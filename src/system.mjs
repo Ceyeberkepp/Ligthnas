@@ -1,7 +1,53 @@
 import os from 'node:os';
 import { readFile, statfs } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 
 const GIB = 1024 ** 3;
+const execute = promisify(execFile);
+
+async function command(file, args) {
+  try {
+    const { stdout } = await execute(file, args, { timeout: 4000, maxBuffer: 1024 * 1024 });
+    return stdout.trim();
+  } catch {
+    return null;
+  }
+}
+
+export async function getStorageInventory() {
+  const [blockDevices, pools, datasets] = await Promise.all([
+    command('lsblk', ['-J', '-b', '-o', 'NAME,PATH,TYPE,SIZE,FSTYPE,MOUNTPOINT,MODEL,TRAN']),
+    command('zpool', ['list', '-H', '-p', '-o', 'name,size,alloc,free,health']),
+    command('zfs', ['list', '-H', '-p', '-o', 'name,used,available,mountpoint,compression'])
+  ]);
+  let disks = [];
+  try {
+    disks = (JSON.parse(blockDevices).blockdevices || [])
+      .filter(device => device.type === 'disk')
+      .map(({ name, path, size, model, tran, children }) => ({
+        name, path, sizeBytes: Number(size) || 0, model: model?.trim() || null,
+        transport: tran || null, partitions: (children || []).map(child => ({
+          name: child.name, path: child.path, sizeBytes: Number(child.size) || 0,
+          filesystem: child.fstype || null, mountPoint: child.mountpoint || null
+        }))
+      }));
+  } catch { /* lsblk can be absent or unavailable in a container. */ }
+  return {
+    disks,
+    zfs: {
+      available: pools !== null && datasets !== null,
+      pools: pools ? pools.split('\n').map(row => {
+        const [name, size, allocated, free, health] = row.split('\t');
+        return { name, sizeBytes: Number(size), allocatedBytes: Number(allocated), freeBytes: Number(free), health };
+      }) : [],
+      datasets: datasets ? datasets.split('\n').map(row => {
+        const [name, used, available, mountPoint, compression] = row.split('\t');
+        return { name, usedBytes: Number(used), availableBytes: Number(available), mountPoint, compression };
+      }) : []
+    }
+  };
+}
 
 async function readText(path, fallback = '') {
   try {

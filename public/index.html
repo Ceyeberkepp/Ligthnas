@@ -24,7 +24,7 @@
         <h1>Storage that thinks ahead.</h1>
         <p>A calm, private home for files, applications, virtual machines, and intelligent automation.</p>
       </div>
-      <div class="story-status"><i></i><span>Local connection secured</span></div>
+      <div class="story-status"><i></i><span>Appliance sign-in</span></div>
     </section>
 
     <section class="auth-panel">
@@ -36,7 +36,6 @@
         <label>Administrator username<input name="username" value="admin" minlength="3" maxlength="32" required autocomplete="username"></label>
         <label>Password<input name="password" type="password" minlength="10" required autocomplete="new-password" placeholder="At least 10 characters"></label>
         <label>Time zone<select name="timezone"><option value="America/New_York">Eastern Time</option><option value="America/Chicago">Central Time</option><option value="America/Denver">Mountain Time</option><option value="America/Los_Angeles">Pacific Time</option><option value="UTC">UTC</option></select></label>
-        <label class="check"><input name="updates" type="checkbox" checked><span>Install security updates automatically</span></label>
         <button class="primary wide" type="submit">Create appliance</button>
         <div class="form-error" role="alert"></div>
       </form>
@@ -62,25 +61,19 @@
       <nav id="nav" aria-label="Primary navigation">
         <a href="#home" data-view="home" class="active"><span>⌂</span>Home</a>
         <a href="#storage" data-view="storage"><span>▱</span>Storage</a>
-        <a href="#files" data-view="files"><span>□</span>Files</a>
         <a href="#apps" data-view="apps"><span>✦</span>Apps</a>
-        <a href="#containers" data-view="containers"><span>⬡</span>Containers</a>
-        <a href="#vms" data-view="vms"><span>▣</span>Virtual machines</a>
-        <a href="#ai" data-view="ai"><span>✣</span>AI Center</a>
-        <a href="#identity" data-view="identity"><span>♙</span>Users & Identity</a>
-        <a href="#protection" data-view="protection"><span>◈</span>Data Protection</a>
         <a href="#monitoring" data-view="monitoring"><span>⌁</span>Monitoring</a>
+        <a href="#capabilities" data-view="capabilities"><span>◇</span>Capabilities</a>
       </nav>
       <div class="sidebar-foot">
         <button id="logout" class="ghost-button">Sign out</button>
-        <div class="device-mini"><i></i><div><b id="mini-name">LightNAS</b><small>System online</small></div></div>
+        <div class="device-mini"><i></i><div><b id="mini-name">LightNAS</b><small>Control panel online</small></div></div>
       </div>
     </aside>
 
     <header class="topbar">
       <button id="menu" class="icon-button menu-button" aria-label="Open navigation">☰</button>
-      <div class="search">⌕ <input id="global-search" aria-label="Search" placeholder="Search settings, apps, and help"></div>
-      <div class="top-actions"><button class="icon-button" aria-label="Notifications">♢<span class="notification-dot"></span></button><div class="avatar" id="avatar">A</div></div>
+      <div class="top-actions"><div class="avatar" id="avatar">A</div></div>
     </header>
 
     <main id="content" class="content" tabindex="-1"></main>
@@ -89,7 +82,7 @@
       <a href="#home" data-view="home" class="active"><span>⌂</span>Home</a>
       <a href="#storage" data-view="storage"><span>▱</span>Storage</a>
       <a href="#apps" data-view="apps"><span>✦</span>Apps</a>
-      <a href="#ai" data-view="ai"><span>✣</span>AI</a>
+      <a href="#monitoring" data-view="monitoring"><span>⌁</span>Health</a>
       <button id="mobile-more"><span>•••</span>More</button>
     </nav>
   </div>
@@ -97,11 +90,11 @@
   <dialog id="share-dialog">
     <form id="share-form">
       <div class="dialog-head"><div><span class="eyebrow">NEW RESOURCE</span><h2>Create shared folder</h2></div><button type="button" class="close-dialog" aria-label="Close">×</button></div>
-      <p>Define a network share. Filesystem creation and permission enforcement are coming in the next storage milestone.</p>
+      <p>Save a proposed share configuration. This does not create a folder or enable SMB, NFS, or SFTP.</p>
       <label>Share name<input name="name" required minlength="2" maxlength="64" placeholder="Team Files"></label>
       <label>Protocol<select name="protocol"><option>SMB</option><option>NFS</option><option>SFTP</option></select></label>
       <label>Description<textarea name="description" maxlength="160" placeholder="What belongs in this share?"></textarea></label>
-      <div class="dialog-actions"><button type="button" class="secondary close-dialog">Cancel</button><button class="primary" type="submit">Create share</button></div>
+      <div class="dialog-actions"><button type="button" class="secondary close-dialog">Cancel</button><button class="primary" type="submit">Save plan</button></div>
       <div class="form-error" role="alert"></div>
     </form>
   </dialog>

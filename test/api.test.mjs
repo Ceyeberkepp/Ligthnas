@@ -17,7 +17,7 @@ test('setup, authentication, overview, and share workflow', async (context) => {
 
   const base = `http://127.0.0.1:${server.address().port}`;
   let response = await fetch(`${base}/api/status`);
-  assert.deepEqual(await response.json(), { version: '0.1.0', setupRequired: true });
+  assert.deepEqual(await response.json(), { version: '0.2.0', setupRequired: true });
 
   response = await fetch(`${base}/api/setup`, {
     method: 'POST',
@@ -34,6 +34,9 @@ test('setup, authentication, overview, and share workflow', async (context) => {
   assert.ok(overview.system.memory.totalBytes > 0);
   assert.ok(Array.isArray(overview.system.capabilities));
   assert.ok(Array.isArray(overview.filesystems));
+  assert.ok(Array.isArray(overview.storage.disks));
+  assert.ok(Array.isArray(overview.storage.zfs.pools));
+  assert.ok(Array.isArray(overview.storage.zfs.datasets));
 
   response = await fetch(`${base}/api/shares`, {
     method: 'POST',

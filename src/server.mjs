@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { JsonStore } from './store.mjs';
-import { getFilesystems, getSystemSnapshot } from './system.mjs';
+import { getFilesystems, getStorageInventory, getSystemSnapshot } from './system.mjs';
 import { hashPassword, Sessions, verifyPassword } from './auth.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -73,7 +73,7 @@ function validateSetup(input) {
 
 async function api(req, res, url) {
   if (req.method === 'GET' && url.pathname === '/api/status') {
-    return send(res, 200, { version: '0.1.0', setupRequired: !store.state.config });
+    return send(res, 200, { version: '0.2.0', setupRequired: !store.state.config });
   }
 
   if (req.method === 'POST' && url.pathname === '/api/setup') {
@@ -86,7 +86,6 @@ async function api(req, res, url) {
       username: input.username,
       passwordHash: await hashPassword(input.password),
       timezone: input.timezone || 'UTC',
-      updates: input.updates !== false,
       createdAt: new Date().toISOString()
     };
     store.addActivity('setup', `Appliance ${input.deviceName} was configured.`, 'success');
@@ -116,19 +115,22 @@ async function api(req, res, url) {
   if (!session) return;
 
   if (req.method === 'GET' && url.pathname === '/api/overview') {
-    const [system, filesystems] = await Promise.all([getSystemSnapshot(), getFilesystems()]);
+    const [system, filesystems, storage] = await Promise.all([getSystemSnapshot(), getFilesystems(), getStorageInventory()]);
     return send(res, 200, {
       appliance: { deviceName: store.state.config.deviceName, username: session.username },
       system,
       filesystems,
+      storage,
       shares: store.state.shares,
-      activity: store.state.activity.slice(0, 8),
-      protection: { backupConfigured: false, lastBackup: null }
+      activity: store.state.activity.slice(0, 8)
     });
   }
 
   if (req.method === 'GET' && url.pathname === '/api/system') return send(res, 200, await getSystemSnapshot());
-  if (req.method === 'GET' && url.pathname === '/api/storage') return send(res, 200, { filesystems: await getFilesystems() });
+  if (req.method === 'GET' && url.pathname === '/api/storage') {
+    const [filesystems, storage] = await Promise.all([getFilesystems(), getStorageInventory()]);
+    return send(res, 200, { filesystems, ...storage });
+  }
   if (req.method === 'GET' && url.pathname === '/api/shares') return send(res, 200, { shares: store.state.shares });
 
   if (req.method === 'POST' && url.pathname === '/api/shares') {

@@ -1,0 +1,27 @@
+name: Build LightNAS ISO
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  iso:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install image tools
+        run: sudo apt-get update && sudo apt-get install -y live-build debootstrap xorriso squashfs-tools
+      - name: Build installer image
+        run: sudo bash iso/build.sh
+      - name: Check ISO format
+        run: |
+          file dist/LightNAS-amd64.iso
+          sha256sum -c dist/LightNAS-amd64.iso.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LightNAS-amd64-iso
+          path: |
+            dist/LightNAS-amd64.iso
+            dist/LightNAS-amd64.iso.sha256

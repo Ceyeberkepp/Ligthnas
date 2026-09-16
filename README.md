@@ -7,15 +7,30 @@ This repository contains the first runnable vertical slice of Lightweight AI NAS
 - Safe first-run appliance setup
 - Scrypt password hashing and secure, HTTP-only login sessions
 - Responsive login, dashboard, sidebar, and mobile navigation
-- Live Linux CPU, memory, kernel, uptime, and mounted-filesystem inventory
-- Capability detection for core NAS, containers, VMs, local AI, and directory services
-- Persistent shared-folder definitions for SMB, NFS, and SFTP workflows
+- Live Linux CPU, memory, kernel, uptime, disk, mount, and accessible ZFS pool/dataset inventory
+- Hardware eligibility estimates for core NAS, containers, VMs, local AI, and directory services
+- Persistent planned-share records for SMB, NFS, and SFTP workflows (configuration only)
 - Recent activity timeline
 - Atomic local configuration writes
 - API validation, request-size limits, security headers, and protected endpoints
 - Automated tests for setup, authentication, inventory, and share creation
 
-The current share workflow creates the control-plane definition. It does **not yet** modify Samba, NFS exports, Unix permissions, partitions, RAID arrays, or user data. Those operations belong to the upcoming privileged storage agent and will be protected by preview and confirmation steps.
+The current storage screen reads host mount information, block-device metadata, and, if installed and accessible, the output of `zpool list` and `zfs list`. Inside LXC it may show no physical disks or pools. It does **not** create pools or datasets, modify Samba/NFS exports, partition disks, or change user data. Saved share plans do not create real shares.
+
+## Bootable installer build (experimental)
+
+`iso/build.sh` prepares a Debian 13 amd64 ISO hybrid live image with the Debian interactive installer and the LightNAS control plane included. The Debian installer asks the operator to select and partition the OS target disk. It does not preselect a disk, and the installer must be tested in a VM before writing it to USB or using it on a NAS. On a separate Debian or Ubuntu build machine with network access and sufficient disk space:
+
+```bash
+sudo apt-get install live-build debootstrap xorriso squashfs-tools
+sudo bash iso/build.sh
+```
+
+The build writes `dist/LightNAS-amd64.iso` and a SHA-256 file. This build has not been completed or boot-tested in the current development environment; the ISO is not a released artifact yet. The current running LXC is only for testing the control plane.
+
+## App interoperability
+
+TrueNAS SCALE supports third-party apps through Docker images and Compose YAML. A future LightNAS app runtime can support compatible OCI images and Compose projects with translated storage paths, permissions, and network settings. Synology `.spk` packages target DSM-specific APIs and packaging, so they cannot be installed unchanged. Applications that publish standard OCI images can be packaged separately for LightNAS. No app catalog, import, or container installer is active in this release.
 
 ## Run locally
 

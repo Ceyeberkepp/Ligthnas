@@ -1,5 +1,7 @@
 data/
 node_modules/
+.iso-build/
+dist/
 upload/
 *.log
 *.zip
