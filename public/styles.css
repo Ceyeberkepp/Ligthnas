@@ -110,6 +110,8 @@ textarea { min-height: 92px; resize: vertical; }
 .track span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent-2), var(--accent)); border-radius: inherit; }
 .metric small { display: block; color: var(--muted); margin-top: 10px; }
 .dashboard-grid { display: grid; grid-template-columns: 1.25fr .75fr; gap: 16px; }
+.tool-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.tool-grid .panel p { min-height: 44px; }
 .panel { padding: 22px; }
 .panel-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
 .panel h2 { font-size: 16px; margin: 0; }
@@ -163,6 +165,7 @@ dialog::backdrop { background: rgba(1,7,13,.76); backdrop-filter: blur(5px); }
 @media (max-width: 1050px) {
   .metric-grid { grid-template-columns: repeat(2, 1fr); }
   .dashboard-grid { grid-template-columns: 1fr; }
+  .tool-grid { grid-template-columns: 1fr; }
   .hero { grid-template-columns: 1fr; }
   .hero-stat { position: absolute; top: 30px; right: 30px; }
 }
