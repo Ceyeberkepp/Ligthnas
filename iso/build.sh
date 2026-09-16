@@ -11,7 +11,7 @@ command -v lb >/dev/null || { echo 'Install live-build, debootstrap, xorriso, an
 [[ ! -e "${BUILD_DIR}" ]] || { echo "Build directory already exists: ${BUILD_DIR}" >&2; exit 1; }
 mkdir -p "${BUILD_DIR}" "$(dirname "${OUTPUT}")"
 cd "${BUILD_DIR}"
-lb config --distribution trixie --architectures amd64 --binary-image iso-hybrid \
+lb config --mode debian --distribution trixie --architectures amd64 --binary-image iso-hybrid \
   --debian-installer live --archive-areas 'main contrib non-free-firmware'
 
 mkdir -p config/package-lists config/includes.chroot/opt/lightnas \
