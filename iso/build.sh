@@ -22,7 +22,7 @@ mkdir -p config/package-lists config/includes.chroot/opt/lightnas \
 echo 'deb http://security.debian.org/debian-security trixie-security main contrib non-free-firmware' \
   >config/includes.chroot/etc/apt/sources.list.d/debian-security.list
 cat >config/package-lists/lightnas.list.chroot <<'EOF'
-ca-certificates curl gnupg git systemd openssh-server util-linux
+ca-certificates curl gnupg git systemd openssh-server util-linux python3 ffmpeg
 EOF
 cp -a "${REPO_ROOT}/src" "${REPO_ROOT}/public" "${REPO_ROOT}/package.json" \
   config/includes.chroot/opt/lightnas/
