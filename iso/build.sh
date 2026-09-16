@@ -12,7 +12,8 @@ command -v lb >/dev/null || { echo 'Install live-build, debootstrap, xorriso, an
 mkdir -p "${BUILD_DIR}" "$(dirname "${OUTPUT}")"
 cd "${BUILD_DIR}"
 lb config --mode debian --distribution trixie --architectures amd64 --binary-image iso-hybrid \
-  --debian-installer live --archive-areas 'main contrib non-free-firmware' --security false
+  --debian-installer live --archive-areas 'main contrib non-free-firmware' --security false \
+  --linux-packages linux-image --linux-flavours amd64
 
 mkdir -p config/package-lists config/includes.chroot/opt/lightnas \
   config/includes.chroot/etc/systemd/system/multi-user.target.wants \
