@@ -26,7 +26,7 @@ sudo apt-get install live-build debootstrap xorriso squashfs-tools
 sudo bash iso/build.sh
 ```
 
-The build writes `dist/LightNAS-amd64.iso` and a SHA-256 file. This build has not been completed or boot-tested in the current development environment; the ISO is not a released artifact yet. The current running LXC is only for testing the control plane.
+The build writes `dist/LightNAS-amd64.iso` and a SHA-256 file. A successful GitHub Actions build produces a bootable-format ISO and uploads it under **Artifacts** on the [ISO build run](https://github.com/Ceyeberkepp/Ligthnas/actions/workflows/build-iso.yml); the artifact is a ZIP containing the ISO and checksum. The image has not yet been boot-tested in a VM or installed on disk. Treat it as experimental, test with an expendable virtual disk first, and do not install it over existing NAS data. The current running LXC is only for testing the control plane.
 
 ## App interoperability
 
