@@ -17,7 +17,7 @@ test('setup, authentication, overview, and share workflow', async (context) => {
 
   const base = `http://127.0.0.1:${server.address().port}`;
   let response = await fetch(`${base}/api/status`);
-  assert.deepEqual(await response.json(), { version: '0.8.0', setupRequired: true });
+  assert.deepEqual(await response.json(), { version: '0.9.0', setupRequired: true });
 
   response = await fetch(`${base}/api/setup`, {
     method: 'POST',
@@ -35,6 +35,12 @@ test('setup, authentication, overview, and share workflow', async (context) => {
   assert.ok(Array.isArray(overview.system.capabilities));
   assert.ok(Array.isArray(overview.filesystems));
   assert.ok(Array.isArray(overview.storage.disks));
+  assert.ok(overview.storage.local?.availableBytes >= 0);
+  response = await fetch(`${base}/api/network`, { headers: { Cookie: cookie } });
+  assert.equal(response.status, 200);
+  const network = await response.json();
+  assert.ok(Array.isArray(network.interfaces));
+  assert.ok(Array.isArray(network.dns));
   assert.ok(Array.isArray(overview.storage.zfs.pools));
   assert.ok(Array.isArray(overview.storage.zfs.datasets));
   response = await fetch(`${base}/api/spaces`, { method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'archive', label: 'Family archive' }) });

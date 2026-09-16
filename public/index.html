@@ -60,7 +60,6 @@
       </a>
       <nav id="nav" aria-label="Primary navigation">
         <a href="#home" data-view="home" class="active"><span>⌂</span>Overview</a>
-        <a href="#admin" data-view="admin"><span>⚙</span>Admin Center</a>
         <details class="nav-group" open><summary>Storage</summary>
           <a href="#storage" data-view="storage"><span>▱</span>Storage</a>
           <a href="#pools" data-view="pools"><span>◫</span>Pools & datasets</a>
@@ -73,6 +72,11 @@
           <a href="#containers" data-view="containers"><span>▦</span>Containers</a>
           <a href="#vms" data-view="vms"><span>▣</span>Virtual machines</a>
         </details>
+        <details class="nav-group"><summary>Connectivity</summary>
+          <a href="#network" data-view="network"><span>⌁</span>Networking</a>
+          <a href="#firewall" data-view="firewall"><span>◇</span>Firewall</a>
+          <a href="#integrations" data-view="integrations"><span>⊞</span>Integrations</a>
+        </details>
         <details class="nav-group"><summary>Administration</summary>
           <a href="#users" data-view="users"><span>◉</span>Users</a>
           <a href="#smtp" data-view="smtp"><span>✉</span>Email / SMTP</a>
@@ -82,6 +86,7 @@
         </details>
       </nav>
       <div class="sidebar-foot">
+        <a class="foot-admin" href="#admin" data-view="admin"><span>⚙</span>Admin Center</a>
         <button id="logout" class="ghost-button">Sign out</button>
         <div class="device-mini"><i></i><div><b id="mini-name">LightNAS</b><small>Control panel online</small></div></div>
       </div>

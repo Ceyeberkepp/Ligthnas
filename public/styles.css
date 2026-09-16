@@ -98,6 +98,8 @@ textarea { min-height: 92px; resize: vertical; }
 .sidebar nav a:hover { color: var(--text); background: rgba(255,255,255,.035); }
 .sidebar nav a.active { color: var(--text); background: linear-gradient(90deg, rgba(92,225,195,.14), rgba(92,225,195,.045)); box-shadow: inset 2px 0 var(--accent); }
 .sidebar-foot { margin-top: auto; border-top: 1px solid var(--line); padding-top: 15px; }
+.foot-admin { display: flex; align-items: center; gap: 12px; color: var(--text); text-decoration: none; padding: 10px 12px; border-radius: 10px; font-size: 13px; font-weight: 700; }
+.foot-admin.active, .foot-admin:hover { background: var(--panel-2); }
 .ghost-button { background: transparent; color: var(--muted); border: 0; padding: 7px 9px; float: right; font-size: 12px; }
 .device-mini { clear: both; display: flex; gap: 10px; align-items: center; padding: 12px 9px 0; }
 .device-mini div { display: grid; }

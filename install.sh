@@ -52,6 +52,26 @@ if ! id lightnas >/dev/null 2>&1; then
   useradd --system --home-dir "${DATA_DIRECTORY}" --shell /usr/sbin/nologin lightnas
 fi
 install -d -o lightnas -g lightnas -m 0700 "${DATA_DIRECTORY}"
+install -d -o lightnas -g lightnas -m 0700 "${DATA_DIRECTORY}/files"
+
+# Explicit opt-in: access to the Docker socket grants effective root on this machine.
+if [[ "${LIGHTNAS_ENABLE_DOCKER:-0}" == "1" ]]; then
+  if ! command -v docker >/dev/null 2>&1; then
+    apt-get install -y docker.io || echo "Docker package installation failed; LightNAS will continue without Docker." >&2
+  fi
+  if command -v docker >/dev/null 2>&1; then systemctl enable --now docker || true; fi
+  if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    usermod -aG docker lightnas
+    install -d -m 0755 /etc/lightnas
+    touch /etc/lightnas/runtime.env
+    chmod 0600 /etc/lightnas/runtime.env
+    sed -i '/^LIGHTNAS_DOCKER_ENABLED=/d' /etc/lightnas/runtime.env
+    printf '\nLIGHTNAS_DOCKER_ENABLED=1\n' >>/etc/lightnas/runtime.env
+    echo "Docker is ready for LightNAS. The service account has Docker host privileges."
+  else
+    echo "Docker could not start here. For an LXC, configure nesting on the Proxmox host, then rerun the installer." >&2
+  fi
+fi
 chown -R root:root "${INSTALL_DIRECTORY}"
 
 echo "[5/6] Installing the systemd service..."

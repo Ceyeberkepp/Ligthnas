@@ -11,6 +11,7 @@ import { catalog, runtimeInventory, installCatalogApp, manageCatalogApp, createC
 import { validateSmtp, sendSmtpTest } from './mailer.mjs';
 import { mediaAvailable, convertMedia } from './media.mjs';
 import { createDataset, updateDataset } from './zfs.mjs';
+import { networkInventory } from './network.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const publicRoot = join(root, 'public');
@@ -85,7 +86,7 @@ function validateSetup(input) {
 
 async function api(req, res, url) {
   if (req.method === 'GET' && url.pathname === '/api/status') {
-    return send(res, 200, { version: '0.8.0', setupRequired: !store.state.config });
+    return send(res, 200, { version: '0.9.0', setupRequired: !store.state.config });
   }
 
   if (req.method === 'POST' && url.pathname === '/api/setup') {
@@ -297,6 +298,7 @@ async function api(req, res, url) {
     });
   }
 
+  if (req.method === 'GET' && url.pathname === '/api/network') return send(res, 200, await networkInventory());
   if (req.method === 'GET' && url.pathname === '/api/system') return send(res, 200, await getSystemSnapshot());
   if (req.method === 'GET' && url.pathname === '/api/storage') {
     const [filesystems, storage] = await Promise.all([getFilesystems(), getStorageInventory()]);

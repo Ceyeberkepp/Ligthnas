@@ -1,4 +1,5 @@
 import os from 'node:os';
+import { dirname, resolve } from 'node:path';
 import { readFile, statfs } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -33,8 +34,20 @@ export async function getStorageInventory() {
         }))
       }));
   } catch { /* lsblk can be absent or unavailable in a container. */ }
+  const dataPath = dirname(resolve(process.env.NAS_DATA_FILE || 'data/state.json'));
+  let local = null;
+  try {
+    const stats = await statfs(dataPath, { bigint: true });
+    const totalBytes = Number(stats.blocks * stats.bsize);
+    const availableBytes = Number(stats.bavail * stats.bsize);
+    const mounts = await readText('/proc/self/mountinfo');
+    const mountPoints = mounts.split('\n').map(line => line.split(' - ')[0]?.split(' ')[4]?.replaceAll('\\040', ' ')).filter(Boolean);
+    const coveringMount = mountPoints.filter(point => dataPath === point || dataPath.startsWith(`${point.replace(/\/$/, '')}/`)).sort((a, b) => b.length - a.length)[0] || '/';
+    local = { path: dataPath, mountPoint: coveringMount, dedicated: coveringMount !== '/', totalBytes, availableBytes, usedBytes: Math.max(0, totalBytes - availableBytes) };
+  } catch { /* Data directory might not exist yet on an unconfigured development host. */ }
   return {
     disks,
+    local,
     zfs: {
       available: pools !== null && datasets !== null,
       canManageDatasets: pools !== null && datasets !== null && process.env.LIGHTNAS_ZFS_ENABLED === '1',

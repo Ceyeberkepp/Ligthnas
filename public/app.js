@@ -1,4 +1,4 @@
-const state = { overview: null, view: 'home', folder: '', files: null, runtimes: null, runtimeError: null, spaces: null, users: null, smtp: undefined, media: null };
+const state = { overview: null, view: 'home', folder: '', files: null, runtimes: null, runtimeError: null, spaces: null, users: null, smtp: undefined, media: null, network: null };
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
 const themeChoices = ['system', 'light', 'dark'];
@@ -89,13 +89,13 @@ function metric(label, value, percent, detail) {
 
 function homeView() {
   const { system, filesystems, storage, shares, activity, appliance } = state.overview;
-  const total = filesystems.reduce((sum, item) => sum + item.totalBytes, 0);
-  const used = filesystems.reduce((sum, item) => sum + item.usedBytes, 0);
+  const total = storage.local?.totalBytes || 0;
+  const used = storage.local?.usedBytes || 0;
   const storagePercent = total ? Math.round((used / total) * 100) : 0;
   return `${pageHead(`Good day, ${escapeHtml(appliance.username)}`, `Here’s what is happening on ${escapeHtml(appliance.deviceName)}.`)}
     <section class="hero">
       <div><span class="eyebrow">LIVE HOST INVENTORY</span><h2>Storage visible to this system</h2><p>Showing current host mounts and disks. An LXC may only expose its virtual storage.</p><div class="hero-actions"><button class="secondary" data-view-link="storage">Review storage</button></div></div>
-      <div class="hero-stat"><strong>${storage.disks.length}</strong><span>visible disks</span></div>
+      <div class="hero-stat"><strong>${storage.local ? bytes(storage.local.availableBytes) : '—'}</strong><span>file space available</span></div>
     </section>
     <section class="metric-grid">
       ${metric('Storage', bytes(used), storagePercent, `${bytes(total - used)} available`)}
@@ -113,6 +113,7 @@ function storageView() {
   const { filesystems, storage } = state.overview;
   return `${pageHead('Storage', 'Capacity, file spaces, mounted filesystems, and ZFS visible to this appliance.', '<button class="primary" data-view-link="pools">Manage storage</button>')}
     <div class="module-hero"><h2>Where your files live</h2><p>The Files library and storage spaces use the appliance data directory. ${filesystems.length ? `This host reports ${filesystems.length} mounted filesystem${filesystems.length === 1 ? '' : 's'}.` : 'No filesystem mount details are accessible.'} Open Storage pools to create a file space or a ZFS dataset on a compatible host.</p><button class="secondary" data-view-link="files">Open Files</button></div>
+    ${storage.local ? `<section class="panel"><h2>Local file storage</h2><p>${escapeHtml(storage.local.path)} · ${escapeHtml(storage.local.dedicated ? 'Dedicated data mount' : 'Shared with the OS filesystem')}</p><p><strong>${bytes(storage.local.availableBytes)} free</strong> of ${bytes(storage.local.totalBytes)} · No partition changes required</p><button class="primary" data-view-link="files">Browse files</button></section>` : ''}
     <h2>LightNAS storage spaces</h2><div class="storage-list">${state.spaces?.map(space => `<article class="storage-row"><div><h3>${escapeHtml(space.label)}</h3><p>Spaces/${escapeHtml(space.name)}</p></div><button class="secondary" data-open-space="${escapeHtml(space.name)}">Open</button></article>`).join('') || '<div class="empty"><p>No file spaces yet. Use Manage storage to create one.</p></div>'}</div>
     <h2>Disks</h2><div class="storage-list">${storage.disks.map(disk => `<article class="storage-row"><div><h3>${escapeHtml(disk.path || disk.name)}</h3><p>${escapeHtml(disk.model || 'Model unavailable')} · ${escapeHtml(disk.transport || 'Transport unknown')}</p></div><p>${disk.partitions.length} visible partitions</p><div class="storage-size">${bytes(disk.sizeBytes)}</div></article>`).join('') || '<div class="empty"><p>No physical disks are visible. Containers often cannot see host drives.</p></div>'}</div>
     <h2>ZFS pools</h2><div class="storage-list">${storage.zfs.pools.map(pool => `<article class="storage-row"><div><h3>${escapeHtml(pool.name)}</h3><p>${escapeHtml(pool.health)}</p></div><p>${bytes(pool.allocatedBytes)} allocated · ${bytes(pool.freeBytes)} free</p><div class="storage-size">${bytes(pool.sizeBytes)}</div></article>`).join('') || `<div class="empty"><p>${storage.zfs.available ? 'No ZFS pools found.' : 'ZFS tools are unavailable or inaccessible in this environment.'}</p></div>`}</div>
@@ -182,7 +183,8 @@ async function loadMedia() {
 async function loadRuntimes() {
   try { state.runtimes = await request('/api/runtimes'); state.runtimeError = null; }
   catch (error) { state.runtimeError = error.message; }
-  if (['apps', 'containers', 'vms'].includes(state.view)) render(state.view);
+  if (['network', 'firewall'].includes(state.view) && !state.network) loadNetwork();
+  if (['apps', 'containers', 'vms', 'integrations'].includes(state.view)) render(state.view);
 }
 
 function runtimeBanner(kind) {
@@ -262,7 +264,7 @@ function adminView() {
   const { appliance } = state.overview;
   return `${pageHead('Admin Center', `Manage ${escapeHtml(appliance.deviceName)} and its connected services.`)}
     <div class="tool-grid">
-      ${[['users','Users & access','Create or remove local accounts.'],['smtp','Email & SMTP','Configure encrypted outgoing email and send a test.'],['settings','Appliance','Change name, time zone and administrator password.'],['pools','Storage & datasets','Review disks, file spaces and ZFS datasets.'],['apps','Application catalog','Install reviewed open-source applications on an enabled host.'],['monitoring','System health','Check CPU, memory, mounts and recent activity.']].map(([view,title,description]) => `<article class="panel"><h2>${title}</h2><p class="muted">${description}</p><button class="secondary" data-view-link="${view}">Open ${title}</button></article>`).join('')}
+      ${[['users','Users & access','Create or remove local accounts.'],['smtp','Email & SMTP','Configure encrypted outgoing email and send a test.'],['settings','Appliance','Change name, time zone and administrator password.'],['pools','Storage & datasets','Review disks, file spaces and ZFS datasets.'],['apps','Application catalog','Install reviewed open-source applications on an enabled host.'],['monitoring','System health','Check CPU, memory, mounts and recent activity.'],['network','Networking','View interfaces, addresses, gateways and DNS.'],['firewall','Firewall','Inspect the firewall status and available rules.'],['integrations','Integrations','View app and VM runtime connections.']].map(([view,title,description]) => `<article class="panel"><h2>${title}</h2><p class="muted">${description}</p><button class="secondary" data-view-link="${view}">Open ${title}</button></article>`).join('')}
     </div>`;
 }
 
@@ -280,11 +282,40 @@ function moduleView(view) {
   return `${pageHead('Monitoring', 'Current readings from this host.', '<button class="secondary" data-action="refresh">Refresh readings</button>')}<section class="metric-grid">${metric('CPU load', `${state.overview.system.cpu.loadPercent}%`, state.overview.system.cpu.loadPercent, state.overview.system.cpu.model)}${metric('Memory', bytes(state.overview.system.memory.usedBytes), state.overview.system.memory.usedPercent, `${bytes(state.overview.system.memory.freeBytes)} free`)}${metric('Uptime', duration(state.overview.system.uptimeSeconds), 0, state.overview.system.kernel)}${metric('Mounts', state.overview.filesystems.length, 0, 'Currently visible')}</section><h2>Activity</h2><div class="activity-list">${state.overview.activity.map(item => `<div class="activity"><div><b>${escapeHtml(item.message)}</b><time>${relativeTime(item.timestamp)}</time></div></div>`).join('') || '<p>No activity recorded.</p>'}</div>`;
 }
 
+async function loadNetwork() {
+  try { state.network = await request('/api/network'); if (['network', 'firewall'].includes(state.view)) render(state.view); }
+  catch (error) { toast(error.message); }
+}
+
+function networkView() {
+  const info = state.network;
+  return `${pageHead('Networking', 'Live addresses, routes, and DNS visible to this appliance.', '<button class="secondary" data-action="refresh-network">Refresh</button>')}
+    ${!info ? '<div class="empty">Loading network inventory…</div>' : `
+    <h2>Interfaces</h2><div class="storage-list">${info.interfaces.map(item => `<article class="storage-row"><div><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.state || 'unknown')} · ${escapeHtml(item.mac || 'MAC unavailable')}</p></div><p>${item.addresses.map(address => `${escapeHtml(address.address)}/${address.prefix}`).join('<br>') || 'No addresses'}</p></article>`).join('') || '<div class="empty">No interfaces accessible.</div>'}</div>
+    <h2>Routes</h2><div class="storage-list">${info.routes.map(route => `<article class="storage-row"><h3>${escapeHtml(route.destination)}</h3><p>via ${escapeHtml(route.gateway || 'on-link')} · ${escapeHtml(route.device)}</p></article>`).join('') || '<div class="empty">No routes accessible.</div>'}</div>
+    <h2>DNS servers</h2><div class="panel">${info.dns.map(escapeHtml).join(', ') || 'No DNS servers found.'}</div>`}`;
+}
+function firewallView() {
+  const firewall = state.network?.firewall;
+  return `${pageHead('Firewall', 'Current firewall status inside this appliance.', '<button class="secondary" data-action="refresh-network">Refresh</button>')}
+    <div class="module-hero"><h2>${escapeHtml(firewall?.status || 'Loading…')}</h2><p>Backend: ${escapeHtml(firewall?.backend || 'detecting')}. Proxmox host firewall rules must be managed on the Proxmox host. Changing rules remotely could disconnect this interface.</p></div>
+    <h2>Visible tables</h2><div class="storage-list">${firewall?.tables?.map(item => `<article class="storage-row">${escapeHtml(item)}</article>`).join('') || '<div class="empty">No firewall tables accessible to the LightNAS account.</div>'}</div>`;
+}
+function integrationsView() {
+  const docker = state.runtimes?.docker, vm = state.runtimes?.virtualization;
+  return `${pageHead('Integrations', 'See which host services LightNAS can actually reach.', '<button class="secondary" data-action="refresh-runtime">Refresh</button>')}
+    <div class="tool-grid">
+      <article class="panel"><h2>App runtime</h2><p>${docker?.available && docker?.enabled ? 'Docker connected. App installation is enabled.' : escapeHtml(docker?.reason || 'Checking Docker…')}</p><button class="secondary" data-view-link="apps">Open App Store</button></article>
+      <article class="panel"><h2>Virtualization</h2><p>${vm?.available && vm?.enabled ? 'Libvirt/KVM connected.' : escapeHtml(vm?.reason || 'Checking libvirt…')}</p><button class="secondary" data-view-link="vms">Open virtual machines</button></article>
+      <article class="panel"><h2>Proxmox host</h2><p>Host integration is not connected. Scripts that create Proxmox containers require an authenticated executor on the Proxmox host; they cannot run inside this LXC.</p></article>
+    </div>`;
+}
+
 function render(view) {
-  state.view = ['home', 'storage', 'pools', 'files', 'media', 'users', 'smtp', 'admin', 'shares', 'capabilities', 'apps', 'containers', 'vms', 'monitoring', 'settings'].includes(view) ? view : 'home';
+  state.view = ['home', 'storage', 'pools', 'files', 'media', 'users', 'smtp', 'admin', 'shares', 'capabilities', 'apps', 'containers', 'vms', 'monitoring', 'settings', 'network', 'firewall', 'integrations'].includes(view) ? view : 'home';
   if (state.overview.appliance.role !== 'administrator' && !['home', 'files', 'media'].includes(state.view)) state.view = 'home';
   const content = $('#content');
-  content.innerHTML = state.view === 'home' ? homeView() : state.view === 'storage' ? storageView() : state.view === 'pools' ? poolsView() : state.view === 'files' ? filesView() : state.view === 'media' ? mediaView() : state.view === 'users' ? usersView() : state.view === 'smtp' ? smtpView() : state.view === 'admin' ? adminView() : state.view === 'shares' ? sharesView() : state.view === 'containers' ? containersView() : state.view === 'vms' ? vmsView() : state.view === 'settings' ? settingsView() : state.view === 'capabilities' ? capabilitiesView() : moduleView(state.view);
+  content.innerHTML = state.view === 'home' ? homeView() : state.view === 'storage' ? storageView() : state.view === 'pools' ? poolsView() : state.view === 'files' ? filesView() : state.view === 'media' ? mediaView() : state.view === 'users' ? usersView() : state.view === 'smtp' ? smtpView() : state.view === 'admin' ? adminView() : state.view === 'shares' ? sharesView() : state.view === 'containers' ? containersView() : state.view === 'vms' ? vmsView() : state.view === 'settings' ? settingsView() : state.view === 'capabilities' ? capabilitiesView() : state.view === 'network' ? networkView() : state.view === 'firewall' ? firewallView() : state.view === 'integrations' ? integrationsView() : moduleView(state.view);
   $$('[data-view]').forEach(link => link.classList.toggle('active', link.dataset.view === state.view));
   $(`[data-view="${state.view}"]`, $('#nav'))?.closest('details')?.setAttribute('open', '');
   content.focus({ preventScroll: true });
@@ -294,7 +325,8 @@ function render(view) {
   if (state.view === 'users' && state.users === null) loadUsers();
   if (state.view === 'smtp' && state.smtp === undefined) loadSmtp();
   if (['files', 'media'].includes(state.view) && state.media === null) loadMedia();
-  if (['apps', 'containers', 'vms'].includes(state.view) && !state.runtimes && !state.runtimeError) loadRuntimes();
+  if (['network', 'firewall'].includes(state.view) && !state.network) loadNetwork();
+  if (['apps', 'containers', 'vms', 'integrations'].includes(state.view) && !state.runtimes && !state.runtimeError) loadRuntimes();
 }
 
 function bindViewActions() {
@@ -391,6 +423,7 @@ function bindViewActions() {
     } catch (error) { if (error.status !== 409) return toast(error.message); }
     state.folder = folder; state.files = null; location.hash = 'files';
   }));
+  $$('[data-action="refresh-network"]', $('#content')).forEach(button => button.addEventListener('click', loadNetwork));
   $$('[data-action="refresh-runtime"]', $('#content')).forEach(button => button.addEventListener('click', loadRuntimes));
   $$('[data-install]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     const docker = state.runtimes?.docker;
