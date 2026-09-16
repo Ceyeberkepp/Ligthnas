@@ -15,7 +15,7 @@ applyTheme();
 async function request(path, options = {}) {
   const response = await fetch(path, {
     ...options,
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }
+    headers: { 'Content-Type': 'application/json', 'X-LightNAS-Request': '1', ...(options.headers || {}) }
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw Object.assign(new Error(body.error || 'Request failed.'), { status: response.status });
@@ -183,7 +183,6 @@ async function loadMedia() {
 async function loadRuntimes() {
   try { state.runtimes = await request('/api/runtimes'); state.runtimeError = null; }
   catch (error) { state.runtimeError = error.message; }
-  if (['network', 'firewall'].includes(state.view) && !state.network) loadNetwork();
   if (['apps', 'containers', 'vms', 'integrations'].includes(state.view)) render(state.view);
 }
 
@@ -209,11 +208,11 @@ function vmsView() {
   const runtime = state.runtimes?.virtualization;
   const ready = runtime?.available && runtime?.enabled && runtime.pools.length && runtime.networks.length && runtime.images.length;
   const choices = items => items.map(item => `<option value="${escapeHtml(item)}">${escapeHtml(item)}</option>`).join('');
-  return `${pageHead('Virtual machines', 'Libvirt/KVM inventory and ISO-based VM creation.', '<div class="head-actions"><button class="secondary" data-action="refresh-runtime">Refresh</button><button class="primary" data-action="create-vm">+ Create VM</button></div>')}
+  return `${pageHead('Virtual machines', 'ISO-based VM creation using an available Proxmox connection or local KVM.', '<div class="head-actions"><button class="secondary" data-action="refresh-runtime">Refresh</button><button class="primary" data-action="create-vm">+ Create VM</button></div>')}
     ${runtimeBanner('virtualization')}
-    ${runtime?.available && runtime?.enabled && !ready ? '<div class="module-hero"><p>Before creating a VM, activate a libvirt storage pool and network, and place a readable ISO in /var/lib/libvirt/images on the VM host.</p></div>' : ''}
+    ${runtime?.available && runtime?.enabled && !ready ? `<div class="module-hero"><p>${runtime.provider === 'proxmox' ? 'Choose image storage and a network bridge on the connected Proxmox node, and upload an ISO there.' : 'Before creating a VM, activate a libvirt storage pool and network, and place a readable ISO in /var/lib/libvirt/images on the VM host.'}</p></div>` : ''}
     ${ready ? `<form id="vm-form" class="panel creation-form"><h2>Create a VM</h2><p class="muted">Creates a new qcow2 disk in the selected libvirt pool and boots the installer ISO. No existing disk is formatted by LightNAS.</p><label>VM name<input name="name" required pattern="[a-zA-Z][a-zA-Z0-9-]{1,39}"></label><label>Memory (MiB)<input name="memoryMiB" type="number" min="1024" max="65536" value="2048" required></label><label>Virtual CPUs<input name="cpus" type="number" min="1" max="32" value="2" required></label><label>New disk (GiB)<input name="diskGiB" type="number" min="10" max="2048" value="20" required></label><label>Storage pool<select name="pool">${choices(runtime.pools)}</select></label><label>Network<select name="network">${choices(runtime.networks)}</select></label><label>Installer ISO<select name="iso">${choices(runtime.images)}</select></label><button class="primary" type="submit">Create VM</button><div class="form-error" role="alert"></div></form>` : ''}
-    <h2>Existing VMs</h2><div class="storage-list">${runtime?.machines?.map(name => `<article class="storage-row"><h3>${escapeHtml(name)}</h3><p>Managed by libvirt on this host</p></article>`).join('') || '<div class="empty"><p>No accessible VMs.</p></div>'}</div>`;
+    <h2>Existing VMs</h2><div class="storage-list">${runtime?.machines?.map(name => `<article class="storage-row"><h3>${escapeHtml(name)}</h3><p>Managed by ${runtime?.provider === 'proxmox' ? 'connected Proxmox host' : 'libvirt on this host'}</p></article>`).join('') || '<div class="empty"><p>No accessible VMs.</p></div>'}</div>`;
 }
 
 function sharesView() {
@@ -344,7 +343,7 @@ function bindViewActions() {
   $$('[data-action="create-vm"]', $('#content')).forEach(button => button.addEventListener('click', () => {
     const vm = state.runtimes?.virtualization;
     if (!vm?.available || !vm.enabled) return toast(vm?.reason || 'KVM/libvirt must be installed and enabled on a VM-capable host.');
-    if (!vm.pools.length || !vm.networks.length || !vm.images.length) return toast('Activate a libvirt pool and network and add an installer ISO first.');
+    if (!vm.pools.length || !vm.networks.length || !vm.images.length) return toast(vm.provider === 'proxmox' ? 'Select Proxmox VM storage, a bridge and a host ISO first.' : 'Activate a libvirt pool and network and add an installer ISO first.');
     $('#vm-form', $('#content'))?.scrollIntoView({ behavior: 'smooth' });
     $('#vm-form input', $('#content'))?.focus();
   }));
@@ -441,7 +440,7 @@ function bindViewActions() {
     try { await request(`/api/catalog/${appId}/${appAction}`, { method: 'POST' }); await loadRuntimes(); toast(`App ${appAction} complete.`); }
     catch (error) { toast(error.message); button.disabled = false; }
   }));
-  for (const [selector, path, message] of [['#container-form', '/api/containers', 'Container created.'], ['#vm-form', '/api/vms', 'VM installer started.']]) {
+  for (const [selector, path, message] of [['#container-form', '/api/containers', 'Container created.'], ['#vm-form', '/api/vms', 'VM creation submitted. Check the host task status.']]) {
     $(selector, $('#content'))?.addEventListener('submit', async event => {
       event.preventDefault();
       const form = event.currentTarget;
@@ -486,7 +485,7 @@ function bindViewActions() {
     let completed = 0;
     for (const file of files) {
       try {
-        const response = await fetch(`/api/files?path=${encodeURIComponent([state.folder, file.name].filter(Boolean).join('/'))}`, { method: 'PUT', body: file });
+        const response = await fetch(`/api/files?path=${encodeURIComponent([state.folder, file.name].filter(Boolean).join('/'))}`, { method: 'PUT', headers: { 'X-LightNAS-Request': '1' }, body: file });
         if (!response.ok) throw new Error((await response.json()).error);
         completed++;
       } catch (error) { toast(`${file.name}: ${error.message}`); break; }

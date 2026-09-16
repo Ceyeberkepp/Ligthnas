@@ -1,7 +1,8 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdir, readdir, lstat } from 'node:fs/promises';
+import { mkdir, readdir, lstat, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { proxmoxInventory, proxmoxCreateVm } from './proxmox.mjs';
 
 const execute = promisify(execFile);
 const dataRoot = dirname(process.env.NAS_DATA_FILE || 'data/state.json');
@@ -55,6 +56,16 @@ export async function runtimeInventory() {
       try { const item = JSON.parse(row); return [{ name: item.Names, image: item.Image, state: item.State, status: item.Status, ports: item.Ports }]; } catch { return []; }
     });
   }
+  const setup = await readFile(join(dataRoot, 'runtime-status.txt'), 'utf8').catch(() => '');
+  if (!runtime.docker.available && setup) runtime.docker.reason = setup.split('\n').find(line => line.startsWith('Containers: '))?.slice(12) || runtime.docker.reason;
+  if (!runtime.virtualization.available && setup) runtime.virtualization.reason = setup.split('\n').find(line => line.startsWith('VMs: '))?.slice(5) || runtime.virtualization.reason;
+  if (Object.keys(process.env).some(key => key.startsWith('LIGHTNAS_PVE_'))) {
+    try { runtime.virtualization = await proxmoxInventory() || runtime.virtualization; }
+    catch (error) {
+      runtime.virtualization = { available: false, enabled: true, provider: 'proxmox',
+        reason: `Proxmox connection failed: ${error.message}. Check its address, trusted certificate and API token.`, machines: [], pools: [], networks: [], images: [] };
+    }
+  }
   return runtime;
 }
 
@@ -98,12 +109,13 @@ export async function createContainer(input) {
 }
 
 export async function createVm(input) {
-  if (process.env.LIGHTNAS_VM_ENABLED !== '1') throw Object.assign(new Error('VM creation is disabled on this host.'), { status: 409 });
+  if (!Object.keys(process.env).some(key => key.startsWith('LIGHTNAS_PVE_')) && process.env.LIGHTNAS_VM_ENABLED !== '1') throw Object.assign(new Error('VM creation is disabled on this host. Connect Proxmox or enable local KVM.'), { status: 409 });
   if (!/^[a-zA-Z][a-zA-Z0-9-]{1,39}$/.test(input.name || '')) throw Object.assign(new Error('Use a 2–40 character VM name.'), { status: 400 });
   const memory = Number(input.memoryMiB), cpus = Number(input.cpus), disk = Number(input.diskGiB);
   if (!Number.isInteger(memory) || memory < 1024 || memory > 65536 || !Number.isInteger(cpus) || cpus < 1 || cpus > 32 || !Number.isInteger(disk) || disk < 10 || disk > 2048) throw Object.assign(new Error('Use 1024–65536 MiB RAM, 1–32 CPUs and 10–2048 GiB disk.'), { status: 400 });
   const { virtualization } = await runtimeInventory();
-  if (!/^[a-zA-Z0-9_-]{1,48}$/.test(input.pool || '') || !/^[a-zA-Z0-9_-]{1,48}$/.test(input.network || '') || !virtualization.available || !virtualization.pools.includes(input.pool) || !virtualization.networks.includes(input.network) || !virtualization.images.includes(input.iso)) throw Object.assign(new Error('Select an accessible active pool, network and ISO image.'), { status: 409 });
+  if (!/^[a-zA-Z0-9_-]{1,48}$/.test(input.pool || '') || !/^[a-zA-Z0-9._-]{1,48}$/.test(input.network || '') || !virtualization.available || !virtualization.pools.includes(input.pool) || !virtualization.networks.includes(input.network) || !virtualization.images.includes(input.iso)) throw Object.assign(new Error('Select an accessible active pool, network and ISO image.'), { status: 409 });
+  if (virtualization.provider === 'proxmox') return proxmoxCreateVm(input, virtualization);
   if (virtualization.machines.includes(input.name)) throw Object.assign(new Error('A VM with this name already exists.'), { status: 409 });
   const args = ['--connect', 'qemu:///system', '--name', input.name, '--memory', String(memory), '--vcpus', String(cpus), '--disk', `pool=${input.pool},size=${disk},format=qcow2`, '--cdrom', join(vmIsoDirectory, input.iso), '--network', `network=${input.network}`, '--osinfo', 'detect=on,require=off', '--graphics', 'vnc,listen=127.0.0.1', '--noautoconsole', '--wait', '0'];
   const response = await exclusive(() => command('virt-install', args, 120000));

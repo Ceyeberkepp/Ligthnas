@@ -54,23 +54,14 @@ fi
 install -d -o lightnas -g lightnas -m 0700 "${DATA_DIRECTORY}"
 install -d -o lightnas -g lightnas -m 0700 "${DATA_DIRECTORY}/files"
 
-# Explicit opt-in: access to the Docker socket grants effective root on this machine.
-if [[ "${LIGHTNAS_ENABLE_DOCKER:-0}" == "1" ]]; then
-  if ! command -v docker >/dev/null 2>&1; then
-    apt-get install -y docker.io || echo "Docker package installation failed; LightNAS will continue without Docker." >&2
-  fi
-  if command -v docker >/dev/null 2>&1; then systemctl enable --now docker || true; fi
-  if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-    usermod -aG docker lightnas
-    install -d -m 0755 /etc/lightnas
-    touch /etc/lightnas/runtime.env
-    chmod 0600 /etc/lightnas/runtime.env
-    sed -i '/^LIGHTNAS_DOCKER_ENABLED=/d' /etc/lightnas/runtime.env
-    printf '\nLIGHTNAS_DOCKER_ENABLED=1\n' >>/etc/lightnas/runtime.env
-    echo "Docker is ready for LightNAS. The service account has Docker host privileges."
-  else
-    echo "Docker could not start here. For an LXC, configure nesting on the Proxmox host, then rerun the installer." >&2
-  fi
+# Install and verify the runtimes this particular host can support.
+# Existing LIGHTNAS_ENABLE_DOCKER=0 is honored as an explicit operator opt-out.
+if [[ "${LIGHTNAS_ENABLE_DOCKER:-1}" == "0" ]]; then export LIGHTNAS_SKIP_DOCKER=1; fi
+LIGHTNAS_RUNTIME_STATUS_FILE="${DATA_DIRECTORY}/runtime-status.txt" \
+  bash "${INSTALL_DIRECTORY}/scripts/provision-runtimes.sh"
+chown lightnas:lightnas "${DATA_DIRECTORY}/runtime-status.txt"
+if systemd-detect-virt --container >/dev/null 2>&1; then
+  bash "${INSTALL_DIRECTORY}/scripts/configure-proxmox.sh"
 fi
 chown -R root:root "${INSTALL_DIRECTORY}"
 
@@ -117,7 +108,8 @@ for attempt in {1..15}; do
   if curl -fsS http://127.0.0.1:3080/api/status >/dev/null 2>&1; then
     address="$(hostname -I 2>/dev/null | awk '{print $1}')"
     echo
-    echo "LightNAS installation completed successfully."
+    echo "LightNAS installation completed. Runtime results:"
+    cat "${DATA_DIRECTORY}/runtime-status.txt"
     echo "Open: http://${address:-SERVER-IP}:3080"
     exit 0
   fi

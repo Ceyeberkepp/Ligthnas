@@ -86,7 +86,7 @@ function validateSetup(input) {
 
 async function api(req, res, url) {
   if (req.method === 'GET' && url.pathname === '/api/status') {
-    return send(res, 200, { version: '0.9.0', setupRequired: !store.state.config });
+    return send(res, 200, { version: '0.10.0', setupRequired: !store.state.config });
   }
 
   if (req.method === 'POST' && url.pathname === '/api/setup') {
@@ -373,7 +373,9 @@ export function createServer() {
   return http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-      if (url.pathname.startsWith('/api/')) await api(req, res, url);
+      if (url.pathname.startsWith('/api/') && !['GET', 'HEAD'].includes(req.method) && req.headers['x-lightnas-request'] !== '1') {
+        send(res, 403, { error: 'This request must originate from the LightNAS interface.' });
+      } else if (url.pathname.startsWith('/api/')) await api(req, res, url);
       else await staticFile(req, res, url);
     } catch (error) {
       const status = error.status || ({ ENOENT: 404, EEXIST: 409, ENOTEMPTY: 409, EACCES: 403 }[error.code] || 500);
