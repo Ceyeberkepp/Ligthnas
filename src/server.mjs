@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { JsonStore } from './store.mjs';
 import { getFilesystems, getStorageInventory, getSystemSnapshot } from './system.mjs';
 import { hashPassword, Sessions, verifyPassword } from './auth.mjs';
+import { listFiles, createFolder, uploadFile, downloadFile, deleteEntry } from './files.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const publicRoot = join(root, 'public');
@@ -73,7 +74,7 @@ function validateSetup(input) {
 
 async function api(req, res, url) {
   if (req.method === 'GET' && url.pathname === '/api/status') {
-    return send(res, 200, { version: '0.2.0', setupRequired: !store.state.config });
+    return send(res, 200, { version: '0.3.0', setupRequired: !store.state.config });
   }
 
   if (req.method === 'POST' && url.pathname === '/api/setup') {
@@ -132,6 +133,20 @@ async function api(req, res, url) {
     return send(res, 200, { filesystems, ...storage });
   }
   if (req.method === 'GET' && url.pathname === '/api/shares') return send(res, 200, { shares: store.state.shares });
+  if (url.pathname === '/api/files') {
+    const path = url.searchParams.get('path') || '';
+    if (req.method === 'GET') return send(res, 200, { path, entries: await listFiles(path) });
+    if (req.method === 'POST') { await createFolder(path); store.addActivity('file', `Folder ${path} was created.`); await store.save(); return send(res, 201, { ok: true }); }
+    if (req.method === 'PUT') { await uploadFile(path, req); store.addActivity('file', `File ${path} was uploaded.`); await store.save(); return send(res, 201, { ok: true }); }
+    if (req.method === 'DELETE') { await deleteEntry(path); store.addActivity('file', `File entry ${path} was deleted.`); await store.save(); return send(res, 200, { ok: true }); }
+  }
+  if (req.method === 'GET' && url.pathname === '/api/files/download') {
+    const path = url.searchParams.get('path') || '';
+    const filename = path.split('/').pop();
+    const data = await downloadFile(path);
+    res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': data.length, 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+    return res.end(data);
+  }
 
   if (req.method === 'POST' && url.pathname === '/api/shares') {
     const input = await bodyJson(req);
@@ -145,9 +160,18 @@ async function api(req, res, url) {
       createdAt: new Date().toISOString()
     };
     store.state.shares.push(share);
-    store.addActivity('share', `Share ${share.name} was created using ${share.protocol}.`, 'success');
+    store.addActivity('share', `Share plan ${share.name} was saved for ${share.protocol}.`, 'info');
     await store.save();
     return send(res, 201, { share });
+  }
+  if (req.method === 'DELETE' && /^\/api\/shares\/[0-9a-f-]{36}$/.test(url.pathname)) {
+    const id = url.pathname.split('/').pop();
+    const index = store.state.shares.findIndex(share => share.id === id);
+    if (index < 0) return send(res, 404, { error: 'Share plan not found.' });
+    const [share] = store.state.shares.splice(index, 1);
+    store.addActivity('share', `Share plan ${share.name} was removed.`, 'info');
+    await store.save();
+    return send(res, 200, { ok: true });
   }
 
   return send(res, 404, { error: 'API endpoint not found.' });
@@ -180,8 +204,9 @@ export function createServer() {
       if (url.pathname.startsWith('/api/')) await api(req, res, url);
       else await staticFile(req, res, url);
     } catch (error) {
-      console.error(error);
-      send(res, error.status || 500, { error: error.status ? error.message : 'Unexpected server error.' });
+      const status = error.status || ({ ENOENT: 404, EEXIST: 409, ENOTEMPTY: 409, EACCES: 403 }[error.code] || 500);
+      if (status >= 500) console.error(error);
+      send(res, status, { error: status === 500 ? 'Unexpected server error.' : error.status ? error.message : ({ ENOENT: 'File or folder not found.', EEXIST: 'File or folder already exists.', ENOTEMPTY: 'Folder must be empty before deletion.', EACCES: 'Access denied.' }[error.code] || 'Request failed.') });
     }
   });
 }

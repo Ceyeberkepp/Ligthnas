@@ -131,6 +131,13 @@ textarea { min-height: 92px; resize: vertical; }
 .storage-row h3, .share-row h3 { margin: 0 0 5px; font-size: 14px; }
 .storage-row p, .share-row p { margin: 0; color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
 .storage-size { text-align: right; font-size: 12px; color: #c2d1dc; }
+.file-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 14px; flex-wrap: wrap; }
+.breadcrumbs { display: flex; align-items: center; flex-wrap: wrap; color: var(--muted); }
+.upload-button { display: inline-flex; margin: 0; cursor: pointer; font-size: 13px; }
+.muted { color: var(--muted); font-size: 13px; }
+.file-row { display: grid; grid-template-columns: minmax(150px, 1fr) 100px auto; align-items: center; gap: 15px; padding: 14px 18px; border: 1px solid var(--line); border-radius: 13px; background: var(--panel); }
+.file-name { background: none; border: 0; text-align: left; color: var(--text); font-weight: 650; overflow-wrap: anywhere; }
+.file-name:hover { color: var(--accent); }
 .capability-row { grid-template-columns: 1fr auto; }
 .capability-row b { display: block; font-size: 13px; }
 .capability-row p { margin: 5px 0 0; color: var(--muted); font-size: 12px; }
@@ -182,6 +189,8 @@ dialog::backdrop { background: rgba(1,7,13,.76); backdrop-filter: blur(5px); }
   .metric-grid { gap: 10px; }
   .metric { padding: 15px; }
   .storage-row { grid-template-columns: 1fr; }
+  .file-row { grid-template-columns: minmax(100px, 1fr) auto; }
+  .file-row .muted { display: none; }
   .storage-size { text-align: left; }
   .hero { padding: 24px; min-height: auto; }
   .hero-stat { display: none; }

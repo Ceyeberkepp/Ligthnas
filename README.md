@@ -8,14 +8,15 @@ This repository contains the first runnable vertical slice of Lightweight AI NAS
 - Scrypt password hashing and secure, HTTP-only login sessions
 - Responsive login, dashboard, sidebar, and mobile navigation
 - Live Linux CPU, memory, kernel, uptime, disk, mount, and accessible ZFS pool/dataset inventory
+- Authenticated file browser backed by the appliance data directory: create folders, upload/download files (32 MB upload limit), and delete files or empty folders
 - Hardware eligibility estimates for core NAS, containers, VMs, local AI, and directory services
-- Persistent planned-share records for SMB, NFS, and SFTP workflows (configuration only)
+- Persistent planned-share records for SMB, NFS, and SFTP workflows (create/remove plans; configuration only)
 - Recent activity timeline
 - Atomic local configuration writes
 - API validation, request-size limits, security headers, and protected endpoints
 - Automated tests for setup, authentication, inventory, and share creation
 
-The current storage screen reads host mount information, block-device metadata, and, if installed and accessible, the output of `zpool list` and `zfs list`. Inside LXC it may show no physical disks or pools. It does **not** create pools or datasets, modify Samba/NFS exports, partition disks, or change user data. Saved share plans do not create real shares.
+The current storage screen reads host mount information, block-device metadata, and, if installed and accessible, the output of `zpool list` and `zfs list`. Inside LXC it may show no physical disks or pools. It does **not** create pools or datasets, modify Samba/NFS exports, or partition disks. Saved share plans do not create real shares. Files uploaded in the browser live under `/var/lib/lightnas/files` in a service installation; they are not accessible over SMB/NFS and are subject to the disk space available to that host or container. The Files page is intended for small files in this milestone; larger files will need streamed transfers.
 
 ## Bootable installer build (experimental)
 

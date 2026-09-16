@@ -17,7 +17,7 @@ test('setup, authentication, overview, and share workflow', async (context) => {
 
   const base = `http://127.0.0.1:${server.address().port}`;
   let response = await fetch(`${base}/api/status`);
-  assert.deepEqual(await response.json(), { version: '0.2.0', setupRequired: true });
+  assert.deepEqual(await response.json(), { version: '0.3.0', setupRequired: true });
 
   response = await fetch(`${base}/api/setup`, {
     method: 'POST',
@@ -49,7 +49,31 @@ test('setup, authentication, overview, and share workflow', async (context) => {
   response = await fetch(`${base}/api/shares`, { headers: { Cookie: cookie } });
   assert.equal((await response.json()).shares.length, 1);
 
+  response = await fetch(`${base}/api/files?path=Projects`, { method: 'POST', headers: { Cookie: cookie } });
+  assert.equal(response.status, 201);
+  response = await fetch(`${base}/api/files?path=Projects%2Fnotes.txt`, { method: 'PUT', headers: { Cookie: cookie }, body: 'real file contents' });
+  assert.equal(response.status, 201);
+  response = await fetch(`${base}/api/files?path=Projects%2Fnotes.txt`, { method: 'PUT', headers: { Cookie: cookie }, body: 'overwrite attempt' });
+  assert.equal(response.status, 409);
+  response = await fetch(`${base}/api/files?path=Projects`, { headers: { Cookie: cookie } });
+  assert.equal((await response.json()).entries[0].name, 'notes.txt');
+  response = await fetch(`${base}/api/files/download?path=Projects%2Fnotes.txt`, { headers: { Cookie: cookie } });
+  assert.equal(await response.text(), 'real file contents');
+  response = await fetch(`${base}/api/files?path=..%2Fstate.json`, { headers: { Cookie: cookie } });
+  assert.equal(response.status, 400);
+  response = await fetch(`${base}/api/files?path=Projects`, { method: 'DELETE', headers: { Cookie: cookie } });
+  assert.equal(response.status, 409);
+  response = await fetch(`${base}/api/files?path=Projects%2Fnotes.txt`, { method: 'DELETE', headers: { Cookie: cookie } });
+  assert.equal(response.status, 200);
+
+  response = await fetch(`${base}/api/shares`, { headers: { Cookie: cookie } });
+  const shareId = (await response.json()).shares[0].id;
+  response = await fetch(`${base}/api/shares/${shareId}`, { method: 'DELETE', headers: { Cookie: cookie } });
+  assert.equal(response.status, 200);
+
   response = await fetch(`${base}/api/overview`);
+  assert.equal(response.status, 401);
+  response = await fetch(`${base}/api/files`);
   assert.equal(response.status, 401);
 });
 
