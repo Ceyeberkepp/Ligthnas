@@ -36,6 +36,7 @@ Wants=network-online.target
 User=lightnas
 Group=lightnas
 WorkingDirectory=/opt/lightnas
+EnvironmentFile=-/etc/lightnas/runtime.env
 Environment=NODE_ENV=production
 Environment=NAS_HOST=0.0.0.0
 Environment=NAS_PORT=3080

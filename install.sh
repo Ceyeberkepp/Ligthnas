@@ -66,6 +66,7 @@ Type=simple
 User=lightnas
 Group=lightnas
 WorkingDirectory=${INSTALL_DIRECTORY}
+EnvironmentFile=-/etc/lightnas/runtime.env
 Environment=NODE_ENV=production
 Environment=NAS_HOST=0.0.0.0
 Environment=NAS_PORT=3080

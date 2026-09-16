@@ -9,6 +9,9 @@ This repository contains the first runnable vertical slice of Lightweight AI NAS
 - Scrypt password hashing and secure, HTTP-only login sessions
 - Responsive login, dashboard, sidebar, and mobile navigation
 - Live Linux CPU, memory, kernel, uptime, disk, mount, and accessible ZFS pool/dataset inventory
+- Storage Pools page listing actual accessible ZFS pools (pool creation still requires a privileged host agent)
+- Containers and VMs pages listing Docker and libvirt resources if their daemons are accessible
+- Optional Docker container creation, two built-in one-click Docker app recipes (Nginx and Jellyfin), and ISO-based libvirt VM creation on equipped hosts
 - Authenticated file browser backed by the appliance data directory: create folders, upload/download files (32 MB upload limit), and delete files or empty folders
 - Hardware eligibility estimates for core NAS, containers, VMs, local AI, and directory services
 - Persistent planned-share records for SMB, NFS, and SFTP workflows (create/remove plans; configuration only)
@@ -18,6 +21,19 @@ This repository contains the first runnable vertical slice of Lightweight AI NAS
 - Automated tests for setup, authentication, inventory, and share creation
 
 The current storage screen reads host mount information, block-device metadata, and, if installed and accessible, the output of `zpool list` and `zfs list`. Inside LXC it may show no physical disks or pools. It does **not** create pools or datasets, modify Samba/NFS exports, or partition disks. Saved share plans do not create real shares. Files uploaded in the browser live under `/var/lib/lightnas/files` in a service installation; they are not accessible over SMB/NFS and are subject to the disk space available to that host or container. The Files page is intended for small files in this milestone; larger files will need streamed transfers.
+
+## Container and VM runtimes (optional)
+
+LightNAS discovers Docker and libvirt through the host's installed command-line clients. Existing resource inventory is read-only. Creation is disabled by default. **Container 170 (`nasos`) is an LXC and is not a KVM host or a physical storage controller.** The VM and pool creation features need a bare-metal system or appropriately configured virtualization host. The ISO installer places the same UI on bare metal, but it does not automatically install Docker, libvirt or ZFS.
+
+On a dedicated, trusted Docker or libvirt test host, install and configure the relevant runtime separately; then grant the `lightnas` service account permission to use that runtime. For Docker, group membership usually grants root-equivalent access to the host, so this is an explicit operator decision. After the runtime is working, set the corresponding variable in a root-owned `/etc/lightnas/runtime.env`:
+
+```text
+LIGHTNAS_DOCKER_ENABLED=1
+LIGHTNAS_VM_ENABLED=1
+```
+
+Include only the runtime you have configured. Restart `lightnas.service` after the change. VM creation requires `virt-install`, a running `qemu:///system` libvirt connection, an active libvirt storage pool and network, and readable `.iso` files under `/var/lib/libvirt/images` (or the root-configured `LIGHTNAS_VM_ISO_DIR`). VM images are created as new qcow2 volumes; an installer ISO is booted with a local-only VNC console. Docker app recipes publish ports 8081 (Nginx) and 8096 (Jellyfin) on the host; check host firewall policy before enabling them. This prototype management UI uses HTTP: add TLS and limit network access before enabling privileged runtimes on a production NAS.
 
 ## Bootable installer build (experimental)
 
@@ -32,7 +48,7 @@ The build writes `dist/LightNAS-amd64.iso` and a SHA-256 file. A successful GitH
 
 ## App interoperability
 
-TrueNAS SCALE supports third-party apps through Docker images and Compose YAML. A future LightNAS app runtime can support compatible OCI images and Compose projects with translated storage paths, permissions, and network settings. Synology `.spk` packages target DSM-specific APIs and packaging, so they cannot be installed unchanged. Applications that publish standard OCI images can be packaged separately for LightNAS. No app catalog, import, or container installer is active in this release.
+The built-in LightNAS catalog currently has two Docker recipes. TrueNAS SCALE supports third-party apps through Docker images and Compose YAML; compatible recipes can be adapted to LightNAS with translated storage paths, permissions and network settings. LightNAS cannot connect to TrueNAS's native store or import Compose definitions yet. Proxmox Helper Scripts target the Proxmox host and are not executed inside a NAS LXC; direct Proxmox integration is not implemented. Synology `.spk` packages target DSM-specific APIs and packaging, so they cannot be installed unchanged.
 
 ## Run locally
 

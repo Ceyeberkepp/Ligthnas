@@ -17,7 +17,7 @@ test('setup, authentication, overview, and share workflow', async (context) => {
 
   const base = `http://127.0.0.1:${server.address().port}`;
   let response = await fetch(`${base}/api/status`);
-  assert.deepEqual(await response.json(), { version: '0.4.0', setupRequired: true });
+  assert.deepEqual(await response.json(), { version: '0.5.0', setupRequired: true });
 
   response = await fetch(`${base}/api/setup`, {
     method: 'POST',
@@ -37,6 +37,17 @@ test('setup, authentication, overview, and share workflow', async (context) => {
   assert.ok(Array.isArray(overview.storage.disks));
   assert.ok(Array.isArray(overview.storage.zfs.pools));
   assert.ok(Array.isArray(overview.storage.zfs.datasets));
+
+  response = await fetch(`${base}/api/runtimes`, { headers: { Cookie: cookie } });
+  const runtimes = await response.json();
+  assert.equal(response.status, 200);
+  assert.ok(Array.isArray(runtimes.docker.containers));
+  assert.ok(Array.isArray(runtimes.virtualization.machines));
+  assert.ok(runtimes.catalog.some(app => app.id === 'jellyfin'));
+  response = await fetch(`${base}/api/catalog/jellyfin/install`, { method: 'POST', headers: { Cookie: cookie } });
+  assert.equal(response.status, 409);
+  response = await fetch(`${base}/api/vms`, { method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'testvm' }) });
+  assert.equal(response.status, 409);
 
   response = await fetch(`${base}/api/shares`, {
     method: 'POST',

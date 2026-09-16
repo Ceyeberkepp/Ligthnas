@@ -6,6 +6,7 @@ import { JsonStore } from './store.mjs';
 import { getFilesystems, getStorageInventory, getSystemSnapshot } from './system.mjs';
 import { hashPassword, Sessions, verifyPassword } from './auth.mjs';
 import { listFiles, createFolder, uploadFile, downloadFile, deleteEntry } from './files.mjs';
+import { catalog, runtimeInventory, installCatalogApp, createContainer, createVm } from './runtimes.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const publicRoot = join(root, 'public');
@@ -43,7 +44,9 @@ async function bodyJson(req) {
     chunks.push(chunk);
   }
   try {
-    return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+    const input = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Invalid JSON object.');
+    return input;
   } catch {
     throw Object.assign(new Error('Invalid JSON.'), { status: 400 });
   }
@@ -74,7 +77,7 @@ function validateSetup(input) {
 
 async function api(req, res, url) {
   if (req.method === 'GET' && url.pathname === '/api/status') {
-    return send(res, 200, { version: '0.4.0', setupRequired: !store.state.config });
+    return send(res, 200, { version: '0.5.0', setupRequired: !store.state.config });
   }
 
   if (req.method === 'POST' && url.pathname === '/api/setup') {
@@ -118,6 +121,26 @@ async function api(req, res, url) {
   if (req.method === 'GET' && url.pathname === '/api/settings') {
     const { username, deviceName, timezone } = store.state.config;
     return send(res, 200, { username, deviceName, timezone });
+  }
+  if (req.method === 'GET' && url.pathname === '/api/runtimes') return send(res, 200, { ...(await runtimeInventory()), catalog });
+  if (req.method === 'POST' && /^\/api\/catalog\/[a-z0-9-]+\/install$/.test(url.pathname)) {
+    const id = url.pathname.split('/')[3];
+    const installed = await installCatalogApp(id);
+    store.addActivity('app', `Catalog app ${id} was installed as a Docker container.`);
+    await store.save();
+    return send(res, 201, installed);
+  }
+  if (req.method === 'POST' && url.pathname === '/api/containers') {
+    const created = await createContainer(await bodyJson(req));
+    store.addActivity('container', `Container ${created.name} was created.`);
+    await store.save();
+    return send(res, 201, created);
+  }
+  if (req.method === 'POST' && url.pathname === '/api/vms') {
+    const created = await createVm(await bodyJson(req));
+    store.addActivity('vm', `Virtual machine ${created.name} was created.`);
+    await store.save();
+    return send(res, 201, created);
   }
   if (req.method === 'PATCH' && url.pathname === '/api/settings') {
     const input = await bodyJson(req);
