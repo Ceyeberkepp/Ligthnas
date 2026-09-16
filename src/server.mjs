@@ -1,18 +1,26 @@
 import http from 'node:http';
-import { readFile } from 'node:fs/promises';
-import { extname, join, normalize } from 'node:path';
+import { readFile, mkdir } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { dirname, extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { JsonStore } from './store.mjs';
 import { getFilesystems, getStorageInventory, getSystemSnapshot } from './system.mjs';
 import { hashPassword, Sessions, verifyPassword } from './auth.mjs';
 import { listFiles, createFolder, uploadFile, downloadFile, deleteEntry } from './files.mjs';
-import { catalog, runtimeInventory, installCatalogApp, createContainer, createVm } from './runtimes.mjs';
+import { catalog, runtimeInventory, installCatalogApp, manageCatalogApp, createContainer, createVm } from './runtimes.mjs';
+import { validateSmtp, sendSmtpTest } from './mailer.mjs';
+import { mediaAvailable, convertMedia } from './media.mjs';
+import { createDataset, updateDataset } from './zfs.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const publicRoot = join(root, 'public');
 const store = new JsonStore();
 const sessions = new Sessions();
 await store.load();
+store.state.users ||= [];
+store.state.spaces ||= [];
+const spaceRoot = join(dirname(resolve(process.env.NAS_DATA_FILE || 'data/state.json')), 'files', 'Spaces');
+const spaceName = /^[a-zA-Z0-9][a-zA-Z0-9_-]{1,39}$/;
 
 const mimeTypes = {
   '.html': 'text/html; charset=utf-8',
@@ -77,7 +85,7 @@ function validateSetup(input) {
 
 async function api(req, res, url) {
   if (req.method === 'GET' && url.pathname === '/api/status') {
-    return send(res, 200, { version: '0.5.0', setupRequired: !store.state.config });
+    return send(res, 200, { version: '0.8.0', setupRequired: !store.state.config });
   }
 
   if (req.method === 'POST' && url.pathname === '/api/setup') {
@@ -101,11 +109,11 @@ async function api(req, res, url) {
   if (req.method === 'POST' && url.pathname === '/api/login') {
     if (!store.state.config) return send(res, 409, { error: 'Complete setup first.' });
     const input = await bodyJson(req);
-    const validUser = input.username === store.state.config.username;
-    const validPassword = validUser && await verifyPassword(input.password, store.state.config.passwordHash);
+    const account = input.username === store.state.config.username ? store.state.config : store.state.users.find(user => user.username === input.username);
+    const validPassword = account && !account.disabled && await verifyPassword(input.password, account.passwordHash);
     if (!validPassword) return send(res, 401, { error: 'Username or password is incorrect.' });
     const token = sessions.create(input.username);
-    store.addActivity('login', `Administrator ${input.username} signed in.`, 'info');
+    store.addActivity('login', `${input.username} signed in.`, 'info');
     await store.save();
     return send(res, 200, { ok: true }, { 'Set-Cookie': `nas_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200` });
   }
@@ -117,6 +125,110 @@ async function api(req, res, url) {
 
   const session = requireSession(req, res);
   if (!session) return;
+  const account = session.username === store.state.config.username ? store.state.config : store.state.users.find(user => user.username === session.username);
+  if (!account || account.disabled) return send(res, 401, { error: 'Account is unavailable.' });
+  const isAdmin = session.username === store.state.config.username;
+  if (!isAdmin && !['/api/overview', '/api/files', '/api/files/download', '/api/media'].includes(url.pathname)) return send(res, 403, { error: 'Administrator access required.' });
+
+  if (req.method === 'GET' && url.pathname === '/api/smtp') {
+    const { password, ...publicConfig } = store.state.smtp || {};
+    return send(res, 200, { config: store.state.smtp ? { ...publicConfig, hasPassword: Boolean(password) } : null });
+  }
+  if (req.method === 'GET' && url.pathname === '/api/media') return send(res, 200, { converterAvailable: await mediaAvailable(), formats: ['mp4', 'webm', 'mp3', 'jpg', 'png', 'webp'] });
+  if (req.method === 'POST' && url.pathname === '/api/media/convert') {
+    const input = await bodyJson(req);
+    const converted = await convertMedia(input.path, input.format);
+    store.addActivity('media', `Converted a media file to ${input.format}.`);
+    await store.save();
+    return send(res, 201, converted);
+  }
+  if (req.method === 'PUT' && url.pathname === '/api/smtp') {
+    const input = await bodyJson(req);
+    if (typeof input.currentPassword !== 'string' || !(await verifyPassword(input.currentPassword, store.state.config.passwordHash))) return send(res, 403, { error: 'Current administrator password is incorrect.' });
+    const problem = validateSmtp(input);
+    if (problem) return send(res, 400, { error: problem });
+    store.state.smtp = { host: input.host, port: Number(input.port), security: input.security, from: input.from, username: input.username, password: input.password || store.state.smtp?.password || '' };
+    store.addActivity('smtp', 'SMTP relay settings were updated.');
+    await store.save();
+    return send(res, 200, { ok: true });
+  }
+  if (req.method === 'POST' && url.pathname === '/api/smtp/test') {
+    if (!store.state.smtp) return send(res, 409, { error: 'Configure SMTP first.' });
+    const { recipient } = await bodyJson(req);
+    await sendSmtpTest(store.state.smtp, recipient);
+    store.addActivity('smtp', 'SMTP test message sent.');
+    await store.save();
+    return send(res, 200, { ok: true });
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/users') return send(res, 200, { users: store.state.users.map(({ username, createdAt, disabled }) => ({ username, createdAt, disabled: Boolean(disabled) })) });
+  if (req.method === 'POST' && url.pathname === '/api/users') {
+    const input = await bodyJson(req);
+    if (!/^[a-zA-Z0-9._-]{3,32}$/.test(input.username || '') || typeof input.password !== 'string' || input.password.length < 10) return send(res, 400, { error: 'Use a 3–32 character username and a password of at least 10 characters.' });
+    if (input.username === store.state.config.username || store.state.users.some(user => user.username === input.username)) return send(res, 409, { error: 'Username already exists.' });
+    store.state.users.push({ username: input.username, passwordHash: await hashPassword(input.password), createdAt: new Date().toISOString() });
+    store.addActivity('user', `User ${input.username} was created.`);
+    await store.save();
+    return send(res, 201, { username: input.username });
+  }
+  if (req.method === 'DELETE' && /^\/api\/users\/[a-zA-Z0-9._-]{3,32}$/.test(url.pathname)) {
+    const username = url.pathname.split('/').pop();
+    const index = store.state.users.findIndex(user => user.username === username);
+    if (index < 0) return send(res, 404, { error: 'User not found.' });
+    store.state.users.splice(index, 1);
+    sessions.clearUser(username);
+    store.addActivity('user', `User ${username} was removed.`);
+    await store.save();
+    return send(res, 200, { ok: true });
+  }
+  if (req.method === 'PATCH' && /^\/api\/users\/[a-zA-Z0-9._-]{3,32}$/.test(url.pathname)) {
+    const username = url.pathname.split('/').pop();
+    const user = store.state.users.find(item => item.username === username);
+    if (!user) return send(res, 404, { error: 'User not found.' });
+    const input = await bodyJson(req);
+    if (typeof input.currentPassword !== 'string' || !(await verifyPassword(input.currentPassword, store.state.config.passwordHash))) return send(res, 403, { error: 'Current administrator password is incorrect.' });
+    if (typeof input.disabled === 'boolean') user.disabled = input.disabled;
+    else if (typeof input.password === 'string' && input.password.length >= 10 && input.password.length <= 1024) user.passwordHash = await hashPassword(input.password);
+    else return send(res, 400, { error: 'Choose a new password of at least 10 characters or enable/disable the account.' });
+    sessions.clearUser(username);
+    store.addActivity('user', `User ${username} was updated.`);
+    await store.save();
+    return send(res, 200, { ok: true });
+  }
+  if (req.method === 'GET' && url.pathname === '/api/spaces') return send(res, 200, { spaces: store.state.spaces });
+  if (req.method === 'POST' && url.pathname === '/api/zfs/datasets') {
+    const result = await createDataset(await bodyJson(req));
+    store.addActivity('zfs', `ZFS dataset ${result.name} was created.`);
+    await store.save();
+    return send(res, 201, result);
+  }
+  if (req.method === 'PATCH' && url.pathname === '/api/zfs/datasets') {
+    const result = await updateDataset(await bodyJson(req));
+    store.addActivity('zfs', `ZFS dataset ${result.name} ${result.property} changed.`);
+    await store.save();
+    return send(res, 200, result);
+  }
+  if (req.method === 'POST' && url.pathname === '/api/spaces') {
+    const input = await bodyJson(req);
+    if (!spaceName.test(input.name || '') || typeof input.label !== 'string' || !input.label.trim() || input.label.length > 80) return send(res, 400, { error: 'Choose a 2–40 character folder name and a label up to 80 characters.' });
+    if (store.state.spaces.some(item => item.name.toLowerCase() === input.name.toLowerCase())) return send(res, 409, { error: 'Storage space already exists.' });
+    await mkdir(spaceRoot, { recursive: true, mode: 0o700 });
+    await mkdir(join(spaceRoot, input.name), { mode: 0o700 });
+    const space = { name: input.name, label: input.label.trim(), createdAt: new Date().toISOString() };
+    store.state.spaces.push(space);
+    store.addActivity('storage', `Storage space ${space.name} was created.`);
+    await store.save();
+    return send(res, 201, { space });
+  }
+  if (req.method === 'PATCH' && /^\/api\/spaces\/[a-zA-Z0-9_-]{2,40}$/.test(url.pathname)) {
+    const space = store.state.spaces.find(item => item.name === url.pathname.split('/').pop());
+    if (!space) return send(res, 404, { error: 'Storage space not found.' });
+    const { label } = await bodyJson(req);
+    if (typeof label !== 'string' || !label.trim() || label.length > 80) return send(res, 400, { error: 'Enter a label up to 80 characters.' });
+    space.label = label.trim();
+    await store.save();
+    return send(res, 200, { space });
+  }
 
   if (req.method === 'GET' && url.pathname === '/api/settings') {
     const { username, deviceName, timezone } = store.state.config;
@@ -129,6 +241,13 @@ async function api(req, res, url) {
     store.addActivity('app', `Catalog app ${id} was installed as a Docker container.`);
     await store.save();
     return send(res, 201, installed);
+  }
+  if (req.method === 'POST' && /^\/api\/catalog\/[a-z0-9-]+\/(start|stop|restart|remove)$/.test(url.pathname)) {
+    const [, , , id, action] = url.pathname.split('/');
+    const result = await manageCatalogApp(id, action);
+    store.addActivity('app', `App ${id}: ${action}.`);
+    await store.save();
+    return send(res, 200, result);
   }
   if (req.method === 'POST' && url.pathname === '/api/containers') {
     const created = await createContainer(await bodyJson(req));
@@ -169,7 +288,7 @@ async function api(req, res, url) {
   if (req.method === 'GET' && url.pathname === '/api/overview') {
     const [system, filesystems, storage] = await Promise.all([getSystemSnapshot(), getFilesystems(), getStorageInventory()]);
     return send(res, 200, {
-      appliance: { deviceName: store.state.config.deviceName, username: session.username, timezone: store.state.config.timezone },
+      appliance: { deviceName: store.state.config.deviceName, username: session.username, role: isAdmin ? 'administrator' : 'user', timezone: store.state.config.timezone },
       system,
       filesystems,
       storage,
@@ -195,8 +314,8 @@ async function api(req, res, url) {
     const path = url.searchParams.get('path') || '';
     const filename = path.split('/').pop();
     const data = await downloadFile(path);
-    res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': data.length, 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
-    return res.end(data);
+    res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': data.size, 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+    return createReadStream(data.path).pipe(res);
   }
 
   if (req.method === 'POST' && url.pathname === '/api/shares') {

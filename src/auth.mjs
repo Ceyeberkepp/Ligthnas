@@ -44,4 +44,8 @@ export class Sessions {
   clear() {
     this.sessions.clear();
   }
+
+  clearUser(username) {
+    for (const [token, session] of this.sessions) if (session.username === username) this.sessions.delete(token);
+  }
 }

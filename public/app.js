@@ -1,6 +1,16 @@
-const state = { overview: null, view: 'home', folder: '', files: null, runtimes: null, runtimeError: null };
+const state = { overview: null, view: 'home', folder: '', files: null, runtimes: null, runtimeError: null, spaces: null, users: null, smtp: undefined, media: null };
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
+const themeChoices = ['system', 'light', 'dark'];
+let theme = themeChoices.includes(localStorage.getItem('lightnas-theme')) ? localStorage.getItem('lightnas-theme') : 'system';
+const systemTheme = matchMedia('(prefers-color-scheme: dark)');
+function applyTheme() {
+  document.documentElement.dataset.theme = theme === 'system' ? (systemTheme.matches ? 'dark' : 'light') : theme;
+  const button = $('#theme-toggle');
+  if (button) { button.title = `Appearance: ${theme}. Click to change.`; button.setAttribute('aria-label', `Appearance: ${theme}. Click to change.`); button.textContent = theme === 'system' ? '◐' : theme === 'light' ? '☀' : '☾'; }
+}
+systemTheme.addEventListener('change', applyTheme);
+applyTheme();
 
 async function request(path, options = {}) {
   const response = await fetch(path, {
@@ -64,6 +74,8 @@ async function showConsole() {
   const { appliance } = state.overview;
   $('#mini-name').textContent = appliance.deviceName;
   $('#avatar').textContent = appliance.username[0].toUpperCase();
+  $$('[data-view]').forEach(link => link.classList.toggle('hidden', appliance.role !== 'administrator' && !['home', 'files', 'media'].includes(link.dataset.view)));
+  $$('.nav-group').forEach(group => group.classList.toggle('hidden', !group.querySelector('[data-view]:not(.hidden)')));
   render(location.hash.slice(1) || 'home');
 }
 
@@ -99,7 +111,9 @@ function homeView() {
 
 function storageView() {
   const { filesystems, storage } = state.overview;
-  return `${pageHead('Storage', 'Read-only inventory of storage visible to this host.')}
+  return `${pageHead('Storage', 'Capacity, file spaces, mounted filesystems, and ZFS visible to this appliance.', '<button class="primary" data-view-link="pools">Manage storage</button>')}
+    <div class="module-hero"><h2>Where your files live</h2><p>The Files library and storage spaces use the appliance data directory. ${filesystems.length ? `This host reports ${filesystems.length} mounted filesystem${filesystems.length === 1 ? '' : 's'}.` : 'No filesystem mount details are accessible.'} Open Storage pools to create a file space or a ZFS dataset on a compatible host.</p><button class="secondary" data-view-link="files">Open Files</button></div>
+    <h2>LightNAS storage spaces</h2><div class="storage-list">${state.spaces?.map(space => `<article class="storage-row"><div><h3>${escapeHtml(space.label)}</h3><p>Spaces/${escapeHtml(space.name)}</p></div><button class="secondary" data-open-space="${escapeHtml(space.name)}">Open</button></article>`).join('') || '<div class="empty"><p>No file spaces yet. Use Manage storage to create one.</p></div>'}</div>
     <h2>Disks</h2><div class="storage-list">${storage.disks.map(disk => `<article class="storage-row"><div><h3>${escapeHtml(disk.path || disk.name)}</h3><p>${escapeHtml(disk.model || 'Model unavailable')} · ${escapeHtml(disk.transport || 'Transport unknown')}</p></div><p>${disk.partitions.length} visible partitions</p><div class="storage-size">${bytes(disk.sizeBytes)}</div></article>`).join('') || '<div class="empty"><p>No physical disks are visible. Containers often cannot see host drives.</p></div>'}</div>
     <h2>ZFS pools</h2><div class="storage-list">${storage.zfs.pools.map(pool => `<article class="storage-row"><div><h3>${escapeHtml(pool.name)}</h3><p>${escapeHtml(pool.health)}</p></div><p>${bytes(pool.allocatedBytes)} allocated · ${bytes(pool.freeBytes)} free</p><div class="storage-size">${bytes(pool.sizeBytes)}</div></article>`).join('') || `<div class="empty"><p>${storage.zfs.available ? 'No ZFS pools found.' : 'ZFS tools are unavailable or inaccessible in this environment.'}</p></div>`}</div>
     <h2>ZFS datasets</h2><div class="storage-list">${storage.zfs.datasets.map(dataset => `<article class="storage-row"><div><h3>${escapeHtml(dataset.name)}</h3><p>${escapeHtml(dataset.mountPoint)} · Compression: ${escapeHtml(dataset.compression)}</p></div><p>${bytes(dataset.usedBytes)} used</p><div class="storage-size">${bytes(dataset.availableBytes)} available</div></article>`).join('') || '<div class="empty"><p>No accessible ZFS datasets.</p></div>'}</div>
@@ -108,10 +122,61 @@ function storageView() {
 
 function poolsView() {
   const { zfs, disks } = state.overview.storage;
-  return `${pageHead('Storage pools', 'Live ZFS pool inventory and disk visibility.')}
-    <div class="module-hero"><h2>Pool creation needs direct disk access</h2><p>This LightNAS service runs without root disk privileges. Creating a ZFS pool can erase selected disks, so the pool creation workflow requires a dedicated host agent and a disk impact preview. On your current LXC, physical drives belong to the Proxmox host.</p></div>
+  const parents = [...zfs.pools.map(pool => pool.name), ...zfs.datasets.map(dataset => dataset.name)].filter((name, index, all) => all.indexOf(name) === index);
+  return `${pageHead('Storage pools', 'Real filesystem pools and datasets visible to the host.', '<button class="primary" data-action="create-pool">+ Create pool</button>')}
+    <div class="module-hero"><h2>${disks.length ? 'Available disk inventory' : 'Connect storage to create a physical pool'}</h2><p>${disks.length ? `This host sees ${disks.length} disk${disks.length === 1 ? '' : 's'}. Pool creation requires disk eligibility checks and a privileged host agent before any disk can be selected.` : 'This LXC cannot access the Proxmox host’s physical drives. Run LightNAS on a dedicated VM with attached data disks or on bare metal for physical pool creation.'}</p></div>
     <h2>Existing ZFS pools</h2><div class="storage-list">${zfs.pools.map(pool => `<article class="storage-row"><div><h3>${escapeHtml(pool.name)}</h3><p>Health: ${escapeHtml(pool.health)}</p></div><p>${bytes(pool.allocatedBytes)} used · ${bytes(pool.freeBytes)} free</p><div class="storage-size">${bytes(pool.sizeBytes)}</div></article>`).join('') || `<div class="empty"><p>${zfs.available ? 'No accessible ZFS pools.' : 'ZFS commands are not available to LightNAS here.'}</p></div>`}</div>
-    <p class="muted">${disks.length} disks visible to LightNAS on this host.</p>`;
+    <h2>ZFS datasets</h2><div class="storage-list">${zfs.datasets.filter(item => !zfs.pools.some(pool => pool.name === item.name)).map(dataset => `<article class="storage-row"><div><h3>${escapeHtml(dataset.name)}</h3><p>${escapeHtml(dataset.mountPoint)} · Compression: ${escapeHtml(dataset.compression)}</p></div><button class="secondary" data-dataset="${escapeHtml(dataset.name)}" ${zfs.canManageDatasets ? '' : 'disabled'}>Edit properties</button></article>`).join('') || '<div class="empty"><p>No child datasets are visible.</p></div>'}</div>
+    ${zfs.canManageDatasets && parents.length ? `<form id="dataset-form" class="panel creation-form"><h2>Create a ZFS dataset</h2><p class="muted">Uses an existing pool. You can delegate ZFS dataset privileges to the LightNAS service account on the host.</p><label>Parent pool or dataset<select name="parent">${parents.map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('')}</select></label><label>Dataset name<input name="name" pattern="[a-zA-Z0-9][a-zA-Z0-9_.-]{1,63}" required></label><label>Compression<select name="compression"><option>lz4</option><option>zstd</option><option>gzip</option><option>off</option></select></label><label>Quota (GiB, 0 for none)<input name="quotaGiB" type="number" min="0" max="1048576" value="0"></label><button class="primary" type="submit">Create dataset</button><div class="form-error" role="alert"></div></form>` : ''}
+    <p class="muted">${disks.length} disks visible to LightNAS on this host.</p>
+    <h2>Storage spaces on this appliance</h2><p class="muted">These are real folders in persistent LightNAS Files. They use the LXC’s existing filesystem and do not create a ZFS pool or partition a disk.</p>
+    <form id="space-form" class="panel creation-form"><label>Folder name<input name="name" pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{1,39}" required placeholder="archive"></label><label>Display label<input name="label" maxlength="80" required placeholder="Team archive"></label><button class="primary" type="submit">Create storage space</button><div class="form-error" role="alert"></div></form>
+    <div class="storage-list">${state.spaces?.map(space => `<article class="storage-row"><div><h3>${escapeHtml(space.label)}</h3><p>Spaces/${escapeHtml(space.name)} · Stored on existing filesystem</p></div><button class="secondary" data-edit-space="${escapeHtml(space.name)}">Edit label</button><button class="secondary" data-open-space="${escapeHtml(space.name)}">Open files</button></article>`).join('') || '<div class="empty"><p>No storage spaces created yet.</p></div>'}</div>`;
+}
+
+async function loadSpaces() {
+  try { state.spaces = (await request('/api/spaces')).spaces; if (['pools', 'storage'].includes(state.view)) render(state.view); } catch (error) { toast(error.message); }
+}
+
+async function loadUsers() {
+  try { state.users = (await request('/api/users')).users; if (state.view === 'users') render('users'); } catch (error) { toast(error.message); }
+}
+
+function usersView() {
+  return `${pageHead('Administrators & users', 'Local accounts for the LightNAS browser; Linux and SMB accounts are separate.')}
+    <article class="panel"><h2>Administrator</h2><p>${escapeHtml(state.overview.appliance.username)} · appliance owner</p></article>
+    <form id="user-form" class="panel creation-form"><h2>Create local user</h2><p class="muted">Users can browse, upload and delete files. Only the appliance administrator manages settings and runtimes.</p><label>Username<input name="username" pattern="[a-zA-Z0-9._-]{3,32}" required></label><label>Password<input name="password" type="password" minlength="10" autocomplete="new-password" required></label><button class="primary" type="submit">Create user</button><div class="form-error" role="alert"></div></form>
+    <h2>Users</h2><div class="storage-list">${state.users?.map(user => `<article class="storage-row"><div><h3>${escapeHtml(user.username)}</h3><p>${user.disabled ? 'Disabled' : 'Active'}</p></div><details class="user-manager"><summary>Manage account</summary><form data-manage-user="${escapeHtml(user.username)}"><label>Administrator password<input name="currentPassword" type="password" autocomplete="current-password" required></label><label>New user password<input name="password" type="password" minlength="10" autocomplete="new-password" placeholder="At least 10 characters"></label><div class="head-actions"><button class="secondary" type="submit" value="password">Reset password</button><button class="secondary" type="submit" value="${user.disabled ? 'enable' : 'disable'}">${user.disabled ? 'Enable' : 'Disable'}</button><button class="secondary" type="button" data-remove-user="${escapeHtml(user.username)}">Remove</button></div><div class="form-error" role="alert"></div></form></details></article>`).join('') || '<div class="empty"><p>No local users yet.</p></div>'}</div>`;
+}
+
+async function loadSmtp() {
+  try { state.smtp = (await request('/api/smtp')).config; if (state.view === 'smtp') render('smtp'); } catch (error) { toast(error.message); }
+}
+
+function smtpView() {
+  const smtp = state.smtp;
+  return `${pageHead('Email / SMTP', 'Connect an encrypted SMTP relay for appliance notifications.')}
+    <form id="smtp-form" class="panel creation-form"><h2>Outgoing mail</h2><p class="muted">TLS certificates are checked. Passwords remain on the NAS in its owner-only state file and are never returned to the browser.</p>
+    <label>Server hostname<input name="host" required value="${escapeHtml(smtp?.host || '')}" placeholder="mail.example.com"></label>
+    <label>Port<input name="port" type="number" min="1" max="65535" value="${smtp?.port || 587}" required></label>
+    <label>Encryption<select name="security"><option value="starttls" ${smtp?.security === 'starttls' ? 'selected' : ''}>STARTTLS (often 587)</option><option value="tls" ${smtp?.security === 'tls' ? 'selected' : ''}>Implicit TLS (often 465)</option></select></label>
+    <label>Sender address<input name="from" type="email" required value="${escapeHtml(smtp?.from || '')}"></label>
+    <label>SMTP username (optional)<input name="username" value="${escapeHtml(smtp?.username || '')}"></label>
+    <label>SMTP password<input name="password" type="password" autocomplete="new-password" placeholder="${smtp?.hasPassword ? 'Leave blank to keep saved password' : 'Optional for internal relay'}"></label>
+    <label>Current administrator password<input name="currentPassword" type="password" autocomplete="current-password" required></label>
+    <button class="primary" type="submit">Save SMTP settings</button><div class="form-error" role="alert"></div></form>
+    ${smtp ? `<form id="smtp-test" class="panel creation-form"><h2>Send a test</h2><label>Recipient address<input name="recipient" type="email" required></label><button class="secondary" type="submit">Send test message</button><div class="form-error" role="alert"></div></form>` : ''}`;
+}
+
+function mediaView() {
+  return `${pageHead('Media & images', 'Upload documents, photos, video, and VM installer images into persistent storage.')}
+    <div class="tool-grid">${[['Documents','Documents'],['Photos','Photos'],['Videos','Videos'],['ISO images','ISO']].map(([label, folder]) => `<article class="panel"><h2>${label}</h2><p class="muted">Keep files together in Files/${folder}.</p><button class="primary" data-media-folder="${folder}">Open ${label}</button></article>`).join('')}</div>
+    <div class="module-hero"><h2>Conversion</h2><p>${state.media?.converterAvailable ? 'FFmpeg is ready. Administrators can convert supported media from the Files page to MP4, WebM, MP3, JPEG, PNG or WebP.' : 'FFmpeg is unavailable on this host. Install FFmpeg to enable media conversions.'} Conversion takes CPU and creates a new file beside the original. Document indexing and format conversion need separate services.</p></div>
+    <div class="module-hero"><h2>VM image library</h2><p>ISO files uploaded here remain in LightNAS Files. A separate libvirt VM host must be configured to read its ISO directory; copying to that host is not automatic.</p></div>`;
+}
+
+async function loadMedia() {
+  try { state.media = await request('/api/media'); if (['media', 'files'].includes(state.view)) render(state.view); } catch (error) { toast(error.message); }
 }
 
 async function loadRuntimes() {
@@ -132,7 +197,7 @@ function runtimeBanner(kind) {
 function containersView() {
   const runtime = state.runtimes?.docker;
   const ready = runtime?.available && runtime?.enabled;
-  return `${pageHead('Containers', 'Existing Docker containers visible to this host.', '<button class="secondary" data-action="refresh-runtime">Refresh</button>')}
+  return `${pageHead('Containers', 'Create and manage Docker workloads on an enabled host.', '<div class="head-actions"><button class="secondary" data-action="refresh-runtime">Refresh</button><button class="primary" data-action="create-container">+ Create container</button></div>')}
     ${runtimeBanner('docker')}
     ${ready ? `<form id="container-form" class="panel creation-form"><h2>Create a container</h2><p class="muted">Runs on the Docker bridge with no host mounts or published ports. Use the Apps catalog for a configured web app.</p><label>Name<input name="name" required pattern="[a-z][a-z0-9-]{1,39}" placeholder="my-container"></label><label>Docker image<input name="image" required placeholder="nginx:stable-alpine"></label><label>Memory limit (MiB)<input type="number" name="memoryMiB" value="512" min="128" max="16384" required></label><button class="primary" type="submit">Create container</button><div class="form-error" role="alert"></div></form>` : ''}
     <h2>Containers</h2><div class="storage-list">${runtime?.containers?.map(item => `<article class="storage-row"><div><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.image)}</p></div><p>${escapeHtml(item.status || item.state)}</p><div class="storage-size">${escapeHtml(item.ports || 'No ports')}</div></article>`).join('') || '<div class="empty"><p>No Docker containers are visible.</p></div>'}</div>`;
@@ -142,7 +207,7 @@ function vmsView() {
   const runtime = state.runtimes?.virtualization;
   const ready = runtime?.available && runtime?.enabled && runtime.pools.length && runtime.networks.length && runtime.images.length;
   const choices = items => items.map(item => `<option value="${escapeHtml(item)}">${escapeHtml(item)}</option>`).join('');
-  return `${pageHead('Virtual machines', 'Libvirt/KVM inventory and ISO-based VM creation.', '<button class="secondary" data-action="refresh-runtime">Refresh</button>')}
+  return `${pageHead('Virtual machines', 'Libvirt/KVM inventory and ISO-based VM creation.', '<div class="head-actions"><button class="secondary" data-action="refresh-runtime">Refresh</button><button class="primary" data-action="create-vm">+ Create VM</button></div>')}
     ${runtimeBanner('virtualization')}
     ${runtime?.available && runtime?.enabled && !ready ? '<div class="module-hero"><p>Before creating a VM, activate a libvirt storage pool and network, and place a readable ISO in /var/lib/libvirt/images on the VM host.</p></div>' : ''}
     ${ready ? `<form id="vm-form" class="panel creation-form"><h2>Create a VM</h2><p class="muted">Creates a new qcow2 disk in the selected libvirt pool and boots the installer ISO. No existing disk is formatted by LightNAS.</p><label>VM name<input name="name" required pattern="[a-zA-Z][a-zA-Z0-9-]{1,39}"></label><label>Memory (MiB)<input name="memoryMiB" type="number" min="1024" max="65536" value="2048" required></label><label>Virtual CPUs<input name="cpus" type="number" min="1" max="32" value="2" required></label><label>New disk (GiB)<input name="diskGiB" type="number" min="10" max="2048" value="20" required></label><label>Storage pool<select name="pool">${choices(runtime.pools)}</select></label><label>Network<select name="network">${choices(runtime.networks)}</select></label><label>Installer ISO<select name="iso">${choices(runtime.images)}</select></label><button class="primary" type="submit">Create VM</button><div class="form-error" role="alert"></div></form>` : ''}
@@ -160,9 +225,9 @@ function filesView() {
   const crumbs = [`<button class="panel-link" data-folder="">Files</button>`, ...segments.map((segment, index) => `<span> / </span><button class="panel-link" data-folder="${escapeHtml(segments.slice(0, index + 1).join('/'))}">${escapeHtml(segment)}</button>`)].join('');
   const entries = state.files;
   return `${pageHead('Files', 'Files stored in the LightNAS data directory on this host.', '<button class="secondary" data-action="refresh-files">Refresh</button>')}
-    <div class="file-toolbar"><div class="breadcrumbs">${crumbs}</div><div><button class="secondary" data-action="new-folder">+ Folder</button> <label class="primary upload-button">Upload file<input id="file-upload" type="file" hidden></label></div></div>
-    <p class="muted">Uploads up to 32 MB; files stay on this host. These files are not an SMB or NFS share.</p>
-    <div class="storage-list">${entries === null ? '<div class="empty"><p>Loading files…</p></div>' : entries.length ? entries.map(entry => `<article class="file-row"><button class="file-name" data-open="${escapeHtml(entry.name)}" data-directory="${entry.directory}">${entry.directory ? '▣' : '▤'} ${escapeHtml(entry.name)}</button><span class="muted">${entry.directory ? 'Folder' : bytes(entry.sizeBytes)}</span><button class="secondary" data-delete-file="${escapeHtml(entry.name)}">Delete</button></article>`).join('') : '<div class="empty"><p>This folder is empty. Create a folder or upload a file.</p></div>'}</div>`;
+    <div class="file-toolbar"><div class="breadcrumbs">${crumbs}</div><div><button class="secondary" data-action="new-folder">+ Folder</button> <label class="primary upload-button">Upload files<input id="file-upload" type="file" multiple hidden></label></div></div>
+    <p class="muted">Streamed uploads up to 1 GB; files stay on this host. These files are not an SMB or NFS share.</p>
+    <div class="storage-list">${entries === null ? '<div class="empty"><p>Loading files…</p></div>' : entries.length ? entries.map(entry => `<article class="file-row"><button class="file-name" data-open="${escapeHtml(entry.name)}" data-directory="${entry.directory}">${entry.directory ? '▣' : '▤'} ${escapeHtml(entry.name)}</button><span class="muted">${entry.directory ? 'Folder' : bytes(entry.sizeBytes)}</span>${!entry.directory && state.media?.converterAvailable && state.overview.appliance.role === 'administrator' ? `<button class="secondary" data-convert-file="${escapeHtml(entry.name)}">Convert</button>` : ''}<button class="secondary" data-delete-file="${escapeHtml(entry.name)}">Delete</button></article>`).join('') : '<div class="empty"><p>This folder is empty. Create a folder or upload a file.</p></div>'}</div>`;
 }
 
 async function loadFiles() {
@@ -193,39 +258,155 @@ function settingsView() {
     </form>`;
 }
 
+function adminView() {
+  const { appliance } = state.overview;
+  return `${pageHead('Admin Center', `Manage ${escapeHtml(appliance.deviceName)} and its connected services.`)}
+    <div class="tool-grid">
+      ${[['users','Users & access','Create or remove local accounts.'],['smtp','Email & SMTP','Configure encrypted outgoing email and send a test.'],['settings','Appliance','Change name, time zone and administrator password.'],['pools','Storage & datasets','Review disks, file spaces and ZFS datasets.'],['apps','Application catalog','Install reviewed open-source applications on an enabled host.'],['monitoring','System health','Check CPU, memory, mounts and recent activity.']].map(([view,title,description]) => `<article class="panel"><h2>${title}</h2><p class="muted">${description}</p><button class="secondary" data-view-link="${view}">Open ${title}</button></article>`).join('')}
+    </div>`;
+}
+
 function moduleView(view) {
   if (view === 'apps') {
     const docker = state.runtimes?.docker;
-    return `${pageHead('App Store', 'Built-in starter recipes for Docker hosts.', '<button class="secondary" data-action="refresh-runtime">Refresh</button>')}
+    return `${pageHead('App Store', 'Choose an app and install it directly from LightNAS.', '<button class="secondary" data-action="refresh-runtime">Refresh apps</button>')}
       ${runtimeBanner('docker')}
       <div class="tool-grid">${state.runtimes?.catalog?.map(app => {
-        const installed = docker.containers.some(container => container.name === `lightnas-app-${app.id}`);
-        return `<article class="panel"><h2>${escapeHtml(app.name)}</h2><p class="muted">${escapeHtml(app.description)}</p><p class="muted">${escapeHtml(app.image)} · Port ${app.port}</p><button class="primary" data-install="${app.id}" ${!docker.available || !docker.enabled || installed ? 'disabled' : ''}>${installed ? 'Installed' : 'Install'}</button></article>`;
+        const instance = docker?.containers?.find(container => container.name === `lightnas-app-${app.id}`);
+        return `<article class="panel"><span class="eyebrow">${escapeHtml(app.category)}</span><h2>${escapeHtml(app.name)}</h2><p class="muted">${escapeHtml(app.description)}</p><p class="muted">${escapeHtml(app.image)} · Port ${app.port}</p>${instance ? `<p class="muted">${escapeHtml(instance.status || instance.state)}</p><div class="head-actions"><button class="secondary" data-app-action="${instance.state === 'running' ? 'stop' : 'start'}" data-app-id="${app.id}">${instance.state === 'running' ? 'Stop' : 'Start'}</button><button class="secondary" data-app-action="restart" data-app-id="${app.id}">Restart</button><button class="secondary" data-app-action="remove" data-app-id="${app.id}">Remove</button></div>` : `<button class="primary" data-install="${app.id}">Install app</button>`}</article>`;
       }).join('') || '<div class="empty"><p>Loading catalog…</p></div>'}</div>
-      <section class="module-hero"><h2>Other app catalogs</h2><p>TrueNAS custom apps built from compatible OCI images can be adapted as LightNAS recipes. Proxmox Helper Scripts target the Proxmox host and cannot be executed inside this NAS LXC. Direct store sync and Compose import are still being built.</p><p><a href="https://apps.truenas.com/" target="_blank" rel="noopener noreferrer">Browse TrueNAS apps</a> · <a href="https://community-scripts.github.io/ProxmoxVE/" target="_blank" rel="noopener noreferrer">Browse Proxmox Helper Scripts</a></p></section>`;
+      <section class="module-hero"><h2>App hosting</h2><p>The app buttons install reviewed containers through the local Docker engine and keep app data on the host. ${docker?.available && docker?.enabled ? 'Docker is ready.' : 'This appliance does not yet have an enabled app runtime. Connect a Docker-capable host to activate installation.'}</p></section>`;
   }
   return `${pageHead('Monitoring', 'Current readings from this host.', '<button class="secondary" data-action="refresh">Refresh readings</button>')}<section class="metric-grid">${metric('CPU load', `${state.overview.system.cpu.loadPercent}%`, state.overview.system.cpu.loadPercent, state.overview.system.cpu.model)}${metric('Memory', bytes(state.overview.system.memory.usedBytes), state.overview.system.memory.usedPercent, `${bytes(state.overview.system.memory.freeBytes)} free`)}${metric('Uptime', duration(state.overview.system.uptimeSeconds), 0, state.overview.system.kernel)}${metric('Mounts', state.overview.filesystems.length, 0, 'Currently visible')}</section><h2>Activity</h2><div class="activity-list">${state.overview.activity.map(item => `<div class="activity"><div><b>${escapeHtml(item.message)}</b><time>${relativeTime(item.timestamp)}</time></div></div>`).join('') || '<p>No activity recorded.</p>'}</div>`;
 }
 
 function render(view) {
-  state.view = ['home', 'storage', 'pools', 'files', 'shares', 'capabilities', 'apps', 'containers', 'vms', 'monitoring', 'settings'].includes(view) ? view : 'home';
+  state.view = ['home', 'storage', 'pools', 'files', 'media', 'users', 'smtp', 'admin', 'shares', 'capabilities', 'apps', 'containers', 'vms', 'monitoring', 'settings'].includes(view) ? view : 'home';
+  if (state.overview.appliance.role !== 'administrator' && !['home', 'files', 'media'].includes(state.view)) state.view = 'home';
   const content = $('#content');
-  content.innerHTML = state.view === 'home' ? homeView() : state.view === 'storage' ? storageView() : state.view === 'pools' ? poolsView() : state.view === 'files' ? filesView() : state.view === 'shares' ? sharesView() : state.view === 'containers' ? containersView() : state.view === 'vms' ? vmsView() : state.view === 'settings' ? settingsView() : state.view === 'capabilities' ? capabilitiesView() : moduleView(state.view);
+  content.innerHTML = state.view === 'home' ? homeView() : state.view === 'storage' ? storageView() : state.view === 'pools' ? poolsView() : state.view === 'files' ? filesView() : state.view === 'media' ? mediaView() : state.view === 'users' ? usersView() : state.view === 'smtp' ? smtpView() : state.view === 'admin' ? adminView() : state.view === 'shares' ? sharesView() : state.view === 'containers' ? containersView() : state.view === 'vms' ? vmsView() : state.view === 'settings' ? settingsView() : state.view === 'capabilities' ? capabilitiesView() : moduleView(state.view);
   $$('[data-view]').forEach(link => link.classList.toggle('active', link.dataset.view === state.view));
+  $(`[data-view="${state.view}"]`, $('#nav'))?.closest('details')?.setAttribute('open', '');
   content.focus({ preventScroll: true });
   bindViewActions();
   if (state.view === 'files' && state.files === null) loadFiles();
+  if (['pools', 'storage'].includes(state.view) && state.spaces === null) loadSpaces();
+  if (state.view === 'users' && state.users === null) loadUsers();
+  if (state.view === 'smtp' && state.smtp === undefined) loadSmtp();
+  if (['files', 'media'].includes(state.view) && state.media === null) loadMedia();
   if (['apps', 'containers', 'vms'].includes(state.view) && !state.runtimes && !state.runtimeError) loadRuntimes();
 }
 
 function bindViewActions() {
+  $$('[data-action="create-pool"]', $('#content')).forEach(button => button.addEventListener('click', () => {
+    const storage = state.overview.storage;
+    if (!storage.disks.length) return toast('No physical disks are exposed to this NAS. Attach data disks to a VM or install on bare metal.');
+    toast('Physical pool creation needs the disk safety agent before it can operate. Existing ZFS datasets can be created below.');
+    $('#dataset-form', $('#content'))?.scrollIntoView({ behavior: 'smooth' });
+  }));
+  $$('[data-action="create-container"]', $('#content')).forEach(button => button.addEventListener('click', () => {
+    if (!state.runtimes?.docker?.available || !state.runtimes.docker.enabled) return toast(state.runtimes?.docker?.reason || 'Docker must be installed and enabled on this host.');
+    $('#container-form', $('#content'))?.scrollIntoView({ behavior: 'smooth' });
+    $('#container-form input', $('#content'))?.focus();
+  }));
+  $$('[data-action="create-vm"]', $('#content')).forEach(button => button.addEventListener('click', () => {
+    const vm = state.runtimes?.virtualization;
+    if (!vm?.available || !vm.enabled) return toast(vm?.reason || 'KVM/libvirt must be installed and enabled on a VM-capable host.');
+    if (!vm.pools.length || !vm.networks.length || !vm.images.length) return toast('Activate a libvirt pool and network and add an installer ISO first.');
+    $('#vm-form', $('#content'))?.scrollIntoView({ behavior: 'smooth' });
+    $('#vm-form input', $('#content'))?.focus();
+  }));
+  $('#dataset-form', $('#content'))?.addEventListener('submit', async event => {
+    event.preventDefault(); const form = event.currentTarget;
+    try { await request('/api/zfs/datasets', { method: 'POST', body: JSON.stringify(Object.fromEntries(new FormData(form))) }); state.overview = await request('/api/overview'); render('pools'); toast('Dataset created.'); }
+    catch (error) { $('.form-error', form).textContent = error.message; }
+  });
+  $$('[data-dataset]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+    const property = prompt('Property to change: compression or quota');
+    if (property === null) return;
+    const value = prompt(property === 'quota' ? 'Quota in GiB, for example 100G, or none:' : 'Compression: off, lz4, zstd, gzip');
+    if (value === null) return;
+    try { await request('/api/zfs/datasets', { method: 'PATCH', body: JSON.stringify({ name: button.dataset.dataset, property: property.trim(), value: value.trim() }) }); state.overview = await request('/api/overview'); render('pools'); toast('Dataset property updated.'); }
+    catch (error) { toast(error.message); }
+  }));
+  $$('[data-convert-file]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+    const format = prompt('Output format: mp4, webm, mp3, jpg, png, or webp');
+    if (format === null) return;
+    button.disabled = true;
+    button.textContent = 'Converting…';
+    try {
+      await request('/api/media/convert', { method: 'POST', body: JSON.stringify({ path: [state.folder, button.dataset.convertFile].filter(Boolean).join('/'), format: format.toLowerCase().trim() }) });
+      await loadFiles(); toast('Converted file is ready in this folder.');
+    } catch (error) { toast(error.message); button.disabled = false; button.textContent = 'Convert'; }
+  }));
+  $('#smtp-form', $('#content'))?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    try { await request('/api/smtp', { method: 'PUT', body: JSON.stringify(Object.fromEntries(new FormData(form))) }); await loadSmtp(); toast('SMTP settings saved.'); }
+    catch (error) { $('.form-error', form).textContent = error.message; }
+  });
+  $('#smtp-test', $('#content'))?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    try { await request('/api/smtp/test', { method: 'POST', body: JSON.stringify(Object.fromEntries(new FormData(form))) }); toast('SMTP test message sent.'); }
+    catch (error) { $('.form-error', form).textContent = error.message; }
+  });
+  $('#space-form', $('#content'))?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    try { await request('/api/spaces', { method: 'POST', body: JSON.stringify(Object.fromEntries(new FormData(form))) }); await loadSpaces(); toast('Storage space created.'); }
+    catch (error) { $('.form-error', form).textContent = error.message; }
+  });
+  $$('[data-edit-space]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+    const label = prompt('New display label');
+    if (label === null) return;
+    try { await request(`/api/spaces/${encodeURIComponent(button.dataset.editSpace)}`, { method: 'PATCH', body: JSON.stringify({ label }) }); await loadSpaces(); toast('Label updated.'); }
+    catch (error) { toast(error.message); }
+  }));
+  $$('[data-open-space]', $('#content')).forEach(button => button.addEventListener('click', () => { state.folder = `Spaces/${button.dataset.openSpace}`; state.files = null; location.hash = 'files'; }));
+  $('#user-form', $('#content'))?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    try { await request('/api/users', { method: 'POST', body: JSON.stringify(Object.fromEntries(new FormData(form))) }); await loadUsers(); toast('User created.'); }
+    catch (error) { $('.form-error', form).textContent = error.message; }
+  });
+  $$('[data-remove-user]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+    if (!confirm(`Remove user ${button.dataset.removeUser}?`)) return;
+    try { await request(`/api/users/${encodeURIComponent(button.dataset.removeUser)}`, { method: 'DELETE' }); await loadUsers(); toast('User removed.'); }
+    catch (error) { toast(error.message); }
+  }));
+  $$('[data-manage-user]', $('#content')).forEach(form => form.addEventListener('submit', async event => {
+    event.preventDefault();
+    const action = event.submitter.value;
+    const input = Object.fromEntries(new FormData(form));
+    if (action === 'password' && (!input.password || input.password.length < 10)) { $('.form-error', form).textContent = 'Enter a password of at least 10 characters.'; return; }
+    const change = action === 'password' ? { currentPassword: input.currentPassword, password: input.password } : { currentPassword: input.currentPassword, disabled: action === 'disable' };
+    try { await request(`/api/users/${encodeURIComponent(form.dataset.manageUser)}`, { method: 'PATCH', body: JSON.stringify(change) }); await loadUsers(); toast('Account updated; old sessions ended.'); }
+    catch (error) { $('.form-error', form).textContent = error.message; }
+  }));
+  $$('[data-media-folder]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+    const folder = button.dataset.mediaFolder;
+    try {
+      await request(`/api/files?path=${encodeURIComponent(folder)}`, { method: 'POST' });
+    } catch (error) { if (error.status !== 409) return toast(error.message); }
+    state.folder = folder; state.files = null; location.hash = 'files';
+  }));
   $$('[data-action="refresh-runtime"]', $('#content')).forEach(button => button.addEventListener('click', loadRuntimes));
   $$('[data-install]', $('#content')).forEach(button => button.addEventListener('click', async () => {
-    if (!confirm(`Install ${button.dataset.install} as a Docker container? It will publish a web port on this NAS.`)) return;
+    const docker = state.runtimes?.docker;
+    if (!docker?.available || !docker?.enabled) return toast(docker?.reason || 'Docker needs to be installed and enabled on this host before app installation.');
+    if (!confirm(`Install ${button.dataset.install} on this NAS? This creates a container and publishes its web port.`)) return;
     button.disabled = true;
     button.textContent = 'Installing…';
     try { await request(`/api/catalog/${button.dataset.install}/install`, { method: 'POST' }); await loadRuntimes(); toast('App installed.'); }
     catch (error) { toast(error.message); button.disabled = false; button.textContent = 'Install'; }
+  }));
+  $$('[data-app-action]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+    const { appId, appAction } = button.dataset;
+    if (appAction === 'remove' && !confirm(`Remove ${appId}? Its saved app data will remain on this NAS.`)) return;
+    button.disabled = true;
+    try { await request(`/api/catalog/${appId}/${appAction}`, { method: 'POST' }); await loadRuntimes(); toast(`App ${appAction} complete.`); }
+    catch (error) { toast(error.message); button.disabled = false; }
   }));
   for (const [selector, path, message] of [['#container-form', '/api/containers', 'Container created.'], ['#vm-form', '/api/vms', 'VM installer started.']]) {
     $(selector, $('#content'))?.addEventListener('submit', async event => {
@@ -267,7 +448,19 @@ function bindViewActions() {
     try { const response = await fetch(`/api/files/download?path=${encodeURIComponent(path)}`); if (!response.ok) throw new Error((await response.json()).error); const object = URL.createObjectURL(await response.blob()); const link = document.createElement('a'); link.href = object; link.download = button.dataset.open; link.click(); setTimeout(() => URL.revokeObjectURL(object), 60000); } catch (error) { toast(error.message); }
   }));
   $$('[data-action="new-folder"]', $('#content')).forEach(button => button.addEventListener('click', async () => { const name = prompt('New folder name'); if (name === null) return; try { await request(`/api/files?path=${encodeURIComponent([state.folder, name].filter(Boolean).join('/'))}`, { method: 'POST' }); await loadFiles(); toast('Folder created.'); } catch (error) { toast(error.message); } }));
-  $('#file-upload', content)?.addEventListener('change', async event => { const file = event.target.files[0]; if (!file) return; try { const response = await fetch(`/api/files?path=${encodeURIComponent([state.folder, file.name].filter(Boolean).join('/'))}`, { method: 'PUT', body: file }); if (!response.ok) throw new Error((await response.json()).error); await loadFiles(); toast('File uploaded.'); } catch (error) { toast(error.message); } });
+  $('#file-upload', content)?.addEventListener('change', async event => {
+    const files = [...event.target.files];
+    let completed = 0;
+    for (const file of files) {
+      try {
+        const response = await fetch(`/api/files?path=${encodeURIComponent([state.folder, file.name].filter(Boolean).join('/'))}`, { method: 'PUT', body: file });
+        if (!response.ok) throw new Error((await response.json()).error);
+        completed++;
+      } catch (error) { toast(`${file.name}: ${error.message}`); break; }
+    }
+    await loadFiles();
+    if (completed === files.length && completed) toast(`${completed} file${completed === 1 ? '' : 's'} uploaded.`);
+  });
   $$('[data-delete-file]', content).forEach(button => button.addEventListener('click', async () => { if (!confirm(`Delete ${button.dataset.deleteFile}? Folders must be empty.`)) return; try { await request(`/api/files?path=${encodeURIComponent([state.folder, button.dataset.deleteFile].filter(Boolean).join('/'))}`, { method: 'DELETE' }); await loadFiles(); toast('Deleted.'); } catch (error) { toast(error.message); } }));
   $$('[data-delete-share]', content).forEach(button => button.addEventListener('click', async () => { if (!confirm(`Remove share plan ${button.dataset.name}?`)) return; try { await request(`/api/shares/${button.dataset.deleteShare}`, { method: 'DELETE' }); state.overview = await request('/api/overview'); render(state.view); toast('Plan removed.'); } catch (error) { toast(error.message); } }));
 }
@@ -292,6 +485,7 @@ $('#setup-form').addEventListener('submit', event => { event.preventDefault(); s
 $('#login-form').addEventListener('submit', event => { event.preventDefault(); submitAuth(event.currentTarget, '/api/login'); });
 $('#logout').addEventListener('click', async () => { await request('/api/logout', { method: 'POST' }); showAuth('login'); });
 $('#menu').addEventListener('click', () => $('.sidebar').classList.toggle('open'));
+$('#theme-toggle').addEventListener('click', () => { theme = themeChoices[(themeChoices.indexOf(theme) + 1) % themeChoices.length]; localStorage.setItem('lightnas-theme', theme); applyTheme(); toast(`Appearance: ${theme}`); });
 $('#mobile-more').addEventListener('click', () => $('.sidebar').classList.add('open'));
 $$('[data-view]').forEach(link => link.addEventListener('click', () => $('.sidebar').classList.remove('open')));
 $$('.close-dialog').forEach(button => button.addEventListener('click', () => $('#share-dialog').close()));

@@ -37,6 +37,7 @@ export async function getStorageInventory() {
     disks,
     zfs: {
       available: pools !== null && datasets !== null,
+      canManageDatasets: pools !== null && datasets !== null && process.env.LIGHTNAS_ZFS_ENABLED === '1',
       pools: pools ? pools.split('\n').map(row => {
         const [name, size, allocated, free, health] = row.split('\t');
         return { name, sizeBytes: Number(size), allocatedBytes: Number(allocated), freeBytes: Number(free), health };

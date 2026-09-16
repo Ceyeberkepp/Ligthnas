@@ -15,8 +15,10 @@ async function exclusive(operation) {
 }
 
 export const catalog = Object.freeze([
-  { id: 'nginx', name: 'Nginx', category: 'Web server', image: 'nginx:stable-alpine', port: 8081, containerPort: 80, description: 'A basic web server with its default welcome page.' },
-  { id: 'jellyfin', name: 'Jellyfin', category: 'Media', image: 'jellyfin/jellyfin:latest', port: 8096, containerPort: 8096, description: 'Media server; serves files from the LightNAS Files directory.' }
+  { id: 'nginx', name: 'Nginx', category: 'Web server', image: 'nginx:stable-alpine', port: 8081, containerPort: 80, memory: '256m', description: 'Open-source web server with a default landing page.', source: 'https://hub.docker.com/_/nginx', volumes: [] },
+  { id: 'jellyfin', name: 'Jellyfin', category: 'Media', image: 'jellyfin/jellyfin:latest', port: 8096, containerPort: 8096, memory: '2g', description: 'Open-source media server. Reads your LightNAS Files as a library.', source: 'https://jellyfin.org/docs/general/installation/container/', volumes: [['config', '/config'], ['cache', '/cache'], ['@files', '/media:ro']] },
+  { id: 'uptime-kuma', name: 'Uptime Kuma', category: 'Monitoring', image: 'louislam/uptime-kuma:2', port: 3001, containerPort: 3001, memory: '1g', description: 'Self-hosted uptime and status monitoring.', source: 'https://github.com/louislam/uptime-kuma', volumes: [['data', '/app/data']] },
+  { id: 'openspeedtest', name: 'OpenSpeedTest', category: 'Network', image: 'openspeedtest/latest', port: 8082, containerPort: 3000, memory: '512m', description: 'Test LAN speed from your browser against this server.', source: 'https://github.com/openspeedtest/Docker-Image', volumes: [] }
 ]);
 
 async function command(program, args, timeout = 4000) {
@@ -67,14 +69,22 @@ export async function installCatalogApp(id) {
   const app = catalog.find(item => item.id === id);
   if (!app) throw Object.assign(new Error('Unknown catalog app.'), { status: 404 });
   const name = `lightnas-app-${app.id}`;
-  const args = ['run', '-d', '--name', name, '--label', `lightnas.catalog=${app.id}`, '--restart', 'unless-stopped', '--memory', '1g', '--pids-limit', '256', '--security-opt', 'no-new-privileges', '-p', `${app.port}:${app.containerPort}`];
-  if (id === 'jellyfin') {
-    const folder = join(dataRoot, 'apps', id);
-    for (const path of [join(folder, 'config'), join(folder, 'cache'), join(dataRoot, 'files')]) await mkdir(path, { recursive: true, mode: 0o700 });
-    args.push('-v', `${join(folder, 'config')}:/config`, '-v', `${join(folder, 'cache')}:/cache`, '-v', `${join(dataRoot, 'files')}:/media:ro`);
+  const args = ['run', '-d', '--name', name, '--label', `lightnas.catalog=${app.id}`, '--restart', 'unless-stopped', '--memory', app.memory, '--pids-limit', '256', '--security-opt', 'no-new-privileges', '-p', `${app.port}:${app.containerPort}`];
+  for (const [folder, target] of app.volumes) {
+    const hostPath = folder === '@files' ? join(dataRoot, 'files') : join(dataRoot, 'apps', id, folder);
+    await mkdir(hostPath, { recursive: true, mode: 0o700 });
+    args.push('-v', `${hostPath}:${target}`);
   }
   args.push(app.image);
   return { id: app.id, containerId: await runDocker(args), port: app.port };
+}
+
+export async function manageCatalogApp(id, action) {
+  if (!catalog.some(app => app.id === id)) throw Object.assign(new Error('Unknown catalog app.'), { status: 404 });
+  if (!['start', 'stop', 'restart', 'remove'].includes(action)) throw Object.assign(new Error('Invalid app action.'), { status: 400 });
+  const name = `lightnas-app-${id}`;
+  await runDocker(action === 'remove' ? ['rm', '-f', name] : [action, name]);
+  return { id, action, dataPreserved: action === 'remove' };
 }
 
 export async function createContainer(input) {

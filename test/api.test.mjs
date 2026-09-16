@@ -17,7 +17,7 @@ test('setup, authentication, overview, and share workflow', async (context) => {
 
   const base = `http://127.0.0.1:${server.address().port}`;
   let response = await fetch(`${base}/api/status`);
-  assert.deepEqual(await response.json(), { version: '0.5.0', setupRequired: true });
+  assert.deepEqual(await response.json(), { version: '0.8.0', setupRequired: true });
 
   response = await fetch(`${base}/api/setup`, {
     method: 'POST',
@@ -37,6 +37,53 @@ test('setup, authentication, overview, and share workflow', async (context) => {
   assert.ok(Array.isArray(overview.storage.disks));
   assert.ok(Array.isArray(overview.storage.zfs.pools));
   assert.ok(Array.isArray(overview.storage.zfs.datasets));
+  response = await fetch(`${base}/api/spaces`, { method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'archive', label: 'Family archive' }) });
+  assert.equal(response.status, 201);
+  response = await fetch(`${base}/api/spaces/archive`, { method: 'PATCH', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ label: 'Updated archive' }) });
+  assert.equal((await response.json()).space.label, 'Updated archive');
+  response = await fetch(`${base}/api/files?path=Spaces%2Farchive`, { headers: { Cookie: cookie } });
+  assert.equal(response.status, 200);
+  response = await fetch(`${base}/api/users`, { method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'reader', password: 'a-long-user-password' }) });
+  assert.equal(response.status, 201);
+  response = await fetch(`${base}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'reader', password: 'a-long-user-password' }) });
+  assert.equal(response.status, 200);
+  const userCookie = response.headers.get('set-cookie').split(';')[0];
+  response = await fetch(`${base}/api/overview`, { headers: { Cookie: userCookie } });
+  assert.equal((await response.json()).appliance.role, 'user');
+  response = await fetch(`${base}/api/settings`, { headers: { Cookie: userCookie } });
+  assert.equal(response.status, 403);
+  response = await fetch(`${base}/api/spaces`, { method: 'POST', headers: { Cookie: userCookie } });
+  assert.equal(response.status, 403);
+  response = await fetch(`${base}/api/files?path=Spaces%2Farchive%2Fimage.png`, { method: 'PUT', headers: { Cookie: userCookie }, body: new Uint8Array(256 * 1024) });
+  assert.equal(response.status, 201);
+  response = await fetch(`${base}/api/files/download?path=Spaces%2Farchive%2Fimage.png`, { headers: { Cookie: userCookie } });
+  assert.equal((await response.arrayBuffer()).byteLength, 256 * 1024);
+  response = await fetch(`${base}/api/users/reader`, { method: 'PATCH', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ currentPassword: 'correct-horse-battery', disabled: true }) });
+  assert.equal(response.status, 200);
+  response = await fetch(`${base}/api/overview`, { headers: { Cookie: userCookie } });
+  assert.equal(response.status, 401);
+  response = await fetch(`${base}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'reader', password: 'a-long-user-password' }) });
+  assert.equal(response.status, 401);
+  response = await fetch(`${base}/api/users/reader`, { method: 'PATCH', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ currentPassword: 'correct-horse-battery', disabled: false }) });
+  assert.equal(response.status, 200);
+  response = await fetch(`${base}/api/users/reader`, { method: 'DELETE', headers: { Cookie: cookie } });
+  assert.equal(response.status, 200);
+  response = await fetch(`${base}/api/overview`, { headers: { Cookie: userCookie } });
+  assert.equal(response.status, 401);
+  response = await fetch(`${base}/api/smtp`, { method: 'PUT', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ host: 'mail.example.com', port: 587, security: 'starttls', from: 'nas@example.com', username: 'nas', password: 'super-secret-smtp-password', currentPassword: 'wrong' }) });
+  assert.equal(response.status, 403);
+  response = await fetch(`${base}/api/smtp`, { method: 'PUT', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ host: 'mail.example.com', port: 587, security: 'starttls', from: 'nas@example.com', username: 'nas', password: 'super-secret-smtp-password', currentPassword: 'correct-horse-battery' }) });
+  assert.equal(response.status, 200);
+  response = await fetch(`${base}/api/smtp`, { headers: { Cookie: cookie } });
+  const smtp = await response.json();
+  assert.equal(smtp.config.hasPassword, true);
+  assert.equal(JSON.stringify(smtp).includes('super-secret'), false);
+  response = await fetch(`${base}/api/media`, { headers: { Cookie: cookie } });
+  assert.ok(Array.isArray((await response.json()).formats));
+  response = await fetch(`${base}/api/media/convert`, { method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ path: '../state.json', format: 'mp4' }) });
+  assert.equal(response.status, 400);
+  response = await fetch(`${base}/api/zfs/datasets`, { method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ parent: 'nonexistent', name: 'photos', compression: 'lz4', quotaGiB: 0 }) });
+  assert.equal(response.status, 409);
 
   response = await fetch(`${base}/api/runtimes`, { headers: { Cookie: cookie } });
   const runtimes = await response.json();

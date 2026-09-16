@@ -9,7 +9,7 @@
 
 Create a lightweight, secure, modern NAS operating system that makes storage, applications, containers, virtual machines, identity, backup, and AI management feel like one coherent product.
 
-The experience should combine the approachability of Synology DSM with the flexibility of Proxmox, Docker, TrueNAS, and a private AI platform—without requiring users to understand Linux administration before they can safely operate it.
+The experience should make storage, applications, virtualization, and private AI approachable without requiring users to understand Linux administration before they can safely operate it.
 
 The product must install on a broad range of x86 hardware, remain useful with as little as 2 GB of RAM, scale upward to modern multi-core servers with GPUs, and offer a responsive interface on phones, tablets, and desktop browsers.
 
@@ -389,4 +389,3 @@ Local generative AI, full VM management, domain-controller creation, clustering,
 ## 17. Product definition statement
 
 Lightweight AI NAS OS is a capability-aware private-cloud operating system that turns compatible old or new hardware into a simple, secure storage appliance and scales into applications, containers, virtual machines, intelligent automation, and identity services as resources permit. Its defining advantage is not merely the number of features; it is that storage, infrastructure, and AI behave as one understandable, safe, responsive experience.
-

@@ -1,8 +1,10 @@
-import { mkdir, readdir, lstat, readFile, writeFile, unlink, rmdir } from 'node:fs/promises';
+import { mkdir, readdir, lstat, unlink, rmdir, open } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { pipeline } from 'node:stream/promises';
+import { Transform } from 'node:stream';
 
 const root = join(dirname(process.env.NAS_DATA_FILE || 'data/state.json'), 'files');
-const MAX_UPLOAD = 32 * 1024 * 1024;
+const MAX_UPLOAD = 1024 * 1024 * 1024;
 
 function parts(relative) {
   if (typeof relative !== 'string' || relative.length > 1024 || relative.includes('\\') || relative.includes('\0')) throw Object.assign(new Error('Invalid file path.'), { status: 400 });
@@ -46,14 +48,17 @@ export async function createFolder(relative) {
 export async function uploadFile(relative, req) {
   if (!parts(relative).length) throw Object.assign(new Error('Enter a file name.'), { status: 400 });
   const path = await checked(relative, false);
-  const chunks = [];
+  const file = await open(path, 'wx', 0o600);
   let size = 0;
-  for await (const chunk of req) {
-    size += chunk.length;
-    if (size > MAX_UPLOAD) throw Object.assign(new Error('File exceeds the 32 MB upload limit.'), { status: 413 });
-    chunks.push(chunk);
+  try {
+    await pipeline(req, new Transform({ transform(chunk, encoding, callback) {
+      size += chunk.length;
+      callback(size > MAX_UPLOAD ? Object.assign(new Error('File exceeds the 1 GB upload limit.'), { status: 413 }) : null, chunk);
+    } }), file.createWriteStream());
+  } catch (error) {
+    await unlink(path).catch(() => {});
+    throw error;
   }
-  await writeFile(path, Buffer.concat(chunks), { flag: 'wx', mode: 0o600 });
 }
 
 export async function downloadFile(relative) {
@@ -61,8 +66,17 @@ export async function downloadFile(relative) {
   const path = await checked(relative);
   const info = await lstat(path);
   if (!info.isFile()) throw Object.assign(new Error('Not a file.'), { status: 400 });
-  if (info.size > MAX_UPLOAD) throw Object.assign(new Error('File exceeds the 32 MB browser download limit.'), { status: 413 });
-  return readFile(path);
+  return { path, size: info.size };
+}
+
+export async function mediaPaths(relative, format) {
+  if (!['mp4', 'webm', 'mp3', 'jpg', 'png', 'webp'].includes(format)) throw Object.assign(new Error('Unsupported output format.'), { status: 400 });
+  if (!parts(relative).length) throw Object.assign(new Error('Select an input file.'), { status: 400 });
+  const input = await checked(relative);
+  if (!(await lstat(input)).isFile()) throw Object.assign(new Error('Input must be a file.'), { status: 400 });
+  const outputRelative = relative.replace(/\.[^./]+$/, '') + `-converted.${format}`;
+  const output = await checked(outputRelative, false);
+  return { input, output, outputRelative };
 }
 
 export async function deleteEntry(relative) {

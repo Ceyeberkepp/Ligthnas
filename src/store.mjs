@@ -7,6 +7,9 @@ export class JsonStore {
     this.state = {
       config: null,
       shares: [],
+      users: [],
+      spaces: [],
+      smtp: null,
       activity: []
     };
     this.writeQueue = Promise.resolve();
