@@ -12,11 +12,14 @@ command -v lb >/dev/null || { echo 'Install live-build, debootstrap, xorriso, an
 mkdir -p "${BUILD_DIR}" "$(dirname "${OUTPUT}")"
 cd "${BUILD_DIR}"
 lb config --mode debian --distribution trixie --architectures amd64 --binary-image iso-hybrid \
-  --debian-installer live --archive-areas 'main contrib non-free-firmware'
+  --debian-installer live --archive-areas 'main contrib non-free-firmware' --security false
 
 mkdir -p config/package-lists config/includes.chroot/opt/lightnas \
   config/includes.chroot/etc/systemd/system/multi-user.target.wants \
+  config/includes.chroot/etc/apt/sources.list.d \
   config/hooks/live
+echo 'deb http://security.debian.org/debian-security trixie-security main contrib non-free-firmware' \
+  >config/includes.chroot/etc/apt/sources.list.d/debian-security.list
 cat >config/package-lists/lightnas.list.chroot <<'EOF'
 ca-certificates curl gnupg git systemd openssh-server util-linux
 EOF
