@@ -84,7 +84,8 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable --now "${SERVICE_NAME}"
+systemctl enable "${SERVICE_NAME}"
+systemctl restart "${SERVICE_NAME}"
 
 if command -v ufw >/dev/null 2>&1 && ufw status | grep -q '^Status: active'; then
   ufw allow 3080/tcp >/dev/null
@@ -92,7 +93,7 @@ fi
 
 echo "[6/6] Verifying LightNAS..."
 for attempt in {1..15}; do
-  if curl -fsS http://127.0.0.1:3080/api/health >/dev/null; then
+  if curl -fsS http://127.0.0.1:3080/api/status >/dev/null; then
     address="$(hostname -I 2>/dev/null | awk '{print $1}')"
     echo
     echo "LightNAS installation completed successfully."
