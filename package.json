@@ -1,0 +1,15 @@
+{
+  "name": "lightweight-ai-nas-os",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Phase 1 control plane and responsive management interface for Lightweight AI NAS OS",
+  "scripts": {
+    "start": "node src/server.mjs",
+    "dev": "NAS_DEV=1 node --watch src/server.mjs",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

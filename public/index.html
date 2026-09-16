@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#08111f">
+  <title>Lightweight AI NAS OS</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div id="boot" class="boot-screen">
+    <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+    <p>Starting your private cloud…</p>
+  </div>
+
+  <main id="auth" class="auth-shell hidden" aria-labelledby="auth-title">
+    <section class="auth-story">
+      <a class="brand" href="/" aria-label="Lightweight AI NAS OS home">
+        <span class="brand-mark small" aria-hidden="true"><span></span><span></span><span></span></span>
+        <span>LightNAS</span>
+      </a>
+      <div class="story-copy">
+        <span class="eyebrow">YOUR DATA. YOUR CLOUD.</span>
+        <h1>Storage that thinks ahead.</h1>
+        <p>A calm, private home for files, applications, virtual machines, and intelligent automation.</p>
+      </div>
+      <div class="story-status"><i></i><span>Local connection secured</span></div>
+    </section>
+
+    <section class="auth-panel">
+      <form id="setup-form" class="auth-form hidden">
+        <div class="step-count">INITIAL SETUP · 1 OF 1</div>
+        <h2 id="auth-title">Make it yours</h2>
+        <p>Configure the appliance administrator. Storage setup comes next.</p>
+        <label>Device name<input name="deviceName" value="lightnas" minlength="2" maxlength="32" required autocomplete="off"></label>
+        <label>Administrator username<input name="username" value="admin" minlength="3" maxlength="32" required autocomplete="username"></label>
+        <label>Password<input name="password" type="password" minlength="10" required autocomplete="new-password" placeholder="At least 10 characters"></label>
+        <label>Time zone<select name="timezone"><option value="America/New_York">Eastern Time</option><option value="America/Chicago">Central Time</option><option value="America/Denver">Mountain Time</option><option value="America/Los_Angeles">Pacific Time</option><option value="UTC">UTC</option></select></label>
+        <label class="check"><input name="updates" type="checkbox" checked><span>Install security updates automatically</span></label>
+        <button class="primary wide" type="submit">Create appliance</button>
+        <div class="form-error" role="alert"></div>
+      </form>
+
+      <form id="login-form" class="auth-form hidden">
+        <span class="eyebrow">WELCOME BACK</span>
+        <h2>Sign in to your NAS</h2>
+        <p>Manage storage, apps, and system health from one place.</p>
+        <label>Username<input name="username" required autocomplete="username"></label>
+        <label>Password<input name="password" type="password" required autocomplete="current-password"></label>
+        <button class="primary wide" type="submit">Sign in</button>
+        <div class="form-error" role="alert"></div>
+      </form>
+    </section>
+  </main>
+
+  <div id="console" class="console hidden">
+    <aside class="sidebar">
+      <a class="brand sidebar-brand" href="#home">
+        <span class="brand-mark small" aria-hidden="true"><span></span><span></span><span></span></span>
+        <span>LightNAS</span>
+      </a>
+      <nav id="nav" aria-label="Primary navigation">
+        <a href="#home" data-view="home" class="active"><span>⌂</span>Home</a>
+        <a href="#storage" data-view="storage"><span>▱</span>Storage</a>
+        <a href="#files" data-view="files"><span>□</span>Files</a>
+        <a href="#apps" data-view="apps"><span>✦</span>Apps</a>
+        <a href="#containers" data-view="containers"><span>⬡</span>Containers</a>
+        <a href="#vms" data-view="vms"><span>▣</span>Virtual machines</a>
+        <a href="#ai" data-view="ai"><span>✣</span>AI Center</a>
+        <a href="#identity" data-view="identity"><span>♙</span>Users & Identity</a>
+        <a href="#protection" data-view="protection"><span>◈</span>Data Protection</a>
+        <a href="#monitoring" data-view="monitoring"><span>⌁</span>Monitoring</a>
+      </nav>
+      <div class="sidebar-foot">
+        <button id="logout" class="ghost-button">Sign out</button>
+        <div class="device-mini"><i></i><div><b id="mini-name">LightNAS</b><small>System online</small></div></div>
+      </div>
+    </aside>
+
+    <header class="topbar">
+      <button id="menu" class="icon-button menu-button" aria-label="Open navigation">☰</button>
+      <div class="search">⌕ <input id="global-search" aria-label="Search" placeholder="Search settings, apps, and help"></div>
+      <div class="top-actions"><button class="icon-button" aria-label="Notifications">♢<span class="notification-dot"></span></button><div class="avatar" id="avatar">A</div></div>
+    </header>
+
+    <main id="content" class="content" tabindex="-1"></main>
+
+    <nav class="mobile-nav" aria-label="Mobile navigation">
+      <a href="#home" data-view="home" class="active"><span>⌂</span>Home</a>
+      <a href="#storage" data-view="storage"><span>▱</span>Storage</a>
+      <a href="#apps" data-view="apps"><span>✦</span>Apps</a>
+      <a href="#ai" data-view="ai"><span>✣</span>AI</a>
+      <button id="mobile-more"><span>•••</span>More</button>
+    </nav>
+  </div>
+
+  <dialog id="share-dialog">
+    <form id="share-form">
+      <div class="dialog-head"><div><span class="eyebrow">NEW RESOURCE</span><h2>Create shared folder</h2></div><button type="button" class="close-dialog" aria-label="Close">×</button></div>
+      <p>Define a network share. Filesystem creation and permission enforcement are coming in the next storage milestone.</p>
+      <label>Share name<input name="name" required minlength="2" maxlength="64" placeholder="Team Files"></label>
+      <label>Protocol<select name="protocol"><option>SMB</option><option>NFS</option><option>SFTP</option></select></label>
+      <label>Description<textarea name="description" maxlength="160" placeholder="What belongs in this share?"></textarea></label>
+      <div class="dialog-actions"><button type="button" class="secondary close-dialog">Cancel</button><button class="primary" type="submit">Create share</button></div>
+      <div class="form-error" role="alert"></div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
