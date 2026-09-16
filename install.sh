@@ -93,7 +93,7 @@ fi
 
 echo "[6/6] Verifying LightNAS..."
 for attempt in {1..15}; do
-  if curl -fsS http://127.0.0.1:3080/api/status >/dev/null; then
+  if curl -fsS http://127.0.0.1:3080/api/status >/dev/null 2>&1; then
     address="$(hostname -I 2>/dev/null | awk '{print $1}')"
     echo
     echo "LightNAS installation completed successfully."
