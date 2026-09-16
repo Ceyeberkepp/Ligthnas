@@ -40,4 +40,8 @@ export class Sessions {
   delete(token) {
     this.sessions.delete(token);
   }
+
+  clear() {
+    this.sessions.clear();
+  }
 }

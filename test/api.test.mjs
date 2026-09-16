@@ -17,7 +17,7 @@ test('setup, authentication, overview, and share workflow', async (context) => {
 
   const base = `http://127.0.0.1:${server.address().port}`;
   let response = await fetch(`${base}/api/status`);
-  assert.deepEqual(await response.json(), { version: '0.3.0', setupRequired: true });
+  assert.deepEqual(await response.json(), { version: '0.4.0', setupRequired: true });
 
   response = await fetch(`${base}/api/setup`, {
     method: 'POST',
@@ -70,6 +70,24 @@ test('setup, authentication, overview, and share workflow', async (context) => {
   const shareId = (await response.json()).shares[0].id;
   response = await fetch(`${base}/api/shares/${shareId}`, { method: 'DELETE', headers: { Cookie: cookie } });
   assert.equal(response.status, 200);
+
+  response = await fetch(`${base}/api/settings`, { headers: { Cookie: cookie } });
+  const settings = await response.json();
+  assert.deepEqual(settings, { username: 'admin', deviceName: 'test-nas', timezone: 'UTC' });
+  response = await fetch(`${base}/api/settings`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', Cookie: cookie }, body: JSON.stringify({ deviceName: 'new-nas', timezone: 'UTC', currentPassword: 'wrong', newPassword: 'a-longer-password' }) });
+  assert.equal(response.status, 403);
+  response = await fetch(`${base}/api/settings`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', Cookie: cookie }, body: JSON.stringify({ deviceName: 'new-nas', timezone: 'America/New_York', currentPassword: 'correct-horse-battery', newPassword: 'a-longer-password' }) });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).signInRequired, true);
+  response = await fetch(`${base}/api/overview`, { headers: { Cookie: cookie } });
+  assert.equal(response.status, 401);
+  response = await fetch(`${base}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'admin', password: 'correct-horse-battery' }) });
+  assert.equal(response.status, 401);
+  response = await fetch(`${base}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'admin', password: 'a-longer-password' }) });
+  assert.equal(response.status, 200);
+  const newCookie = response.headers.get('set-cookie').split(';')[0];
+  response = await fetch(`${base}/api/overview`, { headers: { Cookie: newCookie } });
+  assert.equal((await response.json()).appliance.deviceName, 'new-nas');
 
   response = await fetch(`${base}/api/overview`);
   assert.equal(response.status, 401);

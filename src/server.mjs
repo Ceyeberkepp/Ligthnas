@@ -74,7 +74,7 @@ function validateSetup(input) {
 
 async function api(req, res, url) {
   if (req.method === 'GET' && url.pathname === '/api/status') {
-    return send(res, 200, { version: '0.3.0', setupRequired: !store.state.config });
+    return send(res, 200, { version: '0.4.0', setupRequired: !store.state.config });
   }
 
   if (req.method === 'POST' && url.pathname === '/api/setup') {
@@ -115,10 +115,38 @@ async function api(req, res, url) {
   const session = requireSession(req, res);
   if (!session) return;
 
+  if (req.method === 'GET' && url.pathname === '/api/settings') {
+    const { username, deviceName, timezone } = store.state.config;
+    return send(res, 200, { username, deviceName, timezone });
+  }
+  if (req.method === 'PATCH' && url.pathname === '/api/settings') {
+    const input = await bodyJson(req);
+    if (typeof input.currentPassword !== 'string' || !(await verifyPassword(input.currentPassword, store.state.config.passwordHash))) {
+      return send(res, 403, { error: 'Current administrator password is incorrect.' });
+    }
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9-]{1,31}$/.test(input.deviceName || '')) {
+      return send(res, 400, { error: 'Device name must contain 2–32 letters, numbers, or hyphens.' });
+    }
+    if (!['UTC', 'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles'].includes(input.timezone)) {
+      return send(res, 400, { error: 'Choose a supported time zone.' });
+    }
+    const changedPassword = Boolean(input.newPassword);
+    if (changedPassword && (typeof input.newPassword !== 'string' || input.newPassword.length < 10)) {
+      return send(res, 400, { error: 'New password must contain at least 10 characters.' });
+    }
+    store.state.config.deviceName = input.deviceName;
+    store.state.config.timezone = input.timezone;
+    if (changedPassword) store.state.config.passwordHash = await hashPassword(input.newPassword);
+    store.addActivity('settings', changedPassword ? 'Administrator password was changed.' : 'Appliance settings were updated.');
+    await store.save();
+    if (changedPassword) sessions.clear();
+    return send(res, 200, { ok: true, signInRequired: changedPassword }, changedPassword ? { 'Set-Cookie': 'nas_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0' } : {});
+  }
+
   if (req.method === 'GET' && url.pathname === '/api/overview') {
     const [system, filesystems, storage] = await Promise.all([getSystemSnapshot(), getFilesystems(), getStorageInventory()]);
     return send(res, 200, {
-      appliance: { deviceName: store.state.config.deviceName, username: session.username },
+      appliance: { deviceName: store.state.config.deviceName, username: session.username, timezone: store.state.config.timezone },
       system,
       filesystems,
       storage,
@@ -186,7 +214,7 @@ async function staticFile(req, res, url) {
     const content = await readFile(path);
     res.writeHead(200, {
       'Content-Type': mimeTypes[extname(path)] || 'application/octet-stream',
-      'Cache-Control': process.env.NAS_DEV ? 'no-store' : 'public, max-age=300',
+      'Cache-Control': extname(path) === '.js' || extname(path) === '.css' || extname(path) === '.html' ? 'no-cache' : 'public, max-age=300',
       'X-Content-Type-Options': 'nosniff',
       'Content-Security-Policy': "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; connect-src 'self'"
     });

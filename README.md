@@ -5,6 +5,7 @@ This repository contains the first runnable vertical slice of Lightweight AI NAS
 ## What works now
 
 - Safe first-run appliance setup
+- Appliance Settings page for changing the device name, display time zone, and administrator password (requires the current password; password changes sign out every session)
 - Scrypt password hashing and secure, HTTP-only login sessions
 - Responsive login, dashboard, sidebar, and mobile navigation
 - Live Linux CPU, memory, kernel, uptime, disk, mount, and accessible ZFS pool/dataset inventory

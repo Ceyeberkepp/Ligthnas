@@ -113,6 +113,7 @@ textarea { min-height: 92px; resize: vertical; }
 .tool-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 .tool-grid .panel p { min-height: 44px; }
 .panel { padding: 22px; }
+.settings-form { max-width: 590px; }
 .panel-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
 .panel h2 { font-size: 16px; margin: 0; }
 .panel-link { color: var(--accent); border: 0; background: transparent; font-size: 12px; }

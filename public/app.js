@@ -135,6 +135,21 @@ function capabilitiesView() {
     <div class="capability-list">${system.capabilities.map(item => `<article class="capability-row"><div><b>${escapeHtml(item.name)}</b><p>${escapeHtml(item.available ? `Hardware requirement met · ${item.minimum}` : item.reason)}</p></div><span class="badge ${item.available ? 'available' : 'gated'}">${item.available ? 'ELIGIBLE' : 'HARDWARE GATED'}</span></article>`).join('')}</div>`;
 }
 
+function settingsView() {
+  const { appliance } = state.overview;
+  const zones = [['America/New_York', 'Eastern Time'], ['America/Chicago', 'Central Time'], ['America/Denver', 'Mountain Time'], ['America/Los_Angeles', 'Pacific Time'], ['UTC', 'UTC']];
+  return `${pageHead('Appliance settings', 'Update your LightNAS administrator account and display name.')}
+    <form id="settings-form" class="panel settings-form">
+      <h2>Administrator</h2><p class="muted">Signed in as ${escapeHtml(appliance.username)}. These settings apply to LightNAS only, not the Linux root account.</p>
+      <label>Device name<input name="deviceName" value="${escapeHtml(appliance.deviceName)}" required minlength="2" maxlength="32" autocomplete="off"></label>
+      <label>Display time zone<select name="timezone">${zones.map(([value, label]) => `<option value="${value}" ${appliance.timezone === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
+      <label>Current password<input name="currentPassword" type="password" required autocomplete="current-password"></label>
+      <label>New password (optional)<input name="newPassword" type="password" minlength="10" autocomplete="new-password" placeholder="Leave blank to keep current password"></label>
+      <button class="primary" type="submit">Save settings</button>
+      <div class="form-error" role="alert"></div>
+    </form>`;
+}
+
 function moduleView(view) {
   if (view === 'apps') return `${pageHead('Apps', 'Built-in tools available on this appliance.')}
     <div class="tool-grid"><article class="panel"><h2>Files</h2><p class="muted">Manage files stored on this LightNAS host.</p><button class="secondary" data-view-link="files">Open Files</button></article><article class="panel"><h2>Share plans</h2><p class="muted">Prepare and review future file sharing configurations.</p><button class="secondary" data-view-link="shares">Open share plans</button></article><article class="panel"><h2>Monitoring</h2><p class="muted">Read live host metrics and recent activity.</p><button class="secondary" data-view-link="monitoring">Open Monitoring</button></article></div>
@@ -143,9 +158,9 @@ function moduleView(view) {
 }
 
 function render(view) {
-  state.view = ['home', 'storage', 'files', 'shares', 'capabilities', 'apps', 'monitoring'].includes(view) ? view : 'home';
+  state.view = ['home', 'storage', 'files', 'shares', 'capabilities', 'apps', 'monitoring', 'settings'].includes(view) ? view : 'home';
   const content = $('#content');
-  content.innerHTML = state.view === 'home' ? homeView() : state.view === 'storage' ? storageView() : state.view === 'files' ? filesView() : state.view === 'shares' ? sharesView() : state.view === 'capabilities' ? capabilitiesView() : moduleView(state.view);
+  content.innerHTML = state.view === 'home' ? homeView() : state.view === 'storage' ? storageView() : state.view === 'files' ? filesView() : state.view === 'shares' ? sharesView() : state.view === 'settings' ? settingsView() : state.view === 'capabilities' ? capabilitiesView() : moduleView(state.view);
   $$('[data-view]').forEach(link => link.classList.toggle('active', link.dataset.view === state.view));
   content.focus({ preventScroll: true });
   bindViewActions();
@@ -153,6 +168,22 @@ function render(view) {
 }
 
 function bindViewActions() {
+  $('#settings-form', $('#content'))?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const button = $('button[type="submit"]', form);
+    const error = $('.form-error', form);
+    error.textContent = '';
+    button.disabled = true;
+    try {
+      const input = Object.fromEntries(new FormData(form));
+      const result = await request('/api/settings', { method: 'PATCH', body: JSON.stringify(input) });
+      form.reset();
+      if (result.signInRequired) { showAuth('login'); toast('Password changed. Sign in with the new password.'); }
+      else { state.overview = await request('/api/overview'); $('#mini-name').textContent = state.overview.appliance.deviceName; render('settings'); toast('Settings saved.'); }
+    } catch (problem) { error.textContent = problem.message; }
+    finally { button.disabled = false; }
+  });
   $$('[data-action="new-share"]', $('#content')).forEach(button => button.addEventListener('click', () => $('#share-dialog').showModal()));
   $$('[data-view-link]', $('#content')).forEach(button => button.addEventListener('click', () => { location.hash = button.dataset.viewLink; }));
   $$('[data-action="refresh"]', $('#content')).forEach(button => button.addEventListener('click', async () => { try { state.overview = await request('/api/overview'); render(state.view); toast('Readings updated.'); } catch (error) { toast(error.message); } }));
