@@ -2,8 +2,16 @@
 # Run on the Proxmox host: prepares one EXISTING LXC for Docker and installs LightNAS in it.
 set -Eeuo pipefail
 ctid="${1:-}"
-if [[ $EUID -ne 0 || ! -d /etc/pve || ! $ctid =~ ^[1-9][0-9]{1,5}$ ]]; then
-  echo 'Run on a Proxmox host as root: bash scripts/proxmox-lxc-install.sh CTID' >&2
+if [[ ! -d /etc/pve ]] || ! command -v pct >/dev/null 2>&1; then
+  echo 'This shell is inside an LXC or another non-Proxmox machine.' >&2
+  echo 'Open the Proxmox node shell (root@YOUR-PVE-NODE), then run this script there with CTID 170.' >&2
+  echo 'To update the LightNAS web service only from this LXC, run:' >&2
+  echo '  curl -fsSL https://raw.githubusercontent.com/Ceyeberkepp/Ligthnas/main/install.sh -o /root/lightnas-install.sh' >&2
+  echo '  bash /root/lightnas-install.sh' >&2
+  exit 1
+fi
+if [[ $EUID -ne 0 || ! $ctid =~ ^[1-9][0-9]{1,5}$ ]]; then
+  echo 'Run on the Proxmox node as root: bash /root/lightnas-lxc-install.sh 170' >&2
   exit 1
 fi
 config="$(pct config "$ctid")" || exit 1

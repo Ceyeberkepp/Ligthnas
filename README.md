@@ -89,14 +89,14 @@ when installation finishes.
 
 The installer now attempts Docker automatically and prepares KVM/libvirt when the host supports `/dev/kvm`. It reports which runtime is actually available. To skip Docker, run `LIGHTNAS_SKIP_DOCKER=1 bash /root/lightnas-install.sh` after downloading the installer.
 
-On the **Proxmox host** with the existing LXC 170, you can use the host preparation and install helper instead:
+On the **Proxmox node shell** (prompt such as `root@pve:~#`), with the existing LXC 170, you can use the host preparation and install helper instead. Do not run this helper at the `root@nasos:~#` prompt: `nasos` is inside the LXC and cannot change its own Proxmox configuration:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Ceyeberkepp/Ligthnas/main/scripts/proxmox-lxc-install.sh -o /root/proxmox-lxc-install.sh
 bash /root/proxmox-lxc-install.sh 170
 ```
 
-It preserves the NAS account and data. If features have to change, it gracefully restarts the LXC before installation. Follow the secure API-token prompt to connect VM creation to Proxmox. If running without a terminal, run `/opt/lightnas/scripts/configure-proxmox.sh` later from a root console in the LXC. The Proxmox host remains the owner of the VM hardware and physical storage. Check `/var/lib/lightnas/runtime-status.txt` for the results.
+To update the web service only from `root@nasos:~#`, run the normal `install.sh` command above instead. The host helper preserves the NAS account and data. If features have to change, it gracefully restarts the LXC before installation. Follow the secure API-token prompt to connect VM creation to Proxmox. If running without a terminal, run `/opt/lightnas/scripts/configure-proxmox.sh` later from a root console in the LXC. The Proxmox host remains the owner of the VM hardware and physical storage. Check `/var/lib/lightnas/runtime-status.txt` for the results.
 
 To update an existing Git-based installation, run `install.sh` again. It performs a fast-forward-only source update and preserves state under `/var/lib/lightnas`.
 
