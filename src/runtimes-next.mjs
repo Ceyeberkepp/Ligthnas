@@ -1,8 +1,8 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdir, readdir, lstat, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { proxmoxInventory, proxmoxCreateVm, proxmoxManageVm } from './proxmox.mjs';
+import { proxmoxInventory, proxmoxCreateVm, proxmoxManageVm, proxmoxUpdateVm } from './proxmox.mjs';
 
 const execute = promisify(execFile);
 const dataRoot = dirname(process.env.NAS_DATA_FILE || 'data/state.json');
@@ -122,18 +122,38 @@ export async function manageCatalogApp(id, action) {
 
 async function assertManagedContainer(name) {
   if (!/^lightnas-[a-z0-9][a-z0-9-]{0,60}$/.test(name || '')) throw Object.assign(new Error('Invalid LightNAS container name.'), { status: 400 });
-  const inspected = await runDocker(['inspect', '--format', '{{index .Config.Labels "lightnas.managed"}}|{{index .Config.Labels "lightnas.catalog"}}', name], 15000);
-  const [managed, catalogId] = inspected.split('|');
+  const inspected = await runDocker(['inspect', '--format', '{{index .Config.Labels "lightnas.managed"}}|{{index .Config.Labels "lightnas.catalog"}}|{{.State.Running}}', name], 15000);
+  const [managed, catalogId, running] = inspected.split('|');
   if (managed !== 'true' && !catalogId) throw Object.assign(new Error('Only LightNAS-managed containers can be controlled here.'), { status: 403 });
+  return { running: running === 'true' };
+}
+
+export async function openContainerShell(name) {
+  if (process.env.LIGHTNAS_DOCKER_ENABLED !== '1') throw Object.assign(new Error('Docker actions are disabled on this host.'), { status: 409 });
+  const state = await assertManagedContainer(name);
+  if (!state.running) throw Object.assign(new Error('Start the container before opening its terminal.'), { status: 409 });
+  return spawn('docker', ['exec', '-i', name, 'sh'], { stdio: ['pipe', 'pipe', 'pipe'] });
 }
 
 async function manageContainer(input) {
-  const name = String(input.name || '');
+  let name = String(input.name || '');
   const action = String(input.action || '');
   await assertManagedContainer(name);
   if (['start', 'stop', 'restart'].includes(action)) { await runDocker([action, name], 60000); return { name, action }; }
   if (action === 'remove') { await runDocker(['rm', '-f', name], 60000); return { name, action }; }
   if (action === 'logs') return { name, action, output: await runDocker(['logs', '--tail', '200', name], 30000) };
+  if (action === 'update') {
+    const memory = Number(input.memoryMiB);
+    if (!Number.isInteger(memory) || memory < 128 || memory > 65536) throw Object.assign(new Error('Memory must be 128–65536 MiB.'), { status: 400 });
+    await runDocker(['update', '--memory', `${memory}m`, name], 60000);
+    const requestedName = String(input.newName || '').trim();
+    if (requestedName && requestedName !== name) {
+      if (!/^lightnas-[a-z0-9][a-z0-9-]{0,60}$/.test(requestedName)) throw Object.assign(new Error('New container name must start with lightnas- and contain lowercase letters, numbers, or hyphens.'), { status: 400 });
+      await runDocker(['rename', name, requestedName], 30000);
+      name = requestedName;
+    }
+    return { name, action, memoryMiB: memory };
+  }
   if (action === 'shell') {
     const shellCommand = typeof input.command === 'string' && input.command.trim() ? input.command.trim() : 'id; uname -a';
     if (shellCommand.length > 1000 || /[\0\r\n]/.test(shellCommand)) throw Object.assign(new Error('Container command must be one line and under 1000 characters.'), { status: 400 });
@@ -161,6 +181,7 @@ export async function createVm(input) {
   if (input?.action) {
     const { virtualization } = await runtimeInventory();
     if (!virtualization.provider?.startsWith('proxmox')) throw Object.assign(new Error('VM lifecycle controls currently require the Proxmox integration.'), { status: 409 });
+    if (input.action === 'update') return await proxmoxUpdateVm(input);
     return await proxmoxManageVm(input.vmid, input.action);
   }
   if (!Object.keys(process.env).some(key => key.startsWith('LIGHTNAS_PVE_')) && process.env.LIGHTNAS_VM_ENABLED !== '1') throw Object.assign(new Error('VM creation is disabled on this host. Run LightNAS on a KVM-capable host/VM, or use the one-click Proxmox LXC installer.'), { status: 409 });
