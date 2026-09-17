@@ -1,0 +1,34 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run tests
+        run: npm test
+
+      - name: Validate shell syntax
+        run: |
+          bash -n install.sh
+          bash -n scripts/bootstrap.sh
+          bash -n scripts/proxmox-lxc-install.sh
+          bash -n scripts/configure-proxmox.sh
+          bash -n scripts/provision-runtimes.sh
+          bash -n scripts/start.sh
