@@ -46,9 +46,7 @@ config="$(pct config "$ctid")" || {
 wait_for_container() {
   local attempt
   for attempt in {1..30}; do
-    if pct exec "$ctid" -- true >/dev/null 2>&1; then
-      return 0
-    fi
+    if pct exec "$ctid" -- true >/dev/null 2>&1; then return 0; fi
     sleep 2
   done
   echo "LXC $ctid did not become ready for commands." >&2
@@ -58,9 +56,7 @@ wait_for_container() {
 wait_for_stopped() {
   local attempt
   for attempt in {1..30}; do
-    if [[ "$(pct status "$ctid")" == *'status: stopped'* ]]; then
-      return 0
-    fi
+    if [[ "$(pct status "$ctid")" == *'status: stopped'* ]]; then return 0; fi
     sleep 2
   done
   echo "LXC $ctid did not stop cleanly." >&2
@@ -69,10 +65,7 @@ wait_for_stopped() {
 
 install_host_bridge() {
   echo 'Installing LightNAS Proxmox host bridge...'
-  command -v python3 >/dev/null 2>&1 || {
-    apt-get update
-    apt-get install -y python3
-  }
+  command -v python3 >/dev/null 2>&1 || { apt-get update; apt-get install -y python3; }
   install -d -m 0755 /usr/local/libexec "$HOST_BRIDGE_DIR"
   install -d -m 0700 "$HOST_CLIENT_DIR"
   curl -fsSL "${RAW_BASE}/scripts/proxmox-host-agent.py" -o "$HOST_AGENT"
@@ -101,7 +94,6 @@ EOF
 
 install_host_bridge
 
-# Generate or reuse a unique credential for this one LightNAS LXC.
 secret_file="${HOST_CLIENT_DIR}/${ctid}.secret"
 if [[ ! -s "$secret_file" ]]; then
   umask 077
@@ -109,12 +101,8 @@ if [[ ! -s "$secret_file" ]]; then
 fi
 chmod 0600 "$secret_file"
 secret="$(cat "$secret_file")"
-[[ $secret =~ ^[a-f0-9]{64}$ ]] || {
-  echo 'Host bridge secret generation failed.' >&2
-  exit 1
-}
+[[ $secret =~ ^[a-f0-9]{64}$ ]] || { echo 'Host bridge secret generation failed.' >&2; exit 1; }
 
-# Work out every configuration change before touching the running container.
 features="$(sed -n 's/^features: //p' <<<"$config" | head -1)"
 for option in nesting keyctl; do
   if [[ $features =~ (^|,)${option}=[01](,|$) ]]; then
@@ -131,50 +119,34 @@ mount_change=0
 mount_slot=''
 if ! grep -Eq '^mp[0-9]+: /var/lib/lightnas-pve,mp=/var/lib/lightnas-pve([,[:space:]]|$)' <<<"$config"; then
   mount_change=1
-
-  # If an earlier installer created the old /run target, replace that same slot
-  # rather than leaving a stale bridge mount and allocating another mp entry.
   legacy_mount_line="$(grep -E '^mp[0-9]+: /var/lib/lightnas-pve,mp=/run/lightnas-pve([,[:space:]]|$)' <<<"$config" | head -1 || true)"
   if [[ -n $legacy_mount_line ]]; then
     mount_slot="${legacy_mount_line%%:*}"
     mount_slot="${mount_slot#mp}"
   else
     for slot in $(seq 0 255); do
-      if ! grep -q "^mp${slot}:" <<<"$config"; then
-        mount_slot="$slot"
-        break
-      fi
+      if ! grep -q "^mp${slot}:" <<<"$config"; then mount_slot="$slot"; break; fi
     done
   fi
-
-  [[ -n $mount_slot ]] || {
-    echo 'No free Proxmox LXC mount-point slot is available for the LightNAS host bridge.' >&2
-    exit 1
-  }
+  [[ -n $mount_slot ]] || { echo 'No free Proxmox LXC mount-point slot is available for the LightNAS host bridge.' >&2; exit 1; }
 fi
 
 was_running=0
 if [[ "$(pct status "$ctid")" == *'status: running'* ]]; then
   was_running=1
-  # Create a persistent target directory while the guest is available. Unlike
-  # /run, /var/lib survives restart and can safely receive the bind mount.
   pct exec "$ctid" -- install -d -m 0755 "$GUEST_BRIDGE_DIR"
 fi
 
-# Proxmox attempts to hot-plug mount points when pct set is used on a running CT.
-# Apply feature and mount changes only while stopped to avoid hotplug failures.
 if [[ $feature_change -eq 1 || $mount_change -eq 1 ]]; then
   if [[ $was_running -eq 1 ]]; then
     echo "Stopping LXC $ctid to apply LightNAS runtime integration..."
     pct shutdown "$ctid" --timeout 60
     wait_for_stopped
   fi
-
   if [[ $feature_change -eq 1 ]]; then
     echo "Preparing LXC $ctid: features=$features"
     pct set "$ctid" -features "$features"
   fi
-
   if [[ $mount_change -eq 1 ]]; then
     echo "Adding LightNAS host bridge as mp${mount_slot}..."
     pct set "$ctid" "-mp${mount_slot}" "${HOST_BRIDGE_DIR},mp=${GUEST_BRIDGE_DIR}"
@@ -187,9 +159,6 @@ if [[ "$(pct status "$ctid")" != *'status: running'* ]]; then
   wait_for_container
 fi
 
-# Download on the Proxmox host and push the installer into the guest. This makes
-# first install work even on a minimal Debian/Ubuntu LXC that does not have curl
-# yet; install.sh will install curl and the rest of its normal requirements.
 guest_installer="$(mktemp)"
 curl -fsSL "${RAW_BASE}/install.sh" -o "$guest_installer"
 pct push "$ctid" "$guest_installer" /root/lightnas-install.sh
@@ -197,8 +166,17 @@ rm -f "$guest_installer"
 pct exec "$ctid" -- chmod 0755 /root/lightnas-install.sh
 pct exec "$ctid" -- bash /root/lightnas-install.sh
 
-# Configure the automatically provisioned host bridge. These values are read by
-# systemd and are never returned by the LightNAS browser API.
+# Give the LightNAS service account access to data volumes intentionally mounted
+# into standard NAS paths. ACLs add service access without changing ownership or
+# recursively rewriting existing permissions. The host-bridge mount is excluded.
+latest_config="$(pct config "$ctid")"
+mapfile -t guest_data_mounts < <(sed -nE 's/^mp[0-9]+: .*mp=([^,]+).*/\1/p' <<<"$latest_config" | grep -E '^/(mnt|media|srv|data|storage)(/|$)' || true)
+for guest_mount in "${guest_data_mounts[@]}"; do
+  echo "Granting LightNAS managed access to ${guest_mount}..."
+  pct exec "$ctid" -- bash -lc 'mount="$1"; if [[ -d "$mount" ]]; then setfacl -m u:lightnas:rwx "$mount" && setfacl -m d:u:lightnas:rwx "$mount"; fi' _ "$guest_mount" || \
+    echo "Warning: unable to add LightNAS ACL on ${guest_mount}; it will remain browse-only." >&2
+done
+
 pct exec "$ctid" -- bash -lc "set -Eeuo pipefail
 install -d -m 0755 /etc/lightnas
 touch /etc/lightnas/runtime.env
@@ -216,7 +194,6 @@ fi
 systemctl restart lightnas
 "
 
-# Verify both sides before reporting success.
 systemctl is-active --quiet lightnas-proxmox-agent.service
 pct exec "$ctid" -- test -S "${GUEST_BRIDGE_DIR}/agent.sock"
 pct exec "$ctid" -- systemctl is-active --quiet lightnas
