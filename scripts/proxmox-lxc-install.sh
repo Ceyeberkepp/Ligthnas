@@ -10,6 +10,7 @@ ctid="${1:-${LIGHTNAS_CTID:-}}"
 HOST_BRIDGE_DIR=/var/lib/lightnas-pve
 GUEST_BRIDGE_DIR=/var/lib/lightnas-pve
 HOST_CLIENT_DIR=/etc/lightnas-pve/clients
+HOST_AGENT_BASE=/usr/local/libexec/lightnas-proxmox-agent-base.py
 HOST_AGENT=/usr/local/libexec/lightnas-proxmox-agent
 HOST_SERVICE=/etc/systemd/system/lightnas-proxmox-agent.service
 
@@ -65,12 +66,21 @@ wait_for_stopped() {
 
 install_host_bridge() {
   echo 'Installing LightNAS Proxmox host bridge...'
-  command -v python3 >/dev/null 2>&1 || { apt-get update; apt-get install -y python3; }
+  if ! command -v python3 >/dev/null 2>&1 || ! command -v openssl >/dev/null 2>&1; then
+    apt-get update
+    apt-get install -y python3 openssl
+  fi
   install -d -m 0755 /usr/local/libexec "$HOST_BRIDGE_DIR"
   install -d -m 0700 "$HOST_CLIENT_DIR"
-  curl -fsSL "${RAW_BASE}/scripts/proxmox-host-agent.py" -o "$HOST_AGENT"
-  chmod 0755 "$HOST_AGENT"
-  cat >"$HOST_SERVICE" <<'EOF'
+
+  # Keep the broad validated host operations in the base agent and layer the
+  # console-specific wrapper over it. The wrapper authenticates to qm vncproxy
+  # itself, so no VNC/Proxmox credential is exposed to browser JavaScript.
+  curl -fsSL "${RAW_BASE}/scripts/proxmox-host-agent.py" -o "$HOST_AGENT_BASE"
+  curl -fsSL "${RAW_BASE}/scripts/proxmox-host-agent-v2.py" -o "$HOST_AGENT"
+  chmod 0755 "$HOST_AGENT_BASE" "$HOST_AGENT"
+
+  cat >"$HOST_SERVICE" <<EOF
 [Unit]
 Description=LightNAS Proxmox Host Bridge
 After=pve-cluster.service
@@ -78,7 +88,8 @@ Wants=pve-cluster.service
 
 [Service]
 Type=simple
-ExecStart=/usr/local/libexec/lightnas-proxmox-agent
+Environment=LIGHTNAS_PVE_AGENT_BASE=${HOST_AGENT_BASE}
+ExecStart=${HOST_AGENT}
 Restart=on-failure
 RestartSec=2
 NoNewPrivileges=true
@@ -89,7 +100,11 @@ ProtectHome=true
 WantedBy=multi-user.target
 EOF
   systemctl daemon-reload
-  systemctl enable --now lightnas-proxmox-agent.service
+  systemctl enable lightnas-proxmox-agent.service
+  # Always restart after replacing the bridge so rerunning this installer also
+  # upgrades an already-running LightNAS host agent.
+  systemctl restart lightnas-proxmox-agent.service
+  systemctl is-active --quiet lightnas-proxmox-agent.service
 }
 
 install_host_bridge
@@ -200,5 +215,5 @@ pct exec "$ctid" -- systemctl is-active --quiet lightnas
 
 echo
 printf 'LightNAS installation finished in LXC %s.\n' "$ctid"
-echo 'Proxmox VM management is connected automatically; no API token setup is required.'
+echo 'Proxmox VM management and embedded noVNC are connected automatically; no API token setup is required.'
 pct exec "$ctid" -- bash -lc 'echo "--- Runtime status ---"; cat /var/lib/lightnas/runtime-status.txt 2>/dev/null || true; echo "--- Service ---"; systemctl --no-pager --full is-active lightnas || true'
