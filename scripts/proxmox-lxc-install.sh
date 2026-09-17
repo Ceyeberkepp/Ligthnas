@@ -129,14 +129,24 @@ feature_change=0
 
 mount_change=0
 mount_slot=''
-if ! grep -Eq "^mp[0-9]+: ${HOST_BRIDGE_DIR//\//\\/},mp=${GUEST_BRIDGE_DIR//\//\\/}([,[:space:]]|$)" <<<"$config"; then
+if ! grep -Eq '^mp[0-9]+: /var/lib/lightnas-pve,mp=/var/lib/lightnas-pve([,[:space:]]|$)' <<<"$config"; then
   mount_change=1
-  for slot in $(seq 0 255); do
-    if ! grep -q "^mp${slot}:" <<<"$config"; then
-      mount_slot="$slot"
-      break
-    fi
-  done
+
+  # If an earlier installer created the old /run target, replace that same slot
+  # rather than leaving a stale bridge mount and allocating another mp entry.
+  legacy_mount_line="$(grep -E '^mp[0-9]+: /var/lib/lightnas-pve,mp=/run/lightnas-pve([,[:space:]]|$)' <<<"$config" | head -1 || true)"
+  if [[ -n $legacy_mount_line ]]; then
+    mount_slot="${legacy_mount_line%%:*}"
+    mount_slot="${mount_slot#mp}"
+  else
+    for slot in $(seq 0 255); do
+      if ! grep -q "^mp${slot}:" <<<"$config"; then
+        mount_slot="$slot"
+        break
+      fi
+    done
+  fi
+
   [[ -n $mount_slot ]] || {
     echo 'No free Proxmox LXC mount-point slot is available for the LightNAS host bridge.' >&2
     exit 1
