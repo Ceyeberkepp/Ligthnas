@@ -63,7 +63,7 @@ export async function runtimeInventory() {
     try { runtime.virtualization = await proxmoxInventory() || runtime.virtualization; }
     catch (error) {
       runtime.virtualization = { available: false, enabled: true, provider: 'proxmox',
-        reason: `Proxmox connection failed: ${error.message}. Check its address, trusted certificate and API token.`, machines: [], pools: [], networks: [], images: [] };
+        reason: `Proxmox integration failed: ${error.message}. Re-run the Proxmox LightNAS helper or verify the host bridge.`, machines: [], pools: [], networks: [], images: [] };
     }
   }
   return runtime;
@@ -109,13 +109,13 @@ export async function createContainer(input) {
 }
 
 export async function createVm(input) {
-  if (!Object.keys(process.env).some(key => key.startsWith('LIGHTNAS_PVE_')) && process.env.LIGHTNAS_VM_ENABLED !== '1') throw Object.assign(new Error('VM creation is disabled on this host. Connect Proxmox or enable local KVM.'), { status: 409 });
+  if (!Object.keys(process.env).some(key => key.startsWith('LIGHTNAS_PVE_')) && process.env.LIGHTNAS_VM_ENABLED !== '1') throw Object.assign(new Error('VM creation is disabled on this host. Run LightNAS on a KVM-capable host/VM, or use the one-click Proxmox LXC installer.'), { status: 409 });
   if (!/^[a-zA-Z][a-zA-Z0-9-]{1,39}$/.test(input.name || '')) throw Object.assign(new Error('Use a 2–40 character VM name.'), { status: 400 });
   const memory = Number(input.memoryMiB), cpus = Number(input.cpus), disk = Number(input.diskGiB);
   if (!Number.isInteger(memory) || memory < 1024 || memory > 65536 || !Number.isInteger(cpus) || cpus < 1 || cpus > 32 || !Number.isInteger(disk) || disk < 10 || disk > 2048) throw Object.assign(new Error('Use 1024–65536 MiB RAM, 1–32 CPUs and 10–2048 GiB disk.'), { status: 400 });
   const { virtualization } = await runtimeInventory();
   if (!/^[a-zA-Z0-9_-]{1,48}$/.test(input.pool || '') || !/^[a-zA-Z0-9._-]{1,48}$/.test(input.network || '') || !virtualization.available || !virtualization.pools.includes(input.pool) || !virtualization.networks.includes(input.network) || !virtualization.images.includes(input.iso)) throw Object.assign(new Error('Select an accessible active pool, network and ISO image.'), { status: 409 });
-  if (virtualization.provider === 'proxmox') return proxmoxCreateVm(input, virtualization);
+  if (virtualization.provider?.startsWith('proxmox')) return proxmoxCreateVm(input, virtualization);
   if (virtualization.machines.includes(input.name)) throw Object.assign(new Error('A VM with this name already exists.'), { status: 409 });
   const args = ['--connect', 'qemu:///system', '--name', input.name, '--memory', String(memory), '--vcpus', String(cpus), '--disk', `pool=${input.pool},size=${disk},format=qcow2`, '--cdrom', join(vmIsoDirectory, input.iso), '--network', `network=${input.network}`, '--osinfo', 'detect=on,require=off', '--graphics', 'vnc,listen=127.0.0.1', '--noautoconsole', '--wait', '0'];
   const response = await exclusive(() => command('virt-install', args, 120000));
