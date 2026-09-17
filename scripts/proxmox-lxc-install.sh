@@ -8,6 +8,7 @@ set -Eeuo pipefail
 RAW_BASE="${LIGHTNAS_RAW_BASE:-https://raw.githubusercontent.com/Ceyeberkepp/Ligthnas/main}"
 ctid="${1:-${LIGHTNAS_CTID:-}}"
 HOST_BRIDGE_DIR=/var/lib/lightnas-pve
+GUEST_BRIDGE_DIR=/var/lib/lightnas-pve
 HOST_CLIENT_DIR=/etc/lightnas-pve/clients
 HOST_AGENT=/usr/local/libexec/lightnas-proxmox-agent
 HOST_SERVICE=/etc/systemd/system/lightnas-proxmox-agent.service
@@ -51,6 +52,18 @@ wait_for_container() {
     sleep 2
   done
   echo "LXC $ctid did not become ready for commands." >&2
+  return 1
+}
+
+wait_for_stopped() {
+  local attempt
+  for attempt in {1..30}; do
+    if [[ "$(pct status "$ctid")" == *'status: stopped'* ]]; then
+      return 0
+    fi
+    sleep 2
+  done
+  echo "LXC $ctid did not stop cleanly." >&2
   return 1
 }
 
@@ -101,7 +114,7 @@ secret="$(cat "$secret_file")"
   exit 1
 }
 
-restart_needed=0
+# Work out every configuration change before touching the running container.
 features="$(sed -n 's/^features: //p' <<<"$config" | head -1)"
 for option in nesting keyctl; do
   if [[ $features =~ (^|,)${option}=[01](,|$) ]]; then
@@ -110,17 +123,14 @@ for option in nesting keyctl; do
     features="${features:+$features,}${option}=1"
   fi
 done
-current="$(sed -n 's/^features: //p' <<<"$config" | head -1)"
-if [[ "$features" != "$current" ]]; then
-  echo "Preparing LXC $ctid: features=$features"
-  pct set "$ctid" -features "$features"
-  restart_needed=1
-fi
+current_features="$(sed -n 's/^features: //p' <<<"$config" | head -1)"
+feature_change=0
+[[ "$features" != "$current_features" ]] && feature_change=1
 
-# Bind only the local bridge directory into the LXC. The agent itself remains
-# on the Proxmox host and exposes a narrow authenticated Unix socket.
-if ! grep -Eq '^mp[0-9]+: /var/lib/lightnas-pve,mp=/run/lightnas-pve([,[:space:]]|$)' <<<"$config"; then
-  mount_slot=''
+mount_change=0
+mount_slot=''
+if ! grep -Eq "^mp[0-9]+: ${HOST_BRIDGE_DIR//\//\\/},mp=${GUEST_BRIDGE_DIR//\//\\/}([,[:space:]]|$)" <<<"$config"; then
+  mount_change=1
   for slot in $(seq 0 255); do
     if ! grep -q "^mp${slot}:" <<<"$config"; then
       mount_slot="$slot"
@@ -131,18 +141,38 @@ if ! grep -Eq '^mp[0-9]+: /var/lib/lightnas-pve,mp=/run/lightnas-pve([,[:space:]
     echo 'No free Proxmox LXC mount-point slot is available for the LightNAS host bridge.' >&2
     exit 1
   }
-  echo "Adding LightNAS host bridge as mp${mount_slot}..."
-  pct set "$ctid" "-mp${mount_slot}" "${HOST_BRIDGE_DIR},mp=/run/lightnas-pve"
-  restart_needed=1
+fi
+
+was_running=0
+if [[ "$(pct status "$ctid")" == *'status: running'* ]]; then
+  was_running=1
+  # Create a persistent target directory while the guest is available. Unlike
+  # /run, /var/lib survives restart and can safely receive the bind mount.
+  pct exec "$ctid" -- install -d -m 0755 "$GUEST_BRIDGE_DIR"
+fi
+
+# Proxmox attempts to hot-plug mount points when pct set is used on a running CT.
+# Apply feature and mount changes only while stopped to avoid hotplug failures.
+if [[ $feature_change -eq 1 || $mount_change -eq 1 ]]; then
+  if [[ $was_running -eq 1 ]]; then
+    echo "Stopping LXC $ctid to apply LightNAS runtime integration..."
+    pct shutdown "$ctid" --timeout 60
+    wait_for_stopped
+  fi
+
+  if [[ $feature_change -eq 1 ]]; then
+    echo "Preparing LXC $ctid: features=$features"
+    pct set "$ctid" -features "$features"
+  fi
+
+  if [[ $mount_change -eq 1 ]]; then
+    echo "Adding LightNAS host bridge as mp${mount_slot}..."
+    pct set "$ctid" "-mp${mount_slot}" "${HOST_BRIDGE_DIR},mp=${GUEST_BRIDGE_DIR}"
+  fi
 fi
 
 if [[ "$(pct status "$ctid")" != *'status: running'* ]]; then
   echo "Starting LXC $ctid..."
-  pct start "$ctid"
-  wait_for_container
-elif [[ $restart_needed -eq 1 ]]; then
-  echo "Restarting LXC $ctid to apply LightNAS runtime integration..."
-  pct shutdown "$ctid" --timeout 60
   pct start "$ctid"
   wait_for_container
 fi
@@ -158,7 +188,7 @@ touch /etc/lightnas/runtime.env
 chmod 0600 /etc/lightnas/runtime.env
 sed -i '/^LIGHTNAS_PVE_\\(SOCKET\\|CLIENT_ID\\|SECRET\\)=/d' /etc/lightnas/runtime.env
 printf '%s\\n' \\
-  'LIGHTNAS_PVE_SOCKET=/run/lightnas-pve/agent.sock' \\
+  'LIGHTNAS_PVE_SOCKET=${GUEST_BRIDGE_DIR}/agent.sock' \\
   'LIGHTNAS_PVE_CLIENT_ID=${ctid}' \\
   'LIGHTNAS_PVE_SECRET=${secret}' >> /etc/lightnas/runtime.env
 if grep -q '^VMs:' /var/lib/lightnas/runtime-status.txt 2>/dev/null; then
@@ -171,7 +201,7 @@ systemctl restart lightnas
 
 # Verify both sides before reporting success.
 systemctl is-active --quiet lightnas-proxmox-agent.service
-pct exec "$ctid" -- test -S /run/lightnas-pve/agent.sock
+pct exec "$ctid" -- test -S "${GUEST_BRIDGE_DIR}/agent.sock"
 pct exec "$ctid" -- systemctl is-active --quiet lightnas
 
 echo
