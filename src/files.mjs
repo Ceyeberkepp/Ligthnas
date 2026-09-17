@@ -1,4 +1,4 @@
-import { mkdir, readdir, lstat, unlink, rmdir, open, readFile } from 'node:fs/promises';
+import { access, constants, mkdir, readdir, lstat, unlink, rmdir, open, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { Transform } from 'node:stream';
@@ -24,19 +24,31 @@ function ignoredMount(mountPoint, type) {
 async function attachedVolumes() {
   let mounts = '';
   try { mounts = await readFile('/proc/mounts', 'utf8'); } catch { return []; }
-  const usedNames = new Set();
-  const volumes = [];
+  const records = [];
   for (const line of mounts.trim().split('\n')) {
     const [device, encoded, type, options] = line.split(' ');
     if (!device || !encoded) continue;
-    const mountPoint = encoded.replaceAll('\\040', ' ');
+    records.push({ device, mountPoint: encoded.replaceAll('\\040', ' '), type, options: options || '' });
+  }
+  const rootDevice = records.find(item => item.mountPoint === '/')?.device;
+  const explicitDataPath = mountPoint => /^(\/mnt|\/media|\/srv|\/data|\/storage)(\/|$)/.test(mountPoint);
+  const usedNames = new Set();
+  const volumes = [];
+  for (const record of records) {
+    const { device, mountPoint, type, options } = record;
     if (ignoredMount(mountPoint, type)) continue;
+    if (device === rootDevice && !explicitDataPath(mountPoint)) continue;
+    let writable = !options.split(',').includes('ro');
+    if (writable) {
+      try { await access(mountPoint, constants.W_OK); }
+      catch { writable = false; }
+    }
     let name = mountPoint.split('/').filter(Boolean).join('-').replace(/[^a-zA-Z0-9._ -]/g, '-').slice(0, 100) || 'storage';
     const base = name;
     let suffix = 2;
     while (usedNames.has(name.toLowerCase())) name = `${base}-${suffix++}`;
     usedNames.add(name.toLowerCase());
-    volumes.push({ name, mountPoint, device, type, readOnly: (options || '').split(',').includes('ro') });
+    volumes.push({ name, mountPoint, device, type, writable, readOnly: !writable });
   }
   return volumes;
 }
@@ -45,13 +57,14 @@ async function checked(relative, expectExisting = true) {
   const segments = parts(relative);
   let path;
   let start = 0;
+  let attachedVolume = null;
 
   if (segments[0] === ATTACHED_ROOT) {
     if (segments.length < 2) throw Object.assign(new Error('Select an attached storage volume.'), { status: 400 });
-    const volume = (await attachedVolumes()).find(item => item.name === segments[1]);
-    if (!volume) throw Object.assign(new Error('Attached storage volume is no longer available.'), { status: 404 });
-    if (volume.readOnly && !expectExisting) throw Object.assign(new Error('This attached storage volume is read only.'), { status: 409 });
-    path = volume.mountPoint;
+    attachedVolume = (await attachedVolumes()).find(item => item.name === segments[1]);
+    if (!attachedVolume) throw Object.assign(new Error('Attached storage volume is no longer available.'), { status: 404 });
+    if (attachedVolume.readOnly && !expectExisting) throw Object.assign(new Error(`LightNAS does not have write permission on ${attachedVolume.mountPoint}. Fix the Proxmox mount/ownership permissions, then refresh.`), { status: 403 });
+    path = attachedVolume.mountPoint;
     start = 2;
   } else {
     await mkdir(root, { recursive: true, mode: 0o700 });
@@ -83,7 +96,7 @@ export async function listFiles(relative = '') {
   const volumes = await attachedVolumes();
 
   if (segments.length === 1 && segments[0] === ATTACHED_ROOT) {
-    return volumes.map(volume => ({ name: volume.name, directory: true, sizeBytes: null, modifiedAt: null, supported: true, attached: true, mountPoint: volume.mountPoint }));
+    return volumes.map(volume => ({ name: volume.name, directory: true, sizeBytes: null, modifiedAt: null, supported: true, attached: true, mountPoint: volume.mountPoint, readOnly: volume.readOnly }));
   }
 
   const path = await checked(relative);
