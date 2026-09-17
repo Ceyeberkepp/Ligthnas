@@ -1,0 +1,28 @@
+.attached-storage { margin: 22px 0; }
+.attached-storage-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-top: 14px; }
+.attached-storage-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; }
+.attached-storage-card h3 { margin: 0 0 8px; font-size: 16px; }
+.attached-storage-card p { margin: 4px 0; color: var(--muted); }
+.attached-storage-card .track { margin: 12px 0 8px; }
+
+.lightnas-dialog { width: min(560px, calc(100vw - 32px)); border: 1px solid var(--line-strong); border-radius: 18px; background: var(--panel); color: var(--text); padding: 0; box-shadow: var(--shadow); }
+.lightnas-dialog::backdrop { background: rgba(4, 10, 18, .62); backdrop-filter: blur(4px); }
+.lightnas-dialog .dialog-body { padding: 24px; }
+.lightnas-dialog .dialog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 16px; }
+.lightnas-dialog .dialog-head h2 { margin: 4px 0 0; font-size: 22px; }
+.lightnas-dialog .dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }
+.lightnas-dialog .dialog-close { width: 36px; height: 36px; border-radius: 10px; border: 1px solid var(--line); background: var(--button); color: var(--text); }
+
+.lightnas-viewer { width: min(1100px, calc(100vw - 28px)); max-height: 90vh; }
+.lightnas-viewer .viewer-stage { min-height: 280px; max-height: 68vh; display: grid; place-items: center; overflow: auto; background: #03070c; border-radius: 13px; border: 1px solid var(--line); }
+.lightnas-viewer img { max-width: 100%; max-height: 66vh; object-fit: contain; }
+.lightnas-viewer video { width: 100%; max-height: 66vh; background: #000; }
+.lightnas-viewer audio { width: min(720px, 92%); }
+.lightnas-viewer iframe { width: 100%; height: 66vh; border: 0; background: white; }
+.lightnas-viewer pre { width: 100%; max-height: 66vh; overflow: auto; margin: 0; padding: 18px; white-space: pre-wrap; word-break: break-word; color: #dbe7ef; }
+.viewer-meta { color: var(--muted); font-size: 12px; margin-top: 10px; }
+
+@media (max-width: 700px) {
+  .attached-storage-grid { grid-template-columns: 1fr; }
+  .lightnas-viewer { width: calc(100vw - 16px); }
+}
