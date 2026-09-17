@@ -3,8 +3,8 @@
 
 The service listens only on a local Unix-domain socket. LightNAS LXCs receive that
 socket through a Proxmox bind mount and authenticate with a per-container secret.
-Only explicit inventory and VM-creation operations are implemented; there is no
-arbitrary command execution endpoint.
+Only explicit inventory and VM lifecycle operations are implemented; there is no
+arbitrary host command execution endpoint.
 """
 
 from __future__ import annotations
@@ -43,6 +43,14 @@ def node_name() -> str:
     return name
 
 
+def node_address() -> str | None:
+    try:
+        addresses = run(["hostname", "-I"]).split()
+    except Exception:
+        return None
+    return next((item for item in addresses if ":" not in item and not item.startswith("127.")), addresses[0] if addresses else None)
+
+
 def authenticate(request: dict) -> str:
     client = str(request.get("client", ""))
     supplied = str(request.get("secret", ""))
@@ -55,7 +63,6 @@ def authenticate(request: dict) -> str:
         raise PermissionError("unknown LightNAS client") from exc
     if not hmac.compare_digest(supplied, expected):
         raise PermissionError("invalid LightNAS client secret")
-    # Refuse stale credentials for containers that no longer exist.
     run(["pct", "config", client], timeout=10)
     return client
 
@@ -66,12 +73,18 @@ def inventory() -> dict:
     stores = pvesh(f"/nodes/{node}/storage", "--content", "images") or []
     bridges = pvesh(f"/nodes/{node}/network", "--type", "bridge") or []
 
-    pools = [
-        str(item.get("storage")) for item in stores
-        if item.get("enabled", 1) != 0
-        and item.get("active", 1) != 0
-        and POOL_RE.fullmatch(str(item.get("storage", "")))
-    ]
+    pool_details = []
+    for item in stores:
+        storage = str(item.get("storage", ""))
+        if item.get("enabled", 1) == 0 or item.get("active", 1) == 0 or not POOL_RE.fullmatch(storage):
+            continue
+        pool_details.append({
+            "name": storage,
+            "type": str(item.get("type", "unknown")),
+            "total": int(item.get("total") or 0),
+            "available": int(item.get("avail") or 0),
+        })
+    pools = [item["name"] for item in pool_details]
 
     iso_stores = pvesh(f"/nodes/{node}/storage", "--content", "iso") or []
     images: list[str] = []
@@ -82,27 +95,40 @@ def inventory() -> dict:
         content = pvesh(f"/nodes/{node}/storage/{storage}/content", "--content", "iso") or []
         images.extend(
             str(entry.get("volid")) for entry in content
-            if entry.get("content") == "iso" and isinstance(entry.get("volid"), str)
+            if entry.get("content") == "iso"
+            and isinstance(entry.get("volid"), str)
+            and str(entry.get("volid")).lower().endswith(".iso")
         )
+    images = sorted(set(images))
 
+    machine_details = [
+        {
+            "vmid": int(item.get("vmid")),
+            "name": str(item.get("name") or f"VM-{item.get('vmid')}"),
+            "status": str(item.get("status") or "unknown"),
+            "memory": int(item.get("maxmem") or 0),
+            "disk": int(item.get("maxdisk") or 0),
+            "cpus": int(item.get("cpus") or 0),
+        }
+        for item in machines if str(item.get("vmid", "")).isdigit()
+    ]
+    address = node_address()
     return {
         "available": True,
         "enabled": True,
-        # Keep the provider name compatible with the existing LightNAS UI.
-        # The transport is the automatic local host bridge, not an API token.
         "provider": "proxmox",
         "reason": None,
-        "machines": [
-            f"{item.get('name') or 'VM'} ({item.get('vmid')}) · {item.get('status') or 'unknown'}"
-            for item in machines
-        ],
+        "machines": [f"{item['name']} ({item['vmid']}) · {item['status']}" for item in machine_details],
+        "machineDetails": machine_details,
         "pools": pools,
+        "poolDetails": pool_details,
         "networks": [
             str(item.get("iface")) for item in bridges
             if item.get("active", 1) != 0 and NETWORK_RE.fullmatch(str(item.get("iface", "")))
         ],
         "images": images,
         "node": node,
+        "proxmoxUrl": f"https://{address}:8006/" if address else None,
         "transport": "host-bridge",
     }
 
@@ -125,8 +151,12 @@ def create_vm(data: dict) -> dict:
         raise ValueError("VM resources are outside allowed limits")
 
     current = inventory()
-    if pool not in current["pools"] or network not in current["networks"] or iso not in current["images"]:
-        raise ValueError("storage, network, or ISO is not currently available on Proxmox")
+    if pool not in current["pools"]:
+        raise ValueError(f"VM storage '{pool}' is not currently available on Proxmox")
+    if network not in current["networks"]:
+        raise ValueError(f"network bridge '{network}' is not currently available on Proxmox")
+    if iso not in current["images"] or not iso.lower().endswith(".iso"):
+        raise ValueError("select an existing ISO image from Proxmox ISO storage")
     if any(machine.startswith(f"{name} (") for machine in current["machines"]):
         raise ValueError("a VM with this name already exists")
 
@@ -134,28 +164,54 @@ def create_vm(data: dict) -> dict:
     if vmid < 100:
         raise RuntimeError("Proxmox returned an invalid VM ID")
 
-    # Use qm directly on the host. Every argument is validated above and passed
-    # without a shell, so user input cannot become a host command.
-    run([
-        "qm", "create", str(vmid),
-        "--name", name,
-        "--memory", str(memory),
-        "--cores", str(cpus),
-        "--scsihw", "virtio-scsi-pci",
-        "--scsi0", f"{pool}:{disk}",
-        "--ide2", f"{iso},media=cdrom",
-        "--net0", f"virtio,bridge={network}",
-        "--boot", "order=ide2;scsi0",
-        "--ostype", "l26",
-    ], timeout=120)
+    created = False
+    try:
+        run([
+            "qm", "create", str(vmid), "--name", name, "--memory", str(memory),
+            "--cores", str(cpus), "--scsihw", "virtio-scsi-pci",
+            "--net0", f"virtio,bridge={network}", "--ostype", "l26",
+        ], timeout=60)
+        created = True
+        run(["qm", "set", str(vmid), "--scsi0", f"{pool}:{disk}"], timeout=120)
+        run(["qm", "set", str(vmid), "--ide2", f"{iso},media=cdrom"], timeout=60)
+        run(["qm", "set", str(vmid), "--boot", "order=ide2;scsi0"], timeout=30)
+    except Exception:
+        if created:
+            try:
+                run(["qm", "destroy", str(vmid), "--purge", "1", "--destroy-unreferenced-disks", "1"], timeout=60)
+            except Exception:
+                pass
+        raise
 
     try:
         run(["qm", "start", str(vmid)], timeout=60)
         detail = "VM created and started on the Proxmox host."
-    except Exception:
-        detail = "VM created on the Proxmox host but could not be started automatically."
+    except Exception as exc:
+        detail = f"VM created, but automatic start failed: {str(exc)[:180]}"
 
     return {"name": name, "vmid": vmid, "details": detail}
+
+
+def vm_action(data: dict) -> dict:
+    try:
+        vmid = int(data.get("vmid"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid VM ID") from exc
+    action = str(data.get("action", ""))
+    if vmid < 100 or vmid > 999999:
+        raise ValueError("invalid VM ID")
+    if action not in {"start", "stop", "shutdown", "reboot", "reset", "delete"}:
+        raise ValueError("unsupported VM action")
+    run(["qm", "config", str(vmid)], timeout=15)
+    if action == "delete":
+        try:
+            run(["qm", "stop", str(vmid)], timeout=30)
+        except Exception:
+            pass
+        run(["qm", "destroy", str(vmid), "--purge", "1", "--destroy-unreferenced-disks", "1"], timeout=120)
+        return {"vmid": vmid, "action": action, "status": "deleted"}
+    run(["qm", "reset" if action == "reset" else action, str(vmid)], timeout=60)
+    return {"vmid": vmid, "action": action, "status": "submitted"}
 
 
 def dispatch(request: dict) -> dict:
@@ -168,6 +224,11 @@ def dispatch(request: dict) -> dict:
         if not isinstance(data, dict):
             raise ValueError("missing VM definition")
         return create_vm(data)
+    if action == "vm-action":
+        data = request.get("data")
+        if not isinstance(data, dict):
+            raise ValueError("missing VM action")
+        return vm_action(data)
     raise ValueError("unsupported host operation")
 
 
@@ -188,10 +249,10 @@ class Handler(socketserver.StreamRequestHandler):
         except (ValueError, subprocess.CalledProcessError, subprocess.TimeoutExpired, RuntimeError) as exc:
             detail = str(exc)
             if isinstance(exc, subprocess.CalledProcessError):
-                detail = (exc.stderr or exc.stdout or str(exc)).strip()[:800]
-            self._reply(False, error=detail[:800], code="operation_failed")
-        except Exception:
-            self._reply(False, error="unexpected host-agent failure", code="internal_error")
+                detail = (exc.stderr or exc.stdout or str(exc)).strip()[:1200]
+            self._reply(False, error=detail[:1200], code="operation_failed")
+        except Exception as exc:
+            self._reply(False, error=f"unexpected host-agent failure: {str(exc)[:300]}", code="internal_error")
 
     def _reply(self, ok: bool, **payload):
         response = {"ok": ok, **payload}
