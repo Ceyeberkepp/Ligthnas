@@ -1,16 +1,67 @@
-// Optional Proxmox VE VM connection for installations running inside an LXC.
-// All network requests use the trusted OS CA store. No certificate bypass or shell execution.
-function config() {
+// Proxmox integration for LightNAS installations running inside an LXC.
+// Preferred mode is the one-click local Unix-socket host bridge installed by
+// scripts/proxmox-lxc-install.sh. The older HTTPS API-token mode remains only
+// as a compatibility fallback for remote Proxmox connections.
+
+import net from 'node:net';
+
+function hostBridgeConfig() {
+  const { LIGHTNAS_PVE_SOCKET: socketPath, LIGHTNAS_PVE_CLIENT_ID: client,
+    LIGHTNAS_PVE_SECRET: secret } = process.env;
+  if (![socketPath, client, secret].some(Boolean)) return null;
+  if (![socketPath, client, secret].every(Boolean)) throw new Error('Proxmox host bridge configuration is incomplete.');
+  if (!socketPath.startsWith('/') || socketPath.includes('\0')) throw new Error('Invalid Proxmox host bridge socket path.');
+  if (!/^[1-9][0-9]{1,5}$/.test(client) || !/^[a-fA-F0-9]{32,128}$/.test(secret)) throw new Error('Invalid Proxmox host bridge credentials.');
+  return { socketPath, client, secret };
+}
+
+function apiConfig() {
   const { LIGHTNAS_PVE_URL: address, LIGHTNAS_PVE_NODE: node,
     LIGHTNAS_PVE_TOKEN_ID: tokenId, LIGHTNAS_PVE_TOKEN_SECRET: tokenSecret } = process.env;
   if (![address, node, tokenId, tokenSecret].some(Boolean)) return null;
-  if (![address, node, tokenId, tokenSecret].every(Boolean)) throw new Error('Proxmox connection needs URL, node, token ID and secret.');
+  if (![address, node, tokenId, tokenSecret].every(Boolean)) throw new Error('Legacy Proxmox connection needs URL, node, token ID and secret.');
   const url = new URL(address);
   if (url.protocol !== 'https:' || url.username || url.password || url.pathname !== '/' || url.search || url.hash) throw new Error('Proxmox URL must be a bare HTTPS origin.');
   if (!/^[a-zA-Z0-9._-]{1,64}$/.test(node) || !/^[a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+![a-zA-Z0-9._-]+$/.test(tokenId)) throw new Error('Invalid Proxmox node or token ID.');
   return { url, node, tokenId, tokenSecret };
 }
-export function proxmoxConfigured() { return Boolean(config()); }
+
+export function proxmoxConfigured() { return Boolean(hostBridgeConfig() || apiConfig()); }
+
+async function hostBridge(settings, action, data = undefined) {
+  return await new Promise((resolve, reject) => {
+    const socket = net.createConnection({ path: settings.socketPath });
+    let buffer = '';
+    let settled = false;
+    const finish = (error, value) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      if (error) reject(error); else resolve(value);
+    };
+    socket.setTimeout(15000, () => finish(new Error('Proxmox host bridge timed out.')));
+    socket.on('error', error => finish(new Error(`Proxmox host bridge is unavailable: ${error.message}`)));
+    socket.on('connect', () => {
+      socket.write(`${JSON.stringify({ client: settings.client, secret: settings.secret, action, ...(data ? { data } : {}) })}\n`);
+    });
+    socket.on('data', chunk => {
+      buffer += chunk.toString('utf8');
+      if (buffer.length > 1024 * 1024) return finish(new Error('Proxmox host bridge returned too much data.'));
+      const newline = buffer.indexOf('\n');
+      if (newline < 0) return;
+      try {
+        const response = JSON.parse(buffer.slice(0, newline));
+        if (!response?.ok) return finish(new Error(response?.error || 'Proxmox host bridge operation failed.'));
+        finish(null, response.data);
+      } catch {
+        finish(new Error('Proxmox host bridge returned invalid data.'));
+      }
+    });
+    socket.on('end', () => {
+      if (!settled) finish(new Error('Proxmox host bridge closed before replying.'));
+    });
+  });
+}
 
 async function api(settings, path, form) {
   const url = new URL(`/api2/json/${path}`, settings.url);
@@ -26,7 +77,10 @@ async function api(settings, path, form) {
 }
 
 export async function proxmoxInventory() {
-  const settings = config();
+  const bridge = hostBridgeConfig();
+  if (bridge) return await hostBridge(bridge, 'inventory');
+
+  const settings = apiConfig();
   if (!settings) return null;
   const node = encodeURIComponent(settings.node);
   const [machines, stores, bridges] = await Promise.all([
@@ -35,7 +89,6 @@ export async function proxmoxInventory() {
     api(settings, `nodes/${node}/network`)
   ]);
   const pools = stores.filter(item => item.enabled !== 0 && item.active !== 0 && /^[a-zA-Z0-9_-]+$/.test(item.storage)).map(item => item.storage);
-  // ISO content may reside on a different storage than VM disks.
   const isoStores = await api(settings, `nodes/${node}/storage?content=iso`);
   const images = (await Promise.all(isoStores.filter(item => item.enabled !== 0 && item.active !== 0 && /^[a-zA-Z0-9_-]+$/.test(item.storage)).slice(0, 20).map(async item => {
     const content = await api(settings, `nodes/${node}/storage/${encodeURIComponent(item.storage)}/content?content=iso`);
@@ -49,7 +102,21 @@ export async function proxmoxInventory() {
 }
 
 export async function proxmoxCreateVm(input, inventory) {
-  const settings = config();
+  const bridge = hostBridgeConfig();
+  if (bridge) {
+    if (!inventory?.available) throw Object.assign(new Error('Proxmox host bridge is not available.'), { status: 409 });
+    return await hostBridge(bridge, 'create-vm', {
+      name: input.name,
+      memoryMiB: input.memoryMiB,
+      cpus: input.cpus,
+      diskGiB: input.diskGiB,
+      pool: input.pool,
+      network: input.network,
+      iso: input.iso
+    });
+  }
+
+  const settings = apiConfig();
   if (!settings || !inventory?.available) throw Object.assign(new Error('Proxmox is not connected.'), { status: 409 });
   if (inventory.machines.some(name => name.startsWith(`${input.name} (`))) throw Object.assign(new Error('A VM with this name already exists on Proxmox.'), { status: 409 });
   if (!inventory.pools.includes(input.pool) || !inventory.networks.includes(input.network) || !inventory.images.includes(input.iso)) throw Object.assign(new Error('Choose a currently available Proxmox storage, bridge and ISO.'), { status: 409 });
