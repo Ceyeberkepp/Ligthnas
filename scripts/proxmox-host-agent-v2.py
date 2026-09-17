@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""LightNAS Proxmox host bridge launcher with authenticated raw VNC streaming.
+"""LightNAS Proxmox host bridge launcher with authenticated noVNC streaming.
 
-The main host-agent implementation is installed beside this launcher as
-lightnas-proxmox-agent-base. This wrapper overrides only VM console streaming so
-Proxmox's required LC_PVE_TICKET remains short-lived and VM-specific.
+The main host-agent implementation is installed beside this launcher. This
+wrapper authenticates to ``qm vncproxy`` on the Proxmox host, then presents a
+VNC security-type ``None`` stream only across LightNAS's private authenticated
+Unix-socket bridge. No Proxmox or VNC credential is sent to browser JavaScript.
 """
 
 from __future__ import annotations
@@ -15,12 +16,145 @@ import subprocess
 import threading
 from pathlib import Path
 
-BASE_PATH = Path(os.environ.get("LIGHTNAS_PVE_AGENT_BASE", "/usr/local/libexec/lightnas-proxmox-agent-base"))
+BASE_PATH = Path(os.environ.get(
+    "LIGHTNAS_PVE_AGENT_BASE",
+    "/usr/local/libexec/lightnas-proxmox-agent-base.py",
+))
 spec = importlib.util.spec_from_file_location("lightnas_pve_agent_base", BASE_PATH)
 if spec is None or spec.loader is None:
     raise RuntimeError(f"Unable to load LightNAS host-agent base from {BASE_PATH}")
 base = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(base)
+
+
+def read_exact(stream, size: int) -> bytes:
+    output = bytearray()
+    while len(output) < size:
+        chunk = stream.read(size - len(output))
+        if not chunk:
+            raise RuntimeError("VNC proxy closed during protocol negotiation")
+        output.extend(chunk)
+    return bytes(output)
+
+
+def recv_exact(connection, size: int) -> bytes:
+    output = bytearray()
+    while len(output) < size:
+        chunk = connection.recv(size - len(output))
+        if not chunk:
+            raise ConnectionError("browser console disconnected during VNC negotiation")
+        output.extend(chunk)
+    return bytes(output)
+
+
+def reverse_bits(value: int) -> int:
+    result = 0
+    for _ in range(8):
+        result = (result << 1) | (value & 1)
+        value >>= 1
+    return result
+
+
+def vnc_challenge_response(password: str, challenge: bytes) -> bytes:
+    if len(challenge) != 16:
+        raise RuntimeError("VNC server returned an invalid authentication challenge")
+    password_bytes = password.encode("latin-1", "ignore")[:8].ljust(8, b"\0")
+    des_key = bytes(reverse_bits(value) for value in password_bytes)
+    # EDE3 with K1 == K2 == K3 is equivalent to single DES and remains
+    # available on modern OpenSSL builds where the single-DES alias may not be.
+    key24 = des_key * 3
+    result = subprocess.run(
+        ["openssl", "enc", "-des-ede3", "-K", key24.hex(), "-nopad", "-nosalt"],
+        input=challenge,
+        capture_output=True,
+        check=True,
+        timeout=10,
+    )
+    if len(result.stdout) != 16:
+        raise RuntimeError("Unable to calculate the VNC authentication response")
+    return result.stdout
+
+
+def read_security_result(process) -> None:
+    result = int.from_bytes(read_exact(process.stdout, 4), "big")
+    if result == 0:
+        return
+    reason = "VNC authentication was rejected"
+    try:
+        length = int.from_bytes(read_exact(process.stdout, 4), "big")
+        if 0 < length <= 4096:
+            reason = read_exact(process.stdout, length).decode("utf-8", "replace")
+    except Exception:
+        pass
+    raise RuntimeError(reason)
+
+
+def authenticate_vnc_proxy(process, password: str) -> None:
+    if not process.stdin or not process.stdout:
+        raise RuntimeError("VNC proxy pipes are unavailable")
+    version = read_exact(process.stdout, 12)
+    if not version.startswith(b"RFB 003.") or not version.endswith(b"\n"):
+        raise RuntimeError("Proxmox VNC proxy returned an invalid RFB version")
+    process.stdin.write(version)
+    process.stdin.flush()
+
+    try:
+        minor = int(version[8:11])
+    except ValueError as exc:
+        raise RuntimeError("Unable to parse Proxmox RFB version") from exc
+
+    if minor <= 3:
+        security_type = int.from_bytes(read_exact(process.stdout, 4), "big")
+        if security_type == 0:
+            length = int.from_bytes(read_exact(process.stdout, 4), "big")
+            reason = read_exact(process.stdout, min(length, 4096)).decode("utf-8", "replace") if length else "VNC server rejected the connection"
+            raise RuntimeError(reason)
+        if security_type == 1:
+            return
+        if security_type != 2:
+            raise RuntimeError(f"Unsupported Proxmox VNC security type {security_type}")
+        challenge = read_exact(process.stdout, 16)
+        process.stdin.write(vnc_challenge_response(password, challenge))
+        process.stdin.flush()
+        read_security_result(process)
+        return
+
+    count = read_exact(process.stdout, 1)[0]
+    if count == 0:
+        length = int.from_bytes(read_exact(process.stdout, 4), "big")
+        reason = read_exact(process.stdout, min(length, 4096)).decode("utf-8", "replace") if length else "VNC server offered no security types"
+        raise RuntimeError(reason)
+    types = read_exact(process.stdout, count)
+    if 2 in types:
+        process.stdin.write(b"\x02")
+        process.stdin.flush()
+        challenge = read_exact(process.stdout, 16)
+        process.stdin.write(vnc_challenge_response(password, challenge))
+        process.stdin.flush()
+        read_security_result(process)
+        return
+    if 1 in types:
+        process.stdin.write(b"\x01")
+        process.stdin.flush()
+        # RFB 3.8 sends SecurityResult even for the None security type.
+        if minor >= 8:
+            read_security_result(process)
+        return
+    raise RuntimeError("Proxmox VNC proxy did not offer a supported security type")
+
+
+def negotiate_browser_no_auth(connection) -> None:
+    # The outer LightNAS WebSocket and host bridge have already authenticated
+    # the user and the appliance. Expose a passwordless RFB session only inside
+    # that tunnel so no VNC/Proxmox credential is disclosed to the browser.
+    connection.sendall(b"RFB 003.008\n")
+    version = recv_exact(connection, 12)
+    if not version.startswith(b"RFB 003.") or not version.endswith(b"\n"):
+        raise ConnectionError("browser sent an invalid RFB version")
+    connection.sendall(b"\x01\x01")  # one security type: None
+    if recv_exact(connection, 1) != b"\x01":
+        raise ConnectionError("browser rejected the LightNAS VNC security mode")
+    connection.sendall(b"\x00\x00\x00\x00")  # SecurityResult: OK
 
 
 class Handler(base.Handler):
@@ -37,9 +171,8 @@ class Handler(base.Handler):
         if "running" not in state:
             raise ValueError("VM must be running before opening the console")
 
-        # qm vncproxy requires LC_PVE_TICKET. Keep this credential narrowly
-        # scoped: random, VM-specific, sent only over the private Unix socket,
-        # and Proxmox itself expires the VNC password shortly after setup.
+        # This ticket exists only inside this short-lived process and is used
+        # solely to authenticate the host bridge to qm vncproxy.
         vnc_password = secrets.token_hex(4)
         environment = os.environ.copy()
         environment["LC_PVE_TICKET"] = vnc_password
@@ -47,12 +180,20 @@ class Handler(base.Handler):
             ["qm", "vncproxy", str(vmid)],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             bufsize=0,
             env=environment,
         )
-        self._reply(True, data={"mode": "raw-vnc", "vmid": vmid, "password": vnc_password})
-        self.wfile.flush()
+
+        try:
+            authenticate_vnc_proxy(process, vnc_password)
+            self._reply(True, data={"mode": "raw-vnc", "vmid": vmid, "authentication": "terminated-by-host-bridge"})
+            self.wfile.flush()
+            negotiate_browser_no_auth(self.connection)
+        except Exception:
+            if process.poll() is None:
+                process.terminate()
+            raise
 
         def socket_to_vnc():
             try:
