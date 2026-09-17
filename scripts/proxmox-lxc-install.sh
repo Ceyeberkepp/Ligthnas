@@ -187,8 +187,15 @@ if [[ "$(pct status "$ctid")" != *'status: running'* ]]; then
   wait_for_container
 fi
 
-# Run the portable installer as root INSIDE the existing container.
-pct exec "$ctid" -- bash -lc "set -Eeuo pipefail; curl -fsSL '${RAW_BASE}/install.sh' -o /root/lightnas-install.sh; bash /root/lightnas-install.sh"
+# Download on the Proxmox host and push the installer into the guest. This makes
+# first install work even on a minimal Debian/Ubuntu LXC that does not have curl
+# yet; install.sh will install curl and the rest of its normal requirements.
+guest_installer="$(mktemp)"
+curl -fsSL "${RAW_BASE}/install.sh" -o "$guest_installer"
+pct push "$ctid" "$guest_installer" /root/lightnas-install.sh
+rm -f "$guest_installer"
+pct exec "$ctid" -- chmod 0755 /root/lightnas-install.sh
+pct exec "$ctid" -- bash /root/lightnas-install.sh
 
 # Configure the automatically provisioned host bridge. These values are read by
 # systemd and are never returned by the LightNAS browser API.
