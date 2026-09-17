@@ -20,7 +20,7 @@ export DEBIAN_FRONTEND=noninteractive
 
 echo "[1/6] Installing system requirements..."
 apt-get update
-apt-get install -y ca-certificates curl git gnupg python3 ffmpeg
+apt-get install -y ca-certificates curl git gnupg python3 ffmpeg acl
 
 if ! command -v node >/dev/null 2>&1 || \
    [[ "$(node --version | sed -E 's/^v([0-9]+).*/\1/')" -lt 22 ]]; then
@@ -54,17 +54,11 @@ fi
 install -d -o lightnas -g lightnas -m 0700 "${DATA_DIRECTORY}"
 install -d -o lightnas -g lightnas -m 0700 "${DATA_DIRECTORY}/files"
 
-# Install and verify the runtimes this particular host can support.
-# Existing LIGHTNAS_ENABLE_DOCKER=0 is honored as an explicit operator opt-out.
 if [[ "${LIGHTNAS_ENABLE_DOCKER:-1}" == "0" ]]; then export LIGHTNAS_SKIP_DOCKER=1; fi
 LIGHTNAS_RUNTIME_STATUS_FILE="${DATA_DIRECTORY}/runtime-status.txt" \
   bash "${INSTALL_DIRECTORY}/scripts/provision-runtimes.sh"
 chown lightnas:lightnas "${DATA_DIRECTORY}/runtime-status.txt"
 
-# Proxmox integration is intentionally not configured interactively here.
-# When the one-click helper is launched from a Proxmox node it provisions the
-# local authenticated host bridge automatically after this portable install.
-# configure-proxmox.sh remains available only for legacy remote API-token use.
 chown -R root:root "${INSTALL_DIRECTORY}"
 
 echo "[5/6] Installing the systemd service..."
@@ -91,7 +85,9 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadWritePaths=${DATA_DIRECTORY}
+# Keep the OS read-only while allowing dedicated NAS mounts under standard data roots.
+# A leading '-' lets the service start when a particular root does not exist.
+ReadWritePaths=${DATA_DIRECTORY} -/mnt -/media -/srv -/data -/storage
 
 [Install]
 WantedBy=multi-user.target
