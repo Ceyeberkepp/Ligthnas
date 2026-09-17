@@ -69,11 +69,19 @@ export async function runtimeInventory() {
   return runtime;
 }
 
-async function runDocker(args) {
+async function runDocker(args, timeout = 180000) {
   if (process.env.LIGHTNAS_DOCKER_ENABLED !== '1') throw Object.assign(new Error('Docker actions are disabled. The operator must explicitly enable them on a Docker host.'), { status: 409 });
-  const response = await exclusive(() => command('docker', args, 180000));
+  const response = await exclusive(() => command('docker', args, timeout));
   if (!response.ok) throw Object.assign(new Error(`Docker: ${response.error}`), { status: 409 });
   return response.output;
+}
+
+async function pullDockerImage(image) {
+  try {
+    return await runDocker(['pull', image], 600000);
+  } catch (error) {
+    throw Object.assign(new Error(`Unable to download Docker image ${image}: ${error.message.replace(/^Docker:\s*/, '')}`), { status: error.status || 409 });
+  }
 }
 
 export async function installCatalogApp(id) {
@@ -81,6 +89,7 @@ export async function installCatalogApp(id) {
   const app = catalog.find(item => item.id === id);
   if (!app) throw Object.assign(new Error('Unknown catalog app.'), { status: 404 });
   const name = `lightnas-app-${app.id}`;
+  await pullDockerImage(app.image);
   const args = ['run', '-d', '--name', name, '--label', `lightnas.catalog=${app.id}`, '--restart', 'unless-stopped', '--memory', app.memory, '--pids-limit', '256', '--security-opt', 'no-new-privileges', '-p', `${app.port}:${app.containerPort}`];
   for (const [folder, target] of app.volumes) {
     const hostPath = folder === '@files' ? join(dataRoot, 'files') : join(dataRoot, 'apps', id, folder);
@@ -88,7 +97,7 @@ export async function installCatalogApp(id) {
     args.push('-v', `${hostPath}:${target}`);
   }
   args.push(app.image);
-  return { id: app.id, containerId: await runDocker(args), port: app.port };
+  return { id: app.id, image: app.image, containerId: await runDocker(args), port: app.port };
 }
 
 export async function manageCatalogApp(id, action) {
@@ -104,8 +113,9 @@ export async function createContainer(input) {
   if (typeof input.image !== 'string' || !/^[a-z0-9][a-z0-9./:_-]{0,159}$/.test(input.image) || input.image.includes('..') || input.image.includes('//')) throw Object.assign(new Error('Enter a valid Docker image name.'), { status: 400 });
   const memory = Number(input.memoryMiB);
   if (!Number.isInteger(memory) || memory < 128 || memory > 16384) throw Object.assign(new Error('Memory must be 128–16384 MiB.'), { status: 400 });
+  await pullDockerImage(input.image);
   const args = ['run', '-d', '--name', `lightnas-${input.name}`, '--label', 'lightnas.managed=true', '--restart', 'unless-stopped', '--memory', `${memory}m`, '--pids-limit', '256', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', input.image];
-  return { name: `lightnas-${input.name}`, containerId: await runDocker(args) };
+  return { name: `lightnas-${input.name}`, image: input.image, containerId: await runDocker(args) };
 }
 
 export async function createVm(input) {
