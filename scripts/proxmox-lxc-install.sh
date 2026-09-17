@@ -78,9 +78,6 @@ RestartSec=2
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
-ProtectSystem=strict
-ReadWritePaths=/var/lib/lightnas-pve
-ReadOnlyPaths=/etc/lightnas-pve /etc/pve
 
 [Install]
 WantedBy=multi-user.target
