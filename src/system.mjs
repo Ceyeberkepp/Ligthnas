@@ -16,12 +16,29 @@ async function command(file, args) {
   }
 }
 
+async function readText(path, fallback = '') {
+  try {
+    return await readFile(path, 'utf8');
+  } catch {
+    return fallback;
+  }
+}
+
+function isSystemMount(mountPoint) {
+  return mountPoint === '/' || mountPoint === '/boot' || mountPoint === '/boot/efi' ||
+    mountPoint === '/etc/hosts' || mountPoint === '/etc/hostname' || mountPoint === '/etc/resolv.conf' ||
+    mountPoint === '/var/lib/lightnas-pve' || mountPoint.startsWith('/var/lib/lightnas-pve/');
+}
+
 export async function getStorageInventory() {
-  const [blockDevices, pools, datasets] = await Promise.all([
+  const [blockDevices, pools, datasets, containerType, filesystems] = await Promise.all([
     command('lsblk', ['-J', '-b', '-o', 'NAME,PATH,TYPE,SIZE,FSTYPE,MOUNTPOINT,MODEL,TRAN']),
     command('zpool', ['list', '-H', '-p', '-o', 'name,size,alloc,free,health']),
-    command('zfs', ['list', '-H', '-p', '-o', 'name,used,available,mountpoint,compression'])
+    command('zfs', ['list', '-H', '-p', '-o', 'name,used,available,mountpoint,compression']),
+    command('systemd-detect-virt', ['--container']),
+    getFilesystems()
   ]);
+  const inContainer = Boolean(containerType && containerType !== 'none');
   let disks = [];
   try {
     disks = (JSON.parse(blockDevices).blockdevices || [])
@@ -34,6 +51,26 @@ export async function getStorageInventory() {
         }))
       }));
   } catch { /* lsblk can be absent or unavailable in a container. */ }
+
+  // An LXC can sometimes see host block-device metadata even though those disks
+  // are not safe or directly manageable by the guest. Only expose raw disks for
+  // pool creation when LightNAS is not running inside a container.
+  if (inContainer) disks = [];
+
+  const attachedVolumes = filesystems
+    .filter(item => !isSystemMount(item.mountPoint) && item.totalBytes > 0)
+    .map(item => ({
+      id: item.id,
+      device: item.device,
+      mountPoint: item.mountPoint,
+      type: item.type,
+      readOnly: item.readOnly,
+      totalBytes: item.totalBytes,
+      availableBytes: item.availableBytes,
+      usedBytes: item.usedBytes,
+      usedPercent: item.usedPercent
+    }));
+
   const dataPath = dirname(resolve(process.env.NAS_DATA_FILE || 'data/state.json'));
   let local = null;
   try {
@@ -45,9 +82,12 @@ export async function getStorageInventory() {
     const coveringMount = mountPoints.filter(point => dataPath === point || dataPath.startsWith(`${point.replace(/\/$/, '')}/`)).sort((a, b) => b.length - a.length)[0] || '/';
     local = { path: dataPath, mountPoint: coveringMount, dedicated: coveringMount !== '/', totalBytes, availableBytes, usedBytes: Math.max(0, totalBytes - availableBytes) };
   } catch { /* Data directory might not exist yet on an unconfigured development host. */ }
+
   return {
     disks,
     local,
+    attachedVolumes,
+    environment: { container: inContainer, containerType: inContainer ? containerType : null },
     zfs: {
       available: pools !== null && datasets !== null,
       canManageDatasets: pools !== null && datasets !== null && process.env.LIGHTNAS_ZFS_ENABLED === '1',
@@ -61,14 +101,6 @@ export async function getStorageInventory() {
       }) : []
     }
   };
-}
-
-async function readText(path, fallback = '') {
-  try {
-    return await readFile(path, 'utf8');
-  } catch {
-    return fallback;
-  }
 }
 
 async function cpuCapabilities() {
