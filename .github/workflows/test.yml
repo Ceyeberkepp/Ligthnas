@@ -27,6 +27,15 @@ jobs:
       - name: Run tests
         run: npm test
 
+      - name: Validate JavaScript syntax
+        run: |
+          node --check public/app.js
+          node --check public/container-presets.js
+          node --check public/dialog-controls.js
+          node --check public/enhancements.js
+          node --check public/admin-security.js
+          for file in src/*.mjs; do node --check "$file"; done
+
       - name: Validate shell syntax
         run: |
           bash -n install.sh
@@ -37,4 +46,6 @@ jobs:
           bash -n scripts/start.sh
 
       - name: Validate Proxmox host bridge syntax
-        run: python3 -m py_compile scripts/proxmox-host-agent.py
+        run: |
+          python3 -m py_compile scripts/proxmox-host-agent.py
+          python3 -m py_compile scripts/proxmox-host-agent-v2.py
