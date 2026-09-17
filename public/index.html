@@ -47,6 +47,7 @@
         <p>Manage storage, apps, and system health from one place.</p>
         <label>Username<input name="username" required autocomplete="username"></label>
         <label>Password<input name="password" type="password" required autocomplete="current-password"></label>
+        <label>Authenticator code <span class="muted">(when enabled)</span><input name="totp" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" placeholder="6-digit code"></label>
         <button class="primary wide" type="submit">Sign in</button>
         <div class="form-error" role="alert"></div>
       </form>
@@ -79,9 +80,9 @@
           <a href="#integrations" data-view="integrations"><span>⊞</span>Integrations</a>
         </details>
         <details class="nav-group"><summary>Administration</summary>
-          <a href="#users" data-view="users"><span>◉</span>Users</a>
+          <a href="#users" data-view="users"><span>◉</span>Users & groups</a>
           <a href="#smtp" data-view="smtp"><span>✉</span>Email / SMTP</a>
-          <a href="#settings" data-view="settings"><span>☷</span>Settings</a>
+          <a href="#settings" data-view="settings"><span>☷</span>Settings & security</a>
           <a href="#monitoring" data-view="monitoring"><span>⌁</span>Monitoring</a>
           <a href="#capabilities" data-view="capabilities"><span>◇</span>Capabilities</a>
         </details>
