@@ -3,8 +3,8 @@
 
 The service listens only on a local Unix-domain socket. LightNAS LXCs receive that
 socket through a Proxmox bind mount and authenticate with a per-container secret.
-Only explicit inventory and VM lifecycle operations are implemented; there is no
-arbitrary host command execution endpoint.
+The bridge exposes explicit inventory and lifecycle operations only; it never
+accepts arbitrary host commands.
 """
 
 from __future__ import annotations
@@ -13,8 +13,10 @@ import hmac
 import json
 import os
 import re
+import shutil
 import socketserver
 import subprocess
+import threading
 from pathlib import Path
 
 SOCKET_PATH = Path(os.environ.get("LIGHTNAS_PVE_AGENT_SOCKET", "/var/lib/lightnas-pve/agent.sock"))
@@ -22,8 +24,10 @@ CLIENT_DIR = Path(os.environ.get("LIGHTNAS_PVE_CLIENT_DIR", "/etc/lightnas-pve/c
 MAX_REQUEST = 64 * 1024
 NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9-]{1,39}$")
 POOL_RE = re.compile(r"^[A-Za-z0-9_-]{1,48}$")
-NETWORK_RE = re.compile(r"^[A-Za-z0-9._-]{1,48}$")
+NETWORK_RE = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
 CLIENT_RE = re.compile(r"^[1-9][0-9]{1,5}$")
+DISK_RE = re.compile(r"^/dev/[A-Za-z0-9._+:-]{1,128}$")
+PVE_CONTENT = {"images", "rootdir", "iso", "vztmpl", "backup", "snippets", "import"}
 
 
 def run(args: list[str], timeout: int = 30) -> str:
@@ -31,9 +35,27 @@ def run(args: list[str], timeout: int = 30) -> str:
     return result.stdout.strip()
 
 
+def optional_run(args: list[str], timeout: int = 15, fallback: str = "") -> str:
+    try:
+        return run(args, timeout=timeout)
+    except Exception:
+        return fallback
+
+
+def json_command(args: list[str], fallback):
+    try:
+        return json.loads(run(args, timeout=20) or "null")
+    except Exception:
+        return fallback
+
+
 def pvesh(path: str, *args: str):
     output = run(["pvesh", "get", path, *args, "--output-format", "json"])
     return json.loads(output or "null")
+
+
+def pvesh_set(path: str, *args: str):
+    return run(["pvesh", "set", path, *args], timeout=60)
 
 
 def node_name() -> str:
@@ -44,10 +66,7 @@ def node_name() -> str:
 
 
 def node_address() -> str | None:
-    try:
-        addresses = run(["hostname", "-I"]).split()
-    except Exception:
-        return None
+    addresses = optional_run(["hostname", "-I"]).split()
     return next((item for item in addresses if ":" not in item and not item.startswith("127.")), addresses[0] if addresses else None)
 
 
@@ -65,6 +84,205 @@ def authenticate(request: dict) -> str:
         raise PermissionError("invalid LightNAS client secret")
     run(["pct", "config", client], timeout=10)
     return client
+
+
+def descendants(device: dict) -> list[dict]:
+    result = [device]
+    for child in device.get("children") or []:
+        result.extend(descendants(child))
+    return result
+
+
+def mount_points(device: dict) -> list[str]:
+    result: list[str] = []
+    for item in descendants(device):
+        values = item.get("mountpoints")
+        if not isinstance(values, list):
+            values = [item.get("mountpoint")] if item.get("mountpoint") else []
+        result.extend(str(value) for value in values if value)
+    return sorted(set(result))
+
+
+def host_inventory(node: str) -> dict:
+    status = pvesh(f"/nodes/{node}/status") or {}
+    lxc = pvesh(f"/nodes/{node}/lxc") or []
+    node_storage = pvesh(f"/nodes/{node}/storage") or []
+    storage_config = pvesh("/storage") or []
+    networks = pvesh(f"/nodes/{node}/network") or []
+
+    block = json_command([
+        "lsblk", "-J", "-b", "-o",
+        "NAME,KNAME,PATH,TYPE,SIZE,FSTYPE,MOUNTPOINTS,MODEL,SERIAL,TRAN,RO,RM"
+    ], {"blockdevices": []})
+    root_source = optional_run(["findmnt", "-n", "-o", "SOURCE", "/"])
+    pvs = json_command(["pvs", "--reportformat", "json", "-o", "pv_name,vg_name"], {"report": []})
+    pv_rows = []
+    for report in pvs.get("report") or []:
+        pv_rows.extend(report.get("pv") or [])
+    zpool_status = optional_run(["zpool", "status", "-P"], fallback="")
+
+    disks = []
+    protected_mounts = {"/", "/boot", "/boot/efi"}
+    for disk in block.get("blockdevices") or []:
+        if disk.get("type") != "disk":
+            continue
+        items = descendants(disk)
+        paths = {str(item.get("path")) for item in items if item.get("path")}
+        mounts = mount_points(disk)
+        os_protected = bool(protected_mounts.intersection(mounts)) or (root_source and root_source in paths)
+        lvm_uses = sorted({
+            str(row.get("vg_name")) for row in pv_rows
+            if str(row.get("pv_name")) in paths and row.get("vg_name")
+        })
+        zfs_used = any(path and path in zpool_status for path in paths)
+        reasons = []
+        if mounts:
+            reasons.append("mounted: " + ", ".join(mounts))
+        if lvm_uses:
+            reasons.append("LVM: " + ", ".join(lvm_uses))
+        if zfs_used:
+            reasons.append("member of a ZFS pool")
+        if os_protected:
+            reasons.insert(0, "contains the Proxmox operating system")
+        read_only = bool(int(disk.get("ro") or 0))
+        removable = bool(int(disk.get("rm") or 0))
+        in_use = bool(reasons)
+        path = str(disk.get("path") or "")
+        disks.append({
+            "name": str(disk.get("name") or ""),
+            "path": path,
+            "sizeBytes": int(disk.get("size") or 0),
+            "model": str(disk.get("model") or "").strip() or None,
+            "serial": str(disk.get("serial") or "").strip() or None,
+            "transport": str(disk.get("tran") or "").strip() or None,
+            "filesystem": str(disk.get("fstype") or "").strip() or None,
+            "mountPoints": mounts,
+            "readOnly": read_only,
+            "removable": removable,
+            "osProtected": os_protected,
+            "inUse": in_use,
+            "useReasons": reasons,
+            "eligibleForClean": bool(path and DISK_RE.fullmatch(path) and not read_only and not in_use and not os_protected),
+            "partitions": [
+                {
+                    "name": str(item.get("name") or ""),
+                    "path": str(item.get("path") or ""),
+                    "type": str(item.get("type") or ""),
+                    "sizeBytes": int(item.get("size") or 0),
+                    "filesystem": str(item.get("fstype") or "").strip() or None,
+                    "mountPoints": [value for value in (item.get("mountpoints") or []) if value],
+                }
+                for item in items[1:]
+            ],
+        })
+
+    status_by_name = {str(item.get("storage")): item for item in node_storage if item.get("storage")}
+    storages = []
+    for config in storage_config:
+        name = str(config.get("storage") or "")
+        if not POOL_RE.fullmatch(name):
+            continue
+        live = status_by_name.get(name, {})
+        content = config.get("content") or live.get("content") or ""
+        if isinstance(content, list):
+            content_types = [str(value) for value in content]
+        else:
+            content_types = [value for value in str(content).split(",") if value]
+        storages.append({
+            "name": name,
+            "type": str(config.get("type") or live.get("type") or "unknown"),
+            "content": sorted(set(content_types)),
+            "enabled": int(live.get("enabled", 1) or 0) != 0 and int(config.get("disable", 0) or 0) == 0,
+            "active": int(live.get("active", 1) or 0) != 0,
+            "shared": bool(int(config.get("shared", 0) or 0)),
+            "totalBytes": int(live.get("total") or 0),
+            "availableBytes": int(live.get("avail") or 0),
+            "usedBytes": int(live.get("used") or 0),
+            "path": config.get("path"),
+            "pool": config.get("pool"),
+            "vgname": config.get("vgname"),
+            "thinpool": config.get("thinpool"),
+        })
+
+    zpool_rows = []
+    raw_pools = optional_run(["zpool", "list", "-H", "-p", "-o", "name,size,alloc,free,health"])
+    for row in raw_pools.splitlines():
+        fields = row.split("\t")
+        if len(fields) >= 5:
+            zpool_rows.append({"name": fields[0], "sizeBytes": int(fields[1]), "allocatedBytes": int(fields[2]), "freeBytes": int(fields[3]), "health": fields[4]})
+    dataset_rows = []
+    raw_datasets = optional_run(["zfs", "list", "-H", "-p", "-o", "name,used,available,mountpoint,compression"])
+    for row in raw_datasets.splitlines():
+        fields = row.split("\t")
+        if len(fields) >= 5:
+            dataset_rows.append({"name": fields[0], "usedBytes": int(fields[1]), "availableBytes": int(fields[2]), "mountPoint": fields[3], "compression": fields[4]})
+
+    memory = status.get("memory") or {}
+    rootfs = status.get("rootfs") or {}
+    cpu_value = float(status.get("cpu") or 0)
+    host_status = {
+        "uptimeSeconds": int(status.get("uptime") or 0),
+        "cpuPercent": round(cpu_value * 100, 1),
+        "cpuCount": int(status.get("cpuinfo", {}).get("cpus") or status.get("maxcpu") or 0),
+        "memory": {
+            "totalBytes": int(memory.get("total") or 0),
+            "usedBytes": int(memory.get("used") or 0),
+            "freeBytes": int(memory.get("free") or 0),
+        },
+        "rootfs": {
+            "totalBytes": int(rootfs.get("total") or 0),
+            "usedBytes": int(rootfs.get("used") or 0),
+            "availableBytes": int(rootfs.get("avail") or 0),
+        },
+        "loadAverage": status.get("loadavg") or [],
+    }
+
+    wifi_devices = []
+    iw = optional_run(["iw", "dev"])
+    current = None
+    for line in iw.splitlines():
+        match = re.match(r"\s*Interface\s+(\S+)", line)
+        if match:
+            current = {"name": match.group(1)}
+            wifi_devices.append(current)
+        elif current:
+            ssid = re.match(r"\s*ssid\s+(.+)", line)
+            if ssid:
+                current["ssid"] = ssid.group(1)
+
+    return {
+        "node": node,
+        "address": node_address(),
+        "status": host_status,
+        "disks": disks,
+        "storages": storages,
+        "zfs": {"available": bool(zpool_rows or dataset_rows), "pools": zpool_rows, "datasets": dataset_rows},
+        "networks": [
+            {
+                "name": str(item.get("iface") or ""),
+                "type": str(item.get("type") or "unknown"),
+                "active": int(item.get("active", 1) or 0) != 0,
+                "address": item.get("address"),
+                "cidr": item.get("cidr"),
+                "gateway": item.get("gateway"),
+                "bridgePorts": item.get("bridge_ports"),
+                "comments": item.get("comments"),
+            }
+            for item in networks if NETWORK_RE.fullmatch(str(item.get("iface", "")))
+        ],
+        "wifi": wifi_devices,
+        "containers": [
+            {
+                "vmid": int(item.get("vmid")),
+                "name": str(item.get("name") or f"CT-{item.get('vmid')}"),
+                "status": str(item.get("status") or "unknown"),
+                "memory": int(item.get("maxmem") or 0),
+                "disk": int(item.get("maxdisk") or 0),
+                "cpus": int(item.get("cpus") or 0),
+            }
+            for item in lxc if str(item.get("vmid", "")).isdigit()
+        ],
+    }
 
 
 def inventory() -> dict:
@@ -95,20 +313,15 @@ def inventory() -> dict:
         content = pvesh(f"/nodes/{node}/storage/{storage}/content", "--content", "iso") or []
         images.extend(
             str(entry.get("volid")) for entry in content
-            if entry.get("content") == "iso"
-            and isinstance(entry.get("volid"), str)
-            and str(entry.get("volid")).lower().endswith(".iso")
+            if entry.get("content") == "iso" and isinstance(entry.get("volid"), str) and str(entry.get("volid")).lower().endswith(".iso")
         )
     images = sorted(set(images))
 
     machine_details = [
         {
-            "vmid": int(item.get("vmid")),
-            "name": str(item.get("name") or f"VM-{item.get('vmid')}"),
-            "status": str(item.get("status") or "unknown"),
-            "memory": int(item.get("maxmem") or 0),
-            "disk": int(item.get("maxdisk") or 0),
-            "cpus": int(item.get("cpus") or 0),
+            "vmid": int(item.get("vmid")), "name": str(item.get("name") or f"VM-{item.get('vmid')}"),
+            "status": str(item.get("status") or "unknown"), "memory": int(item.get("maxmem") or 0),
+            "disk": int(item.get("maxdisk") or 0), "cpus": int(item.get("cpus") or 0),
         }
         for item in machines if str(item.get("vmid", "")).isdigit()
     ]
@@ -122,14 +335,12 @@ def inventory() -> dict:
         "machineDetails": machine_details,
         "pools": pools,
         "poolDetails": pool_details,
-        "networks": [
-            str(item.get("iface")) for item in bridges
-            if item.get("active", 1) != 0 and NETWORK_RE.fullmatch(str(item.get("iface", "")))
-        ],
+        "networks": [str(item.get("iface")) for item in bridges if item.get("active", 1) != 0 and NETWORK_RE.fullmatch(str(item.get("iface", "")))],
         "images": images,
         "node": node,
         "proxmoxUrl": f"https://{address}:8006/" if address else None,
         "transport": "host-bridge",
+        "host": host_inventory(node),
     }
 
 
@@ -166,11 +377,7 @@ def create_vm(data: dict) -> dict:
 
     created = False
     try:
-        run([
-            "qm", "create", str(vmid), "--name", name, "--memory", str(memory),
-            "--cores", str(cpus), "--scsihw", "virtio-scsi-pci",
-            "--net0", f"virtio,bridge={network}", "--ostype", "l26",
-        ], timeout=60)
+        run(["qm", "create", str(vmid), "--name", name, "--memory", str(memory), "--cores", str(cpus), "--scsihw", "virtio-scsi-pci", "--net0", f"virtio,bridge={network}", "--ostype", "l26"], timeout=60)
         created = True
         run(["qm", "set", str(vmid), "--scsi0", f"{pool}:{disk}"], timeout=120)
         run(["qm", "set", str(vmid), "--ide2", f"{iso},media=cdrom"], timeout=60)
@@ -188,7 +395,6 @@ def create_vm(data: dict) -> dict:
         detail = "VM created and started on the Proxmox host."
     except Exception as exc:
         detail = f"VM created, but automatic start failed: {str(exc)[:180]}"
-
     return {"name": name, "vmid": vmid, "details": detail}
 
 
@@ -214,21 +420,78 @@ def vm_action(data: dict) -> dict:
     return {"vmid": vmid, "action": action, "status": "submitted"}
 
 
+def update_vm(data: dict) -> dict:
+    try:
+        vmid = int(data.get("vmid"))
+        memory = int(data.get("memoryMiB"))
+        cpus = int(data.get("cpus"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid VM update values") from exc
+    name = str(data.get("name", ""))
+    if vmid < 100 or vmid > 999999 or not NAME_RE.fullmatch(name):
+        raise ValueError("invalid VM ID or name")
+    if not (512 <= memory <= 262144 and 1 <= cpus <= 128):
+        raise ValueError("VM resources are outside allowed limits")
+    run(["qm", "config", str(vmid)], timeout=15)
+    run(["qm", "set", str(vmid), "--name", name, "--memory", str(memory), "--cores", str(cpus)], timeout=60)
+    return {"vmid": vmid, "name": name, "memoryMiB": memory, "cpus": cpus, "status": "updated"}
+
+
+def update_storage(data: dict) -> dict:
+    storage = str(data.get("storage", ""))
+    content = data.get("content")
+    if not POOL_RE.fullmatch(storage) or not isinstance(content, list):
+        raise ValueError("invalid storage update")
+    normalized = sorted({str(item) for item in content if str(item) in PVE_CONTENT})
+    if not normalized:
+        raise ValueError("select at least one supported Proxmox content type")
+    configured = {str(item.get("storage")) for item in (pvesh("/storage") or [])}
+    if storage not in configured:
+        raise ValueError("unknown Proxmox storage")
+    pvesh_set(f"/storage/{storage}", "--content", ",".join(normalized))
+    return {"storage": storage, "content": normalized, "status": "updated"}
+
+
+def clean_disk(data: dict) -> dict:
+    path = str(data.get("path", ""))
+    confirm = str(data.get("confirm", ""))
+    if not DISK_RE.fullmatch(path) or confirm != f"CLEAN {path}":
+        raise ValueError(f"type CLEAN {path} to confirm")
+    current = inventory()["host"]["disks"]
+    disk = next((item for item in current if item.get("path") == path), None)
+    if not disk:
+        raise ValueError("disk is no longer present")
+    if not disk.get("eligibleForClean"):
+        reasons = "; ".join(disk.get("useReasons") or []) or "disk is protected or in use"
+        raise PermissionError(f"refusing to clean {path}: {reasons}")
+    if shutil.which("sgdisk"):
+        run(["sgdisk", "--zap-all", path], timeout=60)
+    run(["wipefs", "--all", "--force", path], timeout=60)
+    try:
+        run(["blockdev", "--rereadpt", path], timeout=20)
+    except Exception:
+        pass
+    return {"path": path, "status": "cleaned"}
+
+
 def dispatch(request: dict) -> dict:
     authenticate(request)
     action = request.get("action")
     if action == "inventory":
         return inventory()
+    data = request.get("data")
+    if not isinstance(data, dict):
+        raise ValueError("missing operation data")
     if action == "create-vm":
-        data = request.get("data")
-        if not isinstance(data, dict):
-            raise ValueError("missing VM definition")
         return create_vm(data)
     if action == "vm-action":
-        data = request.get("data")
-        if not isinstance(data, dict):
-            raise ValueError("missing VM action")
         return vm_action(data)
+    if action == "vm-update":
+        return update_vm(data)
+    if action == "storage-update":
+        return update_storage(data)
+    if action == "disk-clean":
+        return clean_disk(data)
     raise ValueError("unsupported host operation")
 
 
@@ -242,6 +505,10 @@ class Handler(socketserver.StreamRequestHandler):
             request = json.loads(raw.decode("utf-8"))
             if not isinstance(request, dict):
                 raise ValueError("request must be an object")
+            if request.get("action") == "vm-console":
+                authenticate(request)
+                self._stream_vm_console(request.get("data"))
+                return
             data = dispatch(request)
             self._reply(True, data=data)
         except PermissionError as exc:
@@ -253,6 +520,66 @@ class Handler(socketserver.StreamRequestHandler):
             self._reply(False, error=detail[:1200], code="operation_failed")
         except Exception as exc:
             self._reply(False, error=f"unexpected host-agent failure: {str(exc)[:300]}", code="internal_error")
+
+    def _stream_vm_console(self, data):
+        if not isinstance(data, dict):
+            raise ValueError("missing VM console request")
+        try:
+            vmid = int(data.get("vmid"))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("invalid VM ID") from exc
+        if vmid < 100 or vmid > 999999:
+            raise ValueError("invalid VM ID")
+        state = run(["qm", "status", str(vmid)], timeout=15)
+        if "running" not in state:
+            raise ValueError("VM must be running before opening the console")
+
+        process = subprocess.Popen(
+            ["qm", "vncproxy", str(vmid)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            bufsize=0,
+        )
+        self._reply(True, data={"mode": "raw-vnc", "vmid": vmid})
+        self.wfile.flush()
+
+        def socket_to_vnc():
+            try:
+                while process.poll() is None:
+                    chunk = self.connection.recv(65536)
+                    if not chunk:
+                        break
+                    if process.stdin:
+                        process.stdin.write(chunk)
+                        process.stdin.flush()
+            except (BrokenPipeError, ConnectionError, OSError):
+                pass
+            finally:
+                try:
+                    if process.stdin:
+                        process.stdin.close()
+                except Exception:
+                    pass
+
+        feeder = threading.Thread(target=socket_to_vnc, daemon=True)
+        feeder.start()
+        try:
+            while process.poll() is None:
+                chunk = process.stdout.read(65536) if process.stdout else b""
+                if not chunk:
+                    break
+                self.connection.sendall(chunk)
+        except (BrokenPipeError, ConnectionError, OSError):
+            pass
+        finally:
+            if process.poll() is None:
+                process.terminate()
+            try:
+                process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                process.kill()
+            feeder.join(timeout=1)
 
     def _reply(self, ok: bool, **payload):
         response = {"ok": ok, **payload}
