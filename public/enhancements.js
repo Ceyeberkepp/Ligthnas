@@ -154,12 +154,11 @@ async function openPreview(name) {
 
 async function enhanceStorage() {
   const content = document.querySelector('#content');
-  if (!content || !['#storage', '#pools'].includes(location.hash)) return;
+  if (!content || !['#storage', '#pools'].includes(location.hash) || content.querySelector('.attached-storage')) return;
   try {
     const response = await fetch('/api/storage');
     if (!response.ok) return;
     const storage = await response.json();
-    content.querySelector('.attached-storage')?.remove();
     const volumes = storage.attachedVolumes || [];
     if (!volumes.length) return;
 
