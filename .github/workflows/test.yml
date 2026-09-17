@@ -21,6 +21,9 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Install dependencies
+        run: npm install --omit=dev --no-audit --no-fund
+
       - name: Run tests
         run: npm test
 
