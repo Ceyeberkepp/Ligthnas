@@ -1,0 +1,259 @@
+const q = (selector, root = document) => root.querySelector(selector);
+const qa = (selector, root = document) => [...root.querySelectorAll(selector)];
+const escapeText = value => String(value).replace(/[&<>'"]/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' })[ch]);
+
+const permissionNames = {
+  'files.read':'Read files', 'files.write':'Write files', 'media.convert':'Convert media',
+  'storage.view':'View storage', 'storage.manage':'Manage storage', 'shares.manage':'Manage shares',
+  'apps.manage':'Manage apps', 'containers.manage':'Manage containers', 'vms.manage':'Manage virtual machines',
+  'network.view':'View networking', 'network.manage':'Manage firewall / Wi-Fi', 'system.view':'View system health'
+};
+
+async function api(path, options = {}) {
+  const response = await fetch(path, {
+    ...options,
+    headers: { 'Content-Type':'application/json', 'X-LightNAS-Request':'1', ...(options.headers || {}) }
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error || 'Request failed.');
+  return body;
+}
+
+function checkboxes(options, selected = [], prefix = '') {
+  const chosen = new Set(selected);
+  return `<div class="security-check-grid">${options.map(value => `<label><input type="checkbox" ${prefix ? `name="${prefix}"` : ''} value="${escapeText(value)}" ${chosen.has(value) ? 'checked' : ''}><span>${escapeText(permissionNames[value] || value)}</span></label>`).join('')}</div>`;
+}
+
+function memberCheckboxes(users, selected = []) {
+  const chosen = new Set(selected);
+  return `<div class="security-check-grid">${users.map(user => `<label><input type="checkbox" name="members" value="${escapeText(user.username)}" ${chosen.has(user.username) ? 'checked' : ''}><span>${escapeText(user.username)}</span></label>`).join('') || '<p class="muted">Create users first, then add them to this group.</p>'}</div>`;
+}
+
+async function renderGroups() {
+  if (location.hash !== '#users') return;
+  const content = q('#content');
+  if (!content || q('.groups-admin', content)) return;
+  let data;
+  try { data = await api('/api/users'); } catch { return; }
+  const permissions = data.permissionOptions || Object.keys(permissionNames);
+  const groups = data.groups || [];
+  const users = data.users || [];
+
+  const section = document.createElement('section');
+  section.className = 'groups-admin';
+  section.innerHTML = `
+    <div class="admin-section-head"><div><span class="eyebrow">GROUP POLICY</span><h2>Groups & inherited permissions</h2><p class="muted">Users receive their direct permissions plus every permission granted by groups they belong to.</p></div><button class="primary" type="button" data-create-group>+ Create group</button></div>
+    <div class="group-grid">${groups.map(group => `<article class="panel group-card" data-group-id="${group.id}">
+      <div class="volume-title"><div><h3>${escapeText(group.name)}</h3><p>${escapeText(group.description || 'No description')}</p></div><span class="content-badge">${group.members.length} members</span></div>
+      <details><summary>Manage group</summary><form data-group-form="${group.id}">
+        <label>Name<input name="name" value="${escapeText(group.name)}" maxlength="64" required></label>
+        <label>Description<input name="description" value="${escapeText(group.description || '')}" maxlength="160"></label>
+        <h4>Permissions</h4>${checkboxes(permissions, group.permissions, 'permissions')}
+        <h4>Members</h4>${memberCheckboxes(users, group.members)}
+        <div class="head-actions"><button class="primary" type="submit">Save group</button><button class="secondary danger-button" type="button" data-delete-group="${group.id}">Delete</button></div>
+        <div class="form-error" role="alert"></div>
+      </form></details>
+    </article>`).join('') || '<div class="empty"><p>No groups yet. Create one to assign permissions to multiple users together.</p></div>'}</div>
+    <dialog class="lightnas-dialog" data-group-dialog><form class="dialog-body" data-new-group-form>
+      <div class="dialog-head"><div><span class="eyebrow">NEW GROUP</span><h2>Create group</h2></div><button class="dialog-close" type="button" data-close-group>×</button></div>
+      <label>Name<input name="name" maxlength="64" required placeholder="VM Operators"></label>
+      <label>Description<input name="description" maxlength="160" placeholder="Users allowed to operate virtual machines"></label>
+      <h4>Permissions</h4>${checkboxes(permissions, [], 'permissions')}
+      <h4>Members</h4>${memberCheckboxes(users, [])}
+      <div class="form-error" role="alert"></div>
+      <div class="dialog-actions"><button class="secondary" type="button" data-close-group>Cancel</button><button class="primary" type="submit">Create group</button></div>
+    </form></dialog>`;
+  q('.page-head', content)?.insertAdjacentElement('afterend', section);
+
+  // Add group membership controls to each existing user management form.
+  for (const user of users) {
+    const form = q(`form[data-manage-user="${CSS.escape(user.username)}"]`, content);
+    if (!form || q('.membership-policy', form)) continue;
+    const selected = new Set((user.groups || []).map(group => group.id));
+    const markup = `<fieldset class="membership-policy"><legend>Group memberships</legend>${groups.map(group => `<label><input type="checkbox" value="${group.id}" ${selected.has(group.id) ? 'checked' : ''}> ${escapeText(group.name)}</label>`).join('') || '<p class="muted">No groups have been created.</p>'}</fieldset><button class="secondary" type="button" data-save-memberships="${escapeText(user.username)}">Save group memberships</button>`;
+    q('.form-error', form)?.insertAdjacentHTML('beforebegin', markup);
+  }
+}
+
+async function renderTotp() {
+  if (location.hash !== '#settings') return;
+  const content = q('#content');
+  if (!content || q('.totp-admin', content)) return;
+  let status;
+  try { status = await api('/api/security/totp'); } catch { return; }
+  const section = document.createElement('section');
+  section.className = 'panel totp-admin';
+  section.innerHTML = `<div class="admin-section-head"><div><span class="eyebrow">MULTI-FACTOR AUTHENTICATION</span><h2>Authenticator app</h2><p class="muted">Use any RFC 6238 TOTP app such as Microsoft Authenticator, Google Authenticator, 1Password or Authy.</p></div><span class="volume-state ${status.enabled ? 'writable' : 'readonly'}">${status.enabled ? 'ENABLED' : 'DISABLED'}</span></div>
+    ${status.enabled ? `<form data-totp-disable class="security-inline-form"><label>Current password<input name="currentPassword" type="password" required autocomplete="current-password"></label><label>Current 6-digit code<input name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required></label><button class="secondary danger-button" type="submit">Disable 2FA</button><div class="form-error"></div></form>` : `<form data-totp-setup class="security-inline-form"><label>Current password<input name="currentPassword" type="password" required autocomplete="current-password"></label><button class="primary" type="submit">Set up authenticator</button><div class="form-error"></div></form><div data-totp-enrollment></div>`}`;
+  q('#settings-form', content)?.insertAdjacentElement('afterend', section);
+}
+
+async function renderAutomation() {
+  if (location.hash !== '#integrations') return;
+  const content = q('#content');
+  if (!content || q('.automation-admin', content)) return;
+  let tokenData, hookData;
+  try { [tokenData, hookData] = await Promise.all([api('/api/security/api-tokens'), api('/api/security/webhooks')]); } catch { return; }
+  const permissions = tokenData.permissionOptions || Object.keys(permissionNames);
+  const section = document.createElement('section');
+  section.className = 'automation-admin';
+  section.innerHTML = `
+    <div class="admin-section-head"><div><span class="eyebrow">DEVELOPER & AUTOMATION</span><h2>API tokens</h2><p class="muted">Tokens use the same scoped permission model as users and never become the appliance owner.</p></div></div>
+    <form class="panel creation-form" data-token-form><label>Token name<input name="name" required maxlength="64" placeholder="Backup automation"></label>${checkboxes(permissions, ['storage.view'], 'permissions')}<button class="primary" type="submit">Create token</button><div class="form-error"></div><pre class="secret-once hidden" data-token-secret></pre></form>
+    <div class="storage-list">${(tokenData.tokens || []).map(token => `<article class="storage-row"><div><h3>${escapeText(token.name)}</h3><p>${token.disabled ? 'Disabled' : 'Active'} · ${(token.permissions || []).map(value => escapeText(permissionNames[value] || value)).join(', ') || 'No scopes'} · Last used ${escapeText(token.lastUsedAt || 'never')}</p></div><button class="secondary danger-button" type="button" data-delete-token="${token.id}">Delete</button></article>`).join('') || '<div class="empty"><p>No API tokens.</p></div>'}</div>
+    <div class="admin-section-head"><div><span class="eyebrow">EVENT DELIVERY</span><h2>Webhooks</h2><p class="muted">LightNAS signs each JSON delivery with HMAC-SHA256 using the webhook secret.</p></div></div>
+    <form class="panel creation-form" data-webhook-form><label>Name<input name="name" required maxlength="64" placeholder="Operations alerts"></label><label>HTTPS URL<input name="url" type="url" required placeholder="https://automation.example.com/lightnas"></label><label>Events<input name="events" placeholder="storage,vm,container or *" value="*"></label><button class="primary" type="submit">Create webhook</button><div class="form-error"></div><pre class="secret-once hidden" data-webhook-secret></pre></form>
+    <div class="storage-list">${(hookData.webhooks || []).map(hook => `<article class="storage-row"><div><h3>${escapeText(hook.name)}</h3><p>${escapeText(hook.url)} · ${(hook.events || []).join(', ')} · Last status ${hook.lastStatus ?? 'never'}</p></div><div class="head-actions"><button class="secondary" type="button" data-test-webhook="${hook.id}">Test</button><button class="secondary danger-button" type="button" data-delete-webhook="${hook.id}">Delete</button></div></article>`).join('') || '<div class="empty"><p>No webhooks.</p></div>'}</div>`;
+  q('.page-head', content)?.insertAdjacentElement('afterend', section);
+}
+
+async function renderEditableNetwork() {
+  if (!['#network', '#firewall'].includes(location.hash)) return;
+  const content = q('#content');
+  if (!content || q('.editable-network', content)) return;
+  let info;
+  try { info = await api('/api/network'); } catch { return; }
+  const section = document.createElement('section');
+  section.className = 'editable-network';
+  if (location.hash === '#firewall') {
+    section.innerHTML = `<div class="admin-section-head"><div><span class="eyebrow">EDITABLE FIREWALL</span><h2>UFW rules</h2><p class="muted">Rules apply inside the LightNAS appliance. This is suitable for Docker app/container published ports. Proxmox host firewall remains separate.</p></div></div>
+      ${info.firewall?.editable ? `<form class="panel security-inline-form" data-firewall-form><label>Action<select name="decision"><option value="allow">Allow</option><option value="deny">Deny</option></select></label><label>Protocol<select name="protocol"><option>tcp</option><option>udp</option></select></label><label>Port<input name="port" type="number" min="1" max="65535" required></label><label>Source IP/CIDR (optional)<input name="source" placeholder="10.0.0.0/8"></label><button class="primary" type="submit">Add rule</button><div class="form-error"></div></form>` : '<div class="module-hero"><p>UFW is not available to the LightNAS service account, so firewall editing is disabled.</p></div>'}
+      <div class="storage-list">${(info.firewall?.rules || []).map(rule => `<article class="storage-row"><div><h3>#${rule.number} · ${escapeText(rule.action)}</h3><p>${escapeText(rule.target)} · from ${escapeText(rule.source)}</p></div><button class="secondary danger-button" type="button" data-delete-firewall="${rule.number}">Delete</button></article>`).join('') || '<div class="empty"><p>No numbered UFW rules.</p></div>'}</div>`;
+  } else {
+    const wifi = info.wifi || {};
+    section.innerHTML = `<div class="admin-section-head"><div><span class="eyebrow">WIRELESS & DIRECT NETWORK</span><h2>Wi-Fi</h2><p class="muted">Wi-Fi controls appear only when NetworkManager can see an actual Wi-Fi interface inside LightNAS.</p></div></div>
+      ${wifi.available && wifi.devices?.length ? `<div class="inventory-grid">${wifi.devices.map(device => `<article class="inventory-card"><h3>${escapeText(device.name)}</h3><p>${escapeText(device.state)} · ${escapeText(device.connection || 'not connected')}</p>${device.state === 'connected' ? `<button class="secondary" type="button" data-wifi-disconnect="${escapeText(device.name)}">Disconnect</button>` : ''}</article>`).join('')}</div><h2>Available wireless networks</h2><div class="inventory-grid">${(wifi.networks || []).map(network => `<article class="inventory-card"><h3>${escapeText(network.ssid)}</h3><p>${network.signal}% signal · ${escapeText(network.security)} · channel ${network.channel || '—'}</p><button class="secondary" type="button" data-wifi-connect="${escapeText(network.ssid)}">Connect</button></article>`).join('')}</div>` : `<div class="module-hero"><p>${escapeText(wifi.reason || 'No Wi-Fi adapter is visible inside this LightNAS system.')}</p></div>`}`;
+  }
+  q('.page-head', content)?.insertAdjacentElement('afterend', section);
+}
+
+function refreshCurrent() {
+  const hash = location.hash;
+  location.hash = '#home';
+  requestAnimationFrame(() => { location.hash = hash; });
+}
+
+async function enhance() {
+  await Promise.allSettled([renderGroups(), renderTotp(), renderAutomation(), renderEditableNetwork()]);
+  // Use cached FFmpeg thumbnails for images and videos rendered by the other enhancement layer.
+  if (location.hash === '#files') {
+    const folder = qa('#content [data-folder]').at(-1)?.dataset.folder || '';
+    for (const thumb of qa('#content .file-thumb')) {
+      const button = thumb.closest('[data-open]');
+      if (!button) continue;
+      const path = [folder, button.dataset.open].filter(Boolean).join('/');
+      thumb.src = `/api/files/thumbnail?path=${encodeURIComponent(path)}`;
+    }
+  }
+}
+
+const observer = new MutationObserver(() => {
+  clearTimeout(enhance.timer);
+  enhance.timer = setTimeout(enhance, 140);
+});
+observer.observe(document.body, { childList:true, subtree:true });
+addEventListener('hashchange', enhance);
+addEventListener('load', enhance);
+
+document.addEventListener('click', async event => {
+  const createGroup = event.target.closest('[data-create-group]');
+  if (createGroup) { q('[data-group-dialog]')?.showModal(); return; }
+  if (event.target.closest('[data-close-group]')) { q('[data-group-dialog]')?.close(); return; }
+
+  const deleteGroup = event.target.closest('[data-delete-group]');
+  if (deleteGroup) {
+    if (!confirm('Delete this group? Users keep their direct permissions.')) return;
+    try { await api(`/api/groups/${deleteGroup.dataset.deleteGroup}`, { method:'DELETE' }); refreshCurrent(); } catch (error) { alert(error.message); }
+    return;
+  }
+
+  const membership = event.target.closest('[data-save-memberships]');
+  if (membership) {
+    const form = membership.closest('form');
+    const currentPassword = q('input[name="currentPassword"]', form)?.value || '';
+    const groups = qa('.membership-policy input:checked', form).map(input => input.value);
+    try { await api(`/api/users/${encodeURIComponent(membership.dataset.saveMemberships)}`, { method:'PATCH', body:JSON.stringify({ currentPassword, groups }) }); alert('Group memberships saved. The user must sign in again.'); refreshCurrent(); } catch (error) { alert(error.message); }
+    return;
+  }
+
+  const deleteToken = event.target.closest('[data-delete-token]');
+  if (deleteToken) { if (confirm('Delete this API token?')) { try { await api(`/api/security/api-tokens/${deleteToken.dataset.deleteToken}`, { method:'DELETE' }); refreshCurrent(); } catch (error) { alert(error.message); } } return; }
+  const testHook = event.target.closest('[data-test-webhook]');
+  if (testHook) { try { const result = await api(`/api/security/webhooks/${testHook.dataset.testWebhook}/test`, { method:'POST', body:'{}' }); alert(`Webhook test returned HTTP ${result.status}.`); } catch (error) { alert(error.message); } return; }
+  const deleteHook = event.target.closest('[data-delete-webhook]');
+  if (deleteHook) { if (confirm('Delete this webhook?')) { try { await api(`/api/security/webhooks/${deleteHook.dataset.deleteWebhook}`, { method:'DELETE' }); refreshCurrent(); } catch (error) { alert(error.message); } } return; }
+
+  const deleteFirewall = event.target.closest('[data-delete-firewall]');
+  if (deleteFirewall) { if (confirm(`Delete firewall rule #${deleteFirewall.dataset.deleteFirewall}?`)) { try { await api('/api/network', { method:'POST', body:JSON.stringify({ action:'firewall-delete', number:Number(deleteFirewall.dataset.deleteFirewall) }) }); refreshCurrent(); } catch (error) { alert(error.message); } } return; }
+
+  const wifiConnect = event.target.closest('[data-wifi-connect]');
+  if (wifiConnect) {
+    let info; try { info = await api('/api/network'); } catch (error) { alert(error.message); return; }
+    const device = info.wifi?.devices?.[0]?.name;
+    if (!device) return alert('No Wi-Fi device is available.');
+    const secret = prompt(`Wi-Fi password for ${wifiConnect.dataset.wifiConnect}. Leave blank for an open network.`) ?? null;
+    if (secret === null) return;
+    try { await api('/api/network', { method:'POST', body:JSON.stringify({ action:'wifi-connect', device, ssid:wifiConnect.dataset.wifiConnect, password:secret }) }); refreshCurrent(); } catch (error) { alert(error.message); }
+    return;
+  }
+  const wifiDisconnect = event.target.closest('[data-wifi-disconnect]');
+  if (wifiDisconnect) { try { await api('/api/network', { method:'POST', body:JSON.stringify({ action:'wifi-disconnect', device:wifiDisconnect.dataset.wifiDisconnect }) }); refreshCurrent(); } catch (error) { alert(error.message); } }
+}, true);
+
+document.addEventListener('submit', async event => {
+  const form = event.target;
+  if (form.matches('[data-new-group-form]')) {
+    event.preventDefault();
+    const data = new FormData(form);
+    const permissions = qa('input[name="permissions"]:checked', form).map(input => input.value);
+    const members = qa('input[name="members"]:checked', form).map(input => input.value);
+    try { await api('/api/groups', { method:'POST', body:JSON.stringify({ name:data.get('name'), description:data.get('description'), permissions, members }) }); q('[data-group-dialog]')?.close(); refreshCurrent(); } catch (error) { q('.form-error', form).textContent = error.message; }
+    return;
+  }
+  if (form.matches('[data-group-form]')) {
+    event.preventDefault();
+    const data = new FormData(form);
+    const permissions = qa('input[name="permissions"]:checked', form).map(input => input.value);
+    const members = qa('input[name="members"]:checked', form).map(input => input.value);
+    try { await api(`/api/groups/${form.dataset.groupForm}`, { method:'PATCH', body:JSON.stringify({ name:data.get('name'), description:data.get('description'), permissions, members }) }); refreshCurrent(); } catch (error) { q('.form-error', form).textContent = error.message; }
+    return;
+  }
+  if (form.matches('[data-totp-setup]')) {
+    event.preventDefault();
+    const enrollment = q('[data-totp-enrollment]');
+    try {
+      const result = await api('/api/security/totp/setup', { method:'POST', body:JSON.stringify(Object.fromEntries(new FormData(form))) });
+      enrollment.innerHTML = `<div class="security-enrollment"><p>Add this account to your authenticator app using the secret below, then enter the current code.</p><pre>${escapeText(result.secret)}</pre><details><summary>otpauth URI</summary><code>${escapeText(result.uri)}</code></details><form data-totp-verify><label>6-digit code<input name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required></label><button class="primary" type="submit">Verify & enable</button><div class="form-error"></div></form></div>`;
+    } catch (error) { q('.form-error', form).textContent = error.message; }
+    return;
+  }
+  if (form.matches('[data-totp-verify]')) {
+    event.preventDefault();
+    try { await api('/api/security/totp/verify', { method:'POST', body:JSON.stringify(Object.fromEntries(new FormData(form))) }); alert('Authenticator 2FA is enabled.'); refreshCurrent(); } catch (error) { q('.form-error', form).textContent = error.message; }
+    return;
+  }
+  if (form.matches('[data-totp-disable]')) {
+    event.preventDefault();
+    try { await api('/api/security/totp/disable', { method:'POST', body:JSON.stringify(Object.fromEntries(new FormData(form))) }); alert('Authenticator 2FA disabled.'); refreshCurrent(); } catch (error) { q('.form-error', form).textContent = error.message; }
+    return;
+  }
+  if (form.matches('[data-token-form]')) {
+    event.preventDefault();
+    const data = new FormData(form);
+    const permissions = qa('.security-check-grid input:checked', form).map(input => input.value);
+    try { const result = await api('/api/security/api-tokens', { method:'POST', body:JSON.stringify({ name:data.get('name'), permissions }) }); const output = q('[data-token-secret]', form); output.textContent = `Copy this token now — it will not be shown again:\n${result.token}`; output.classList.remove('hidden'); } catch (error) { q('.form-error', form).textContent = error.message; }
+    return;
+  }
+  if (form.matches('[data-webhook-form]')) {
+    event.preventDefault();
+    const data = new FormData(form);
+    const events = String(data.get('events') || '*').split(',').map(value => value.trim()).filter(Boolean);
+    try { const result = await api('/api/security/webhooks', { method:'POST', body:JSON.stringify({ name:data.get('name'), url:data.get('url'), events }) }); const output = q('[data-webhook-secret]', form); output.textContent = `Signing secret — copy it now:\n${result.secret}`; output.classList.remove('hidden'); } catch (error) { q('.form-error', form).textContent = error.message; }
+    return;
+  }
+  if (form.matches('[data-firewall-form]')) {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(form));
+    try { await api('/api/network', { method:'POST', body:JSON.stringify({ action:'firewall-add', ...data, port:Number(data.port) }) }); refreshCurrent(); } catch (error) { q('.form-error', form).textContent = error.message; }
+  }
+}, true);
