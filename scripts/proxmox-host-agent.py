@@ -88,7 +88,9 @@ def inventory() -> dict:
     return {
         "available": True,
         "enabled": True,
-        "provider": "proxmox-host",
+        # Keep the provider name compatible with the existing LightNAS UI.
+        # The transport is the automatic local host bridge, not an API token.
+        "provider": "proxmox",
         "reason": None,
         "machines": [
             f"{item.get('name') or 'VM'} ({item.get('vmid')}) · {item.get('status') or 'unknown'}"
@@ -101,6 +103,7 @@ def inventory() -> dict:
         ],
         "images": images,
         "node": node,
+        "transport": "host-bridge",
     }
 
 
