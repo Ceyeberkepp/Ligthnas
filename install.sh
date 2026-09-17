@@ -20,7 +20,7 @@ export DEBIAN_FRONTEND=noninteractive
 
 echo "[1/6] Installing system requirements..."
 apt-get update
-apt-get install -y ca-certificates curl git gnupg python3 ffmpeg acl
+apt-get install -y ca-certificates curl git gnupg python3 ffmpeg acl novnc
 
 if ! command -v node >/dev/null 2>&1 || \
    [[ "$(node --version | sed -E 's/^v([0-9]+).*/\1/')" -lt 22 ]]; then
@@ -46,6 +46,10 @@ elif [[ -e "${INSTALL_DIRECTORY}" ]]; then
 else
   git clone --depth 1 "${REPOSITORY_URL}" "${INSTALL_DIRECTORY}"
 fi
+
+# Install the small server-side WebSocket dependency used by embedded VM and
+# container consoles. Production dependencies stay inside /opt/lightnas.
+npm --prefix "${INSTALL_DIRECTORY}" install --omit=dev --no-audit --no-fund
 
 echo "[4/6] Creating the service account and persistent storage..."
 if ! id lightnas >/dev/null 2>&1; then
@@ -86,7 +90,6 @@ PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
 # Keep the OS read-only while allowing dedicated NAS mounts under standard data roots.
-# A leading '-' lets the service start when a particular root does not exist.
 ReadWritePaths=${DATA_DIRECTORY} -/mnt -/media -/srv -/data -/storage
 
 [Install]
