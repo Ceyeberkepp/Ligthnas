@@ -60,9 +60,11 @@ if [[ "${LIGHTNAS_ENABLE_DOCKER:-1}" == "0" ]]; then export LIGHTNAS_SKIP_DOCKER
 LIGHTNAS_RUNTIME_STATUS_FILE="${DATA_DIRECTORY}/runtime-status.txt" \
   bash "${INSTALL_DIRECTORY}/scripts/provision-runtimes.sh"
 chown lightnas:lightnas "${DATA_DIRECTORY}/runtime-status.txt"
-if systemd-detect-virt --container >/dev/null 2>&1; then
-  bash "${INSTALL_DIRECTORY}/scripts/configure-proxmox.sh"
-fi
+
+# Proxmox integration is intentionally not configured interactively here.
+# When the one-click helper is launched from a Proxmox node it provisions the
+# local authenticated host bridge automatically after this portable install.
+# configure-proxmox.sh remains available only for legacy remote API-token use.
 chown -R root:root "${INSTALL_DIRECTORY}"
 
 echo "[5/6] Installing the systemd service..."
