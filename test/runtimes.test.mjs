@@ -19,6 +19,7 @@ test('runtime inventory and creation use fixed command arguments and validate re
 case "$1" in
   info) echo 28.0 ;;
   ps) echo '{"Names":"other","Image":"nginx","State":"running","Status":"Up","Ports":""}' ;;
+  pull) printf 'docker:%s\n' "$@" >> "$LIGHTNAS_TEST_LOG"; echo pulled ;;
   run) printf 'docker:%s\n' "$@" >> "$LIGHTNAS_TEST_LOG"; echo container-id ;;
   start|stop|restart|rm) printf 'docker:%s\n' "$@" >> "$LIGHTNAS_TEST_LOG" ;;
 esac
@@ -47,6 +48,8 @@ if [ "$1" = '--version' ]; then echo 4.2; else printf 'vm:%s\n' "$@" >> "$LIGHTN
     await assert.rejects(createVm({ name: 'x', memoryMiB: 2048, cpus: 2, diskGiB: 20, pool: 'default', network: 'default', iso: 'install.iso' }), { status: 400 });
     await createVm({ name: 'NewVm', memoryMiB: 2048, cpus: 2, diskGiB: 20, pool: 'default', network: 'default', iso: 'install.iso' });
     const commands = await readFile(process.env.LIGHTNAS_TEST_LOG, 'utf8');
+    assert.match(commands, /docker:pull\ndocker:nginx:stable-alpine/);
+    assert.match(commands, /docker:pull\ndocker:openspeedtest\/latest/);
     assert.match(commands, /docker:--label\ndocker:lightnas\.catalog=nginx/);
     assert.match(commands, /docker:openspeedtest\/latest/);
     assert.match(commands, /docker:stop\ndocker:lightnas-app-nginx/);
