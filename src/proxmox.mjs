@@ -145,7 +145,23 @@ export async function proxmoxCreateVm(input, inventory) {
     net0: `virtio,bridge=${input.network}`, boot: 'order=ide2;scsi0', ostype: 'l26'
   });
   if (typeof task !== 'string' || !task.startsWith('UPID:')) throw operationError('Proxmox did not return a VM creation task ID.');
-  return { name: input.name, vmid, task, details: 'VM creation task submitted to Proxmox.' };
+
+  for (let attempt = 0; attempt < 20; attempt++) {
+    let taskStatus;
+    try { taskStatus = await api(settings, `nodes/${node}/tasks/${encodeURIComponent(task)}/status`); }
+    catch { return { name: input.name, vmid, task, details: 'VM creation task submitted. Check its status in Proxmox.' }; }
+    if (taskStatus.status === 'stopped') {
+      if (taskStatus.exitstatus !== 'OK') throw operationError(`VM creation task failed: ${String(taskStatus.exitstatus || 'unknown').slice(0, 120)}.`);
+      try {
+        const startTask = await api(settings, `nodes/${node}/qemu/${vmid}/status/start`, {});
+        return { name: input.name, vmid, task, startTask, details: 'VM created and start task submitted.' };
+      } catch {
+        return { name: input.name, vmid, task, details: 'VM created, but automatic start failed. Start it from Proxmox.' };
+      }
+    }
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+  return { name: input.name, vmid, task, details: 'VM creation is still running. Check its Proxmox task.' };
 }
 
 export async function proxmoxManageVm(vmid, action) {
@@ -160,7 +176,7 @@ export async function proxmoxManageVm(vmid, action) {
   if (!settings) throw operationError('Proxmox is not connected.');
   const node = encodeURIComponent(settings.node);
   if (action === 'delete') {
-    try { await api(settings, `nodes/${node}/qemu/${numericId}/status/stop`, {}); } catch { /* already stopped */ }
+    try { await api(settings, `nodes/${node}/qemu/${numericId}/status/stop`, {}); } catch {}
     await api(settings, `nodes/${node}/qemu/${numericId}`, { purge: '1', 'destroy-unreferenced-disks': '1' }, 'DELETE');
     return { vmid: numericId, action, status: 'deleted' };
   }
