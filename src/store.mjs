@@ -8,8 +8,10 @@ export class JsonStore {
       config: null,
       shares: [],
       users: [],
+      groups: [],
       spaces: [],
       smtp: null,
+      security: { apiTokens: [], webhooks: [] },
       activity: []
     };
     this.writeQueue = Promise.resolve();
@@ -19,6 +21,12 @@ export class JsonStore {
     try {
       const parsed = JSON.parse(await readFile(this.path, 'utf8'));
       this.state = { ...this.state, ...parsed };
+      this.state.groups ||= [];
+      this.state.security = {
+        apiTokens: [],
+        webhooks: [],
+        ...(this.state.security || {})
+      };
     } catch (error) {
       if (error.code !== 'ENOENT') throw error;
     }
