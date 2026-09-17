@@ -15,6 +15,20 @@ async function exclusive(operation) {
   try { return await operation(); } finally { operationRunning = false; }
 }
 
+export const containerImages = Object.freeze([
+  { id: 'debian', name: 'Debian 13', category: 'Linux', image: 'debian:13-slim', description: 'Current Debian base image for general-purpose containers.' },
+  { id: 'ubuntu', name: 'Ubuntu 24.04 LTS', category: 'Linux', image: 'ubuntu:24.04', description: 'Ubuntu LTS base image.' },
+  { id: 'alpine', name: 'Alpine Linux', category: 'Linux', image: 'alpine:latest', description: 'Very small Linux base image.' },
+  { id: 'nginx', name: 'Nginx', category: 'Web', image: 'nginx:stable-alpine', description: 'Popular web server and reverse proxy.' },
+  { id: 'apache', name: 'Apache HTTP Server', category: 'Web', image: 'httpd:2.4-alpine', description: 'Apache HTTP server.' },
+  { id: 'redis', name: 'Redis', category: 'Database', image: 'redis:alpine', description: 'In-memory data store and cache.' },
+  { id: 'postgres', name: 'PostgreSQL 17', category: 'Database', image: 'postgres:17-alpine', description: 'PostgreSQL relational database.' },
+  { id: 'mariadb', name: 'MariaDB 11.4', category: 'Database', image: 'mariadb:11.4', description: 'MariaDB relational database.' },
+  { id: 'node', name: 'Node.js LTS', category: 'Development', image: 'node:lts-slim', description: 'Node.js LTS runtime.' },
+  { id: 'python', name: 'Python 3', category: 'Development', image: 'python:3-slim', description: 'Python runtime on a compact Debian base.' },
+  { id: 'busybox', name: 'BusyBox', category: 'Utility', image: 'busybox:latest', description: 'Small utility image useful for testing and diagnostics.' }
+]);
+
 export const catalog = Object.freeze([
   { id: 'nginx', name: 'Nginx', category: 'Web server', image: 'nginx:stable-alpine', port: 8081, containerPort: 80, memory: '256m', description: 'Open-source web server with a default landing page.', source: 'https://hub.docker.com/_/nginx', volumes: [] },
   { id: 'jellyfin', name: 'Jellyfin', category: 'Media', image: 'jellyfin/jellyfin:latest', port: 8096, containerPort: 8096, memory: '2g', description: 'Open-source media server. Reads your LightNAS Files as a library.', source: 'https://jellyfin.org/docs/general/installation/container/', volumes: [['config', '/config'], ['cache', '/cache'], ['@files', '/media:ro']] },
@@ -47,7 +61,7 @@ export async function runtimeInventory() {
     images = (await Promise.all(images.map(async name => (await lstat(join(folder, name))).isFile() ? name : null))).filter(Boolean);
   } catch { /* ISO directory might not be accessible to this service account. */ }
   const runtime = {
-    docker: { available: dockerInfo.ok, enabled: process.env.LIGHTNAS_DOCKER_ENABLED === '1', reason: dockerInfo.ok ? null : 'Docker is not installed, running, or accessible to the lightnas service account.', containers: [] },
+    docker: { available: dockerInfo.ok, enabled: process.env.LIGHTNAS_DOCKER_ENABLED === '1', reason: dockerInfo.ok ? null : 'Docker is not installed, running, or accessible to the lightnas service account.', containers: [], presets: containerImages },
     virtualization: { available: vmInfo.ok && installer.ok, enabled: process.env.LIGHTNAS_VM_ENABLED === '1', reason: vmInfo.ok && installer.ok ? null : 'Libvirt/KVM and virt-install must be installed and accessible on bare metal or a VM with nested virtualization.', machines: vmInfo.ok && vmInfo.output ? vmInfo.output.split('\n').filter(Boolean) : [], pools: vmPools.ok && vmPools.output ? vmPools.output.split('\n').filter(Boolean) : [], networks: vmNetworks.ok && vmNetworks.output ? vmNetworks.output.split('\n').filter(Boolean) : [], images }
   };
   if (dockerInfo.ok) {
