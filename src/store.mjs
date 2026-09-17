@@ -11,7 +11,7 @@ export class JsonStore {
       groups: [],
       spaces: [],
       smtp: null,
-      security: { apiTokens: [], webhooks: [] },
+      security: { apiTokens: [], webhooks: [], identityProviders: [] },
       activity: []
     };
     this.writeQueue = Promise.resolve();
@@ -26,8 +26,12 @@ export class JsonStore {
       this.state.security = {
         apiTokens: [],
         webhooks: [],
+        identityProviders: [],
         ...(this.state.security || {})
       };
+      this.state.security.apiTokens ||= [];
+      this.state.security.webhooks ||= [];
+      this.state.security.identityProviders ||= [];
     } catch (error) {
       if (error.code !== 'ENOENT') throw error;
     }
