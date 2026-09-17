@@ -21,6 +21,9 @@ import {
   createApiTokenRecord, authenticateApiToken,
   createWebhookRecord, deliverWebhook, deliverEvent
 } from './access.mjs';
+import {
+  normalizeIdentityProvider, publicIdentityProvider, testIdentityProvider
+} from './identity-providers.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const publicRoot = join(root, 'public');
@@ -31,9 +34,10 @@ await store.load();
 store.state.users ||= [];
 store.state.groups ||= [];
 store.state.spaces ||= [];
-store.state.security ||= { apiTokens: [], webhooks: [] };
+store.state.security ||= { apiTokens: [], webhooks: [], identityProviders: [] };
 store.state.security.apiTokens ||= [];
 store.state.security.webhooks ||= [];
+store.state.security.identityProviders ||= [];
 const spaceRoot = join(dirname(resolve(process.env.NAS_DATA_FILE || 'data/state.json')), 'files', 'Spaces');
 const spaceName = /^[a-zA-Z0-9][a-zA-Z0-9_-]{1,39}$/;
 const groupName = /^[A-Za-z0-9][A-Za-z0-9 _.-]{1,63}$/;
@@ -290,7 +294,8 @@ async function api(req, res, url) {
   const ownerOnly = url.pathname === '/api/settings' || url.pathname === '/api/users' || url.pathname.startsWith('/api/users/') ||
     url.pathname === '/api/groups' || url.pathname.startsWith('/api/groups/') ||
     url.pathname === '/api/smtp' || url.pathname === '/api/smtp/test' ||
-    url.pathname.startsWith('/api/security/api-tokens') || url.pathname.startsWith('/api/security/webhooks');
+    url.pathname.startsWith('/api/security/api-tokens') || url.pathname.startsWith('/api/security/webhooks') ||
+    url.pathname.startsWith('/api/security/identity-providers');
   if (ownerOnly && !requireOwner(res, context)) return;
 
   if (req.method === 'GET' && url.pathname === '/api/smtp') {
@@ -483,6 +488,51 @@ async function api(req, res, url) {
     if (index < 0) return send(res, 404, { error: 'Webhook not found.' });
     const [hook] = store.state.security.webhooks.splice(index, 1);
     store.addActivity('security', `Webhook ${hook.name} was removed.`);
+    await store.save();
+    return send(res, 200, { ok: true });
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/security/identity-providers') {
+    return send(res, 200, {
+      providers: store.state.security.identityProviders.map(publicIdentityProvider),
+      permissionOptions: PERMISSIONS,
+      types: ['ldaps', 'saml', 'oidc']
+    });
+  }
+  if (req.method === 'POST' && url.pathname === '/api/security/identity-providers') {
+    const input = await bodyJson(req);
+    if (Array.isArray(input.permissions)) input.permissions = normalizePermissions(input.permissions, PERMISSIONS, []);
+    const provider = normalizeIdentityProvider(input);
+    store.state.security.identityProviders.push(provider);
+    store.addActivity('security', `Identity provider ${provider.name} (${provider.type.toUpperCase()}) was created.`);
+    await store.save();
+    return send(res, 201, publicIdentityProvider(provider));
+  }
+  if (req.method === 'PATCH' && /^\/api\/security\/identity-providers\/[0-9a-f-]{36}$/.test(url.pathname)) {
+    const id = url.pathname.split('/').pop();
+    const index = store.state.security.identityProviders.findIndex(item => item.id === id);
+    if (index < 0) return send(res, 404, { error: 'Identity provider not found.' });
+    const input = await bodyJson(req);
+    if (Array.isArray(input.permissions)) input.permissions = normalizePermissions(input.permissions, PERMISSIONS, []);
+    const provider = normalizeIdentityProvider(input, store.state.security.identityProviders[index]);
+    store.state.security.identityProviders[index] = provider;
+    store.addActivity('security', `Identity provider ${provider.name} was updated.`);
+    await store.save();
+    return send(res, 200, publicIdentityProvider(provider));
+  }
+  if (req.method === 'POST' && /^\/api\/security\/identity-providers\/[0-9a-f-]{36}\/test$/.test(url.pathname)) {
+    const id = url.pathname.split('/')[4];
+    const provider = store.state.security.identityProviders.find(item => item.id === id);
+    if (!provider) return send(res, 404, { error: 'Identity provider not found.' });
+    const result = await testIdentityProvider(provider);
+    return send(res, 200, result);
+  }
+  if (req.method === 'DELETE' && /^\/api\/security\/identity-providers\/[0-9a-f-]{36}$/.test(url.pathname)) {
+    const id = url.pathname.split('/').pop();
+    const index = store.state.security.identityProviders.findIndex(item => item.id === id);
+    if (index < 0) return send(res, 404, { error: 'Identity provider not found.' });
+    const [provider] = store.state.security.identityProviders.splice(index, 1);
+    store.addActivity('security', `Identity provider ${provider.name} was removed.`);
     await store.save();
     return send(res, 200, { ok: true });
   }
