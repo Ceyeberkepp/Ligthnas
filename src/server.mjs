@@ -1,5 +1,5 @@
 import http from 'node:http';
-import { readFile, mkdir } from 'node:fs/promises';
+import { readFile, mkdir, rmdir } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import { dirname, extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,12 +8,19 @@ import { JsonStore } from './store.mjs';
 import { getFilesystems, getStorageInventory, getSystemSnapshot } from './system.mjs';
 import { hashPassword, Sessions, verifyPassword } from './auth.mjs';
 import { listFiles, createFolder, uploadFile, downloadFile, deleteEntry } from './files.mjs';
+import { thumbnailFor } from './thumbnails.mjs';
 import { catalog, runtimeInventory, installCatalogApp, manageCatalogApp, createContainer, createVm, openContainerShell } from './runtimes-next.mjs';
 import { proxmoxConsoleSocket, proxmoxUpdateStorage, proxmoxCleanDisk } from './proxmox.mjs';
 import { validateSmtp, sendSmtpTest } from './mailer.mjs';
 import { mediaAvailable, convertMedia } from './media.mjs';
 import { createDataset, updateDataset } from './zfs.mjs';
-import { networkInventory } from './network.mjs';
+import { networkInventory, networkAction } from './network.mjs';
+import { generateTotpSecret, totpUri, verifyTotp } from './totp.mjs';
+import {
+  normalizePermissions, effectivePermissions, groupsForUser,
+  createApiTokenRecord, authenticateApiToken,
+  createWebhookRecord, deliverWebhook, deliverEvent
+} from './access.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const publicRoot = join(root, 'public');
@@ -22,17 +29,27 @@ const store = new JsonStore();
 const sessions = new Sessions();
 await store.load();
 store.state.users ||= [];
+store.state.groups ||= [];
 store.state.spaces ||= [];
+store.state.security ||= { apiTokens: [], webhooks: [] };
+store.state.security.apiTokens ||= [];
+store.state.security.webhooks ||= [];
 const spaceRoot = join(dirname(resolve(process.env.NAS_DATA_FILE || 'data/state.json')), 'files', 'Spaces');
 const spaceName = /^[a-zA-Z0-9][a-zA-Z0-9_-]{1,39}$/;
+const groupName = /^[A-Za-z0-9][A-Za-z0-9 _.-]{1,63}$/;
 
 export const PERMISSIONS = Object.freeze([
   'files.read', 'files.write', 'media.convert',
   'storage.view', 'storage.manage', 'shares.manage',
   'apps.manage', 'containers.manage', 'vms.manage',
-  'network.view', 'system.view'
+  'network.view', 'network.manage', 'system.view'
 ]);
 const DEFAULT_USER_PERMISSIONS = Object.freeze(['files.read', 'files.write']);
+
+store.setActivityListener(async event => {
+  await deliverEvent(store.state, event);
+  await store.save();
+});
 
 const mimeTypes = {
   '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
@@ -63,7 +80,7 @@ async function bodyJson(req) {
   let size = 0;
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > 64 * 1024) throw Object.assign(new Error('Request is too large.'), { status: 413 });
+    if (size > 128 * 1024) throw Object.assign(new Error('Request is too large.'), { status: 413 });
     chunks.push(chunk);
   }
   try {
@@ -82,22 +99,29 @@ function cookies(req) {
   }));
 }
 
-function normalizePermissions(value) {
-  if (!Array.isArray(value)) return [...DEFAULT_USER_PERMISSIONS];
-  return [...new Set(value.filter(item => PERMISSIONS.includes(item)))];
-}
-
-function permissionsFor(account, isAdmin) {
-  return isAdmin ? [...PERMISSIONS] : normalizePermissions(account.permissions);
-}
-
-function requestContext(req) {
+function localContext(req) {
   const session = sessions.get(cookies(req).nas_session);
   if (!session || !store.state.config) return null;
   const account = session.username === store.state.config.username ? store.state.config : store.state.users.find(user => user.username === session.username);
   if (!account || account.disabled) return null;
   const isAdmin = session.username === store.state.config.username;
-  return { session, account, isAdmin, permissions: permissionsFor(account, isAdmin) };
+  return {
+    session,
+    username: session.username,
+    account,
+    isAdmin,
+    apiToken: null,
+    permissions: effectivePermissions({ state: store.state, username: session.username, account, isAdmin, allowed: PERMISSIONS, defaults: DEFAULT_USER_PERMISSIONS })
+  };
+}
+
+function requestContext(req) {
+  const local = localContext(req);
+  if (local) return local;
+  const token = authenticateApiToken(store.state, req.headers.authorization, PERMISSIONS);
+  if (!token) return null;
+  queueMicrotask(() => store.save().catch(() => {}));
+  return { session: null, ...token };
 }
 
 function requireSession(req, res) {
@@ -125,11 +149,59 @@ function requireAnyPermission(res, permissionSet, choices) {
   return false;
 }
 
+function requireOwner(res, context) {
+  if (context.isAdmin && !context.apiToken) return true;
+  send(res, 403, { error: 'Appliance owner access required.' });
+  return false;
+}
+
 function validateSetup(input) {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9-]{1,31}$/.test(input.deviceName || '')) return 'Device name must contain 2–32 letters, numbers, or hyphens.';
   if (!/^[a-zA-Z0-9._-]{3,32}$/.test(input.username || '')) return 'Administrator username must contain 3–32 valid characters.';
   if (typeof input.password !== 'string' || input.password.length < 10) return 'Password must contain at least 10 characters.';
   return null;
+}
+
+function validMembers(value) {
+  if (!Array.isArray(value)) return [];
+  const known = new Set(store.state.users.map(user => user.username));
+  return [...new Set(value.filter(username => known.has(username)))];
+}
+
+function groupPublic(group) {
+  return {
+    id: group.id,
+    name: group.name,
+    description: group.description || '',
+    permissions: normalizePermissions(group.permissions, PERMISSIONS, []),
+    members: validMembers(group.members),
+    createdAt: group.createdAt
+  };
+}
+
+function userPublic(user) {
+  const groups = groupsForUser(store.state, user.username);
+  return {
+    username: user.username,
+    createdAt: user.createdAt,
+    disabled: Boolean(user.disabled),
+    totpEnabled: Boolean(user.totpEnabled),
+    permissions: normalizePermissions(user.permissions, PERMISSIONS, DEFAULT_USER_PERMISSIONS),
+    effectivePermissions: effectivePermissions({ state: store.state, username: user.username, account: user, isAdmin: false, allowed: PERMISSIONS, defaults: DEFAULT_USER_PERMISSIONS }),
+    groups: groups.map(group => ({ id: group.id, name: group.name }))
+  };
+}
+
+function applyUserGroups(username, groupIds) {
+  if (!Array.isArray(groupIds)) return;
+  const selected = new Set(groupIds.filter(id => store.state.groups.some(group => group.id === id)));
+  for (const group of store.state.groups) {
+    group.members ||= [];
+    const has = group.members.includes(username);
+    const should = selected.has(group.id);
+    if (should && !has) group.members.push(username);
+    if (!should && has) group.members = group.members.filter(member => member !== username);
+  }
 }
 
 async function api(req, res, url) {
@@ -140,7 +212,14 @@ async function api(req, res, url) {
     const input = await bodyJson(req);
     const problem = validateSetup(input);
     if (problem) return send(res, 400, { error: problem });
-    store.state.config = { deviceName: input.deviceName, username: input.username, passwordHash: await hashPassword(input.password), timezone: input.timezone || 'UTC', createdAt: new Date().toISOString() };
+    store.state.config = {
+      deviceName: input.deviceName,
+      username: input.username,
+      passwordHash: await hashPassword(input.password),
+      timezone: input.timezone || 'UTC',
+      createdAt: new Date().toISOString(),
+      totpEnabled: false
+    };
     store.addActivity('setup', `Appliance ${input.deviceName} was configured.`, 'success');
     await store.save();
     const token = sessions.create(input.username);
@@ -153,6 +232,9 @@ async function api(req, res, url) {
     const account = input.username === store.state.config.username ? store.state.config : store.state.users.find(user => user.username === input.username);
     const validPassword = account && !account.disabled && await verifyPassword(input.password, account.passwordHash);
     if (!validPassword) return send(res, 401, { error: 'Username or password is incorrect.' });
+    if (account.totpEnabled && (!account.totpSecret || !verifyTotp(account.totpSecret, input.totp))) {
+      return send(res, 401, { error: 'Authenticator code is required or invalid.', totpRequired: true });
+    }
     const token = sessions.create(input.username);
     store.addActivity('login', `${input.username} signed in.`, 'info');
     await store.save();
@@ -166,10 +248,50 @@ async function api(req, res, url) {
 
   const context = requireSession(req, res);
   if (!context) return;
-  const { session, isAdmin, permissions } = context;
+  const { username, account, isAdmin, permissions } = context;
 
-  const adminOnly = url.pathname === '/api/settings' || url.pathname === '/api/users' || url.pathname.startsWith('/api/users/') || url.pathname === '/api/smtp' || url.pathname === '/api/smtp/test';
-  if (adminOnly && !isAdmin) return send(res, 403, { error: 'Appliance owner access required.' });
+  if (req.method === 'GET' && url.pathname === '/api/security/totp') {
+    if (context.apiToken) return send(res, 403, { error: 'TOTP settings require an interactive local account session.' });
+    return send(res, 200, { enabled: Boolean(account.totpEnabled), pending: Boolean(account.totpPendingSecret) });
+  }
+  if (req.method === 'POST' && url.pathname === '/api/security/totp/setup') {
+    if (context.apiToken) return send(res, 403, { error: 'TOTP settings require an interactive local account session.' });
+    const input = await bodyJson(req);
+    if (!(await verifyPassword(input.currentPassword, account.passwordHash))) return send(res, 403, { error: 'Current account password is incorrect.' });
+    const secret = generateTotpSecret();
+    account.totpPendingSecret = secret;
+    await store.save();
+    return send(res, 200, { secret, uri: totpUri({ secret, username, issuer: `LightNAS ${store.state.config.deviceName}` }) });
+  }
+  if (req.method === 'POST' && url.pathname === '/api/security/totp/verify') {
+    if (context.apiToken) return send(res, 403, { error: 'TOTP settings require an interactive local account session.' });
+    const input = await bodyJson(req);
+    if (!account.totpPendingSecret || !verifyTotp(account.totpPendingSecret, input.code)) return send(res, 400, { error: 'Authenticator code did not verify.' });
+    account.totpSecret = account.totpPendingSecret;
+    delete account.totpPendingSecret;
+    account.totpEnabled = true;
+    store.addActivity('security', `TOTP authenticator enabled for ${username}.`, 'success');
+    await store.save();
+    return send(res, 200, { enabled: true });
+  }
+  if (req.method === 'POST' && url.pathname === '/api/security/totp/disable') {
+    if (context.apiToken) return send(res, 403, { error: 'TOTP settings require an interactive local account session.' });
+    const input = await bodyJson(req);
+    if (!(await verifyPassword(input.currentPassword, account.passwordHash))) return send(res, 403, { error: 'Current account password is incorrect.' });
+    if (account.totpEnabled && (!account.totpSecret || !verifyTotp(account.totpSecret, input.code))) return send(res, 403, { error: 'Current authenticator code is required.' });
+    delete account.totpSecret;
+    delete account.totpPendingSecret;
+    account.totpEnabled = false;
+    store.addActivity('security', `TOTP authenticator disabled for ${username}.`, 'warning');
+    await store.save();
+    return send(res, 200, { enabled: false });
+  }
+
+  const ownerOnly = url.pathname === '/api/settings' || url.pathname === '/api/users' || url.pathname.startsWith('/api/users/') ||
+    url.pathname === '/api/groups' || url.pathname.startsWith('/api/groups/') ||
+    url.pathname === '/api/smtp' || url.pathname === '/api/smtp/test' ||
+    url.pathname.startsWith('/api/security/api-tokens') || url.pathname.startsWith('/api/security/webhooks');
+  if (ownerOnly && !requireOwner(res, context)) return;
 
   if (req.method === 'GET' && url.pathname === '/api/smtp') {
     const { password, ...publicConfig } = store.state.smtp || {};
@@ -195,31 +317,33 @@ async function api(req, res, url) {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/users') {
-    return send(res, 200, { permissionOptions: PERMISSIONS, users: store.state.users.map(({ username, createdAt, disabled, permissions: saved }) => ({ username, createdAt, disabled: Boolean(disabled), permissions: normalizePermissions(saved) })) });
+    return send(res, 200, { permissionOptions: PERMISSIONS, users: store.state.users.map(userPublic), groups: store.state.groups.map(groupPublic) });
   }
   if (req.method === 'POST' && url.pathname === '/api/users') {
     const input = await bodyJson(req);
     if (!/^[a-zA-Z0-9._-]{3,32}$/.test(input.username || '') || typeof input.password !== 'string' || input.password.length < 10) return send(res, 400, { error: 'Use a 3–32 character username and a password of at least 10 characters.' });
     if (input.username === store.state.config.username || store.state.users.some(user => user.username === input.username)) return send(res, 409, { error: 'Username already exists.' });
-    const user = { username: input.username, passwordHash: await hashPassword(input.password), permissions: normalizePermissions(input.permissions), createdAt: new Date().toISOString() };
+    const user = { username: input.username, passwordHash: await hashPassword(input.password), permissions: normalizePermissions(input.permissions, PERMISSIONS, DEFAULT_USER_PERMISSIONS), createdAt: new Date().toISOString(), totpEnabled: false };
     store.state.users.push(user);
+    applyUserGroups(input.username, input.groups);
     store.addActivity('user', `User ${input.username} was created.`);
     await store.save();
-    return send(res, 201, { username: input.username, permissions: user.permissions });
+    return send(res, 201, userPublic(user));
   }
   if (req.method === 'DELETE' && /^\/api\/users\/[a-zA-Z0-9._-]{3,32}$/.test(url.pathname)) {
-    const username = url.pathname.split('/').pop();
-    const index = store.state.users.findIndex(user => user.username === username);
+    const userName = url.pathname.split('/').pop();
+    const index = store.state.users.findIndex(user => user.username === userName);
     if (index < 0) return send(res, 404, { error: 'User not found.' });
     store.state.users.splice(index, 1);
-    sessions.clearUser(username);
-    store.addActivity('user', `User ${username} was removed.`);
+    for (const group of store.state.groups) group.members = (group.members || []).filter(member => member !== userName);
+    sessions.clearUser(userName);
+    store.addActivity('user', `User ${userName} was removed.`);
     await store.save();
     return send(res, 200, { ok: true });
   }
   if (req.method === 'PATCH' && /^\/api\/users\/[a-zA-Z0-9._-]{3,32}$/.test(url.pathname)) {
-    const username = url.pathname.split('/').pop();
-    const user = store.state.users.find(item => item.username === username);
+    const userName = url.pathname.split('/').pop();
+    const user = store.state.users.find(item => item.username === userName);
     if (!user) return send(res, 404, { error: 'User not found.' });
     const input = await bodyJson(req);
     if (typeof input.currentPassword !== 'string' || !(await verifyPassword(input.currentPassword, store.state.config.passwordHash))) return send(res, 403, { error: 'Current administrator password is incorrect.' });
@@ -229,12 +353,138 @@ async function api(req, res, url) {
       if (input.password.length < 10 || input.password.length > 1024) return send(res, 400, { error: 'New password must contain at least 10 characters.' });
       user.passwordHash = await hashPassword(input.password); changed = true;
     }
-    if (Array.isArray(input.permissions)) { user.permissions = normalizePermissions(input.permissions); changed = true; }
-    if (!changed) return send(res, 400, { error: 'Choose a password, enable/disable state, or permissions to update.' });
-    sessions.clearUser(username);
-    store.addActivity('user', `User ${username} was updated.`);
+    if (Array.isArray(input.permissions)) { user.permissions = normalizePermissions(input.permissions, PERMISSIONS, []); changed = true; }
+    if (Array.isArray(input.groups)) { applyUserGroups(userName, input.groups); changed = true; }
+    if (!changed) return send(res, 400, { error: 'Choose a password, enable/disable state, groups, or permissions to update.' });
+    sessions.clearUser(userName);
+    store.addActivity('user', `User ${userName} was updated.`);
     await store.save();
-    return send(res, 200, { ok: true, permissions: normalizePermissions(user.permissions) });
+    return send(res, 200, userPublic(user));
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/groups') return send(res, 200, { permissionOptions: PERMISSIONS, groups: store.state.groups.map(groupPublic) });
+  if (req.method === 'POST' && url.pathname === '/api/groups') {
+    const input = await bodyJson(req);
+    const name = String(input.name || '').trim();
+    if (!groupName.test(name)) return send(res, 400, { error: 'Group name must contain 2–64 valid characters.' });
+    if (store.state.groups.some(group => group.name.toLowerCase() === name.toLowerCase())) return send(res, 409, { error: 'A group with this name already exists.' });
+    const group = {
+      id: crypto.randomUUID(), name, description: String(input.description || '').trim().slice(0, 160),
+      permissions: normalizePermissions(input.permissions, PERMISSIONS, []), members: validMembers(input.members), createdAt: new Date().toISOString()
+    };
+    store.state.groups.push(group);
+    for (const member of group.members) sessions.clearUser(member);
+    store.addActivity('group', `Group ${group.name} was created.`);
+    await store.save();
+    return send(res, 201, groupPublic(group));
+  }
+  if (req.method === 'PATCH' && /^\/api\/groups\/[0-9a-f-]{36}$/.test(url.pathname)) {
+    const id = url.pathname.split('/').pop();
+    const group = store.state.groups.find(item => item.id === id);
+    if (!group) return send(res, 404, { error: 'Group not found.' });
+    const input = await bodyJson(req);
+    const previousMembers = new Set(group.members || []);
+    if (input.name !== undefined) {
+      const name = String(input.name || '').trim();
+      if (!groupName.test(name)) return send(res, 400, { error: 'Group name must contain 2–64 valid characters.' });
+      if (store.state.groups.some(item => item.id !== id && item.name.toLowerCase() === name.toLowerCase())) return send(res, 409, { error: 'A group with this name already exists.' });
+      group.name = name;
+    }
+    if (input.description !== undefined) group.description = String(input.description || '').trim().slice(0, 160);
+    if (Array.isArray(input.permissions)) group.permissions = normalizePermissions(input.permissions, PERMISSIONS, []);
+    if (Array.isArray(input.members)) group.members = validMembers(input.members);
+    const affected = new Set([...previousMembers, ...(group.members || [])]);
+    for (const member of affected) sessions.clearUser(member);
+    store.addActivity('group', `Group ${group.name} was updated.`);
+    await store.save();
+    return send(res, 200, groupPublic(group));
+  }
+  if (req.method === 'DELETE' && /^\/api\/groups\/[0-9a-f-]{36}$/.test(url.pathname)) {
+    const id = url.pathname.split('/').pop();
+    const index = store.state.groups.findIndex(item => item.id === id);
+    if (index < 0) return send(res, 404, { error: 'Group not found.' });
+    const [group] = store.state.groups.splice(index, 1);
+    for (const member of group.members || []) sessions.clearUser(member);
+    store.addActivity('group', `Group ${group.name} was removed.`);
+    await store.save();
+    return send(res, 200, { ok: true });
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/security/api-tokens') {
+    return send(res, 200, { tokens: store.state.security.apiTokens.map(({ tokenHash, ...token }) => token), permissionOptions: PERMISSIONS });
+  }
+  if (req.method === 'POST' && url.pathname === '/api/security/api-tokens') {
+    const input = await bodyJson(req);
+    const { record, secret } = createApiTokenRecord({ name: input.name, permissions: input.permissions, allowed: PERMISSIONS });
+    store.state.security.apiTokens.push(record);
+    store.addActivity('security', `API token ${record.name} was created.`);
+    await store.save();
+    const { tokenHash, ...publicRecord } = record;
+    return send(res, 201, { token: secret, record: publicRecord });
+  }
+  if (req.method === 'PATCH' && /^\/api\/security\/api-tokens\/[0-9a-f-]{36}$/.test(url.pathname)) {
+    const id = url.pathname.split('/').pop();
+    const token = store.state.security.apiTokens.find(item => item.id === id);
+    if (!token) return send(res, 404, { error: 'API token not found.' });
+    const input = await bodyJson(req);
+    if (typeof input.disabled === 'boolean') token.disabled = input.disabled;
+    if (Array.isArray(input.permissions)) token.permissions = normalizePermissions(input.permissions, PERMISSIONS, []);
+    await store.save();
+    const { tokenHash, ...publicToken } = token;
+    return send(res, 200, publicToken);
+  }
+  if (req.method === 'DELETE' && /^\/api\/security\/api-tokens\/[0-9a-f-]{36}$/.test(url.pathname)) {
+    const id = url.pathname.split('/').pop();
+    const index = store.state.security.apiTokens.findIndex(item => item.id === id);
+    if (index < 0) return send(res, 404, { error: 'API token not found.' });
+    const [token] = store.state.security.apiTokens.splice(index, 1);
+    store.addActivity('security', `API token ${token.name} was removed.`);
+    await store.save();
+    return send(res, 200, { ok: true });
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/security/webhooks') {
+    return send(res, 200, { webhooks: store.state.security.webhooks.map(({ secret, ...hook }) => ({ ...hook, hasSecret: Boolean(secret) })) });
+  }
+  if (req.method === 'POST' && url.pathname === '/api/security/webhooks') {
+    const input = await bodyJson(req);
+    const hook = createWebhookRecord(input);
+    store.state.security.webhooks.push(hook);
+    store.addActivity('security', `Webhook ${hook.name} was created.`);
+    await store.save();
+    const { secret, ...publicHook } = hook;
+    return send(res, 201, { secret, webhook: publicHook });
+  }
+  if (req.method === 'PATCH' && /^\/api\/security\/webhooks\/[0-9a-f-]{36}$/.test(url.pathname)) {
+    const id = url.pathname.split('/').pop();
+    const hook = store.state.security.webhooks.find(item => item.id === id);
+    if (!hook) return send(res, 404, { error: 'Webhook not found.' });
+    const input = await bodyJson(req);
+    if (input.name !== undefined || input.url !== undefined || input.events !== undefined) {
+      const validated = createWebhookRecord({ name: input.name ?? hook.name, url: input.url ?? hook.url, events: input.events ?? hook.events });
+      hook.name = validated.name; hook.url = validated.url; hook.events = validated.events;
+    }
+    if (typeof input.enabled === 'boolean') hook.enabled = input.enabled;
+    await store.save();
+    const { secret, ...publicHook } = hook;
+    return send(res, 200, publicHook);
+  }
+  if (req.method === 'POST' && /^\/api\/security\/webhooks\/[0-9a-f-]{36}\/test$/.test(url.pathname)) {
+    const id = url.pathname.split('/')[4];
+    const hook = store.state.security.webhooks.find(item => item.id === id);
+    if (!hook) return send(res, 404, { error: 'Webhook not found.' });
+    const result = await deliverWebhook(hook, { id: crypto.randomUUID(), type: 'test', message: 'LightNAS webhook test', severity: 'info', timestamp: new Date().toISOString() });
+    await store.save();
+    return send(res, result.ok ? 200 : 409, result);
+  }
+  if (req.method === 'DELETE' && /^\/api\/security\/webhooks\/[0-9a-f-]{36}$/.test(url.pathname)) {
+    const id = url.pathname.split('/').pop();
+    const index = store.state.security.webhooks.findIndex(item => item.id === id);
+    if (index < 0) return send(res, 404, { error: 'Webhook not found.' });
+    const [hook] = store.state.security.webhooks.splice(index, 1);
+    store.addActivity('security', `Webhook ${hook.name} was removed.`);
+    await store.save();
+    return send(res, 200, { ok: true });
   }
 
   if (req.method === 'GET' && url.pathname === '/api/media') {
@@ -291,10 +541,22 @@ async function api(req, res, url) {
     await store.save();
     return send(res, 200, { space });
   }
+  if (req.method === 'DELETE' && /^\/api\/spaces\/[a-zA-Z0-9_-]{2,40}$/.test(url.pathname)) {
+    if (!requirePermission(res, permissions, 'storage.manage')) return;
+    const name = url.pathname.split('/').pop();
+    const index = store.state.spaces.findIndex(item => item.name === name);
+    if (index < 0) return send(res, 404, { error: 'Storage space not found.' });
+    try { await rmdir(join(spaceRoot, name)); }
+    catch (error) { if (error.code === 'ENOTEMPTY') return send(res, 409, { error: 'Storage space must be empty before it can be removed.' }); throw error; }
+    store.state.spaces.splice(index, 1);
+    store.addActivity('storage', `Storage space ${name} was removed.`);
+    await store.save();
+    return send(res, 200, { ok: true });
+  }
 
   if (req.method === 'GET' && url.pathname === '/api/settings') {
-    const { username, deviceName, timezone } = store.state.config;
-    return send(res, 200, { username, deviceName, timezone });
+    const { username: owner, deviceName, timezone } = store.state.config;
+    return send(res, 200, { username: owner, deviceName, timezone });
   }
   if (req.method === 'PATCH' && url.pathname === '/api/settings') {
     const input = await bodyJson(req);
@@ -371,7 +633,7 @@ async function api(req, res, url) {
       getSystemSnapshot(), getFilesystems(), getStorageInventory(), shouldLoadHost ? runtimeInventory() : Promise.resolve(null)
     ]);
     return send(res, 200, {
-      appliance: { deviceName: store.state.config.deviceName, username: session.username, role: isAdmin ? 'administrator' : 'user', permissions, timezone: store.state.config.timezone },
+      appliance: { deviceName: store.state.config.deviceName, username, role: isAdmin ? 'administrator' : context.apiToken ? 'api' : 'user', permissions, timezone: store.state.config.timezone },
       system, filesystems, storage, host: runtimes?.virtualization?.host || null,
       shares: store.state.shares, activity: store.state.activity.slice(0, 8)
     });
@@ -383,12 +645,19 @@ async function api(req, res, url) {
     try { host = (await runtimeInventory()).virtualization?.host || null; } catch {}
     return send(res, 200, { ...local, host });
   }
+  if (req.method === 'POST' && url.pathname === '/api/network') {
+    if (!requirePermission(res, permissions, 'network.manage')) return;
+    const result = await networkAction(await bodyJson(req));
+    store.addActivity('network', `Network action ${result.action} completed.`);
+    await store.save();
+    return send(res, 200, result);
+  }
   if (req.method === 'GET' && url.pathname === '/api/system') {
     if (!requirePermission(res, permissions, 'system.view')) return;
     const local = await getSystemSnapshot();
     let host = null;
     try { host = (await runtimeInventory()).virtualization?.host || null; } catch {}
-    return send(res, 200, { local, host });
+    return send(res, 200, { ...local, host });
   }
   if (req.method === 'GET' && url.pathname === '/api/storage') {
     if (!requirePermission(res, permissions, 'storage.view')) return;
@@ -406,6 +675,12 @@ async function api(req, res, url) {
     if (req.method === 'POST') { await createFolder(path); store.addActivity('file', `Folder ${path} was created.`); await store.save(); return send(res, 201, { ok: true }); }
     if (req.method === 'PUT') { await uploadFile(path, req); store.addActivity('file', `File ${path} was uploaded.`); await store.save(); return send(res, 201, { ok: true }); }
     if (req.method === 'DELETE') { await deleteEntry(path); store.addActivity('file', `File entry ${path} was deleted.`); await store.save(); return send(res, 200, { ok: true }); }
+  }
+  if (req.method === 'GET' && url.pathname === '/api/files/thumbnail') {
+    if (!requirePermission(res, permissions, 'files.read')) return;
+    const thumbnail = await thumbnailFor(url.searchParams.get('path') || '');
+    res.writeHead(200, { 'Content-Type': thumbnail.contentType, 'Content-Length': thumbnail.size, 'Cache-Control': 'private, max-age=86400', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': csp });
+    return createReadStream(thumbnail.path).pipe(res);
   }
   if (req.method === 'GET' && url.pathname === '/api/files/download') {
     if (!requirePermission(res, permissions, 'files.read')) return;
@@ -475,7 +750,8 @@ async function staticAsset(req, res, url) {
 
 function rejectUpgrade(socket, status, message) {
   const body = Buffer.from(message, 'utf8');
-  socket.write(`HTTP/1.1 ${status} ${status === 401 ? 'Unauthorized' : 'Forbidden'}\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: ${body.length}\r\n\r\n`);
+  const label = status === 401 ? 'Unauthorized' : 'Forbidden';
+  socket.write(`HTTP/1.1 ${status} ${label}\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: ${body.length}\r\n\r\n`);
   socket.write(body);
   socket.destroy();
 }
@@ -515,7 +791,8 @@ export function createServer() {
   const server = http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-      if (url.pathname.startsWith('/api/') && !['GET', 'HEAD'].includes(req.method) && req.headers['x-lightnas-request'] !== '1') send(res, 403, { error: 'This request must originate from the LightNAS interface.' });
+      const bearer = /^Bearer\s+/i.test(req.headers.authorization || '');
+      if (url.pathname.startsWith('/api/') && !['GET', 'HEAD'].includes(req.method) && req.headers['x-lightnas-request'] !== '1' && !bearer) send(res, 403, { error: 'This request must originate from the LightNAS interface or use a scoped API token.' });
       else if (url.pathname.startsWith('/api/')) await api(req, res, url);
       else await staticAsset(req, res, url);
     } catch (error) {
@@ -530,7 +807,7 @@ export function createServer() {
   server.on('upgrade', async (req, socket, head) => {
     try {
       if (!sameOrigin(req)) return rejectUpgrade(socket, 403, 'Same-origin console connection required.');
-      const context = requestContext(req);
+      const context = localContext(req);
       if (!context) return rejectUpgrade(socket, 401, 'Authentication required.');
       const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
       const vm = url.pathname.match(/^\/api\/console\/vm\/([1-9][0-9]{1,5})$/);
@@ -538,7 +815,6 @@ export function createServer() {
       if (!vm && !container) return rejectUpgrade(socket, 403, 'Unknown console endpoint.');
       if (vm && !context.permissions.includes('vms.manage')) return rejectUpgrade(socket, 403, 'VM management permission required.');
       if (container && !context.permissions.includes('containers.manage')) return rejectUpgrade(socket, 403, 'Container management permission required.');
-
       const backend = vm ? await proxmoxConsoleSocket(Number(vm[1])) : await openContainerShell(container[1]);
       wss.handleUpgrade(req, socket, head, ws => {
         if (vm) bridgeWebSocketToSocket(ws, backend);
