@@ -1,13 +1,30 @@
 .attached-storage { margin: 22px 0; }
-.attached-storage-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-top: 14px; }
-.attached-storage-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; }
-.attached-storage-card h3 { margin: 0; font-size: 16px; }
-.attached-storage-card p { margin: 7px 0; color: var(--muted); line-height: 1.45; }
-.attached-storage-card .track { margin: 12px 0 8px; }
+.attached-storage-grid, .inventory-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-top: 14px; }
+.attached-storage-card, .inventory-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; min-width: 0; }
+.attached-storage-card h3, .inventory-card h3 { margin: 0; font-size: 16px; overflow-wrap: anywhere; }
+.attached-storage-card p, .inventory-card p { margin: 7px 0; color: var(--muted); line-height: 1.45; overflow-wrap: anywhere; }
+.attached-storage-card .track, .inventory-card .track { margin: 12px 0 8px; }
 .volume-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.volume-state { font-size: 10px; font-weight: 800; letter-spacing: .08em; border-radius: 999px; padding: 5px 8px; }
+.volume-state { flex: 0 0 auto; font-size: 10px; font-weight: 800; letter-spacing: .08em; border-radius: 999px; padding: 5px 8px; }
 .volume-state.writable { color: var(--success); border: 1px solid color-mix(in srgb, var(--success) 35%, transparent); background: color-mix(in srgb, var(--success) 9%, transparent); }
 .volume-state.readonly { color: var(--warning); border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent); background: color-mix(in srgb, var(--warning) 9%, transparent); }
+
+.unified-storage { display: grid; gap: 15px; margin: 20px 0 28px; }
+.unified-storage > h2 { margin: 14px 0 -2px; font-size: 18px; }
+.inventory-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; }
+.inventory-heading h2 { margin: 4px 0 7px; font-size: 22px; }
+.inventory-heading p { margin: 0; max-width: 850px; }
+.host-monitor-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+.monitor-card { display: grid; gap: 7px; min-height: 120px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-2); }
+.monitor-card > span { color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.monitor-card strong { font-size: 22px; line-height: 1.1; }
+.monitor-card small { color: var(--muted); line-height: 1.35; }
+.host-live-monitor { margin-top: 18px; }
+.content-badge { display: inline-block; margin: 2px 3px 2px 0; padding: 2px 6px; border-radius: 999px; font-size: 9px; font-weight: 700; color: var(--muted); border: 1px solid var(--line); background: var(--panel-2); }
+.content-policy-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; margin: 16px 0; }
+.content-policy-grid label { display: flex; align-items: center; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); }
+.disk-card .danger-button { margin-top: 8px; }
+.legacy-hidden { display: none !important; }
 
 .lightnas-dialog { width: min(560px, calc(100vw - 32px)); border: 1px solid var(--line-strong); border-radius: 18px; background: var(--panel); color: var(--text); padding: 0; box-shadow: var(--shadow); }
 .lightnas-dialog::backdrop { background: rgba(4, 10, 18, .62); backdrop-filter: blur(4px); }
@@ -27,7 +44,7 @@
 .viewer-meta { color: var(--muted); font-size: 12px; margin-top: 10px; }
 
 .runtime-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 7px; flex-wrap: wrap; padding-top: 10px; border-top: 1px solid var(--line); margin-top: 8px; }
-.runtime-actions .secondary { padding: 8px 11px; font-size: 12px; }
+.runtime-actions .secondary, .runtime-actions .primary { padding: 8px 11px; font-size: 12px; }
 .danger-button { color: var(--danger) !important; border-color: color-mix(in srgb, var(--danger) 28%, var(--line)) !important; }
 .runtime-dialog { width: min(840px, calc(100vw - 28px)); }
 .runtime-output { min-height: 250px; max-height: 55vh; overflow: auto; white-space: pre-wrap; word-break: break-word; background: #03070c; color: #dbe7ef; border: 1px solid var(--line); border-radius: 12px; padding: 16px; font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
@@ -50,8 +67,13 @@
 .admin-tool-card b { font-size: 12px; }
 .admin-tool-card span { color: var(--muted); font-size: 11px; }
 
+.file-name { position: relative; }
+.file-name.has-thumbnail, .file-name:has(.file-thumb) { display: flex !important; align-items: center; gap: 10px; }
+.file-thumb { width: 54px; height: 42px; flex: 0 0 54px; object-fit: cover; border-radius: 7px; background: #05090d; border: 1px solid var(--line); }
+
 @media (max-width: 700px) {
-  .attached-storage-grid, .policy-grid { grid-template-columns: 1fr; }
+  .attached-storage-grid, .inventory-grid, .policy-grid, .content-policy-grid, .host-monitor-grid { grid-template-columns: 1fr; }
   .lightnas-viewer, .runtime-dialog { width: calc(100vw - 16px); }
   .runtime-actions { justify-content: flex-start; }
+  .inventory-heading { display: grid; }
 }
