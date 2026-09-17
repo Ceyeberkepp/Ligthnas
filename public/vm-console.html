@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>LightNAS VM Console</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background:#071019; color:#e9f4f7; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; display:flex; flex-direction:column; background:#071019; }
+    header { min-height:54px; display:flex; align-items:center; gap:12px; padding:8px 14px; border-bottom:1px solid #20323e; background:#0c1821; }
+    header strong { margin-right:auto; }
+    button { border:1px solid #2b4655; background:#122632; color:#e9f4f7; border-radius:9px; padding:8px 12px; font:inherit; cursor:pointer; }
+    button:hover { background:#193746; }
+    #status { font-size:12px; color:#9fb4bf; }
+    #screen { flex:1; min-height:0; display:flex; align-items:center; justify-content:center; overflow:hidden; background:#000; }
+    #screen canvas { max-width:100%; max-height:100%; }
+    .error { color:#ff9a9a !important; }
+  </style>
+</head>
+<body>
+  <header>
+    <strong id="title">VM console</strong>
+    <span id="status">Connecting…</span>
+    <button id="cad" type="button">Ctrl+Alt+Del</button>
+    <button id="fullscreen" type="button">Fullscreen</button>
+  </header>
+  <div id="screen" aria-label="VM console display"></div>
+  <script type="module">
+    import RFB from '/novnc/core/rfb.js';
+
+    const params = new URLSearchParams(location.search);
+    const vmid = params.get('vmid');
+    const name = params.get('name') || `VM ${vmid || ''}`;
+    const title = document.querySelector('#title');
+    const status = document.querySelector('#status');
+    const screen = document.querySelector('#screen');
+    title.textContent = `${name} · console`;
+
+    if (!/^\d{3,6}$/.test(vmid || '')) {
+      status.textContent = 'Invalid VM ID';
+      status.classList.add('error');
+      throw new Error('Invalid VM ID');
+    }
+
+    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const socketUrl = `${protocol}//${location.host}/api/console/vm/${encodeURIComponent(vmid)}`;
+    const rfb = new RFB(screen, socketUrl, { shared: true });
+    rfb.scaleViewport = true;
+    rfb.resizeSession = true;
+    rfb.viewOnly = false;
+    rfb.background = '#000';
+
+    rfb.addEventListener('connect', () => {
+      status.textContent = 'Connected';
+      status.classList.remove('error');
+    });
+    rfb.addEventListener('disconnect', event => {
+      status.textContent = event.detail.clean ? 'Console closed' : 'Disconnected';
+      status.classList.toggle('error', !event.detail.clean);
+    });
+    rfb.addEventListener('credentialsrequired', () => {
+      status.textContent = 'Console authentication failed';
+      status.classList.add('error');
+    });
+
+    document.querySelector('#cad').addEventListener('click', () => rfb.sendCtrlAltDel());
+    document.querySelector('#fullscreen').addEventListener('click', async () => {
+      if (!document.fullscreenElement) await document.documentElement.requestFullscreen();
+      else await document.exitFullscreen();
+    });
+    addEventListener('beforeunload', () => rfb.disconnect());
+  </script>
+</body>
+</html>
