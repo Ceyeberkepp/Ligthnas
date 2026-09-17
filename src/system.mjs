@@ -1,6 +1,6 @@
 import os from 'node:os';
 import { dirname, resolve } from 'node:path';
-import { readFile, statfs } from 'node:fs/promises';
+import { access, constants, readFile, statfs } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
@@ -17,11 +17,8 @@ async function command(file, args) {
 }
 
 async function readText(path, fallback = '') {
-  try {
-    return await readFile(path, 'utf8');
-  } catch {
-    return fallback;
-  }
+  try { return await readFile(path, 'utf8'); }
+  catch { return fallback; }
 }
 
 function isSystemMount(mountPoint) {
@@ -50,21 +47,25 @@ export async function getStorageInventory() {
           filesystem: child.fstype || null, mountPoint: child.mountpoint || null
         }))
       }));
-  } catch { /* lsblk can be absent or unavailable in a container. */ }
+  } catch {}
 
-  // An LXC can sometimes see host block-device metadata even though those disks
-  // are not safe or directly manageable by the guest. Only expose raw disks for
-  // pool creation when LightNAS is not running inside a container.
   if (inContainer) disks = [];
 
+  const rootFilesystem = filesystems.find(item => item.mountPoint === '/');
+  const rootDevice = rootFilesystem?.device || null;
+  const explicitDataPath = mountPoint => /^(\/mnt|\/media|\/srv|\/data|\/storage)(\/|$)/.test(mountPoint);
   const attachedVolumes = filesystems
     .filter(item => !isSystemMount(item.mountPoint) && item.totalBytes > 0)
+    // systemd may create writable bind mounts such as /var/lib/lightnas and
+    // /var/tmp on the root filesystem. Do not present those as extra disks.
+    .filter(item => item.device !== rootDevice || explicitDataPath(item.mountPoint))
     .map(item => ({
       id: item.id,
       device: item.device,
       mountPoint: item.mountPoint,
       type: item.type,
       readOnly: item.readOnly,
+      writable: item.writable,
       totalBytes: item.totalBytes,
       availableBytes: item.availableBytes,
       usedBytes: item.usedBytes,
@@ -81,7 +82,7 @@ export async function getStorageInventory() {
     const mountPoints = mounts.split('\n').map(line => line.split(' - ')[0]?.split(' ')[4]?.replaceAll('\\040', ' ')).filter(Boolean);
     const coveringMount = mountPoints.filter(point => dataPath === point || dataPath.startsWith(`${point.replace(/\/$/, '')}/`)).sort((a, b) => b.length - a.length)[0] || '/';
     local = { path: dataPath, mountPoint: coveringMount, dedicated: coveringMount !== '/', totalBytes, availableBytes, usedBytes: Math.max(0, totalBytes - availableBytes) };
-  } catch { /* Data directory might not exist yet on an unconfigured development host. */ }
+  } catch {}
 
   return {
     disks,
@@ -172,20 +173,22 @@ export async function getFilesystems() {
       const stats = await statfs(mountPoint, { bigint: true });
       const total = Number(stats.blocks * stats.bsize);
       const available = Number(stats.bavail * stats.bsize);
+      let writable = false;
+      try { await access(mountPoint, constants.W_OK); writable = true; } catch {}
+      const mountedReadOnly = options.split(',').includes('ro');
       entries.push({
         id: Buffer.from(`${device}:${mountPoint}`).toString('base64url'),
         device,
         mountPoint,
         type,
-        readOnly: options.split(',').includes('ro'),
+        writable: writable && !mountedReadOnly,
+        readOnly: mountedReadOnly || !writable,
         totalBytes: total,
         availableBytes: available,
         usedBytes: Math.max(0, total - available),
         usedPercent: total ? Math.round(((total - available) / total) * 100) : 0
       });
-    } catch {
-      // A mount may disappear while inventory is running.
-    }
+    } catch {}
   }
 
   return entries.sort((a, b) => b.totalBytes - a.totalBytes);
