@@ -3,11 +3,13 @@ import { readFile, mkdir } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import { dirname, extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { WebSocketServer } from 'ws';
 import { JsonStore } from './store.mjs';
 import { getFilesystems, getStorageInventory, getSystemSnapshot } from './system.mjs';
 import { hashPassword, Sessions, verifyPassword } from './auth.mjs';
 import { listFiles, createFolder, uploadFile, downloadFile, deleteEntry } from './files.mjs';
-import { catalog, runtimeInventory, installCatalogApp, manageCatalogApp, createContainer, createVm } from './runtimes-next.mjs';
+import { catalog, runtimeInventory, installCatalogApp, manageCatalogApp, createContainer, createVm, openContainerShell } from './runtimes-next.mjs';
+import { proxmoxConsoleSocket, proxmoxUpdateStorage, proxmoxCleanDisk } from './proxmox.mjs';
 import { validateSmtp, sendSmtpTest } from './mailer.mjs';
 import { mediaAvailable, convertMedia } from './media.mjs';
 import { createDataset, updateDataset } from './zfs.mjs';
@@ -15,6 +17,7 @@ import { networkInventory } from './network.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const publicRoot = join(root, 'public');
+const novncRoot = process.env.LIGHTNAS_NOVNC_ROOT || '/usr/share/novnc';
 const store = new JsonStore();
 const sessions = new Sessions();
 await store.load();
@@ -41,9 +44,9 @@ const mimeTypes = {
   '.txt': 'text/plain; charset=utf-8', '.log': 'text/plain; charset=utf-8', '.md': 'text/markdown; charset=utf-8',
   '.csv': 'text/csv; charset=utf-8', '.xml': 'application/xml; charset=utf-8', '.yaml': 'text/yaml; charset=utf-8',
   '.yml': 'text/yaml; charset=utf-8', '.ini': 'text/plain; charset=utf-8', '.conf': 'text/plain; charset=utf-8',
-  '.sh': 'text/plain; charset=utf-8'
+  '.sh': 'text/plain; charset=utf-8', '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf'
 };
-const csp = "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: blob:; media-src 'self' data: blob:; frame-src 'self' blob:; connect-src 'self'";
+const csp = "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: blob:; media-src 'self' data: blob:; frame-src 'self' blob:; connect-src 'self' ws: wss:; worker-src 'self' blob:; font-src 'self' data:";
 
 function send(res, status, body, headers = {}) {
   const payload = typeof body === 'string' ? body : JSON.stringify(body);
@@ -79,12 +82,6 @@ function cookies(req) {
   }));
 }
 
-function requireSession(req, res) {
-  const session = sessions.get(cookies(req).nas_session);
-  if (!session) { send(res, 401, { error: 'Authentication required.' }); return null; }
-  return session;
-}
-
 function normalizePermissions(value) {
   if (!Array.isArray(value)) return [...DEFAULT_USER_PERMISSIONS];
   return [...new Set(value.filter(item => PERMISSIONS.includes(item)))];
@@ -92,6 +89,24 @@ function normalizePermissions(value) {
 
 function permissionsFor(account, isAdmin) {
   return isAdmin ? [...PERMISSIONS] : normalizePermissions(account.permissions);
+}
+
+function requestContext(req) {
+  const session = sessions.get(cookies(req).nas_session);
+  if (!session || !store.state.config) return null;
+  const account = session.username === store.state.config.username ? store.state.config : store.state.users.find(user => user.username === session.username);
+  if (!account || account.disabled) return null;
+  const isAdmin = session.username === store.state.config.username;
+  return { session, account, isAdmin, permissions: permissionsFor(account, isAdmin) };
+}
+
+function requireSession(req, res) {
+  const context = requestContext(req);
+  if (!context) {
+    send(res, 401, { error: 'Authentication required.' });
+    return null;
+  }
+  return context;
 }
 
 function hasPermission(permissionSet, permission) {
@@ -118,7 +133,7 @@ function validateSetup(input) {
 }
 
 async function api(req, res, url) {
-  if (req.method === 'GET' && url.pathname === '/api/status') return send(res, 200, { version: '0.11.0', setupRequired: !store.state.config });
+  if (req.method === 'GET' && url.pathname === '/api/status') return send(res, 200, { version: '0.12.0', setupRequired: !store.state.config });
 
   if (req.method === 'POST' && url.pathname === '/api/setup') {
     if (store.state.config) return send(res, 409, { error: 'This appliance is already configured.' });
@@ -149,14 +164,10 @@ async function api(req, res, url) {
     return send(res, 200, { ok: true }, { 'Set-Cookie': 'nas_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0' });
   }
 
-  const session = requireSession(req, res);
-  if (!session) return;
-  const account = session.username === store.state.config.username ? store.state.config : store.state.users.find(user => user.username === session.username);
-  if (!account || account.disabled) return send(res, 401, { error: 'Account is unavailable.' });
-  const isAdmin = session.username === store.state.config.username;
-  const permissions = permissionsFor(account, isAdmin);
+  const context = requireSession(req, res);
+  if (!context) return;
+  const { session, isAdmin, permissions } = context;
 
-  // Owner-only appliance administration.
   const adminOnly = url.pathname === '/api/settings' || url.pathname === '/api/users' || url.pathname.startsWith('/api/users/') || url.pathname === '/api/smtp' || url.pathname === '/api/smtp/test';
   if (adminOnly && !isAdmin) return send(res, 403, { error: 'Appliance owner access required.' });
 
@@ -302,7 +313,7 @@ async function api(req, res, url) {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/runtimes') {
-    if (!requireAnyPermission(res, permissions, ['apps.manage', 'containers.manage', 'vms.manage'])) return;
+    if (!requireAnyPermission(res, permissions, ['apps.manage', 'containers.manage', 'vms.manage', 'storage.view', 'system.view'])) return;
     return send(res, 200, { ...(await runtimeInventory()), catalog });
   }
   if (req.method === 'POST' && /^\/api\/catalog\/[a-z0-9-]+\/install$/.test(url.pathname)) {
@@ -337,26 +348,52 @@ async function api(req, res, url) {
     await store.save();
     return send(res, input.action ? 200 : 201, result);
   }
+  if (req.method === 'POST' && url.pathname === '/api/proxmox/storage') {
+    if (!requirePermission(res, permissions, 'storage.manage')) return;
+    const input = await bodyJson(req);
+    const result = await proxmoxUpdateStorage(input.storage, input.content);
+    store.addActivity('storage', `Proxmox storage ${result.storage} content policy updated.`);
+    await store.save();
+    return send(res, 200, result);
+  }
+  if (req.method === 'POST' && url.pathname === '/api/proxmox/disk-clean') {
+    if (!requirePermission(res, permissions, 'storage.manage')) return;
+    const input = await bodyJson(req);
+    const result = await proxmoxCleanDisk(input.path, input.confirm);
+    store.addActivity('storage', `Disk ${result.path} partition/filesystem signatures were cleaned.`, 'warning');
+    await store.save();
+    return send(res, 200, result);
+  }
 
   if (req.method === 'GET' && url.pathname === '/api/overview') {
-    const [system, filesystems, storage] = await Promise.all([getSystemSnapshot(), getFilesystems(), getStorageInventory()]);
+    const shouldLoadHost = isAdmin || ['storage.view', 'system.view', 'vms.manage'].some(permission => permissions.includes(permission));
+    const [system, filesystems, storage, runtimes] = await Promise.all([
+      getSystemSnapshot(), getFilesystems(), getStorageInventory(), shouldLoadHost ? runtimeInventory() : Promise.resolve(null)
+    ]);
     return send(res, 200, {
       appliance: { deviceName: store.state.config.deviceName, username: session.username, role: isAdmin ? 'administrator' : 'user', permissions, timezone: store.state.config.timezone },
-      system, filesystems, storage, shares: store.state.shares, activity: store.state.activity.slice(0, 8)
+      system, filesystems, storage, host: runtimes?.virtualization?.host || null,
+      shares: store.state.shares, activity: store.state.activity.slice(0, 8)
     });
   }
   if (req.method === 'GET' && url.pathname === '/api/network') {
     if (!requirePermission(res, permissions, 'network.view')) return;
-    return send(res, 200, await networkInventory());
+    const local = await networkInventory();
+    let host = null;
+    try { host = (await runtimeInventory()).virtualization?.host || null; } catch {}
+    return send(res, 200, { ...local, host });
   }
   if (req.method === 'GET' && url.pathname === '/api/system') {
     if (!requirePermission(res, permissions, 'system.view')) return;
-    return send(res, 200, await getSystemSnapshot());
+    const local = await getSystemSnapshot();
+    let host = null;
+    try { host = (await runtimeInventory()).virtualization?.host || null; } catch {}
+    return send(res, 200, { local, host });
   }
   if (req.method === 'GET' && url.pathname === '/api/storage') {
     if (!requirePermission(res, permissions, 'storage.view')) return;
-    const [filesystems, storage] = await Promise.all([getFilesystems(), getStorageInventory()]);
-    return send(res, 200, { filesystems, ...storage });
+    const [filesystems, storage, runtimes] = await Promise.all([getFilesystems(), getStorageInventory(), runtimeInventory()]);
+    return send(res, 200, { filesystems, ...storage, host: runtimes.virtualization?.host || null });
   }
 
   if (url.pathname === '/api/files') {
@@ -415,11 +452,13 @@ async function api(req, res, url) {
   return send(res, 404, { error: 'API endpoint not found.' });
 }
 
-async function staticFile(req, res, url) {
-  const requested = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
+async function staticAsset(req, res, url) {
+  const isNovnc = url.pathname.startsWith('/novnc/');
+  const base = resolve(isNovnc ? novncRoot : publicRoot);
+  const requested = isNovnc ? url.pathname.slice('/novnc/'.length) : (url.pathname === '/' ? 'index.html' : url.pathname.slice(1));
   const safePath = normalize(requested).replace(/^(\.\.[/\\])+/, '');
-  const path = join(publicRoot, safePath);
-  if (!path.startsWith(publicRoot)) return send(res, 403, 'Forbidden');
+  const path = resolve(base, safePath);
+  if (path !== base && !path.startsWith(`${base}/`)) return send(res, 403, 'Forbidden');
   try {
     const content = await readFile(path);
     res.writeHead(200, {
@@ -429,18 +468,56 @@ async function staticFile(req, res, url) {
     });
     res.end(content);
   } catch (error) {
-    if (error.code === 'ENOENT') return send(res, 404, 'Not found');
+    if (error.code === 'ENOENT' || error.code === 'EISDIR') return send(res, 404, 'Not found');
     throw error;
   }
 }
 
+function rejectUpgrade(socket, status, message) {
+  const body = Buffer.from(message, 'utf8');
+  socket.write(`HTTP/1.1 ${status} ${status === 401 ? 'Unauthorized' : 'Forbidden'}\r\nConnection: close\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: ${body.length}\r\n\r\n`);
+  socket.write(body);
+  socket.destroy();
+}
+
+function sameOrigin(req) {
+  if (!req.headers.origin || !req.headers.host) return false;
+  try { return new URL(req.headers.origin).host === req.headers.host; }
+  catch { return false; }
+}
+
+function bridgeWebSocketToSocket(ws, backend) {
+  const close = () => {
+    if (!backend.destroyed) backend.destroy();
+    if (ws.readyState === 0 || ws.readyState === 1) ws.close();
+  };
+  backend.on('data', chunk => { if (ws.readyState === 1) ws.send(chunk, { binary: true }); });
+  backend.on('error', () => { if (ws.readyState === 1) ws.close(1011, 'Console backend error'); });
+  backend.on('close', () => { if (ws.readyState === 1) ws.close(1000, 'Console closed'); });
+  ws.on('message', data => { if (!backend.destroyed) backend.write(Buffer.from(data)); });
+  ws.on('close', close);
+  ws.on('error', close);
+}
+
+function bridgeWebSocketToProcess(ws, process) {
+  const output = chunk => { if (ws.readyState === 1) ws.send(chunk.toString('utf8')); };
+  process.stdout?.on('data', output);
+  process.stderr?.on('data', output);
+  process.on('error', error => { if (ws.readyState === 1) ws.send(`\r\n[terminal error: ${error.message}]\r\n`); });
+  process.on('close', code => { if (ws.readyState === 1) ws.close(1000, `Shell exited (${code ?? 0})`); });
+  ws.on('message', data => { if (process.stdin?.writable) process.stdin.write(Buffer.from(data)); });
+  const stop = () => { if (!process.killed) process.kill('SIGTERM'); };
+  ws.on('close', stop);
+  ws.on('error', stop);
+}
+
 export function createServer() {
-  return http.createServer(async (req, res) => {
+  const server = http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
       if (url.pathname.startsWith('/api/') && !['GET', 'HEAD'].includes(req.method) && req.headers['x-lightnas-request'] !== '1') send(res, 403, { error: 'This request must originate from the LightNAS interface.' });
       else if (url.pathname.startsWith('/api/')) await api(req, res, url);
-      else await staticFile(req, res, url);
+      else await staticAsset(req, res, url);
     } catch (error) {
       const status = error.status || ({ ENOENT: 404, EEXIST: 409, ENOTEMPTY: 409, EACCES: 403 }[error.code] || 500);
       if (status >= 500) console.error(error);
@@ -448,10 +525,34 @@ export function createServer() {
       send(res, status, { error: error.status ? error.message : status === 500 ? 'Unexpected server error.' : fallback });
     }
   });
+
+  const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
+  server.on('upgrade', async (req, socket, head) => {
+    try {
+      if (!sameOrigin(req)) return rejectUpgrade(socket, 403, 'Same-origin console connection required.');
+      const context = requestContext(req);
+      if (!context) return rejectUpgrade(socket, 401, 'Authentication required.');
+      const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+      const vm = url.pathname.match(/^\/api\/console\/vm\/([1-9][0-9]{1,5})$/);
+      const container = url.pathname.match(/^\/api\/console\/container\/(lightnas-[a-z0-9][a-z0-9-]{0,60})$/);
+      if (!vm && !container) return rejectUpgrade(socket, 403, 'Unknown console endpoint.');
+      if (vm && !context.permissions.includes('vms.manage')) return rejectUpgrade(socket, 403, 'VM management permission required.');
+      if (container && !context.permissions.includes('containers.manage')) return rejectUpgrade(socket, 403, 'Container management permission required.');
+
+      const backend = vm ? await proxmoxConsoleSocket(Number(vm[1])) : await openContainerShell(container[1]);
+      wss.handleUpgrade(req, socket, head, ws => {
+        if (vm) bridgeWebSocketToSocket(ws, backend);
+        else bridgeWebSocketToProcess(ws, backend);
+      });
+    } catch (error) {
+      if (!socket.destroyed) rejectUpgrade(socket, error.status === 401 ? 401 : 403, error.message || 'Console unavailable.');
+    }
+  });
+  return server;
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const host = process.env.NAS_HOST || '127.0.0.1';
   const port = Number(process.env.NAS_PORT || 3080);
-  createServer().listen(port, host, () => console.log(`Lightweight AI NAS OS is running at http://${host}:${port}`));
+  createServer().listen(port, host, () => console.log(`LightNAS is running at http://${host}:${port}`));
 }
