@@ -1,6 +1,6 @@
 const previewExtensions = {
   image: new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'avif']),
-  video: new Set(['mp4', 'webm', 'mov', 'm4v', 'ogv']),
+  video: new Set(['mp4', 'webm', 'mov', 'm4v', 'ogv', 'mkv', 'avi']),
   audio: new Set(['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac']),
   pdf: new Set(['pdf']),
   text: new Set(['txt', 'log', 'md', 'json', 'csv', 'xml', 'yaml', 'yml', 'ini', 'conf', 'sh', 'js', 'mjs', 'css', 'html'])
@@ -10,12 +10,12 @@ const permissionLabels = {
   'files.read': ['Read files', 'Browse, preview and download files.'],
   'files.write': ['Write files', 'Upload, create folders and delete file entries.'],
   'media.convert': ['Convert media', 'Run FFmpeg conversions from Files.'],
-  'storage.view': ['View storage', 'See attached volumes, capacity and storage inventory.'],
-  'storage.manage': ['Manage storage', 'Create file spaces and manage delegated datasets.'],
+  'storage.view': ['View storage', 'See attached volumes, host disks and storage inventory.'],
+  'storage.manage': ['Manage storage', 'Create file spaces and manage Proxmox/ZFS storage.'],
   'shares.manage': ['Manage shares', 'Create and remove share configurations.'],
   'apps.manage': ['Manage apps', 'Install, start, stop and remove catalog applications.'],
-  'containers.manage': ['Manage containers', 'Create and control LightNAS Docker containers.'],
-  'vms.manage': ['Manage VMs', 'Create and control virtual machines.'],
+  'containers.manage': ['Manage containers', 'Create, edit, control and open LightNAS containers.'],
+  'vms.manage': ['Manage VMs', 'Create, edit, control and open VM consoles.'],
   'network.view': ['View networking', 'View network interfaces, routes and firewall inventory.'],
   'system.view': ['View system health', 'View monitoring, CPU, memory and system details.']
 };
@@ -31,6 +31,10 @@ function bytes(value) {
   let unit = 0;
   while (number >= 1024 && unit < units.length - 1) { number /= 1024; unit += 1; }
   return `${number >= 10 || unit === 0 ? number.toFixed(0) : number.toFixed(1)} ${units[unit]}`;
+}
+
+function percent(used, total) {
+  return total > 0 ? Math.max(0, Math.min(100, Math.round((used / total) * 100))) : 0;
 }
 
 async function apiRequest(path, options = {}) {
@@ -153,60 +157,127 @@ function ensureRuntimeDialog() {
   dialog.className = 'lightnas-dialog runtime-dialog';
   dialog.innerHTML = `
     <div class="dialog-body">
-      <div class="dialog-head"><div><span class="eyebrow">RUNTIME CONSOLE</span><h2 data-runtime-title>Container</h2></div><button class="dialog-close" type="button" data-runtime-close>×</button></div>
+      <div class="dialog-head"><div><span class="eyebrow">RUNTIME OUTPUT</span><h2 data-runtime-title>Container</h2></div><button class="dialog-close" type="button" data-runtime-close>×</button></div>
       <pre class="runtime-output" data-runtime-output>Ready.</pre>
-      <form data-runtime-command-form>
-        <label>Command<input name="command" autocomplete="off" value="id; uname -a" placeholder="Enter a shell command"></label>
-        <div class="dialog-actions"><button class="secondary" type="button" data-runtime-logs>Logs</button><button class="primary" type="submit">Run command</button></div>
-      </form>
+      <div class="dialog-actions"><button class="primary" type="button" data-runtime-close>Close</button></div>
     </div>`;
   document.body.append(dialog);
-  dialog.querySelector('[data-runtime-close]').addEventListener('click', () => dialog.close());
-  dialog.querySelector('[data-runtime-command-form]').addEventListener('submit', async event => {
+  dialog.querySelectorAll('[data-runtime-close]').forEach(button => button.addEventListener('click', () => dialog.close()));
+  return dialog;
+}
+
+function ensureStoragePolicyDialog() {
+  let dialog = document.querySelector('#lightnas-storage-policy-dialog');
+  if (dialog) return dialog;
+  dialog = document.createElement('dialog');
+  dialog.id = 'lightnas-storage-policy-dialog';
+  dialog.className = 'lightnas-dialog';
+  dialog.innerHTML = `
+    <form class="dialog-body" data-storage-policy-form>
+      <div class="dialog-head"><div><span class="eyebrow">PROXMOX STORAGE</span><h2 data-storage-policy-title>Storage policy</h2></div><button class="dialog-close" type="button" data-storage-policy-close>×</button></div>
+      <p class="muted">Choose which Proxmox content types this storage is allowed to hold.</p>
+      <div class="content-policy-grid"></div>
+      <div class="form-error" role="alert"></div>
+      <div class="dialog-actions"><button class="secondary" type="button" data-storage-policy-close>Cancel</button><button class="primary" type="submit">Save policy</button></div>
+    </form>`;
+  document.body.append(dialog);
+  dialog.querySelectorAll('[data-storage-policy-close]').forEach(button => button.addEventListener('click', () => dialog.close()));
+  dialog.querySelector('form').addEventListener('submit', async event => {
     event.preventDefault();
-    const name = dialog.dataset.container;
-    const command = new FormData(event.currentTarget).get('command')?.toString() || '';
-    const output = dialog.querySelector('[data-runtime-output]');
-    output.textContent = 'Running…';
+    const error = event.currentTarget.querySelector('.form-error');
+    error.textContent = '';
+    const content = [...event.currentTarget.querySelectorAll('input:checked')].map(input => input.value);
     try {
-      const result = await apiRequest('/api/containers', { method: 'POST', body: JSON.stringify({ name, action: 'shell', command }) });
-      output.textContent = result.output || '(command completed with no output)';
-    } catch (error) { output.textContent = error.message; }
-  });
-  dialog.querySelector('[data-runtime-logs]').addEventListener('click', async () => {
-    const output = dialog.querySelector('[data-runtime-output]');
-    output.textContent = 'Loading logs…';
-    try {
-      const result = await apiRequest('/api/containers', { method: 'POST', body: JSON.stringify({ name: dialog.dataset.container, action: 'logs' }) });
-      output.textContent = result.output || '(no logs)';
-    } catch (error) { output.textContent = error.message; }
+      await apiRequest('/api/proxmox/storage', { method: 'POST', body: JSON.stringify({ storage: dialog.dataset.storage, content }) });
+      dialog.close();
+      document.querySelector('#content .unified-storage')?.remove();
+      enhanceStorage();
+    } catch (problem) { error.textContent = problem.message; }
   });
   return dialog;
 }
 
+function hideLegacySections(content, labels) {
+  for (const heading of [...content.querySelectorAll('h2')]) {
+    if (!labels.includes(heading.textContent.trim())) continue;
+    const next = heading.nextElementSibling;
+    heading.classList.add('legacy-hidden');
+    if (next) next.classList.add('legacy-hidden');
+  }
+}
+
+function storageUsageCard(item) {
+  const total = Number(item.totalBytes || item.total || 0);
+  const available = Number(item.availableBytes || item.available || 0);
+  const used = Number(item.usedBytes || Math.max(0, total - available));
+  const usedPercent = percent(used, total);
+  const contents = (item.content || []).map(value => `<span class="content-badge">${escapeHtml(value)}</span>`).join('');
+  return `<article class="inventory-card">
+    <div class="volume-title"><h3>${escapeHtml(item.name)}</h3><span class="volume-state ${item.active === false ? 'readonly' : 'writable'}">${item.active === false ? 'OFFLINE' : 'ACTIVE'}</span></div>
+    <p>${escapeHtml(item.type || 'storage')} ${contents ? `· ${contents}` : ''}</p>
+    <div class="track"><span style="width:${usedPercent}%"></span></div>
+    <p><strong>${bytes(available)} free</strong> of ${bytes(total)} · ${usedPercent}% used</p>
+    <button class="secondary" type="button" data-storage-policy="${escapeHtml(item.name)}" data-storage-content="${escapeHtml((item.content || []).join(','))}">Edit allowed content</button>
+  </article>`;
+}
+
 async function enhanceStorage() {
   const content = document.querySelector('#content');
-  if (!content || !['#storage', '#pools'].includes(location.hash) || content.querySelector('.attached-storage')) return;
+  if (!content || !['#storage', '#pools'].includes(location.hash) || content.querySelector('.unified-storage')) return;
   try {
     const storage = await apiRequest('/api/storage');
     const volumes = storage.attachedVolumes || [];
-    if (!volumes.length) return;
+    const host = storage.host || null;
+    if (!volumes.length && !host) return;
     const section = document.createElement('section');
-    section.className = 'attached-storage';
-    section.innerHTML = `<h2>Attached NAS storage</h2><p class="muted">Storage mounted into this LightNAS appliance. Raw Proxmox host disks stay hidden from the guest.</p><div class="attached-storage-grid">${volumes.map(volume => `
-      <article class="attached-storage-card">
-        <div class="volume-title"><h3>${escapeHtml(volume.mountPoint)}</h3><span class="volume-state ${volume.readOnly ? 'readonly' : 'writable'}">${volume.readOnly ? 'READ ONLY' : 'WRITABLE'}</span></div>
-        <p>${escapeHtml(volume.device)} · ${escapeHtml(volume.type)}</p>
-        <div class="track"><span style="width:${Math.min(100, volume.usedPercent || 0)}%"></span></div>
-        <p><strong>${bytes(volume.availableBytes)} free</strong> of ${bytes(volume.totalBytes)} · ${volume.usedPercent}% used</p>
-        <p class="muted">${volume.readOnly ? 'LightNAS can browse this volume but the service account cannot modify it. Fix guest ownership/ACL or mount permissions to enable editing.' : 'Available for folders, uploads and file management under Files → Attached storage.'}</p>
-      </article>`).join('')}</div>`;
-    const hero = content.querySelector('.module-hero');
-    if (hero && location.hash === '#pools') {
-      hero.innerHTML = `<h2>Attached storage is ready</h2><p>LightNAS is running in a container. Use the mounted NAS volumes below. Physical pool creation belongs on bare metal or a VM with directly attached data disks.</p>`;
-      hero.insertAdjacentElement('afterend', section);
-    } else content.querySelector('.page-head')?.insertAdjacentElement('afterend', section);
+    section.className = 'unified-storage';
+
+    const memory = host?.status?.memory || null;
+    const memoryPercent = memory?.totalBytes ? percent(memory.usedBytes, memory.totalBytes) : 0;
+    const hostStorages = host?.storages || [];
+    const disks = host?.disks || [];
+    const zfs = host?.zfs || { pools: [], datasets: [] };
+    section.innerHTML = `
+      <div class="inventory-heading"><div><span class="eyebrow">UNIFIED INFRASTRUCTURE INVENTORY</span><h2>Storage visible to LightNAS</h2><p class="muted">Local mounts, attached NAS volumes and Proxmox host storage are shown together. Physical disks remain protected unless the host bridge proves they are unused.</p></div><button class="secondary" type="button" data-refresh-inventory>Refresh</button></div>
+      ${host ? `<div class="host-monitor-grid">
+        <article class="monitor-card"><span>Proxmox host RAM</span><strong>${bytes(memory?.usedBytes || 0)}</strong><div class="track"><span style="width:${memoryPercent}%"></span></div><small>${bytes(memory?.freeBytes || 0)} free of ${bytes(memory?.totalBytes || 0)}</small></article>
+        <article class="monitor-card"><span>Host CPU</span><strong>${Number(host.status?.cpuPercent || 0).toFixed(1)}%</strong><div class="track"><span style="width:${Math.min(100, Number(host.status?.cpuPercent || 0))}%"></span></div><small>${host.status?.cpuCount || '—'} logical CPUs</small></article>
+        <article class="monitor-card"><span>Physical drives</span><strong>${disks.length}</strong><small>${disks.filter(item => item.osProtected).length} OS-protected · ${disks.filter(item => item.eligibleForClean).length} available to clean</small></article>
+        <article class="monitor-card"><span>Proxmox storages</span><strong>${hostStorages.length}</strong><small>${hostStorages.filter(item => item.active !== false).length} active storage definitions</small></article>
+      </div>` : ''}
+      ${volumes.length ? `<h2>Attached LightNAS volumes</h2><div class="inventory-grid">${volumes.map(volume => `<article class="inventory-card"><div class="volume-title"><h3>${escapeHtml(volume.mountPoint)}</h3><span class="volume-state ${volume.readOnly ? 'readonly' : 'writable'}">${volume.readOnly ? 'READ ONLY' : 'WRITABLE'}</span></div><p>${escapeHtml(volume.device)} · ${escapeHtml(volume.type)}</p><div class="track"><span style="width:${Math.min(100, volume.usedPercent || 0)}%"></span></div><p><strong>${bytes(volume.availableBytes)} free</strong> of ${bytes(volume.totalBytes)} · ${volume.usedPercent}% used</p></article>`).join('')}</div>` : ''}
+      ${hostStorages.length ? `<h2>Proxmox virtual storages</h2><div class="inventory-grid">${hostStorages.map(storageUsageCard).join('')}</div>` : ''}
+      ${disks.length ? `<h2>Host physical disks</h2><div class="inventory-grid">${disks.map(disk => `<article class="inventory-card disk-card"><div class="volume-title"><h3>${escapeHtml(disk.path)}</h3><span class="volume-state ${disk.osProtected || disk.inUse ? 'readonly' : 'writable'}">${disk.osProtected ? 'OS PROTECTED' : disk.inUse ? 'IN USE' : 'AVAILABLE'}</span></div><p>${escapeHtml(disk.model || 'Unknown model')} · ${escapeHtml(disk.transport || 'unknown transport')} · ${bytes(disk.sizeBytes)}</p><p class="muted">${disk.useReasons?.length ? escapeHtml(disk.useReasons.join(' · ')) : 'No mounted filesystem, LVM VG or ZFS membership detected.'}</p>${disk.eligibleForClean ? `<button class="secondary danger-button" type="button" data-clean-disk="${escapeHtml(disk.path)}">Reset / clean disk</button>` : ''}</article>`).join('')}</div>` : ''}
+      ${zfs.pools?.length ? `<h2>Host ZFS pools</h2><div class="inventory-grid">${zfs.pools.map(pool => `<article class="inventory-card"><h3>${escapeHtml(pool.name)}</h3><p>Health: ${escapeHtml(pool.health)}</p><div class="track"><span style="width:${percent(pool.allocatedBytes, pool.sizeBytes)}%"></span></div><p>${bytes(pool.allocatedBytes)} used · ${bytes(pool.freeBytes)} free of ${bytes(pool.sizeBytes)}</p></article>`).join('')}</div>` : ''}
+      ${zfs.datasets?.length ? `<h2>Host ZFS datasets</h2><div class="inventory-grid">${zfs.datasets.map(dataset => `<article class="inventory-card"><h3>${escapeHtml(dataset.name)}</h3><p>${escapeHtml(dataset.mountPoint)} · ${escapeHtml(dataset.compression)}</p><p>${bytes(dataset.usedBytes)} used · ${bytes(dataset.availableBytes)} available</p></article>`).join('')}</div>` : ''}`;
+
+    content.querySelector('.page-head')?.insertAdjacentElement('afterend', section);
+    if (host) hideLegacySections(content, ['Disks', 'ZFS pools', 'ZFS datasets', 'Mounted filesystems', 'Existing ZFS pools']);
   } catch {}
+}
+
+let monitorTimer;
+async function enhanceHomeMonitor() {
+  if (location.hash && location.hash !== '#home') return;
+  const content = document.querySelector('#content');
+  if (!content) return;
+  try {
+    const overview = await apiRequest('/api/overview');
+    const host = overview.host;
+    if (!host) return;
+    let section = content.querySelector('.host-live-monitor');
+    if (!section) {
+      section = document.createElement('section');
+      section.className = 'host-live-monitor panel';
+      content.querySelector('.metric-grid')?.insertAdjacentElement('afterend', section);
+    }
+    const memory = host.status?.memory || {};
+    const memPercent = percent(memory.usedBytes, memory.totalBytes);
+    const storages = host.storages || [];
+    section.innerHTML = `<div class="panel-head"><div><span class="eyebrow">PROXMOX HOST MONITOR</span><h2>Live host resources</h2></div><small>Auto refreshes</small></div><div class="host-monitor-grid"><article class="monitor-card"><span>RAM used</span><strong>${bytes(memory.usedBytes || 0)}</strong><div class="track"><span style="width:${memPercent}%"></span></div><small>${bytes(memory.freeBytes || 0)} free / ${bytes(memory.totalBytes || 0)} total</small></article><article class="monitor-card"><span>CPU use</span><strong>${Number(host.status?.cpuPercent || 0).toFixed(1)}%</strong><div class="track"><span style="width:${Math.min(100, Number(host.status?.cpuPercent || 0))}%"></span></div><small>${host.status?.cpuCount || '—'} logical CPUs</small></article>${storages.slice(0, 4).map(item => { const total = item.totalBytes || 0; const used = item.usedBytes || Math.max(0, total - (item.availableBytes || 0)); const p = percent(used,total); return `<article class="monitor-card"><span>${escapeHtml(item.name)}</span><strong>${bytes(used)}</strong><div class="track"><span style="width:${p}%"></span></div><small>${bytes(item.availableBytes || 0)} free / ${bytes(total)} total</small></article>`; }).join('')}</div>`;
+  } catch {}
+  clearTimeout(monitorTimer);
+  if (!location.hash || location.hash === '#home') monitorTimer = setTimeout(enhanceHomeMonitor, 10000);
 }
 
 function portFromDocker(ports) {
@@ -229,8 +300,9 @@ async function enhanceRuntimeControls() {
         actions.className = 'runtime-actions';
         const running = item.state === 'running';
         const webPort = portFromDocker(item.ports);
-        actions.innerHTML = `${webPort ? `<button class="secondary" data-container-open="${webPort}">Open</button>` : ''}
-          ${running ? `<button class="secondary" data-container-action="stop" data-container="${escapeHtml(item.name)}">Stop</button><button class="secondary" data-container-action="restart" data-container="${escapeHtml(item.name)}">Restart</button><button class="secondary" data-container-console="${escapeHtml(item.name)}">Console</button>` : `<button class="secondary" data-container-action="start" data-container="${escapeHtml(item.name)}">Start</button>`}
+        actions.innerHTML = `${webPort ? `<button class="secondary" data-container-open="${webPort}">Open app</button>` : ''}
+          ${running ? `<button class="secondary" data-container-action="stop" data-container="${escapeHtml(item.name)}">Stop</button><button class="secondary" data-container-action="restart" data-container="${escapeHtml(item.name)}">Restart</button><button class="primary" data-container-console="${escapeHtml(item.name)}">Terminal</button>` : `<button class="primary" data-container-action="start" data-container="${escapeHtml(item.name)}">Start</button>`}
+          <button class="secondary" data-container-edit="${escapeHtml(item.name)}">Edit</button>
           <button class="secondary" data-container-logs="${escapeHtml(item.name)}">Logs</button>
           <button class="secondary danger-button" data-container-action="remove" data-container="${escapeHtml(item.name)}">Remove</button>`;
         row.append(actions);
@@ -245,26 +317,38 @@ async function enhanceRuntimeControls() {
           if (option) option.textContent = `${detail.name} · ${detail.type}${detail.available ? ` · ${bytes(detail.available)} free` : ''}`;
         }
       }
-      if (vm.proxmoxUrl && !content.querySelector('[data-open-proxmox]')) {
-        const button = document.createElement('button');
-        button.className = 'secondary'; button.type = 'button'; button.dataset.openProxmox = vm.proxmoxUrl; button.textContent = 'Open Proxmox';
-        content.querySelector('.page-head .head-actions')?.prepend(button);
-      }
       for (const item of vm.machineDetails || []) {
         const row = [...content.querySelectorAll('.storage-row')].find(candidate => candidate.querySelector('h3')?.textContent.includes(`(${item.vmid})`));
         if (!row || row.querySelector('.runtime-actions')) continue;
         const actions = document.createElement('div');
         actions.className = 'runtime-actions';
         const running = item.status === 'running';
-        actions.innerHTML = `${running ? `<button class="secondary" data-vm-action="shutdown" data-vmid="${item.vmid}">Shutdown</button><button class="secondary" data-vm-action="reboot" data-vmid="${item.vmid}">Reboot</button><button class="secondary" data-vm-action="stop" data-vmid="${item.vmid}">Stop</button>` : `<button class="secondary" data-vm-action="start" data-vmid="${item.vmid}">Start</button>`}
+        const memoryMiB = Math.max(1, Math.round((item.memory || 0) / 1048576));
+        actions.innerHTML = `${running ? `<button class="primary" data-vm-console="${item.vmid}" data-vm-name="${escapeHtml(item.name)}">noVNC Console</button><button class="secondary" data-vm-action="shutdown" data-vmid="${item.vmid}">Shutdown</button><button class="secondary" data-vm-action="reboot" data-vmid="${item.vmid}">Reboot</button><button class="secondary" data-vm-action="stop" data-vmid="${item.vmid}">Stop</button>` : `<button class="primary" data-vm-action="start" data-vmid="${item.vmid}">Start</button>`}
+          <button class="secondary" data-vm-edit="${item.vmid}" data-vm-name="${escapeHtml(item.name)}" data-vm-memory="${memoryMiB}" data-vm-cpus="${item.cpus || 1}">Edit</button>
           <button class="secondary" data-vm-action="reset" data-vmid="${item.vmid}">Reset</button>
-          ${vm.proxmoxUrl ? `<button class="secondary" data-open-proxmox="${escapeHtml(vm.proxmoxUrl)}">Console / Proxmox</button>` : ''}
           <button class="secondary danger-button" data-vm-action="delete" data-vmid="${item.vmid}">Delete</button>`;
         row.append(actions);
       }
     }
-  } catch {} finally {
-    delete content.dataset.runtimeEnhancing;
+  } catch {} finally { delete content.dataset.runtimeEnhancing; }
+}
+
+function enhanceFileThumbnails() {
+  if (location.hash !== '#files') return;
+  const folder = currentFolder();
+  for (const button of [...document.querySelectorAll('#content .file-name[data-directory="false"]')]) {
+    if (button.querySelector('.file-thumb')) continue;
+    const name = button.dataset.open || '';
+    const kind = previewKind(name);
+    if (!['image', 'video'].includes(kind)) continue;
+    const path = joinPath(folder, name);
+    const media = document.createElement(kind === 'image' ? 'img' : 'video');
+    media.className = 'file-thumb';
+    media.loading = 'lazy';
+    media.src = `/api/files/download?path=${encodeURIComponent(path)}${kind === 'video' ? '#t=0.15' : ''}`;
+    if (kind === 'video') { media.muted = true; media.preload = 'metadata'; media.playsInline = true; }
+    button.prepend(media);
   }
 }
 
@@ -298,11 +382,11 @@ function enhanceAdminCenter() {
   const content = document.querySelector('#content');
   if (!content || content.querySelector('.admin-tool-groups')) return;
   const groups = [
-    ['Access & security', [['users','Users & policies'],['settings','Appliance settings'],['capabilities','Capabilities']]],
-    ['Storage & data', [['storage','Storage'],['pools','Pools & datasets'],['files','File manager'],['shares','Shares']]],
+    ['Identity & access', [['users','Users & policies'],['settings','Appliance settings'],['integrations','Identity integrations']]],
+    ['Storage & data', [['storage','Unified storage'],['pools','Pools & datasets'],['files','File manager'],['shares','Shares']]],
     ['Compute & apps', [['apps','App Store'],['containers','Containers'],['vms','Virtual machines']]],
-    ['Network & services', [['network','Networking'],['firewall','Firewall'],['integrations','Integrations'],['smtp','Email / SMTP']]],
-    ['System operations', [['monitoring','Monitoring'],['home','Overview']]]
+    ['Network & security', [['network','Networking'],['firewall','Firewall'],['smtp','Email / SMTP']]],
+    ['System operations', [['monitoring','Monitoring'],['capabilities','Capabilities'],['home','Overview']]]
   ];
   const section = document.createElement('section');
   section.className = 'admin-tool-groups';
@@ -314,7 +398,9 @@ function scheduleEnhancements() {
   clearTimeout(scheduleEnhancements.timer);
   scheduleEnhancements.timer = setTimeout(() => {
     enhanceStorage();
+    enhanceHomeMonitor();
     enhanceRuntimeControls();
+    enhanceFileThumbnails();
     enhancePolicies();
     enhanceAdminCenter();
   }, 100);
@@ -327,8 +413,7 @@ window.addEventListener('load', scheduleEnhancements);
 
 document.addEventListener('submit', async event => {
   if (event.target.id !== 'user-form' || !event.target.querySelector('.policy-grid')) return;
-  event.preventDefault();
-  event.stopImmediatePropagation();
+  event.preventDefault(); event.stopImmediatePropagation();
   const form = event.target;
   const error = form.querySelector('.form-error');
   error.textContent = '';
@@ -356,15 +441,39 @@ document.addEventListener('click', async event => {
   const fileButton = event.target.closest('#content .file-name[data-directory="false"]');
   if (fileButton && previewKind(fileButton.dataset.open || '')) {
     event.preventDefault(); event.stopImmediatePropagation();
-    try { await openPreview(fileButton.dataset.open); }
-    catch (problem) { alert(problem.message); }
+    try { await openPreview(fileButton.dataset.open); } catch (problem) { alert(problem.message); }
     return;
   }
 
-  const createPool = event.target.closest('#content [data-action="create-pool"]');
-  if (createPool && document.querySelector('#content .attached-storage')) {
-    event.preventDefault(); event.stopImmediatePropagation();
-    alert('This LightNAS instance is running in an LXC. Its mounted storage is already attached and ready to use. Raw Proxmox host disks are intentionally not exposed for pool creation.');
+  const refresh = event.target.closest('[data-refresh-inventory]');
+  if (refresh) { document.querySelector('#content .unified-storage')?.remove(); enhanceStorage(); return; }
+
+  const storagePolicy = event.target.closest('[data-storage-policy]');
+  if (storagePolicy) {
+    const dialog = ensureStoragePolicyDialog();
+    dialog.dataset.storage = storagePolicy.dataset.storagePolicy;
+    dialog.querySelector('[data-storage-policy-title]').textContent = storagePolicy.dataset.storagePolicy;
+    const selected = (storagePolicy.dataset.storageContent || '').split(',').filter(Boolean);
+    const options = [['images','VM disks'],['rootdir','Container disks'],['iso','ISO images'],['vztmpl','Container templates'],['backup','Backups'],['snippets','Snippets'],['import','Import files']];
+    dialog.querySelector('.content-policy-grid').innerHTML = options.map(([value,label]) => `<label><input type="checkbox" value="${value}" ${selected.includes(value) ? 'checked' : ''}> ${label}</label>`).join('');
+    dialog.querySelector('.form-error').textContent = '';
+    dialog.showModal();
+    return;
+  }
+
+  const cleanDisk = event.target.closest('[data-clean-disk]');
+  if (cleanDisk) {
+    const path = cleanDisk.dataset.cleanDisk;
+    const phrase = `CLEAN ${path}`;
+    const confirmation = prompt(`This removes partition/filesystem signatures from ${path}.\n\nLightNAS already verified it is not the OS disk and is not mounted/LVM/ZFS in use.\n\nType exactly:\n${phrase}`);
+    if (confirmation !== phrase) return;
+    cleanDisk.disabled = true;
+    try {
+      await apiRequest('/api/proxmox/disk-clean', { method: 'POST', body: JSON.stringify({ path, confirm: confirmation }) });
+      document.querySelector('#content .unified-storage')?.remove();
+      await enhanceStorage();
+    } catch (error) { alert(error.message); }
+    finally { cleanDisk.disabled = false; }
     return;
   }
 
@@ -373,20 +482,32 @@ document.addEventListener('click', async event => {
 
   const consoleButton = event.target.closest('[data-container-console]');
   if (consoleButton) {
-    const dialog = ensureRuntimeDialog();
-    dialog.dataset.container = consoleButton.dataset.containerConsole;
-    dialog.querySelector('[data-runtime-title]').textContent = consoleButton.dataset.containerConsole;
-    dialog.querySelector('[data-runtime-output]').textContent = 'Ready. Run a command or view logs.';
-    dialog.showModal();
+    window.open(`/container-console.html?name=${encodeURIComponent(consoleButton.dataset.containerConsole)}`, '_blank', 'noopener,width=1100,height=760');
     return;
   }
   const logsButton = event.target.closest('[data-container-logs]');
   if (logsButton) {
     const dialog = ensureRuntimeDialog();
-    dialog.dataset.container = logsButton.dataset.containerLogs;
     dialog.querySelector('[data-runtime-title]').textContent = `${logsButton.dataset.containerLogs} logs`;
+    dialog.querySelector('[data-runtime-output]').textContent = 'Loading logs…';
     dialog.showModal();
-    dialog.querySelector('[data-runtime-logs]').click();
+    try {
+      const result = await apiRequest('/api/containers', { method: 'POST', body: JSON.stringify({ name: logsButton.dataset.containerLogs, action: 'logs' }) });
+      dialog.querySelector('[data-runtime-output]').textContent = result.output || '(no logs)';
+    } catch (error) { dialog.querySelector('[data-runtime-output]').textContent = error.message; }
+    return;
+  }
+  const containerEdit = event.target.closest('[data-container-edit]');
+  if (containerEdit) {
+    const name = containerEdit.dataset.containerEdit;
+    const memory = Number(prompt(`Memory limit for ${name} in MiB`, '512'));
+    if (!Number.isInteger(memory)) return;
+    const newName = prompt('Container name', name);
+    if (!newName) return;
+    try {
+      await apiRequest('/api/containers', { method: 'POST', body: JSON.stringify({ name, action: 'update', memoryMiB: memory, newName }) });
+      document.querySelector('#content [data-action="refresh-runtime"]')?.click();
+    } catch (error) { alert(error.message); }
     return;
   }
   const containerAction = event.target.closest('[data-container-action]');
@@ -403,6 +524,25 @@ document.addEventListener('click', async event => {
     return;
   }
 
+  const vmConsole = event.target.closest('[data-vm-console]');
+  if (vmConsole) {
+    window.open(`/vm-console.html?vmid=${encodeURIComponent(vmConsole.dataset.vmConsole)}&name=${encodeURIComponent(vmConsole.dataset.vmName || '')}`, '_blank', 'noopener,width=1280,height=820');
+    return;
+  }
+  const vmEdit = event.target.closest('[data-vm-edit]');
+  if (vmEdit) {
+    const vmid = Number(vmEdit.dataset.vmEdit);
+    const name = prompt('VM name', vmEdit.dataset.vmName || `VM-${vmid}`);
+    if (!name) return;
+    const memoryMiB = Number(prompt('Memory (MiB)', vmEdit.dataset.vmMemory || '2048'));
+    const cpus = Number(prompt('Virtual CPUs', vmEdit.dataset.vmCpus || '2'));
+    if (!Number.isInteger(memoryMiB) || !Number.isInteger(cpus)) return;
+    try {
+      await apiRequest('/api/vms', { method: 'POST', body: JSON.stringify({ vmid, action: 'update', name, memoryMiB, cpus }) });
+      document.querySelector('#content [data-action="refresh-runtime"]')?.click();
+    } catch (error) { alert(error.message); }
+    return;
+  }
   const vmAction = event.target.closest('[data-vm-action]');
   if (vmAction) {
     const action = vmAction.dataset.vmAction;
@@ -416,9 +556,6 @@ document.addEventListener('click', async event => {
     finally { vmAction.disabled = false; }
     return;
   }
-
-  const proxmox = event.target.closest('[data-open-proxmox]');
-  if (proxmox) { window.open(proxmox.dataset.openProxmox, '_blank', 'noopener'); return; }
 
   const policy = event.target.closest('[data-save-policy]');
   if (policy) {
