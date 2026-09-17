@@ -15,6 +15,7 @@ export class JsonStore {
       activity: []
     };
     this.writeQueue = Promise.resolve();
+    this.activityListener = null;
   }
 
   async load() {
@@ -33,6 +34,10 @@ export class JsonStore {
     return this.state;
   }
 
+  setActivityListener(listener) {
+    this.activityListener = typeof listener === 'function' ? listener : null;
+  }
+
   async save() {
     const snapshot = JSON.stringify(this.state, null, 2);
     this.writeQueue = this.writeQueue.then(async () => {
@@ -45,13 +50,16 @@ export class JsonStore {
   }
 
   addActivity(type, message, severity = 'info') {
-    this.state.activity.unshift({
+    const event = {
       id: crypto.randomUUID(),
       type,
       message,
       severity,
       timestamp: new Date().toISOString()
-    });
+    };
+    this.state.activity.unshift(event);
     this.state.activity = this.state.activity.slice(0, 100);
+    if (this.activityListener) queueMicrotask(() => Promise.resolve(this.activityListener(event)).catch(() => {}));
+    return event;
   }
 }
