@@ -39,7 +39,7 @@ LightNAS now treats virtualization as a **built-in OS function**, not as a depen
 - **Virtual machines:** native QEMU/KVM managed through libvirt. LightNAS creates qcow2-backed guests, attaches ISO media, uses VirtIO devices, controls lifecycle through libvirt and exposes the guest console through embedded noVNC.
 - **Privileged operations:** a root-owned `lightnas-host-agent.service` exposes a narrow Unix-socket API to the unprivileged Node control plane. It owns LXC lifecycle and host network/firewall mutations; it does not expose arbitrary shell execution.
 - **Networking:** NetworkManager is the editable host network layer for wired Ethernet, Wi-Fi, connection profiles, DHCP/static IPv4, DNS/gateway, bridges and VLANs. UFW/nftables provide the firewall layer. Wi-Fi can be the appliance uplink; guests should normally use a routed/NAT virtual network when a station-mode Wi-Fi device cannot participate in a transparent Ethernet bridge.
-- **Apps:** Docker/OCI is optional and separate. It is enabled only when `LIGHTNAS_ENABLE_DOCKER_APPS=1` is supplied. The App Store may use it, but the Containers page never does.
+- **Apps:** Docker/OCI is a separate App Store engine and is enabled by default by the one-click installer. It can be disabled with `LIGHTNAS_ENABLE_DOCKER_APPS=0`. The Containers page never uses Docker; System Containers remain native LXC/liblxc.
 
 On bare metal or a normal VM, `install.sh` installs the native LXC and KVM/libvirt stack automatically. Hardware virtualization requires `/dev/kvm`; if it is missing, LightNAS reports VMs as unavailable instead of silently delegating creation to another host.
 
@@ -94,7 +94,7 @@ The installer adds Node.js 22 when required, checks out LightNAS under
 an automatically starting `lightnas.service`. Open port `3080` at the IP shown
 when installation finishes.
 
-The installer prepares native LXC/liblxc and KVM/libvirt when the environment supports them. Docker is not installed for Containers; it is optional for the App Store and can be enabled explicitly with `LIGHTNAS_ENABLE_DOCKER_APPS=1`.
+The installer prepares native LXC/liblxc plus QEMU/libvirt. It uses KVM acceleration when available and automatically falls back to QEMU TCG software virtualization when hardware virtualization is unavailable. Docker is never the System Containers backend; it is used only by the App Store and can be disabled with `LIGHTNAS_ENABLE_DOCKER_APPS=0`.
 
 On the **Proxmox node shell** (prompt such as `root@pve:~#`), with the existing LXC 170, you can use the host preparation and install helper instead. Do not run this helper at the `root@nasos:~#` prompt: `nasos` is inside the LXC and cannot change its own Proxmox configuration:
 
