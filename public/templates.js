@@ -162,14 +162,26 @@ async function openUrlDialog() {
 function renderCatalog(dialog, query = '') {
   const catalog = templateState.catalog || [];
   const normalized = query.trim().toLowerCase();
-  const matches = catalog.filter(item => !normalized || item.filename.toLowerCase().includes(normalized)).slice(0, 80);
+  const matches = catalog.filter(item => {
+    if (!normalized) return true;
+    return [item.filename, item.package, item.version, item.description, item.section, item.source]
+      .some(value => String(value || '').toLowerCase().includes(normalized));
+  }).slice(0, 160);
   const list = dialog.querySelector('[data-template-catalog-list]');
   if (!list) return;
-  list.innerHTML = matches.length ? `
-    <div class="template-table">
-      <div class="template-table-head"><span>Type</span><span>Package</span><span>Version</span><span>Description</span><span></span></div>
-      ${matches.map(item => `<div class="template-table-row"><span>${tEsc(item.type || 'lxc')}</span><span><b>${tEsc(item.package || item.filename)}</b></span><span>${tEsc(item.version || '')}</span><span>${tEsc(item.description || item.filename)}</span><span><button class="secondary" type="button" data-template-catalog-file="${tEsc(item.filename)}">Download</button></span></div>`).join('')}
-    </div>` : '<div class="empty"><p>No matching templates.</p></div>';
+  if (!matches.length) {
+    list.innerHTML = '<div class="empty"><p>No matching templates.</p></div>';
+    return;
+  }
+  const sections = [...new Set(matches.map(item => item.section || 'system'))];
+  list.innerHTML = `<div class="template-table">
+    <div class="template-table-head"><span>Type</span><span>Package</span><span>Version</span><span>Description</span><span></span></div>
+    ${sections.map(section => {
+      const rows = matches.filter(item => (item.section || 'system') === section);
+      return `<div class="template-section-row"><b>Section: ${tEsc(section)}</b><span>${rows.length} item${rows.length === 1 ? '' : 's'}</span></div>
+        ${rows.map(item => `<div class="template-table-row"><span>${tEsc(item.type || 'lxc')}</span><span><b>${tEsc(item.package || item.filename)}</b><small>${tEsc(item.source || '')}</small></span><span>${tEsc(item.version || '')}</span><span>${tEsc(item.description || item.filename)}</span><span><button class="secondary" type="button" data-template-catalog-file="${tEsc(item.filename)}">Download</button></span></div>`).join('')}`;
+    }).join('')}
+  </div>`;
 }
 
 async function openCatalogDialog() {
