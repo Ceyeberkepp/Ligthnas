@@ -225,19 +225,22 @@ function containersView() {
 function vmsView() {
   const runtime = state.runtimes?.virtualization;
   const diagnostics = runtime?.diagnostics;
-  const ready = runtime?.available && runtime?.enabled && runtime.pools?.length && runtime.networks?.length && runtime.images?.length;
+  const ready = runtime?.available && runtime?.enabled && runtime.pools?.length && runtime.networks?.length;
   const choices = items => (items || []).map(item => `<option value="${escapeHtml(item)}">${escapeHtml(item)}</option>`).join('');
+  const acceleration = runtime?.acceleration === 'kvm' ? 'KVM hardware acceleration' : runtime?.acceleration === 'tcg' ? 'QEMU software virtualization (TCG)' : escapeHtml(runtime?.provider || 'QEMU/libvirt');
   const nestedVmPanel = diagnostics?.nested ? `<div class="inventory-grid">
-    <article class="inventory-card"><h3>KVM</h3><p>${diagnostics.kvm?.usable ? `Ready · API ${diagnostics.kvm.apiVersion}` : escapeHtml(diagnostics.kvm?.error || 'Unavailable')}</p></article>
+    <article class="inventory-card"><h3>VM engine</h3><p>${escapeHtml(acceleration)}</p></article>
+    <article class="inventory-card"><h3>KVM</h3><p>${diagnostics.kvm?.usable ? `Ready · API ${diagnostics.kvm.apiVersion}` : 'Not available · software VM mode will be used'}</p></article>
     <article class="inventory-card"><h3>TUN/TAP</h3><p>${diagnostics.tun ? 'Ready' : 'Missing /dev/net/tun'}</p></article>
-    <article class="inventory-card"><h3>Mode</h3><p>Nested virtualization</p></article>
   </div>` : '';
-  return `${pageHead('Virtual machines', 'Native QEMU/KVM virtual machines managed by LightNAS through libvirt.', '<div class="head-actions"><button class="secondary" data-action="refresh-runtime">Refresh</button><button class="primary" data-action="create-vm">+ Create VM</button></div>')}
+  const isoOptions = `<option value="">No ISO — create blank VM</option>${choices(runtime?.images || [])}`;
+  return `${pageHead('Virtual machines', 'QEMU/libvirt virtual machines managed directly by LightNAS.', '<div class="head-actions"><button class="secondary" data-action="refresh-runtime">Refresh</button><button class="primary" data-action="create-vm">+ Create VM</button></div>')}
     ${runtimeBanner('virtualization')}
+    ${runtime?.warning ? `<div class="module-note"><b>Software virtualization:</b> ${escapeHtml(runtime.warning)}</div>` : ''}
     ${nestedVmPanel}
-    ${runtime?.available && runtime?.enabled && !ready ? '<div class="module-hero"><h2>VM resources needed</h2><p>Activate a local libvirt storage pool and network/bridge, then place an ISO in /var/lib/libvirt/images. LightNAS will use those resources directly.</p></div>' : ''}
-    ${ready ? `<form id="vm-form" class="panel creation-form"><h2>Create a VM</h2><p class="muted">Creates a native KVM/QEMU guest on this LightNAS host with VirtIO devices and an embedded noVNC console.</p><label>VM name<input name="name" required pattern="[a-zA-Z][a-zA-Z0-9-]{1,39}"></label><label>Memory (MiB)<input name="memoryMiB" type="number" min="1024" max="65536" value="2048" required></label><label>Virtual CPUs<input name="cpus" type="number" min="1" max="32" value="2" required></label><label>New disk (GiB)<input name="diskGiB" type="number" min="10" max="2048" value="20" required></label><label>Storage pool<select name="pool">${choices(runtime.pools)}</select></label><label>Network<select name="network">${choices(runtime.networks)}</select></label><label>Installer ISO<select name="iso">${choices(runtime.images)}</select></label><button class="primary" type="submit">Create & start VM</button><div class="form-error" role="alert"></div></form>` : ''}
-    <h2>Existing VMs</h2><div class="storage-list">${runtime?.machineDetails?.map(item => `<article class="storage-row"><div><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.status)} · ${item.cpus || '—'} vCPU · ${bytes(item.memory || 0)} RAM</p></div><div class="storage-size">${escapeHtml(runtime.provider || 'libvirt-kvm')}</div></article>`).join('') || '<div class="empty"><p>No local KVM virtual machines are visible.</p></div>'}</div>`;
+    ${runtime?.available && runtime?.enabled && !ready ? '<div class="module-hero"><h2>VM resources needed</h2><p>LightNAS needs an active local libvirt storage pool and network. The installer creates default resources automatically.</p></div>' : ''}
+    ${ready ? `<form id="vm-form" class="panel creation-form"><h2>Create a VM</h2><p class="muted">Uses KVM when hardware virtualization exists and automatically falls back to QEMU software emulation when it does not.</p><label>VM name<input name="name" required pattern="[a-zA-Z][a-zA-Z0-9-]{1,39}"></label><label>Memory (MiB)<input name="memoryMiB" type="number" min="1024" max="65536" value="2048" required></label><label>Virtual CPUs<input name="cpus" type="number" min="1" max="32" value="2" required></label><label>New disk (GiB)<input name="diskGiB" type="number" min="10" max="2048" value="20" required></label><label>Storage pool<select name="pool">${choices(runtime.pools)}</select></label><label>Network<select name="network">${choices(runtime.networks)}</select></label><label>Installer ISO<select name="iso">${isoOptions}</select></label><p class="muted">You can create the VM without an ISO. It will boot to firmware/no-boot-media until installation media is attached.</p><button class="primary" type="submit">Create & start VM</button><div class="form-error" role="alert"></div></form>` : ''}
+    <h2>Existing VMs</h2><div class="storage-list">${runtime?.machineDetails?.map(item => `<article class="storage-row"><div><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.status)} · ${item.cpus || '—'} vCPU · ${bytes(item.memory || 0)} RAM</p></div><div class="storage-size">${escapeHtml(runtime.provider || 'libvirt')}</div></article>`).join('') || '<div class="empty"><p>No local virtual machines are visible.</p></div>'}</div>`;
 }
 
 function sharesView() {
@@ -314,15 +317,34 @@ async function loadNetwork() {
 function networkView() {
   const info = state.network;
   const control = info?.control;
-  return `${pageHead('Networking', 'Manage wired Ethernet, Wi‑Fi, bridges, VLANs, addressing, routes and DNS on the LightNAS host.', '<div class="head-actions"><button class="secondary" data-action="refresh-network">Refresh</button><button class="primary" data-network-add-bridge>+ Bridge</button><button class="secondary" data-network-add-vlan>+ VLAN</button></div>')}
-    ${!info ? '<div class="empty">Loading network inventory…</div>' : `
-    <div class="module-hero"><h2>${control?.editable ? 'Host networking is editable' : 'Read-only network inventory'}</h2><p>${escapeHtml(control?.editable ? `Managed through ${control.manager}. Ethernet and Wi‑Fi can both be used for LightNAS management; VM/container guests can use a bridge or routed/NAT network.` : control?.reason || 'The local network manager is unavailable.')}</p></div>
-    <h2>Network devices</h2><div class="storage-list">${(control?.devices || []).map(item => `<article class="storage-row"><div><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.type)} · ${escapeHtml(item.state)} · ${escapeHtml(item.connection || 'No active profile')}</p></div><div class="runtime-actions"><button class="secondary" data-network-device="${escapeHtml(item.name)}" data-network-device-action="connect">Connect</button><button class="secondary" data-network-device="${escapeHtml(item.name)}" data-network-device-action="disconnect">Disconnect</button></div></article>`).join('') || '<div class="empty">No NetworkManager devices are visible.</div>'}</div>
+  if (!info) return `${pageHead('Networking', 'Manage wired Ethernet, Wi‑Fi, bridges, VLANs, addressing, routes and DNS on the LightNAS host.', '<button class="secondary" data-action="refresh-network">Refresh</button>')}<div class="empty">Loading network inventory…</div>`;
+
+  const uplinks = control?.uplinks || [];
+  const current = control?.currentUplink || null;
+  const currentInterface = current ? info.interfaces.find(item => item.name === current.name) : null;
+  const currentAddresses = currentInterface?.addresses?.filter(item => item.family === 'inet').map(item => `${item.address}/${item.prefix}`).join(', ') || 'No IPv4 address';
+  const wifiDevices = (control?.devices || []).filter(item => item.type === 'wifi' && !['unavailable','unmanaged'].includes(item.state));
+  const selectableUplinks = uplinks.filter(item => !item.active);
+  const deviceRows = (control?.devices || []).filter(item => item.name !== 'lo');
+
+  return `${pageHead('Networking', 'LightNAS automatically detects available wired and Wi‑Fi interfaces and uses the active default route as the current Internet connection.', '<div class="head-actions"><button class="secondary" data-action="refresh-network">Refresh</button><button class="primary" data-network-add-bridge>+ Bridge</button><button class="secondary" data-network-add-vlan>+ VLAN</button></div>')}
+    <section class="module-hero">
+      <span class="eyebrow">CURRENT INTERNET CONNECTION</span>
+      <h2>${current ? `${escapeHtml(current.kind)} · ${escapeHtml(current.name)}` : 'No active Internet uplink detected'}</h2>
+      <p>${current ? `${escapeHtml(current.connection || 'Active connection')} · ${escapeHtml(currentAddresses)}${current.gateway ? ` · gateway ${escapeHtml(current.gateway)}` : ''} · connectivity ${escapeHtml(control?.connectivity || 'unknown')}` : 'Connect an available Ethernet or Wi‑Fi interface below.'}</p>
+    </section>
+
+    ${uplinks.length ? `<h2>Available Internet connections</h2><div class="inventory-grid">${uplinks.map(item => `<article class="inventory-card"><div class="volume-title"><h3>${escapeHtml(item.kind)} · ${escapeHtml(item.name)}</h3><span class="volume-state ${item.active ? 'writable' : ''}">${item.active ? 'CURRENT' : escapeHtml(item.state.toUpperCase())}</span></div><p>${escapeHtml(item.connection || 'No active profile')}</p>${!item.active && selectableUplinks.length ? `<button class="secondary" data-uplink-prefer="${escapeHtml(item.name)}">Use this connection</button>` : '<small>Current/only available uplink</small>'}</article>`).join('')}</div>` : '<div class="module-note">No usable Ethernet or Wi‑Fi uplink is currently visible to LightNAS.</div>'}
+
+    ${wifiDevices.length ? `<h2>Wi‑Fi networks</h2><p class="muted">Wi‑Fi is shown because LightNAS detected a wireless adapter. Connecting to a network makes it the preferred uplink while keeping another link available as fallback.</p><div class="inventory-grid">${(control?.wifi || []).map(item => `<article class="inventory-card"><div class="volume-title"><h3>${escapeHtml(item.ssid)}</h3><span class="volume-state ${item.connected ? 'writable' : ''}">${item.connected ? 'CONNECTED' : `${item.signal}%`}</span></div><p>${escapeHtml(item.security || 'Open')}</p><button class="secondary" data-wifi-connect="${escapeHtml(item.ssid)}">${item.connected ? 'Use as preferred' : 'Connect'}</button></article>`).join('') || '<div class="empty">No Wi‑Fi networks are currently in range.</div>'}</div>` : ''}
+
+    <h2>Network devices</h2><div class="storage-list">${deviceRows.map(item => `<article class="storage-row"><div><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.type)} · ${escapeHtml(item.state)} · ${escapeHtml(item.connection || 'No active profile')}</p></div><div class="runtime-actions">${item.state !== 'connected' ? `<button class="secondary" data-network-device="${escapeHtml(item.name)}" data-network-device-action="connect">Connect</button>` : `<button class="secondary" data-network-device="${escapeHtml(item.name)}" data-network-device-action="disconnect">Disconnect</button>`}</div></article>`).join('') || '<div class="empty">No NetworkManager devices are visible.</div>'}</div>
+
     <h2>Connection profiles</h2><div class="storage-list">${(control?.connections || []).map(item => `<article class="storage-row"><div><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.type)} · ${escapeHtml(item.device || 'not active')} · autoconnect ${item.autoconnect ? 'on' : 'off'}</p></div><div class="runtime-actions"><button class="secondary" data-network-edit="${escapeHtml(item.name)}">Edit IPv4 / DNS</button><button class="secondary danger-button" data-network-delete="${escapeHtml(item.name)}">Delete</button></div></article>`).join('') || '<div class="empty">No connection profiles are visible.</div>'}</div>
-    <h2>Wi‑Fi networks</h2><div class="inventory-grid">${(control?.wifi || []).map(item => `<article class="inventory-card"><div class="volume-title"><h3>${escapeHtml(item.ssid)}</h3><span class="volume-state ${item.connected ? 'writable' : ''}">${item.connected ? 'CONNECTED' : `${item.signal}%`}</span></div><p>${escapeHtml(item.security || 'Open')}</p><button class="secondary" data-wifi-connect="${escapeHtml(item.ssid)}">${item.connected ? 'Reconnect' : 'Connect'}</button></article>`).join('') || '<div class="empty">No Wi‑Fi networks detected, or no Wi‑Fi adapter is installed.</div>'}</div>
+
     <h2>Live addresses</h2><div class="storage-list">${info.interfaces.map(item => `<article class="storage-row"><div><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.state || 'unknown')} · ${escapeHtml(item.mac || 'MAC unavailable')}</p></div><p>${item.addresses.map(address => `${escapeHtml(address.address)}/${address.prefix}`).join('<br>') || 'No addresses'}</p></article>`).join('') || '<div class="empty">No interfaces accessible.</div>'}</div>
-    <h2>Routes</h2><div class="storage-list">${info.routes.map(route => `<article class="storage-row"><h3>${escapeHtml(route.destination)}</h3><p>via ${escapeHtml(route.gateway || 'on-link')} · ${escapeHtml(route.device)}</p></article>`).join('') || '<div class="empty">No routes accessible.</div>'}</div>
-    <h2>DNS servers</h2><div class="panel">${info.dns.map(escapeHtml).join(', ') || 'No DNS servers found.'}</div>`}`;
+    <h2>Routes</h2><div class="storage-list">${info.routes.map(route => `<article class="storage-row"><h3>${escapeHtml(route.destination)}</h3><p>via ${escapeHtml(route.gateway || 'on-link')} · ${escapeHtml(route.device)}${route.metric !== null ? ` · metric ${route.metric}` : ''}</p></article>`).join('') || '<div class="empty">No routes accessible.</div>'}</div>
+    <h2>DNS servers</h2><div class="panel">${info.dns.map(escapeHtml).join(', ') || 'No DNS servers found.'}</div>`;
 }
 
 function firewallView() {
@@ -379,7 +401,7 @@ function bindViewActions() {
   $$('[data-action="create-vm"]', $('#content')).forEach(button => button.addEventListener('click', () => {
     const vm = state.runtimes?.virtualization;
     if (!vm?.available || !vm.enabled) return toast(vm?.reason || 'KVM/libvirt must be installed and enabled on a VM-capable host.');
-    if (!vm.pools.length || !vm.networks.length || !vm.images.length) return toast(vm.provider === 'proxmox' ? 'Select Proxmox VM storage, a bridge and a host ISO first.' : 'Activate a libvirt pool and network and add an installer ISO first.');
+    if (!vm.pools.length || !vm.networks.length) return toast(vm.provider === 'proxmox' ? 'Select VM storage and a network first.' : 'Activate a libvirt storage pool and network first.');
     $('#vm-form', $('#content'))?.scrollIntoView({ behavior: 'smooth' });
     $('#vm-form input', $('#content'))?.focus();
   }));
