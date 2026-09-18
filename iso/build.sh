@@ -20,6 +20,7 @@ lb config --mode debian --distribution trixie --architectures amd64 --binary-ima
 
 mkdir -p \
   config/package-lists \
+  config/binary_debian-installer \
   config/includes.chroot/opt/lightnas \
   config/includes.chroot/etc/systemd/system/multi-user.target.wants \
   config/includes.chroot/etc/apt/sources.list.d \
@@ -39,6 +40,8 @@ EOF
 
 cp -a "${REPO_ROOT}/src" "${REPO_ROOT}/public" "${REPO_ROOT}/scripts" "${REPO_ROOT}/package.json" \
   config/includes.chroot/opt/lightnas/
+
+cp "${REPO_ROOT}/iso/preseed.cfg" config/binary_debian-installer/preseed.cfg
 
 cat >config/includes.chroot/etc/systemd/system/lightnas-runtime-init.service <<'EOF'
 [Unit]
@@ -131,7 +134,7 @@ for group in libvirt kvm; do
   getent group "$group" >/dev/null 2>&1 && usermod -aG "$group" lightnas || true
 done
 
-install -d -o lightnas -g lightnas -m 0700 /var/lib/lightnas /var/lib/lightnas/files
+install -d -o lightnas -g lightnas -m 0700 /var/lib/lightnas /var/lib/lightnas/files /var/lib/lightnas/storage /var/lib/lightnas/storage/local
 install -m 0600 /dev/null /etc/lightnas/runtime.env
 npm --prefix /opt/lightnas install --omit=dev --no-audit --no-fund
 
