@@ -222,14 +222,15 @@ def container_inventory() -> dict:
 
 
 def local_networks() -> list[str]:
-    # LXC veth devices need a bridge. Do not offer arbitrary physical or Wi-Fi
-    # interfaces here; Wi-Fi uplinks use a routed/NAT guest network instead.
+    # LXC veth devices need an administratively-up Linux bridge. Do not offer
+    # Docker's private bridge or inactive libvirt bridges as container targets.
     result = []
     try:
         links = json.loads(run(["ip", "-j", "link", "show", "type", "bridge"], timeout=10) or "[]")
         for item in links:
             name = str(item.get("ifname") or "")
-            if IFACE_RE.fullmatch(name) and name != "docker0":
+            flags = set(item.get("flags") or [])
+            if IFACE_RE.fullmatch(name) and name != "docker0" and "UP" in flags:
                 result.append(name)
     except Exception:
         pass
@@ -394,11 +395,16 @@ def network_inventory() -> dict:
     for item in devices:
         if item["type"] not in {"ethernet", "wifi"}:
             continue
-        if item["state"] in {"unavailable", "unmanaged"}:
+        is_default = item["name"] == default_device
+        # Proxmox commonly supplies the appliance eth0 outside NetworkManager.
+        # A real kernel default route is authoritative, so keep that interface
+        # as a valid active uplink even when nmcli labels it "unmanaged".
+        if item["state"] == "unavailable" or (item["state"] == "unmanaged" and not is_default):
             continue
         uplinks.append({
             **item,
-            "active": item["name"] == default_device or (not default_device and item["state"] == "connected"),
+            "active": is_default or (not default_device and item["state"] == "connected"),
+            "managed": item["state"] != "unmanaged",
             "kind": "Wi-Fi" if item["type"] == "wifi" else "Ethernet",
         })
 
