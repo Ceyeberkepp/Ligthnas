@@ -52,7 +52,7 @@ fi
 
 # Docker/OCI is optional and is used only by the App Store. Do not install or
 # grant Docker-socket access unless the operator explicitly opts in.
-if [[ "${LIGHTNAS_ENABLE_DOCKER_APPS:-0}" != "1" ]]; then
+if [[ "${LIGHTNAS_ENABLE_DOCKER_APPS:-1}" != "1" ]]; then
   set_flag LIGHTNAS_DOCKER_ENABLED 0
   report Apps 'optional Docker/OCI engine disabled (set LIGHTNAS_ENABLE_DOCKER_APPS=1 to enable)'
 else
@@ -86,16 +86,12 @@ fi
 
 if [[ "${LIGHTNAS_SKIP_VM:-0}" == "1" ]]; then
   set_flag LIGHTNAS_VM_ENABLED 0
+  set_flag LIGHTNAS_VM_ACCELERATION disabled
   report VMs 'skipped by operator (LIGHTNAS_SKIP_VM=1)'
-elif systemd-detect-virt --container >/dev/null 2>&1 && [[ ! -c /dev/kvm ]]; then
-  set_flag LIGHTNAS_VM_ENABLED 0
-  report VMs 'this appliance is inside a container and /dev/kvm was not passed through; local KVM is unavailable'
-elif [[ ! -c /dev/kvm ]]; then
-  set_flag LIGHTNAS_VM_ENABLED 0
-  report VMs '/dev/kvm is unavailable; enable hardware or nested virtualization on the host'
 elif [[ "$(uname -m)" != 'x86_64' ]]; then
   set_flag LIGHTNAS_VM_ENABLED 0
-  report VMs 'automatic KVM provisioning currently supports x86_64 only'
+  set_flag LIGHTNAS_VM_ACCELERATION unsupported
+  report VMs 'automatic x86 VM provisioning currently supports x86_64 LightNAS hosts only'
 else
   if apt-get install -y qemu-system-x86 qemu-utils libvirt-daemon-system libvirt-clients virtinst; then
     if systemctl list-unit-files libvirtd.socket --no-legend 2>/dev/null | grep -q '^libvirtd.socket'; then
@@ -104,11 +100,10 @@ else
       systemctl enable --now virtqemud.socket >/dev/null 2>&1 || true
     fi
     if getent group libvirt >/dev/null 2>&1; then usermod -aG libvirt lightnas; fi
+
     install -d -m 0755 /var/lib/libvirt/images
     setfacl -m u:lightnas:rwx /var/lib/libvirt/images >/dev/null 2>&1 || true
 
-    # Wait for libvirt before defining resources. Socket activation can take a
-    # moment after package installation, especially inside nested appliances.
     for attempt in {1..15}; do
       virsh -c qemu:///system list --all >/dev/null 2>&1 && break
       sleep 1
@@ -119,9 +114,7 @@ else
       cat >"$pool_xml" <<'EOF'
 <pool type='dir'>
   <name>default</name>
-  <target>
-    <path>/var/lib/libvirt/images</path>
-  </target>
+  <target><path>/var/lib/libvirt/images</path></target>
 </pool>
 EOF
       virsh -c qemu:///system pool-define "$pool_xml" >/dev/null 2>&1 || true
@@ -139,9 +132,7 @@ EOF
   <forward mode='nat'/>
   <bridge name='virbr0' stp='on' delay='0'/>
   <ip address='192.168.122.1' netmask='255.255.255.0'>
-    <dhcp>
-      <range start='192.168.122.2' end='192.168.122.254'/>
-    </dhcp>
+    <dhcp><range start='192.168.122.2' end='192.168.122.254'/></dhcp>
   </ip>
 </network>
 EOF
@@ -151,22 +142,34 @@ EOF
     virsh -c qemu:///system net-start default >/dev/null 2>&1 || true
     virsh -c qemu:///system net-autostart default >/dev/null 2>&1 || true
 
+    acceleration=tcg
+    if [[ -c /dev/kvm ]]; then
+      acceleration=kvm
+    fi
+    set_flag LIGHTNAS_VM_ACCELERATION "$acceleration"
+
     for attempt in {1..10}; do
       runuser -u lightnas -- virsh -c qemu:///system list --all --name >/dev/null 2>&1 && break
       sleep 1
     done
+
     if runuser -u lightnas -- virsh -c qemu:///system list --all --name >/dev/null 2>&1 \
       && virsh -c qemu:///system pool-info default >/dev/null 2>&1 \
       && virsh -c qemu:///system net-info default >/dev/null 2>&1 \
       && command -v virt-install >/dev/null 2>&1; then
       set_flag LIGHTNAS_VM_ENABLED 1
-      report VMs 'native QEMU/KVM + libvirt ready; default storage pool and NAT network are active'
+      if [[ "$acceleration" == kvm ]]; then
+        report VMs 'native QEMU/KVM + libvirt ready; hardware acceleration enabled'
+      else
+        report VMs 'QEMU/libvirt software virtualization ready (TCG); VMs work without VT-x/AMD-V but run slower'
+      fi
     else
       set_flag LIGHTNAS_VM_ENABLED 0
-      report VMs 'libvirt installed, but the service account cannot access qemu:///system'
+      report VMs 'QEMU/libvirt installed, but the local VM pool/network or LightNAS service access is not ready'
     fi
   else
     set_flag LIGHTNAS_VM_ENABLED 0
-    report VMs 'KVM/libvirt package installation failed'
+    set_flag LIGHTNAS_VM_ACCELERATION unavailable
+    report VMs 'QEMU/libvirt package installation failed'
   fi
 fi
