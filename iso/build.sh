@@ -31,7 +31,7 @@ echo 'deb http://security.debian.org/debian-security trixie-security main contri
 cat >config/package-lists/lightnas.list.chroot <<'EOF'
 ca-certificates curl gnupg git systemd openssh-server util-linux python3 ffmpeg
 acl novnc iproute2 nftables ufw smartmontools
-lxc lxc-templates lxcfs uidmap bridge-utils debootstrap debian-archive-keyring ubuntu-keyring
+lxc lxc-templates lxcfs uidmap bridge-utils debootstrap debian-archive-keyring ubuntu-keyring zstd
 qemu-system-x86 qemu-utils libvirt-daemon-system libvirt-clients virtinst ovmf
 dnsmasq-base network-manager iw rfkill wpasupplicant
 zfsutils-linux
@@ -74,7 +74,7 @@ ExecStart=/usr/bin/python3 /opt/lightnas/scripts/lightnas-host-agent.py
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=false
-ProtectHome=true
+ProtectHome=false
 PrivateTmp=true
 
 [Install]
@@ -102,9 +102,9 @@ Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true
 PrivateTmp=true
-ProtectHome=true
-ProtectSystem=strict
-ReadWritePaths=/var/lib/lightnas -/mnt -/media -/srv -/data -/storage
+ProtectHome=false
+ProtectSystem=full
+ReadWritePaths=/var/lib/lightnas
 
 [Install]
 WantedBy=multi-user.target
