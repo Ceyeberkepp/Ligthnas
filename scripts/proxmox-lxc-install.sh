@@ -75,6 +75,36 @@ if [[ "$features" != "$(sed -n 's/^features: //p' <<<"$config" | head -1)" ]]; t
   pct set "$ctid" -features "$features"
 fi
 
+ensure_host_kvm() {
+  if [[ -c /dev/kvm ]]; then
+    return 0
+  fi
+
+  echo "Proxmox host does not currently expose /dev/kvm; trying to load KVM modules..."
+  modprobe kvm >/dev/null 2>&1 || true
+
+  vendor="$(awk -F: '/vendor_id/{gsub(/[[:space:]]/,"",$2); print $2; exit}' /proc/cpuinfo 2>/dev/null || true)"
+  case "$vendor" in
+    GenuineIntel) modprobe kvm_intel >/dev/null 2>&1 || true ;;
+    AuthenticAMD) modprobe kvm_amd >/dev/null 2>&1 || true ;;
+  esac
+
+  if [[ -c /dev/kvm ]]; then
+    echo "Host KVM device is now available."
+    return 0
+  fi
+
+  echo "WARNING: /dev/kvm is still unavailable on the Proxmox host." >&2
+  if grep -Eq '(^|[[:space:]])(vmx|svm)([[:space:]]|$)' /proc/cpuinfo; then
+    echo "CPU virtualization flags are present, but the KVM device/module is unavailable. Check Proxmox host module errors." >&2
+  else
+    echo "CPU virtualization flags (vmx/svm) are not visible. Enable Intel VT-x/AMD-V in firmware or expose nested virtualization to this Proxmox host." >&2
+  fi
+  return 0
+}
+
+ensure_host_kvm
+
 pass_device() {
   local path="$1" mode="${2:-0666}" label="$3"
   [[ -e "$path" ]] || { echo "Host device $path is unavailable; $label will be limited." >&2; return 0; }
@@ -185,18 +215,6 @@ pct exec "$ctid" -- bash -lc '
   ls -l /dev/kvm 2>/dev/null || echo "/dev/kvm unavailable"
   echo "--- Services ---"
   systemctl --no-pager is-active lightnas-host-agent lightnas || true
-  echo "--- Nested runtime self-test ---"
-  python3 - <<'"'"'PY'"'"'
-import json, socket
-sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-sock.connect("/run/lightnas/host-agent.sock")
-sock.sendall(b'{"action":"runtime-diagnostics"}\\n')
-data = b""
-while b"\\n" not in data:
-    chunk = sock.recv(65536)
-    if not chunk:
-        break
-    data += chunk
-print(json.dumps(json.loads(data.split(b"\\n",1)[0]), indent=2))
-PY
 '
+echo "--- Nested runtime self-test ---"
+pct exec "$ctid" -- python3 -c 'import json,socket; s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.connect("/run/lightnas/host-agent.sock"); s.sendall(b"{\"action\":\"runtime-diagnostics\"}\n"); data=b""; exec("while b\\\"\\n\\\" not in data:\\n chunk=s.recv(65536)\\n if not chunk: break\\n data+=chunk"); print(json.dumps(json.loads(data.split(b"\\n",1)[0]), indent=2))'
