@@ -437,6 +437,175 @@ def update_vm(data: dict) -> dict:
     return {"vmid": vmid, "name": name, "memoryMiB": memory, "cpus": cpus, "status": "updated"}
 
 
+
+def container_inventory(client_id: str | None = None) -> dict:
+    node = node_name()
+    containers = pvesh(f"/nodes/{node}/lxc") or []
+    root_stores = pvesh(f"/nodes/{node}/storage", "--content", "rootdir") or []
+    template_stores = pvesh(f"/nodes/{node}/storage", "--content", "vztmpl") or []
+    bridges = pvesh(f"/nodes/{node}/network", "--type", "bridge") or []
+
+    pools = []
+    for item in root_stores:
+        storage = str(item.get("storage", ""))
+        if item.get("enabled", 1) == 0 or item.get("active", 1) == 0 or not POOL_RE.fullmatch(storage):
+            continue
+        pools.append({
+            "name": storage,
+            "type": str(item.get("type") or "unknown"),
+            "total": int(item.get("total") or 0),
+            "available": int(item.get("avail") or 0),
+        })
+
+    templates = []
+    for item in template_stores[:20]:
+        storage = str(item.get("storage", ""))
+        if item.get("enabled", 1) == 0 or item.get("active", 1) == 0 or not POOL_RE.fullmatch(storage):
+            continue
+        content = pvesh(f"/nodes/{node}/storage/{storage}/content", "--content", "vztmpl") or []
+        for entry in content:
+            volid = entry.get("volid")
+            if entry.get("content") == "vztmpl" and isinstance(volid, str) and len(volid) <= 512:
+                templates.append(volid)
+
+    networks = [
+        str(item.get("iface")) for item in bridges
+        if item.get("active", 1) != 0 and NETWORK_RE.fullmatch(str(item.get("iface", "")))
+    ]
+    protected = int(client_id) if client_id and CLIENT_RE.fullmatch(str(client_id)) else None
+    details = []
+    for item in containers:
+        raw_id = str(item.get("vmid", ""))
+        if not raw_id.isdigit():
+            continue
+        vmid = int(raw_id)
+        details.append({
+            "vmid": vmid,
+            "name": str(item.get("name") or f"CT-{vmid}"),
+            "status": str(item.get("status") or "unknown"),
+            "memory": int(item.get("maxmem") or 0),
+            "disk": int(item.get("maxdisk") or 0),
+            "cpus": int(item.get("cpus") or 0),
+            "uptime": int(item.get("uptime") or 0),
+            "protected": vmid == protected,
+        })
+    return {
+        "available": True,
+        "enabled": True,
+        "provider": "proxmox-lxc",
+        "reason": None,
+        "containers": details,
+        "pools": [item["name"] for item in pools],
+        "poolDetails": pools,
+        "networks": networks,
+        "templates": sorted(set(templates)),
+        "node": node,
+    }
+
+
+def create_container(data: dict, client_id: str) -> dict:
+    name = str(data.get("name", "")).strip()
+    template = str(data.get("template", "")).strip()
+    pool = str(data.get("pool", "")).strip()
+    network = str(data.get("network", "")).strip()
+    try:
+        memory = int(data.get("memoryMiB"))
+        cpus = int(data.get("cpus"))
+        disk = int(data.get("diskGiB"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid container resource values") from exc
+
+    if not NAME_RE.fullmatch(name):
+        raise ValueError("container name must contain 2-40 letters, numbers, or hyphens")
+    if not (256 <= memory <= 65536 and 1 <= cpus <= 64 and 2 <= disk <= 2048):
+        raise ValueError("container resources are outside allowed limits")
+
+    current = container_inventory(client_id)
+    if pool not in current["pools"]:
+        raise ValueError(f"container storage '{pool}' is not available for rootdir content")
+    if network not in current["networks"]:
+        raise ValueError(f"network bridge '{network}' is not available")
+    if template not in current["templates"]:
+        raise ValueError("select an existing Proxmox LXC template")
+    if any(item["name"].lower() == name.lower() for item in current["containers"]):
+        raise ValueError("a container with this name already exists")
+
+    vmid = int(pvesh("/cluster/nextid"))
+    if vmid < 100 or str(vmid) == str(client_id):
+        raise RuntimeError("Proxmox returned an invalid container ID")
+
+    created = False
+    try:
+        run([
+            "pct", "create", str(vmid), template,
+            "--hostname", name,
+            "--memory", str(memory),
+            "--cores", str(cpus),
+            "--rootfs", f"{pool}:{disk}",
+            "--net0", f"name=eth0,bridge={network},ip=dhcp,type=veth",
+            "--unprivileged", "1",
+            "--onboot", "1",
+        ], timeout=180)
+        created = True
+        run(["pct", "start", str(vmid)], timeout=60)
+    except Exception:
+        if created:
+            try:
+                run(["pct", "destroy", str(vmid), "--purge", "1"], timeout=120)
+            except Exception:
+                pass
+        raise
+    return {
+        "vmid": vmid,
+        "name": name,
+        "provider": "proxmox-lxc",
+        "status": "running",
+        "details": "System container created and started on the Proxmox host.",
+    }
+
+
+def container_action(data: dict, client_id: str) -> dict:
+    try:
+        vmid = int(data.get("vmid"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid container ID") from exc
+    action = str(data.get("action", ""))
+    if vmid < 100 or vmid > 999999:
+        raise ValueError("invalid container ID")
+    if str(vmid) == str(client_id):
+        raise PermissionError("LightNAS will not manage or delete the container it is currently running inside")
+    if action not in {"start", "stop", "shutdown", "reboot", "delete"}:
+        raise ValueError("unsupported container action")
+    run(["pct", "config", str(vmid)], timeout=15)
+    if action == "delete":
+        try:
+            run(["pct", "stop", str(vmid)], timeout=30)
+        except Exception:
+            pass
+        run(["pct", "destroy", str(vmid), "--purge", "1"], timeout=120)
+        return {"vmid": vmid, "action": action, "status": "deleted"}
+    run(["pct", action, str(vmid)], timeout=60)
+    return {"vmid": vmid, "action": action, "status": "submitted"}
+
+
+def update_container(data: dict, client_id: str) -> dict:
+    try:
+        vmid = int(data.get("vmid"))
+        memory = int(data.get("memoryMiB"))
+        cpus = int(data.get("cpus"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid container update values") from exc
+    name = str(data.get("name", "")).strip()
+    if vmid < 100 or vmid > 999999 or not NAME_RE.fullmatch(name):
+        raise ValueError("invalid container ID or name")
+    if str(vmid) == str(client_id):
+        raise PermissionError("LightNAS will not change the resources of the container it is currently running inside")
+    if not (256 <= memory <= 262144 and 1 <= cpus <= 128):
+        raise ValueError("container resources are outside allowed limits")
+    run(["pct", "config", str(vmid)], timeout=15)
+    run(["pct", "set", str(vmid), "--hostname", name, "--memory", str(memory), "--cores", str(cpus)], timeout=60)
+    return {"vmid": vmid, "name": name, "memoryMiB": memory, "cpus": cpus, "status": "updated"}
+
 def update_storage(data: dict) -> dict:
     storage = str(data.get("storage", ""))
     content = data.get("content")
@@ -475,10 +644,12 @@ def clean_disk(data: dict) -> dict:
 
 
 def dispatch(request: dict) -> dict:
-    authenticate(request)
+    client = authenticate(request)
     action = request.get("action")
     if action == "inventory":
         return inventory()
+    if action == "container-inventory":
+        return container_inventory(client)
     data = request.get("data")
     if not isinstance(data, dict):
         raise ValueError("missing operation data")
@@ -488,6 +659,12 @@ def dispatch(request: dict) -> dict:
         return vm_action(data)
     if action == "vm-update":
         return update_vm(data)
+    if action == "create-container":
+        return create_container(data, client)
+    if action == "container-action":
+        return container_action(data, client)
+    if action == "container-update":
+        return update_container(data, client)
     if action == "storage-update":
         return update_storage(data)
     if action == "disk-clean":
