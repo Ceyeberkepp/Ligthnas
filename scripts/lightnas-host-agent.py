@@ -267,6 +267,47 @@ def require_nmcli() -> None:
 def network_action(data: dict) -> dict:
     require_nmcli()
     action = str(data.get("action") or "")
+    if action == "firewall-add":
+        if not available("ufw"):
+            raise RuntimeError("UFW is not installed on this LightNAS host")
+        decision = str(data.get("decision") or "").lower()
+        protocol = str(data.get("protocol") or "").lower()
+        try:
+            port = int(data.get("port"))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("invalid firewall port") from exc
+        source = str(data.get("source") or "").strip()
+        if decision not in {"allow", "deny"} or protocol not in {"tcp", "udp"} or not (1 <= port <= 65535):
+            raise ValueError("invalid firewall rule")
+        args = ["ufw", decision]
+        if source:
+            if not re.fullmatch(r"[A-Fa-f0-9:.]+(?:/[0-9]{1,3})?", source):
+                raise ValueError("invalid firewall source address")
+            args += ["from", source, "to", "any"]
+        args += ["port", str(port), "proto", protocol]
+        run(args, timeout=30)
+        return {"action": action, "decision": decision, "protocol": protocol, "port": port, "source": source or "any"}
+    if action == "firewall-delete":
+        if not available("ufw"):
+            raise RuntimeError("UFW is not installed on this LightNAS host")
+        try:
+            number = int(data.get("number"))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("invalid firewall rule number") from exc
+        if not (1 <= number <= 9999):
+            raise ValueError("invalid firewall rule number")
+        run(["ufw", "--force", "delete", str(number)], timeout=30)
+        return {"action": action, "number": number}
+    if action == "firewall-enable":
+        if not available("ufw"):
+            raise RuntimeError("UFW is not installed on this LightNAS host")
+        run(["ufw", "--force", "enable"], timeout=30)
+        return {"action": action, "status": "enabled"}
+    if action == "firewall-disable":
+        if not available("ufw"):
+            raise RuntimeError("UFW is not installed on this LightNAS host")
+        run(["ufw", "disable"], timeout=30)
+        return {"action": action, "status": "disabled"}
     if action == "wifi-connect":
         device = str(data.get("device") or "")
         ssid = str(data.get("ssid") or "")
