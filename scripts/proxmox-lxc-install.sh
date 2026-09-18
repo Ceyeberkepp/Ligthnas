@@ -150,7 +150,7 @@ if ! pct exec "$ctid" -- bash -lc 'command -v lxc-ls >/dev/null && command -v lx
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
     apt-get install -y \
-      lxc lxc-templates lxcfs uidmap bridge-utils \
+      lxc lxc-templates lxcfs uidmap bridge-utils debootstrap debian-archive-keyring ubuntu-keyring \
       qemu-system-x86 qemu-utils libvirt-daemon-system libvirt-clients virtinst ovmf \
       dnsmasq-base network-manager iproute2 nftables ufw
   '
@@ -198,6 +198,7 @@ pct exec "$ctid" -- bash -lc '
   set -Eeuo pipefail
   command -v lxc-ls >/dev/null
   command -v lxc-create >/dev/null
+  command -v debootstrap >/dev/null
   command -v virsh >/dev/null
   command -v virt-install >/dev/null
   systemctl is-active --quiet lightnas-host-agent
