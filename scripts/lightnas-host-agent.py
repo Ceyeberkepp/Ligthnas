@@ -229,7 +229,7 @@ def local_networks() -> list[str]:
         links = json.loads(run(["ip", "-j", "link", "show", "type", "bridge"], timeout=10) or "[]")
         for item in links:
             name = str(item.get("ifname") or "")
-            if IFACE_RE.fullmatch(name):
+            if IFACE_RE.fullmatch(name) and name != "docker0":
                 result.append(name)
     except Exception:
         pass
@@ -359,21 +359,60 @@ def parse_nmcli(text: str, count: int) -> list[list[str]]:
 
 def network_inventory() -> dict:
     if not available("nmcli"):
-        return {"editable": False, "manager": None, "reason": "NetworkManager is not installed.", "devices": [], "connections": [], "wifi": []}
+        return {
+            "editable": False, "manager": None, "reason": "NetworkManager is not installed.",
+            "devices": [], "connections": [], "wifi": [], "wifiAvailable": False,
+            "uplinks": [], "currentUplink": None, "connectivity": "unknown"
+        }
+
     devices_raw = run(["nmcli", "-t", "-f", "DEVICE,TYPE,STATE,CONNECTION", "device", "status"], timeout=15, check=False)
     devices = [
         {"name": row[0], "type": row[1], "state": row[2], "connection": row[3] or None}
         for row in parse_nmcli(devices_raw, 4)
         if IFACE_RE.fullmatch(row[0])
     ]
+
     connections_raw = run(["nmcli", "-t", "-f", "NAME,UUID,TYPE,DEVICE,AUTOCONNECT", "connection", "show"], timeout=15, check=False)
     connections = [
         {"name": row[0], "uuid": row[1], "type": row[2], "device": row[3] or None, "autoconnect": row[4] == "yes"}
         for row in parse_nmcli(connections_raw, 5)
         if row[0]
     ]
+
+    default_routes = []
+    try:
+        default_routes = json.loads(run(["ip", "-j", "route", "show", "default"], timeout=10, check=False) or "[]")
+    except Exception:
+        default_routes = []
+    default_routes = sorted(default_routes, key=lambda item: int(item.get("metric") or 0))
+    preferred_route = default_routes[0] if default_routes else {}
+    default_device = str(preferred_route.get("dev") or "")
+
+    connectivity = run(["nmcli", "-t", "-f", "CONNECTIVITY", "general"], timeout=10, check=False).strip() or "unknown"
+
+    uplinks = []
+    for item in devices:
+        if item["type"] not in {"ethernet", "wifi"}:
+            continue
+        if item["state"] in {"unavailable", "unmanaged"}:
+            continue
+        uplinks.append({
+            **item,
+            "active": item["name"] == default_device or (not default_device and item["state"] == "connected"),
+            "kind": "Wi-Fi" if item["type"] == "wifi" else "Ethernet",
+        })
+
+    current_uplink = next((item for item in uplinks if item["active"]), None)
+    if current_uplink:
+        current_uplink = {
+            **current_uplink,
+            "gateway": preferred_route.get("gateway") or None,
+            "metric": preferred_route.get("metric"),
+        }
+
     wifi = []
-    if any(item["type"] == "wifi" for item in devices):
+    wifi_devices = [item for item in devices if item["type"] == "wifi" and item["state"] not in {"unavailable", "unmanaged"}]
+    if wifi_devices:
         scan = run(["nmcli", "-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY", "device", "wifi", "list", "--rescan", "auto"], timeout=20, check=False)
         seen = set()
         for row in parse_nmcli(scan, 4):
@@ -382,7 +421,62 @@ def network_inventory() -> dict:
                 continue
             seen.add(ssid)
             wifi.append({"ssid": ssid, "connected": row[0] == "*", "signal": int(row[2] or 0), "security": row[3] or "Open"})
-    return {"editable": True, "manager": "NetworkManager", "reason": None, "devices": devices, "connections": connections, "wifi": wifi}
+
+    return {
+        "editable": True,
+        "manager": "NetworkManager",
+        "reason": None,
+        "devices": devices,
+        "connections": connections,
+        "wifi": wifi,
+        "wifiAvailable": bool(wifi_devices),
+        "uplinks": uplinks,
+        "currentUplink": current_uplink,
+        "connectivity": connectivity,
+    }
+
+
+def prefer_uplink(device: str) -> dict:
+    if not IFACE_RE.fullmatch(device):
+        raise ValueError("invalid network device")
+
+    raw = run(["nmcli", "-t", "-f", "DEVICE,TYPE,STATE,CONNECTION", "device", "status"], timeout=15, check=False)
+    rows = parse_nmcli(raw, 4)
+    selected = next((row for row in rows if row[0] == device), None)
+    if not selected or selected[1] not in {"ethernet", "wifi"}:
+        raise ValueError("select an available Ethernet or Wi-Fi interface")
+    if selected[2] in {"unavailable", "unmanaged"}:
+        raise RuntimeError("selected network interface is not currently usable")
+
+    if selected[2] != "connected":
+        result = subprocess.run(["nmcli", "device", "connect", device], text=True, capture_output=True, timeout=45)
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "unable to connect device").strip()
+            if selected[1] == "wifi":
+                raise RuntimeError(f"Connect to a Wi-Fi network first: {detail}")
+            raise RuntimeError(detail)
+        raw = run(["nmcli", "-t", "-f", "DEVICE,TYPE,STATE,CONNECTION", "device", "status"], timeout=15, check=False)
+        selected = next((row for row in parse_nmcli(raw, 4) if row[0] == device), selected)
+
+    connection = selected[3] if len(selected) > 3 else ""
+    if not connection:
+        raise RuntimeError("NetworkManager did not report an active connection profile")
+
+    # Prefer the selected connection without dropping the fallback link. Lower
+    # route metric wins, so switching does not intentionally break management.
+    run(["nmcli", "connection", "modify", connection, "ipv4.route-metric", "50", "ipv6.route-metric", "50", "connection.autoconnect", "yes"], timeout=20)
+
+    active_raw = run(["nmcli", "-t", "-f", "NAME,TYPE,DEVICE", "connection", "show", "--active"], timeout=15, check=False)
+    for row in parse_nmcli(active_raw, 3):
+        other_name, other_type, other_device = row
+        if other_name == connection or other_device == device:
+            continue
+        if "ethernet" in other_type or "wireless" in other_type or other_type == "wifi":
+            run(["nmcli", "connection", "modify", other_name, "ipv4.route-metric", "600", "ipv6.route-metric", "600"], timeout=20, check=False)
+
+    run(["nmcli", "connection", "up", connection], timeout=45)
+    return {"device": device, "connection": connection, "status": "preferred"}
+
 
 
 def require_nmcli() -> None:
@@ -444,7 +538,12 @@ def network_action(data: dict) -> dict:
         if password:
             args += ["password", password]
         run(args, timeout=45)
-        return {"action": action, "device": device, "ssid": ssid, "status": "connected"}
+        preferred = prefer_uplink(device)
+        return {"action": action, "device": device, "ssid": ssid, "status": "connected", "preferred": preferred}
+    if action == "uplink-prefer":
+        device = str(data.get("device") or "")
+        result = prefer_uplink(device)
+        return {"action": action, **result}
     if action == "device-connect":
         device = str(data.get("device") or "")
         if not IFACE_RE.fullmatch(device):
