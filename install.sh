@@ -20,7 +20,7 @@ export DEBIAN_FRONTEND=noninteractive
 
 echo "[1/6] Installing system requirements..."
 apt-get update
-apt-get install -y ca-certificates curl git gnupg python3 ffmpeg acl novnc iproute2 nftables ufw
+apt-get install -y ca-certificates curl git gnupg python3 ffmpeg acl novnc iproute2 nftables ufw zstd
 
 if ! command -v node >/dev/null 2>&1 || \
    [[ "$(node --version | sed -E 's/^v([0-9]+).*/\1/')" -lt 22 ]]; then
@@ -97,7 +97,7 @@ ExecStart=/usr/bin/python3 ${INSTALL_DIRECTORY}/scripts/lightnas-host-agent.py
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=false
-ProtectHome=true
+ProtectHome=false
 PrivateTmp=true
 
 [Install]
@@ -126,10 +126,10 @@ Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true
 PrivateTmp=true
-ProtectHome=true
-ProtectSystem=strict
-# Keep the OS read-only while allowing dedicated NAS mounts under standard data roots.
-ReadWritePaths=${DATA_DIRECTORY} -/mnt -/media -/srv -/data -/storage
+ProtectHome=false
+ProtectSystem=full
+# /usr, /boot and /etc stay read-only; explicitly attached NAS mounts remain usable.
+ReadWritePaths=${DATA_DIRECTORY}
 
 [Install]
 WantedBy=multi-user.target
