@@ -89,10 +89,35 @@ else
     fi
     if getent group libvirt >/dev/null 2>&1; then usermod -aG libvirt lightnas; fi
     install -d -m 0755 /var/lib/libvirt/images
+    setfacl -m u:lightnas:rwx /var/lib/libvirt/images >/dev/null 2>&1 || true
+
+    if ! virsh -c qemu:///system pool-info default >/dev/null 2>&1; then
+      virsh -c qemu:///system pool-define-as default dir --target /var/lib/libvirt/images >/dev/null 2>&1 || true
+      virsh -c qemu:///system pool-build default >/dev/null 2>&1 || true
+    fi
     virsh -c qemu:///system pool-start default >/dev/null 2>&1 || true
     virsh -c qemu:///system pool-autostart default >/dev/null 2>&1 || true
+
+    if ! virsh -c qemu:///system net-info default >/dev/null 2>&1; then
+      network_xml="$(mktemp)"
+      cat >"$network_xml" <<'EOF'
+<network>
+  <name>default</name>
+  <forward mode='nat'/>
+  <bridge name='virbr0' stp='on' delay='0'/>
+  <ip address='192.168.122.1' netmask='255.255.255.0'>
+    <dhcp>
+      <range start='192.168.122.2' end='192.168.122.254'/>
+    </dhcp>
+  </ip>
+</network>
+EOF
+      virsh -c qemu:///system net-define "$network_xml" >/dev/null 2>&1 || true
+      rm -f "$network_xml"
+    fi
     virsh -c qemu:///system net-start default >/dev/null 2>&1 || true
     virsh -c qemu:///system net-autostart default >/dev/null 2>&1 || true
+
     for attempt in {1..10}; do
       runuser -u lightnas -- virsh -c qemu:///system list --all --name >/dev/null 2>&1 && break
       sleep 1
