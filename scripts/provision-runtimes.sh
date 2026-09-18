@@ -19,43 +19,61 @@ chmod 0644 "${status_file}"
 
 # Native system containers are built into LightNAS through LXC/liblxc.
 if command -v lxc-create >/dev/null 2>&1 && command -v lxc-start >/dev/null 2>&1; then
-  # Give system containers a stable LightNAS-owned NAT bridge. NetworkManager
-  # shared mode supplies DHCP/DNS/NAT and follows whichever host uplink
-  # (Ethernet or Wi-Fi) is currently preferred.
-  if command -v nmcli >/dev/null 2>&1; then
-    if ! nmcli -t -f NAME connection show 2>/dev/null | grep -Fxq 'lightnas0'; then
-      nmcli connection add type bridge ifname lightnas0 con-name lightnas0 \
-        ipv4.method shared ipv4.addresses 10.77.0.1/24 ipv6.method disabled \
-        connection.autoconnect yes >/dev/null 2>&1 || true
-    fi
-    nmcli connection up lightnas0 >/dev/null 2>&1 || true
-  fi
+  # Use the standard lxc-net helper as the owner of the LightNAS container
+  # bridge. This works even when the outer LXC's eth0 is intentionally
+  # unmanaged by NetworkManager. lxc-net supplies the bridge, DHCP/DNS and
+  # outbound NAT through the host's current default route.
   if systemctl list-unit-files lxc-net.service --no-legend 2>/dev/null | grep -q '^lxc-net.service'; then
-    if [[ -f /etc/default/lxc-net ]]; then
-      if grep -q '^USE_LXC_BRIDGE=' /etc/default/lxc-net; then
-        sed -i 's/^USE_LXC_BRIDGE=.*/USE_LXC_BRIDGE="true"/' /etc/default/lxc-net
-      else
-        printf '%s\n' 'USE_LXC_BRIDGE="true"' >> /etc/default/lxc-net
-      fi
-      for setting in \
-        'LXC_BRIDGE="lxcbr0"' \
-        'LXC_ADDR="10.77.0.1"' \
-        'LXC_NETMASK="255.255.255.0"' \
-        'LXC_NETWORK="10.77.0.0/24"' \
-        'LXC_DHCP_RANGE="10.77.0.2,10.77.0.254"' \
-        'LXC_DHCP_MAX="253"'; do
-        key="${setting%%=*}"
-        sed -i "/^${key}=/d" /etc/default/lxc-net
-        printf '%s\n' "$setting" >> /etc/default/lxc-net
-      done
+    systemctl stop lxc-net.service >/dev/null 2>&1 || true
+
+    # Older LightNAS builds created a NetworkManager profile with this name.
+    # Remove the inactive profile so NetworkManager and lxc-net never fight
+    # over the same bridge device.
+    if command -v nmcli >/dev/null 2>&1; then
+      while IFS= read -r uuid; do
+        [[ -n "$uuid" ]] && nmcli connection delete uuid "$uuid" >/dev/null 2>&1 || true
+      done < <(nmcli -t -f UUID,NAME connection show 2>/dev/null | awk -F: '$2=="lightnas0"{print $1}')
     fi
+
+    if ip link show lightnas0 >/dev/null 2>&1; then
+      ip link set lightnas0 down >/dev/null 2>&1 || true
+      ip link delete lightnas0 type bridge >/dev/null 2>&1 || true
+    fi
+
+    install -d -m 0755 /etc/default
+    touch /etc/default/lxc-net
+    for setting in \
+      'USE_LXC_BRIDGE="true"' \
+      'LXC_BRIDGE="lightnas0"' \
+      'LXC_ADDR="10.77.0.1"' \
+      'LXC_NETMASK="255.255.255.0"' \
+      'LXC_NETWORK="10.77.0.0/24"' \
+      'LXC_DHCP_RANGE="10.77.0.20,10.77.0.250"' \
+      'LXC_DHCP_MAX="231"'; do
+      key="${setting%%=*}"
+      sed -i "/^${key}=/d" /etc/default/lxc-net
+      printf '%s\n' "$setting" >> /etc/default/lxc-net
+    done
+
     systemctl enable lxc-net.service >/dev/null 2>&1 || true
     systemctl restart lxc-net.service >/dev/null 2>&1 || true
+
+    for attempt in {1..10}; do
+      if ip link show lightnas0 2>/dev/null | grep -q 'UP' \
+        && ip -4 address show dev lightnas0 2>/dev/null | grep -q '10\.77\.0\.1/24'; then
+        break
+      fi
+      sleep 1
+    done
   fi
+
   if systemd-detect-virt --container >/dev/null 2>&1 && [[ "${LIGHTNAS_ALLOW_NESTED_LXC:-0}" != "1" ]]; then
     report Containers 'native LXC installed, but this appliance is itself in a container and nested LXC was not enabled'
+  elif ip link show lightnas0 2>/dev/null | grep -q 'UP' \
+    && ip -4 address show dev lightnas0 2>/dev/null | grep -q '10\.77\.0\.1/24'; then
+    report Containers 'native LXC/liblxc ready on lightnas0 (10.77.0.0/24 NAT)'
   else
-    report Containers 'native LXC/liblxc ready'
+    report Containers 'native LXC/liblxc installed, but the LightNAS container bridge is not active'
   fi
 else
   report Containers 'native LXC/liblxc tools are not installed on this host'
