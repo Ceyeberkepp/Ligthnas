@@ -100,19 +100,22 @@ document.addEventListener('click', async event => {
   if (containerEdit) {
     event.preventDefault();
     event.stopImmediatePropagation();
-    const currentName = containerEdit.dataset.containerEdit;
+    const vmid = Number(containerEdit.dataset.containerEdit);
+    const currentName = containerEdit.dataset.containerName || `CT-${vmid}`;
     showEditor({
-      eyebrow: 'CONTAINER SETTINGS',
-      title: `Edit ${currentName}`,
-      description: 'Rename the LightNAS container or change its memory limit. The container remains managed by LightNAS.',
+      eyebrow: 'SYSTEM CONTAINER SETTINGS',
+      title: `Edit CT ${vmid}`,
+      description: 'Change the Proxmox LXC hostname, assigned memory, or virtual CPU count. Root disk and network changes remain separate storage/network operations.',
       fields: [
-        { name: 'newName', label: 'Container name', value: currentName, required: true },
-        { name: 'memoryMiB', label: 'Memory limit (MiB)', type: 'number', value: '512', min: 128, max: 16384, step: 1, required: true }
+        { name: 'name', label: 'Container name', value: currentName, required: true },
+        { name: 'memoryMiB', label: 'Memory (MiB)', type: 'number', value: containerEdit.dataset.containerMemory || '2048', min: 256, max: 262144, step: 1, required: true },
+        { name: 'cpus', label: 'Virtual CPUs', type: 'number', value: containerEdit.dataset.containerCpus || '2', min: 1, max: 128, step: 1, required: true }
       ],
       onSubmit: async values => {
         const memoryMiB = Number(values.memoryMiB);
-        if (!Number.isInteger(memoryMiB)) throw new Error('Memory must be a whole number of MiB.');
-        await dialogApi('/api/containers', { method: 'POST', body: JSON.stringify({ name: currentName, action: 'update', newName: values.newName, memoryMiB }) });
+        const cpus = Number(values.cpus);
+        if (!Number.isInteger(memoryMiB) || !Number.isInteger(cpus)) throw new Error('Memory and CPU values must be whole numbers.');
+        await dialogApi('/api/containers', { method: 'POST', body: JSON.stringify({ vmid, action: 'update', name: values.name, memoryMiB, cpus }) });
         refreshRuntime();
       }
     });
