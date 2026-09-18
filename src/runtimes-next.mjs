@@ -4,6 +4,7 @@ import { mkdir, readdir, lstat, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { proxmoxInventory, proxmoxCreateVm, proxmoxManageVm, proxmoxUpdateVm } from './proxmox.mjs';
 import { localContainerInventory, localCreateContainer, localManageContainer, localUpdateContainer } from './local-host.mjs';
+import { listContainerTemplates, resolveContainerTemplate } from './templates.mjs';
 
 const execute = promisify(execFile);
 const dataRoot = dirname(process.env.NAS_DATA_FILE || 'data/state.json');
@@ -142,6 +143,19 @@ export async function runtimeInventory() {
   };
   try {
     runtime.containers = await localContainerInventory();
+    const templateLibrary = await listContainerTemplates().catch(() => ({ templates: [] }));
+    runtime.containers.images = [
+      ...(runtime.containers.images || []),
+      ...templateLibrary.templates.map(item => ({
+        id: item.id,
+        label: `${item.filename} · ${item.storageLabel}`,
+        source: 'template-library',
+        filename: item.filename,
+        storageLabel: item.storageLabel,
+        sizeBytes: item.sizeBytes
+      }))
+    ];
+    runtime.containers.templateCount = templateLibrary.templates.length;
     runtime.virtualization.diagnostics = runtime.containers.diagnostics || null;
     if (runtime.containers.diagnostics?.nested) {
       const kvm = runtime.containers.diagnostics.kvm;
@@ -270,9 +284,16 @@ export async function createContainer(input) {
     });
     return await localManageContainer(input.id || input.name, input.action);
   }
+  const importedTemplate = String(input.image || '').startsWith('template:')
+    ? await resolveContainerTemplate(input.image)
+    : null;
+  if (String(input.image || '').startsWith('template:') && !importedTemplate) {
+    throw Object.assign(new Error('The selected container template is no longer available on storage.'), { status: 409 });
+  }
   return await localCreateContainer({
     name: input.name,
-    image: input.image,
+    image: importedTemplate ? '' : input.image,
+    templatePath: importedTemplate?.path || '',
     memoryMiB: Number(input.memoryMiB),
     cpus: Number(input.cpus),
     network: input.network
