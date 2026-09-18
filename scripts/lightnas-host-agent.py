@@ -15,6 +15,7 @@ import os
 import pty
 import re
 import shutil
+import socket
 import socketserver
 import subprocess
 import threading
@@ -337,6 +338,69 @@ def network_action(data: dict) -> dict:
     raise ValueError("unsupported network action")
 
 
+
+def vm_console_target(name: str) -> tuple[str, int]:
+    if not NAME_RE.fullmatch(name):
+        raise ValueError("invalid VM name")
+    if not available("virsh"):
+        raise RuntimeError("libvirt client is not installed")
+    state = run(["virsh", "-c", "qemu:///system", "domstate", name], timeout=15).lower()
+    if "running" not in state:
+        raise ValueError("start the VM before opening its console")
+    display = run(["virsh", "-c", "qemu:///system", "vncdisplay", name], timeout=15).strip()
+    # Common forms are :0, 127.0.0.1:0 and 127.0.0.1:5900.
+    host = "127.0.0.1"
+    value = display
+    if ":" in display and not display.startswith(":"):
+        host, value = display.rsplit(":", 1)
+    else:
+        value = display.lstrip(":")
+    try:
+        number = int(value)
+    except ValueError as exc:
+        raise RuntimeError(f"libvirt returned an invalid VNC display: {display}") from exc
+    port = number if number >= 5900 else 5900 + number
+    if not (5900 <= port <= 65535):
+        raise RuntimeError("VM VNC port is outside the allowed range")
+    if host in {"0.0.0.0", "::", "localhost", ""}:
+        host = "127.0.0.1"
+    return host, port
+
+
+def stream_vm_console(connection, data: dict) -> None:
+    name = str(data.get("id") or data.get("name") or "")
+    host, port = vm_console_target(name)
+    backend = socket.create_connection((host, port), timeout=10)
+
+    def input_loop():
+        try:
+            while True:
+                chunk = connection.recv(65536)
+                if not chunk:
+                    break
+                backend.sendall(chunk)
+        except OSError:
+            pass
+        finally:
+            try:
+                backend.shutdown(socket.SHUT_WR)
+            except OSError:
+                pass
+
+    feeder = threading.Thread(target=input_loop, daemon=True)
+    feeder.start()
+    try:
+        while True:
+            chunk = backend.recv(65536)
+            if not chunk:
+                break
+            connection.sendall(chunk)
+    except OSError:
+        pass
+    finally:
+        backend.close()
+        feeder.join(timeout=1)
+
 def stream_container(connection, data: dict) -> None:
     name = str(data.get("id") or data.get("name") or "")
     if not NAME_RE.fullmatch(name):
@@ -412,6 +476,11 @@ class Handler(socketserver.StreamRequestHandler):
                 self.wfile.write(b'{"ok":true,"data":{"mode":"pty"}}\n')
                 self.wfile.flush()
                 stream_container(self.connection, request.get("data") or {})
+                return
+            if request.get("action") == "vm-console":
+                self.wfile.write(b'{"ok":true,"data":{"mode":"raw-vnc"}}\n')
+                self.wfile.flush()
+                stream_vm_console(self.connection, request.get("data") or {})
                 return
             data = dispatch(request)
             self.wfile.write((json.dumps({"ok": True, "data": data}, separators=(",", ":")) + "\n").encode())
