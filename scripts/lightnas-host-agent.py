@@ -346,9 +346,19 @@ def managed_template_archive(value: str) -> Path:
     if not path.is_file() or not any(name.endswith(suffix) for suffix in (".tar.zst", ".tar.xz", ".tar.gz", ".tgz")):
         raise ValueError("unsupported container template archive")
     text = str(path)
-    local_root = str(Path("/var/lib/lightnas/templates").resolve())
-    managed_marker = f"{os.sep}.lightnas{os.sep}template{os.sep}cache{os.sep}"
-    if not (text.startswith(local_root + os.sep) or managed_marker in text):
+    legacy_root = str(Path("/var/lib/lightnas/templates").resolve())
+    local_cache = str(Path("/var/lib/lightnas/storage/local/template/cache").resolve())
+    legacy_marker = f"{os.sep}.lightnas{os.sep}template{os.sep}cache{os.sep}"
+    storage_cache = re.compile(
+        rf"{re.escape(os.sep)}\.lightnas{re.escape(os.sep)}storage{re.escape(os.sep)}"
+        rf"[A-Za-z][A-Za-z0-9_-]{{1,31}}{re.escape(os.sep)}template{re.escape(os.sep)}cache{re.escape(os.sep)}"
+    )
+    if not (
+        text.startswith(legacy_root + os.sep)
+        or text.startswith(local_cache + os.sep)
+        or legacy_marker in text
+        or storage_cache.search(text)
+    ):
         raise ValueError("template archive is outside a LightNAS-managed template cache")
     return path
 
