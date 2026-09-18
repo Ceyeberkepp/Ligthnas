@@ -2,7 +2,8 @@ import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdir, readdir, lstat, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { proxmoxInventory, proxmoxCreateVm, proxmoxManageVm, proxmoxUpdateVm, proxmoxContainerInventory, proxmoxCreateContainer, proxmoxManageContainer, proxmoxUpdateContainer } from './proxmox.mjs';
+import { proxmoxInventory, proxmoxCreateVm, proxmoxManageVm, proxmoxUpdateVm } from './proxmox.mjs';
+import { localContainerInventory, localCreateContainer, localManageContainer, localUpdateContainer } from './local-host.mjs';
 
 const execute = promisify(execFile);
 const dataRoot = dirname(process.env.NAS_DATA_FILE || 'data/state.json');
@@ -63,9 +64,12 @@ export async function runtimeInventory() {
   } catch {}
   const runtime = {
     docker: { available: dockerInfo.ok, enabled: process.env.LIGHTNAS_DOCKER_ENABLED === '1', reason: dockerInfo.ok ? null : 'Optional app runtime is not installed or not accessible.', containers: [], presets: containerImages },
-    containers: { available: false, enabled: false, provider: 'none', reason: 'No system-container provider is connected. On Proxmox, run the LightNAS Proxmox helper. Local Incus support is the non-Proxmox provider.', containers: [], pools: [], networks: [], templates: [] },
+    containers: { available: false, enabled: false, provider: 'local-lxc', reason: 'Native LXC is not available on this LightNAS host.', containers: [], images: [], networks: [], storageRoot: null },
     virtualization: { available: vmInfo.ok && installer.ok, enabled: process.env.LIGHTNAS_VM_ENABLED === '1', reason: vmInfo.ok && installer.ok ? null : 'Libvirt/KVM and virt-install must be installed and accessible on bare metal or a VM with nested virtualization.', machines: vmInfo.ok && vmInfo.output ? vmInfo.output.split('\n').filter(Boolean) : [], machineDetails: [], pools: vmPools.ok && vmPools.output ? vmPools.output.split('\n').filter(Boolean) : [], networks: vmNetworks.ok && vmNetworks.output ? vmNetworks.output.split('\n').filter(Boolean) : [], images }
   };
+  try { runtime.containers = await localContainerInventory(); }
+  catch (error) { runtime.containers = { available: false, enabled: false, provider: 'local-lxc', reason: `Native LXC host agent unavailable: ${error.message}`, containers: [], images: [], networks: [], storageRoot: null }; }
+
   if (dockerInfo.ok) {
     const list = await command('docker', ['ps', '-a', '--format', '{{json .}}']);
     if (list.ok) runtime.docker.containers = list.output.split('\n').filter(Boolean).flatMap(row => {
@@ -78,11 +82,9 @@ export async function runtimeInventory() {
   const setup = await readFile(join(dataRoot, 'runtime-status.txt'), 'utf8').catch(() => '');
   if (!runtime.docker.available && setup) runtime.docker.reason = setup.split('\n').find(line => line.startsWith('Apps: '))?.slice(6) || runtime.docker.reason;
   if (!runtime.virtualization.available && setup) runtime.virtualization.reason = setup.split('\n').find(line => line.startsWith('VMs: '))?.slice(5) || runtime.virtualization.reason;
-  if (Object.keys(process.env).some(key => key.startsWith('LIGHTNAS_PVE_'))) {
+  if (process.env.LIGHTNAS_ENABLE_PROXMOX_PROVIDER === '1' && Object.keys(process.env).some(key => key.startsWith('LIGHTNAS_PVE_'))) {
     try { runtime.virtualization = await proxmoxInventory() || runtime.virtualization; }
-    catch (error) { runtime.virtualization = { available: false, enabled: true, provider: 'proxmox', reason: `Proxmox integration failed: ${error.message}. Re-run the Proxmox LightNAS helper or verify the host bridge.`, machines: [], machineDetails: [], pools: [], networks: [], images: [] }; }
-    try { runtime.containers = await proxmoxContainerInventory() || runtime.containers; }
-    catch (error) { runtime.containers = { available: false, enabled: true, provider: 'proxmox-lxc', reason: `Proxmox LXC integration failed: ${error.message}. Re-run the Proxmox LightNAS helper.`, containers: [], pools: [], networks: [], templates: [] }; }
+    catch (error) { runtime.virtualization = { available: false, enabled: true, provider: 'proxmox', reason: `Optional Proxmox provider failed: ${error.message}`, machines: [], machineDetails: [], pools: [], networks: [], images: [] }; }
   }
   return runtime;
 }
@@ -139,15 +141,24 @@ export async function openContainerShell(name) {
 }
 
 export async function createContainer(input) {
-  const pve = Object.keys(process.env).some(key => key.startsWith('LIGHTNAS_PVE_'));
-  if (!pve) throw Object.assign(new Error('System containers require a connected provider. On Proxmox, run the one-click Proxmox helper. Local Incus is the planned provider for bare metal and generic VMs.'), { status: 409 });
-  const inventory = await proxmoxContainerInventory();
-  if (!inventory?.available) throw Object.assign(new Error(inventory?.reason || 'Proxmox LXC provider is unavailable.'), { status: 409 });
+  const inventory = await localContainerInventory();
+  if (!inventory?.available || !inventory.enabled) throw Object.assign(new Error(inventory?.reason || 'Native LXC is unavailable on this LightNAS host.'), { status: 409 });
   if (input?.action) {
-    if (input.action === 'update') return await proxmoxUpdateContainer(input);
-    return await proxmoxManageContainer(input.vmid, input.action);
+    if (input.action === 'update') return await localUpdateContainer({
+      id: input.id || input.name,
+      name: input.name || input.id,
+      memoryMiB: Number(input.memoryMiB),
+      cpus: Number(input.cpus)
+    });
+    return await localManageContainer(input.id || input.name, input.action);
   }
-  return await proxmoxCreateContainer(input, inventory);
+  return await localCreateContainer({
+    name: input.name,
+    image: input.image,
+    memoryMiB: Number(input.memoryMiB),
+    cpus: Number(input.cpus),
+    network: input.network
+  });
 }
 
 export async function createVm(input) {
