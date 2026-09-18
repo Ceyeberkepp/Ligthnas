@@ -152,7 +152,7 @@ if ! pct exec "$ctid" -- bash -lc 'command -v lxc-ls >/dev/null && command -v lx
     apt-get install -y \
       lxc lxc-templates lxcfs uidmap bridge-utils debootstrap debian-archive-keyring ubuntu-keyring \
       qemu-system-x86 qemu-utils libvirt-daemon-system libvirt-clients virtinst ovmf \
-      dnsmasq-base network-manager iproute2 nftables ufw
+      dnsmasq-base network-manager iproute2 nftables ufw zstd
   '
 fi
 
@@ -175,12 +175,60 @@ pct exec "$ctid" -- bash -lc '
 '
 
 latest_config="$(pct config "$ctid")"
-mapfile -t guest_data_mounts < <(sed -nE 's/^mp[0-9]+: .*mp=([^,]+).*/\1/p' <<<"$latest_config" | grep -E '^/(mnt|media|srv|data|storage)(/|$)' || true)
+mapfile -t guest_data_mounts < <(sed -nE 's/^mp[0-9]+: .*mp=([^,]+).*/\1/p' <<<"$latest_config" | grep -v '^/var/lib/lightnas-pve
+echo
+echo "LightNAS local-runtime installation finished in LXC $ctid."
+echo 'Containers: native LXC/liblxc inside LightNAS.'
+echo 'VMs: native QEMU/KVM + libvirt inside LightNAS when /dev/kvm is available.'
+echo 'Proxmox host APIs are not used for normal LightNAS compute operations.'
+
+echo "Performing strict post-install verification..."
+latest_config="$(pct config "$ctid")"
+grep -Eq '(^|,)nesting=1(,|$)' <<<"${latest_config#*features: }" || { echo 'ERROR: nesting=1 is missing.' >&2; exit 1; }
+grep -Eq '^features: .*keyctl=1' <<<"$latest_config" || { echo 'ERROR: keyctl=1 is missing.' >&2; exit 1; }
+grep -Eq '^features: .*mknod=1' <<<"$latest_config" || { echo 'ERROR: mknod=1 is missing.' >&2; exit 1; }
+
+pct exec "$ctid" -- bash -lc '
+  set -Eeuo pipefail
+  command -v lxc-ls >/dev/null
+  command -v lxc-create >/dev/null
+  command -v debootstrap >/dev/null
+  command -v virsh >/dev/null
+  command -v virt-install >/dev/null
+  systemctl is-active --quiet lightnas-host-agent
+  systemctl is-active --quiet lightnas
+' || {
+  echo "ERROR: LightNAS nested runtime verification failed." >&2
+  pct exec "$ctid" -- systemctl status lightnas-host-agent lightnas --no-pager --full || true
+  exit 1
+}
+
+pct exec "$ctid" -- bash -lc '
+  echo "--- Runtime status ---"
+  cat /var/lib/lightnas/runtime-status.txt 2>/dev/null || true
+  echo "--- KVM ---"
+  ls -l /dev/kvm 2>/dev/null || echo "/dev/kvm unavailable"
+  echo "--- Services ---"
+  systemctl --no-pager is-active lightnas-host-agent lightnas || true
+'
+echo "--- Nested runtime self-test ---"
+pct exec "$ctid" -- python3 -c 'import json,socket; s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.connect("/run/lightnas/host-agent.sock"); s.sendall(b"{\"action\":\"runtime-diagnostics\"}\n"); line=s.makefile("rb").readline(); print(json.dumps(json.loads(line), indent=2))'
+ || true)
 for guest_mount in "${guest_data_mounts[@]}"; do
+  [[ "$guest_mount" == /* ]] || guest_mount="/$guest_mount"
   echo "Granting LightNAS managed access to ${guest_mount}..."
-  pct exec "$ctid" -- bash -lc 'mount="$1"; [[ -d "$mount" ]] && setfacl -m u:lightnas:rwx "$mount" && setfacl -m d:u:lightnas:rwx "$mount"' _ "$guest_mount" || \
-    echo "Warning: unable to add LightNAS ACL on ${guest_mount}; it will remain browse-only." >&2
+  pct exec "$ctid" -- bash -lc '
+    mount="$1"
+    if [[ -d "$mount" ]]; then
+      setfacl -m u:lightnas:rwx "$mount"
+      setfacl -m d:u:lightnas:rwx "$mount"
+      install -d -m 0770 "$mount/.lightnas/template/cache"
+      setfacl -R -m u:lightnas:rwx "$mount/.lightnas"
+      setfacl -R -m d:u:lightnas:rwx "$mount/.lightnas"
+    fi
+  ' _ "$guest_mount" || echo "Warning: unable to grant LightNAS access on ${guest_mount}; it will remain browse-only." >&2
 done
+pct exec "$ctid" -- systemctl restart lightnas-host-agent lightnas
 
 echo
 echo "LightNAS local-runtime installation finished in LXC $ctid."
