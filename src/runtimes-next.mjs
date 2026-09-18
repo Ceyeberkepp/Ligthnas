@@ -2,7 +2,7 @@ import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdir, readdir, lstat, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { proxmoxInventory, proxmoxCreateVm, proxmoxManageVm, proxmoxUpdateVm } from './proxmox.mjs';
+import { proxmoxInventory, proxmoxCreateVm, proxmoxManageVm, proxmoxUpdateVm, proxmoxContainerInventory, proxmoxCreateContainer, proxmoxManageContainer, proxmoxUpdateContainer } from './proxmox.mjs';
 
 const execute = promisify(execFile);
 const dataRoot = dirname(process.env.NAS_DATA_FILE || 'data/state.json');
@@ -62,7 +62,8 @@ export async function runtimeInventory() {
     images = (await Promise.all(images.map(async name => (await lstat(join(vmIsoDirectory, name))).isFile() ? name : null))).filter(Boolean);
   } catch {}
   const runtime = {
-    docker: { available: dockerInfo.ok, enabled: process.env.LIGHTNAS_DOCKER_ENABLED === '1', reason: dockerInfo.ok ? null : 'Docker is not installed, running, or accessible to the lightnas service account.', containers: [], presets: containerImages },
+    docker: { available: dockerInfo.ok, enabled: process.env.LIGHTNAS_DOCKER_ENABLED === '1', reason: dockerInfo.ok ? null : 'Optional app runtime is not installed or not accessible.', containers: [], presets: containerImages },
+    containers: { available: false, enabled: false, provider: 'none', reason: 'No system-container provider is connected. On Proxmox, run the LightNAS Proxmox helper. Local Incus support is the non-Proxmox provider.', containers: [], pools: [], networks: [], templates: [] },
     virtualization: { available: vmInfo.ok && installer.ok, enabled: process.env.LIGHTNAS_VM_ENABLED === '1', reason: vmInfo.ok && installer.ok ? null : 'Libvirt/KVM and virt-install must be installed and accessible on bare metal or a VM with nested virtualization.', machines: vmInfo.ok && vmInfo.output ? vmInfo.output.split('\n').filter(Boolean) : [], machineDetails: [], pools: vmPools.ok && vmPools.output ? vmPools.output.split('\n').filter(Boolean) : [], networks: vmNetworks.ok && vmNetworks.output ? vmNetworks.output.split('\n').filter(Boolean) : [], images }
   };
   if (dockerInfo.ok) {
@@ -75,11 +76,13 @@ export async function runtimeInventory() {
     });
   }
   const setup = await readFile(join(dataRoot, 'runtime-status.txt'), 'utf8').catch(() => '');
-  if (!runtime.docker.available && setup) runtime.docker.reason = setup.split('\n').find(line => line.startsWith('Containers: '))?.slice(12) || runtime.docker.reason;
+  if (!runtime.docker.available && setup) runtime.docker.reason = setup.split('\n').find(line => line.startsWith('Apps: '))?.slice(6) || runtime.docker.reason;
   if (!runtime.virtualization.available && setup) runtime.virtualization.reason = setup.split('\n').find(line => line.startsWith('VMs: '))?.slice(5) || runtime.virtualization.reason;
   if (Object.keys(process.env).some(key => key.startsWith('LIGHTNAS_PVE_'))) {
     try { runtime.virtualization = await proxmoxInventory() || runtime.virtualization; }
     catch (error) { runtime.virtualization = { available: false, enabled: true, provider: 'proxmox', reason: `Proxmox integration failed: ${error.message}. Re-run the Proxmox LightNAS helper or verify the host bridge.`, machines: [], machineDetails: [], pools: [], networks: [], images: [] }; }
+    try { runtime.containers = await proxmoxContainerInventory() || runtime.containers; }
+    catch (error) { runtime.containers = { available: false, enabled: true, provider: 'proxmox-lxc', reason: `Proxmox LXC integration failed: ${error.message}. Re-run the Proxmox LightNAS helper.`, containers: [], pools: [], networks: [], templates: [] }; }
   }
   return runtime;
 }
@@ -121,60 +124,30 @@ export async function manageCatalogApp(id, action) {
 }
 
 async function assertManagedContainer(name) {
-  if (!/^lightnas-[a-z0-9][a-z0-9-]{0,60}$/.test(name || '')) throw Object.assign(new Error('Invalid LightNAS container name.'), { status: 400 });
+  if (!/^lightnas-[a-z0-9][a-z0-9-]{0,60}$/.test(name || '')) throw Object.assign(new Error('Invalid LightNAS app container name.'), { status: 400 });
   const inspected = await runDocker(['inspect', '--format', '{{index .Config.Labels "lightnas.managed"}}|{{index .Config.Labels "lightnas.catalog"}}|{{.State.Running}}', name], 15000);
   const [managed, catalogId, running] = inspected.split('|');
-  if (managed !== 'true' && !catalogId) throw Object.assign(new Error('Only LightNAS-managed containers can be controlled here.'), { status: 403 });
+  if (managed !== 'true' && !catalogId) throw Object.assign(new Error('Only LightNAS-managed app containers can be controlled here.'), { status: 403 });
   return { running: running === 'true' };
 }
 
 export async function openContainerShell(name) {
-  if (process.env.LIGHTNAS_DOCKER_ENABLED !== '1') throw Object.assign(new Error('Docker actions are disabled on this host.'), { status: 409 });
+  if (process.env.LIGHTNAS_DOCKER_ENABLED !== '1') throw Object.assign(new Error('The optional Docker app engine is disabled.'), { status: 409 });
   const state = await assertManagedContainer(name);
-  if (!state.running) throw Object.assign(new Error('Start the container before opening its terminal.'), { status: 409 });
+  if (!state.running) throw Object.assign(new Error('Start the app container before opening its shell.'), { status: 409 });
   return spawn('docker', ['exec', '-i', name, 'sh'], { stdio: ['pipe', 'pipe', 'pipe'] });
 }
 
-async function manageContainer(input) {
-  let name = String(input.name || '');
-  const action = String(input.action || '');
-  await assertManagedContainer(name);
-  if (['start', 'stop', 'restart'].includes(action)) { await runDocker([action, name], 60000); return { name, action }; }
-  if (action === 'remove') { await runDocker(['rm', '-f', name], 60000); return { name, action }; }
-  if (action === 'logs') return { name, action, output: await runDocker(['logs', '--tail', '200', name], 30000) };
-  if (action === 'update') {
-    const memory = Number(input.memoryMiB);
-    if (!Number.isInteger(memory) || memory < 128 || memory > 65536) throw Object.assign(new Error('Memory must be 128–65536 MiB.'), { status: 400 });
-    await runDocker(['update', '--memory', `${memory}m`, name], 60000);
-    const requestedName = String(input.newName || '').trim();
-    if (requestedName && requestedName !== name) {
-      if (!/^lightnas-[a-z0-9][a-z0-9-]{0,60}$/.test(requestedName)) throw Object.assign(new Error('New container name must start with lightnas- and contain lowercase letters, numbers, or hyphens.'), { status: 400 });
-      await runDocker(['rename', name, requestedName], 30000);
-      name = requestedName;
-    }
-    return { name, action, memoryMiB: memory };
-  }
-  if (action === 'shell') {
-    const shellCommand = typeof input.command === 'string' && input.command.trim() ? input.command.trim() : 'id; uname -a';
-    if (shellCommand.length > 1000 || /[\0\r\n]/.test(shellCommand)) throw Object.assign(new Error('Container command must be one line and under 1000 characters.'), { status: 400 });
-    const result = await command('docker', ['exec', name, 'sh', '-lc', shellCommand], 30000);
-    if (!result.ok) throw Object.assign(new Error(`Container command failed: ${result.error}`), { status: 409 });
-    return { name, action, output: result.output };
-  }
-  throw Object.assign(new Error('Invalid container action.'), { status: 400 });
-}
-
 export async function createContainer(input) {
-  if (input?.action) return await manageContainer(input);
-  if (!/^[a-z][a-z0-9-]{1,39}$/.test(input.name || '')) throw Object.assign(new Error('Use a 2–40 character lowercase container name.'), { status: 400 });
-  if (typeof input.image !== 'string' || !/^[a-z0-9][a-z0-9./:_-]{0,159}$/.test(input.image) || input.image.includes('..') || input.image.includes('//')) throw Object.assign(new Error('Enter a valid Docker image name.'), { status: 400 });
-  const memory = Number(input.memoryMiB);
-  if (!Number.isInteger(memory) || memory < 128 || memory > 16384) throw Object.assign(new Error('Memory must be 128–16384 MiB.'), { status: 400 });
-  await pullDockerImage(input.image);
-  const args = ['run', '-d', '--name', `lightnas-${input.name}`, '--label', 'lightnas.managed=true', '--restart', 'unless-stopped', '--memory', `${memory}m`, '--pids-limit', '256', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges'];
-  args.push(input.image);
-  if (persistentShellImages.has(input.image)) args.push('sh', '-lc', 'trap : TERM INT; sleep infinity & wait');
-  return { name: `lightnas-${input.name}`, image: input.image, containerId: await runDocker(args) };
+  const pve = Object.keys(process.env).some(key => key.startsWith('LIGHTNAS_PVE_'));
+  if (!pve) throw Object.assign(new Error('System containers require a connected provider. On Proxmox, run the one-click Proxmox helper. Local Incus is the planned provider for bare metal and generic VMs.'), { status: 409 });
+  const inventory = await proxmoxContainerInventory();
+  if (!inventory?.available) throw Object.assign(new Error(inventory?.reason || 'Proxmox LXC provider is unavailable.'), { status: 409 });
+  if (input?.action) {
+    if (input.action === 'update') return await proxmoxUpdateContainer(input);
+    return await proxmoxManageContainer(input.vmid, input.action);
+  }
+  return await proxmoxCreateContainer(input, inventory);
 }
 
 export async function createVm(input) {
