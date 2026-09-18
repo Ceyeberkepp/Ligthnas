@@ -24,22 +24,22 @@
   <form id="command-form" autocomplete="off"><input id="command" placeholder="Type a command and press Enter" autofocus><button>Send</button></form>
   <script>
     const params = new URLSearchParams(location.search);
-    const vmid = params.get('vmid') || '';
-    const name = params.get('name') || `CT ${vmid}`;
+    const id = params.get('id') || '';
+    const name = params.get('name') || id;
     const title = document.querySelector('#title');
     const status = document.querySelector('#status');
     const terminal = document.querySelector('#terminal');
     const input = document.querySelector('#command');
-    title.textContent = `${name || `CT ${vmid}`} · root terminal`;
+    title.textContent = `${name || id} · root terminal`;
 
-    if (!/^[1-9][0-9]{1,5}$/.test(vmid)) {
-      status.textContent = 'Invalid container ID';
+    if (!/^[A-Za-z][A-Za-z0-9-]{1,39}$/.test(id)) {
+      status.textContent = 'Invalid container name';
       status.classList.add('error');
-      throw new Error('Invalid container ID');
+      throw new Error('Invalid container name');
     }
 
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${protocol}//${location.host}/api/console/container/${encodeURIComponent(vmid)}`);
+    const ws = new WebSocket(`${protocol}//${location.host}/api/console/container/${encodeURIComponent(id)}`);
     ws.binaryType = 'arraybuffer';
     const append = text => {
       terminal.textContent += text;
@@ -47,7 +47,7 @@
     };
     ws.addEventListener('open', () => {
       status.textContent = 'Connected';
-      append(`Connected to ${name} (CT ${vmid}) as root\n`);
+      append(`Connected to ${name} as root\n`);
       input.focus();
     });
     ws.addEventListener('message', async event => {
