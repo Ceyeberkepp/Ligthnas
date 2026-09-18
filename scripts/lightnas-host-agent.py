@@ -271,7 +271,7 @@ def bootstrap_deb_container(name: str, image: dict) -> Path:
     rootfs.mkdir(parents=True, exist_ok=True)
 
     include = ",".join([
-        "systemd-sysv", "ifupdown", "isc-dhcp-client", "iproute2",
+        "systemd-sysv", "systemd-resolved", "iproute2",
         "iputils-ping", "ca-certificates", "netbase", "procps"
     ])
     args = [
@@ -289,11 +289,22 @@ def bootstrap_deb_container(name: str, image: dict) -> Path:
         f"127.0.0.1\tlocalhost\n127.0.1.1\t{name}\n::1\tlocalhost ip6-localhost ip6-loopback\n",
         encoding="utf-8",
     )
-    network_dir = rootfs / "etc" / "network"
+    network_dir = rootfs / "etc" / "systemd" / "network"
     network_dir.mkdir(parents=True, exist_ok=True)
-    (network_dir / "interfaces").write_text(
-        "auto lo\niface lo inet loopback\n\nauto eth0\niface eth0 inet dhcp\n",
+    (network_dir / "20-eth0.network").write_text(
+        "[Match]\nName=eth0\n\n[Network]\nDHCP=yes\nIPv6AcceptRA=yes\n",
         encoding="utf-8",
+    )
+    resolv = rootfs / "etc" / "resolv.conf"
+    try:
+        if resolv.exists() or resolv.is_symlink():
+            resolv.unlink()
+        resolv.symlink_to("/run/systemd/resolve/stub-resolv.conf")
+    except OSError:
+        pass
+    subprocess.run(
+        ["systemctl", "--root", str(rootfs), "enable", "systemd-networkd.service", "systemd-resolved.service"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
     )
     machine_id = rootfs / "etc" / "machine-id"
     if machine_id.exists():
