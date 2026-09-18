@@ -337,12 +337,89 @@ def bootstrap_template_container(name: str, image: dict) -> Path:
     return Path("/var/lib/lxc") / name / "config"
 
 
+def managed_template_archive(value: str) -> Path:
+    try:
+        path = Path(value).resolve(strict=True)
+    except OSError as exc:
+        raise ValueError("container template archive is unavailable") from exc
+    name = path.name.lower()
+    if not path.is_file() or not any(name.endswith(suffix) for suffix in (".tar.zst", ".tar.xz", ".tar.gz", ".tgz")):
+        raise ValueError("unsupported container template archive")
+    text = str(path)
+    local_root = str(Path("/var/lib/lightnas/templates").resolve())
+    managed_marker = f"{os.sep}.lightnas{os.sep}template{os.sep}cache{os.sep}"
+    if not (text.startswith(local_root + os.sep) or managed_marker in text):
+        raise ValueError("template archive is outside a LightNAS-managed template cache")
+    return path
+
+
+def bootstrap_archive_container(name: str, archive_value: str) -> Path:
+    archive = managed_template_archive(archive_value)
+    base = Path("/var/lib/lxc") / name
+    rootfs = base / "rootfs"
+    base.mkdir(parents=True, exist_ok=False)
+    rootfs.mkdir(parents=True, exist_ok=True)
+
+    try:
+        listing = run(["tar", "-taf", str(archive)], timeout=120)
+        for entry in listing.splitlines():
+            cleaned = entry.lstrip("./")
+            if entry.startswith("/") or ".." in Path(cleaned).parts:
+                raise ValueError("template archive contains an unsafe path")
+        run([
+            "tar", "--numeric-owner", "--xattrs", "--xattrs-include=*",
+            "-xaf", str(archive), "-C", str(rootfs)
+        ], timeout=1800)
+    except Exception:
+        cleanup_container_path(name)
+        raise
+
+    if not (rootfs / "etc").is_dir():
+        cleanup_container_path(name)
+        raise ValueError("template archive does not contain a Linux root filesystem")
+
+    (rootfs / "etc" / "hostname").write_text(f"{name}\n", encoding="utf-8")
+    hosts = rootfs / "etc" / "hosts"
+    if not hosts.exists():
+        hosts.write_text(
+            f"127.0.0.1\tlocalhost\n127.0.1.1\t{name}\n::1\tlocalhost ip6-localhost ip6-loopback\n",
+            encoding="utf-8",
+        )
+
+    # Proxmox system templates generally already contain guest networking.
+    # Add a networkd DHCP profile only when systemd is present so imported
+    # templates remain bootable on the LightNAS NAT bridge.
+    if (rootfs / "usr" / "lib" / "systemd").exists() or (rootfs / "lib" / "systemd").exists():
+        network_dir = rootfs / "etc" / "systemd" / "network"
+        network_dir.mkdir(parents=True, exist_ok=True)
+        (network_dir / "20-eth0.network").write_text(
+            "[Match]\nName=eth0\n\n[Network]\nDHCP=yes\nIPv6AcceptRA=yes\n",
+            encoding="utf-8",
+        )
+        subprocess.run(
+            ["systemctl", "--root", str(rootfs), "enable", "systemd-networkd.service"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+        )
+
+    config = base / "config"
+    config.write_text(
+        "# LightNAS imported system-container template\n"
+        "lxc.include = /usr/share/lxc/config/common.conf\n"
+        f"lxc.rootfs.path = dir:{rootfs}\n"
+        f"lxc.uts.name = {name}\n"
+        "lxc.arch = x86_64\n",
+        encoding="utf-8",
+    )
+    return config
+
+
 def create_container(data: dict) -> dict:
     ok, reason, _diagnostics = container_capability()
     if not ok:
         raise RuntimeError(reason)
     name = str(data.get("name") or "").strip()
     image_id = str(data.get("image") or "").strip()
+    template_path = str(data.get("templatePath") or "").strip()
     network = str(data.get("network") or "lightnas0").strip()
     try:
         memory = int(data.get("memoryMiB") or 2048)
@@ -352,8 +429,8 @@ def create_container(data: dict) -> dict:
     if not NAME_RE.fullmatch(name):
         raise ValueError("invalid container name")
     image = IMAGE_BY_ID.get(image_id)
-    if not image or (in_container() and not image.get("nested", True)):
-        raise ValueError("select a Linux system-container image supported by this LightNAS environment")
+    if not template_path and (not image or (in_container() and not image.get("nested", True))):
+        raise ValueError("select a Linux system-container image or imported LightNAS template")
     if not IFACE_RE.fullmatch(network) or network not in local_networks():
         raise ValueError("select an active local container bridge")
     host_cpus = max(1, os.cpu_count() or 1)
@@ -372,7 +449,9 @@ def create_container(data: dict) -> dict:
         else:
             raise ValueError("a container with this name already exists")
 
-    if image.get("builder") == "debootstrap":
+    if template_path:
+        config = bootstrap_archive_container(name, template_path)
+    elif image.get("builder") == "debootstrap":
         config = bootstrap_deb_container(name, image)
     else:
         config = bootstrap_template_container(name, image)
@@ -403,7 +482,7 @@ def create_container(data: dict) -> dict:
         "status": "running",
         "provider": "local-lxc",
         "image": image_id,
-        "builder": image.get("builder"),
+        "builder": "archive" if template_path else image.get("builder"),
     }
 
 
