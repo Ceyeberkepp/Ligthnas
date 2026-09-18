@@ -217,4 +217,4 @@ pct exec "$ctid" -- bash -lc '
   systemctl --no-pager is-active lightnas-host-agent lightnas || true
 '
 echo "--- Nested runtime self-test ---"
-pct exec "$ctid" -- python3 -c 'import json,socket; s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.connect("/run/lightnas/host-agent.sock"); s.sendall(b"{\"action\":\"runtime-diagnostics\"}\n"); data=b""; exec("while b\\\"\\n\\\" not in data:\\n chunk=s.recv(65536)\\n if not chunk: break\\n data+=chunk"); print(json.dumps(json.loads(data.split(b"\\n",1)[0]), indent=2))'
+pct exec "$ctid" -- python3 -c 'import json,socket; s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.connect("/run/lightnas/host-agent.sock"); s.sendall(b"{\"action\":\"runtime-diagnostics\"}\n"); line=s.makefile("rb").readline(); print(json.dumps(json.loads(line), indent=2))'
