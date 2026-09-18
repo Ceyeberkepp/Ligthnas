@@ -319,42 +319,63 @@ function networkView() {
   const control = info?.control;
   if (!info) return `${pageHead('Networking', 'Manage wired Ethernet, Wi‑Fi, bridges, VLANs, addressing, routes and DNS on the LightNAS host.', '<button class="secondary" data-action="refresh-network">Refresh</button>')}<div class="empty">Loading network inventory…</div>`;
 
-  const uplinks = control?.uplinks || [];
   const defaultRoute = [...(info.routes || [])].filter(item => item.destination === 'default').sort((a, b) => (a.metric ?? 0) - (b.metric ?? 0))[0] || null;
   const routeDevice = defaultRoute?.device || '';
   const routeDeviceInfo = (control?.devices || []).find(item => item.name === routeDevice);
   const current = control?.currentUplink || (routeDevice ? {
     name: routeDevice,
     kind: routeDeviceInfo?.type === 'wifi' ? 'Wi-Fi' : 'Ethernet',
-    connection: routeDeviceInfo?.connection || 'Kernel-managed connection',
+    connection: routeDeviceInfo?.connection || 'Kernel / hypervisor managed',
     gateway: defaultRoute?.gateway || null,
     metric: defaultRoute?.metric ?? null,
-    active: true
+    active: true,
+    managed: false
   } : null);
+
+  const reportedUplinks = control?.uplinks || [];
+  const uplinks = reportedUplinks.length ? reportedUplinks : (current ? [current] : []);
+  const selectableUplinks = uplinks.filter(item => !item.active && item.managed !== false);
   const currentInterface = current ? info.interfaces.find(item => item.name === current.name) : null;
   const currentAddresses = currentInterface?.addresses?.filter(item => item.family === 'inet').map(item => `${item.address}/${item.prefix}`).join(', ') || 'No IPv4 address';
-  const wifiDevices = (control?.devices || []).filter(item => item.type === 'wifi' && !['unavailable','unmanaged'].includes(item.state));
-  const selectableUplinks = uplinks.filter(item => !item.active);
-  const deviceRows = (control?.devices || []).filter(item => item.name !== 'lo');
+  const routeStatus = current?.managed === false ? 'kernel route active' : (control?.connectivity || 'route active');
 
-  return `${pageHead('Networking', 'LightNAS automatically detects available wired and Wi‑Fi interfaces and uses the active default route as the current Internet connection.', '<div class="head-actions"><button class="secondary" data-action="refresh-network">Refresh</button><button class="primary" data-network-add-bridge>+ Bridge</button><button class="secondary" data-network-add-vlan>+ VLAN</button></div>')}
+  const wifiDevices = (control?.devices || []).filter(item => item.type === 'wifi' && !['unavailable','unmanaged'].includes(item.state));
+  const isVirtual = item => item.type === 'bridge' || /^(docker\d*|virbr\d*|lightnas\d*|lxcbr\d*)$/i.test(item.name || '');
+  const physicalDevices = (control?.devices || []).filter(item => item.name !== 'lo' && !isVirtual(item));
+  const virtualDevices = (control?.devices || []).filter(item => item.name !== 'lo' && isVirtual(item));
+
+  const virtualPurpose = name => /^lightnas/i.test(name) ? 'System containers · LightNAS NAT bridge'
+    : /^virbr/i.test(name) ? 'Virtual machines · libvirt network'
+    : /^docker/i.test(name) ? 'App Store · Docker network'
+    : /^lxcbr/i.test(name) ? 'System containers · LXC network'
+    : 'Virtual network';
+
+  return `${pageHead('Networking', 'LightNAS detects the real default Internet route separately from VM, container and application virtual networks.', '<div class="head-actions"><button class="secondary" data-action="refresh-network">Refresh</button><button class="primary" data-network-add-bridge>+ Bridge</button><button class="secondary" data-network-add-vlan>+ VLAN</button></div>')}
     <section class="module-hero">
       <span class="eyebrow">CURRENT INTERNET CONNECTION</span>
       <h2>${current ? `${escapeHtml(current.kind)} · ${escapeHtml(current.name)}` : 'No active Internet uplink detected'}</h2>
-      <p>${current ? `${escapeHtml(current.connection || 'Active connection')} · ${escapeHtml(currentAddresses)}${current.gateway ? ` · gateway ${escapeHtml(current.gateway)}` : ''} · connectivity ${escapeHtml(control?.connectivity || 'unknown')}` : 'Connect an available Ethernet or Wi‑Fi interface below.'}</p>
+      <p>${current ? `${escapeHtml(current.connection || 'Active connection')} · ${escapeHtml(currentAddresses)}${current.gateway ? ` · gateway ${escapeHtml(current.gateway)}` : ''} · ${escapeHtml(routeStatus)}` : 'Connect an available Ethernet or Wi-Fi interface below.'}</p>
     </section>
 
-    ${uplinks.length ? `<h2>Available Internet connections</h2><div class="inventory-grid">${uplinks.map(item => `<article class="inventory-card"><div class="volume-title"><h3>${escapeHtml(item.kind)} · ${escapeHtml(item.name)}</h3><span class="volume-state ${item.active ? 'writable' : ''}">${item.active ? 'CURRENT' : escapeHtml(item.state.toUpperCase())}</span></div><p>${escapeHtml(item.connection || 'No active profile')}</p>${!item.active && selectableUplinks.length ? `<button class="secondary" data-uplink-prefer="${escapeHtml(item.name)}">Use this connection</button>` : '<small>Current/only available uplink</small>'}</article>`).join('')}</div>` : '<div class="module-note">No usable Ethernet or Wi‑Fi uplink is currently visible to LightNAS.</div>'}
+    ${uplinks.length ? `<h2>Internet uplinks</h2><div class="inventory-grid">${uplinks.map(item => `<article class="inventory-card"><div class="volume-title"><h3>${escapeHtml(item.kind || (item.type === 'wifi' ? 'Wi-Fi' : 'Ethernet'))} · ${escapeHtml(item.name)}</h3><span class="volume-state ${item.active ? 'writable' : ''}">${item.active ? 'CURRENT' : escapeHtml(String(item.state || 'AVAILABLE').toUpperCase())}</span></div><p>${escapeHtml(item.connection || (item.managed === false ? 'Kernel / hypervisor managed' : 'No active profile'))}</p>${!item.active && item.managed !== false && selectableUplinks.length ? `<button class="secondary" data-uplink-prefer="${escapeHtml(item.name)}">Use this connection</button>` : `<small>${item.active ? 'Active default Internet route' : item.managed === false ? 'Not controlled by NetworkManager' : 'Available uplink'}</small>`}</article>`).join('')}</div>` : '<div class="module-note">No Ethernet or Wi-Fi Internet route is currently available.</div>'}
 
-    ${wifiDevices.length ? `<h2>Wi‑Fi networks</h2><p class="muted">Wi‑Fi is shown because LightNAS detected a wireless adapter. Connecting to a network makes it the preferred uplink while keeping another link available as fallback.</p><div class="inventory-grid">${(control?.wifi || []).map(item => `<article class="inventory-card"><div class="volume-title"><h3>${escapeHtml(item.ssid)}</h3><span class="volume-state ${item.connected ? 'writable' : ''}">${item.connected ? 'CONNECTED' : `${item.signal}%`}</span></div><p>${escapeHtml(item.security || 'Open')}</p><button class="secondary" data-wifi-connect="${escapeHtml(item.ssid)}">${item.connected ? 'Use as preferred' : 'Connect'}</button></article>`).join('') || '<div class="empty">No Wi‑Fi networks are currently in range.</div>'}</div>` : ''}
+    ${wifiDevices.length ? `<h2>Wi-Fi networks</h2><p class="muted">Wi-Fi appears only when LightNAS detects a usable wireless adapter. When both wired and Wi-Fi are available you can choose the preferred uplink.</p><div class="inventory-grid">${(control?.wifi || []).map(item => `<article class="inventory-card"><div class="volume-title"><h3>${escapeHtml(item.ssid)}</h3><span class="volume-state ${item.connected ? 'writable' : ''}">${item.connected ? 'CONNECTED' : `${item.signal}%`}</span></div><p>${escapeHtml(item.security || 'Open')}</p><button class="secondary" data-wifi-connect="${escapeHtml(item.ssid)}">${item.connected ? 'Use as preferred' : 'Connect'}</button></article>`).join('') || '<div class="empty">No Wi-Fi networks are currently in range.</div>'}</div>` : ''}
 
-    <h2>Network devices</h2><div class="storage-list">${deviceRows.map(item => `<article class="storage-row"><div><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.type)} · ${escapeHtml(item.state)} · ${escapeHtml(item.connection || 'No active profile')}</p></div><div class="runtime-actions">${item.state !== 'connected' ? `<button class="secondary" data-network-device="${escapeHtml(item.name)}" data-network-device-action="connect">Connect</button>` : `<button class="secondary" data-network-device="${escapeHtml(item.name)}" data-network-device-action="disconnect">Disconnect</button>`}</div></article>`).join('') || '<div class="empty">No NetworkManager devices are visible.</div>'}</div>
+    <h2>Physical / uplink interfaces</h2><div class="storage-list">${physicalDevices.map(item => `<article class="storage-row"><div><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.type)} · ${escapeHtml(item.state)} · ${escapeHtml(item.connection || (item.name === routeDevice ? 'Kernel / hypervisor managed' : 'No active profile'))}</p></div><div class="runtime-actions">${item.state === 'unmanaged' ? '<span class="badge">KERNEL MANAGED</span>' : item.state !== 'connected' ? `<button class="secondary" data-network-device="${escapeHtml(item.name)}" data-network-device-action="connect">Connect</button>` : `<button class="secondary" data-network-device="${escapeHtml(item.name)}" data-network-device-action="disconnect">Disconnect</button>`}</div></article>`).join('') || '<div class="empty">No physical Ethernet or Wi-Fi interfaces are visible.</div>'}</div>
 
-    <h2>Connection profiles</h2><div class="storage-list">${(control?.connections || []).map(item => `<article class="storage-row"><div><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.type)} · ${escapeHtml(item.device || 'not active')} · autoconnect ${item.autoconnect ? 'on' : 'off'}</p></div><div class="runtime-actions"><button class="secondary" data-network-edit="${escapeHtml(item.name)}">Edit IPv4 / DNS</button><button class="secondary danger-button" data-network-delete="${escapeHtml(item.name)}">Delete</button></div></article>`).join('') || '<div class="empty">No connection profiles are visible.</div>'}</div>
+    <h2>Virtual networks</h2><div class="storage-list">${virtualDevices.map(item => {
+      const live = info.interfaces.find(iface => iface.name === item.name);
+      const addresses = live?.addresses?.filter(address => address.family === 'inet').map(address => `${address.address}/${address.prefix}`).join(', ') || 'No IPv4 address';
+      return `<article class="storage-row"><div><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(virtualPurpose(item.name))} · ${escapeHtml(live?.state || item.state || 'unknown')} · ${escapeHtml(addresses)}</p></div><span class="badge">${String(live?.state || item.state || '').toUpperCase() === 'UP' ? 'ACTIVE' : 'INACTIVE'}</span></article>`;
+    }).join('') || '<div class="empty">No VM/container/application bridges are visible.</div>'}</div>
 
-    <h2>Live addresses</h2><div class="storage-list">${info.interfaces.map(item => `<article class="storage-row"><div><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.state || 'unknown')} · ${escapeHtml(item.mac || 'MAC unavailable')}</p></div><p>${item.addresses.map(address => `${escapeHtml(address.address)}/${address.prefix}`).join('<br>') || 'No addresses'}</p></article>`).join('') || '<div class="empty">No interfaces accessible.</div>'}</div>
-    <h2>Routes</h2><div class="storage-list">${info.routes.map(route => `<article class="storage-row"><h3>${escapeHtml(route.destination)}</h3><p>via ${escapeHtml(route.gateway || 'on-link')} · ${escapeHtml(route.device)}${route.metric !== null ? ` · metric ${route.metric}` : ''}</p></article>`).join('') || '<div class="empty">No routes accessible.</div>'}</div>
-    <h2>DNS servers</h2><div class="panel">${info.dns.map(escapeHtml).join(', ') || 'No DNS servers found.'}</div>`;
+    <h2>Connection profiles</h2><div class="storage-list">${(control?.connections || []).filter(item => item.name !== 'lightnas0').map(item => `<article class="storage-row"><div><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.type)} · ${escapeHtml(item.device || 'not active')} · autoconnect ${item.autoconnect ? 'on' : 'off'}</p></div><div class="runtime-actions"><button class="secondary" data-network-edit="${escapeHtml(item.name)}">Edit IPv4 / DNS</button><button class="secondary danger-button" data-network-delete="${escapeHtml(item.name)}">Delete</button></div></article>`).join('') || '<div class="empty">No NetworkManager connection profiles are visible.</div>'}</div>
+
+    <details class="panel"><summary><b>Advanced network details</b></summary>
+      <h2>Live addresses</h2><div class="storage-list">${info.interfaces.map(item => `<article class="storage-row"><div><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.state || 'unknown')} · ${escapeHtml(item.mac || 'MAC unavailable')}</p></div><p>${item.addresses.map(address => `${escapeHtml(address.address)}/${address.prefix}`).join('<br>') || 'No addresses'}</p></article>`).join('') || '<div class="empty">No interfaces accessible.</div>'}</div>
+      <h2>Routes</h2><div class="storage-list">${info.routes.map(route => `<article class="storage-row"><h3>${escapeHtml(route.destination)}</h3><p>via ${escapeHtml(route.gateway || 'on-link')} · ${escapeHtml(route.device)}${route.metric !== null ? ` · metric ${route.metric}` : ''}</p></article>`).join('') || '<div class="empty">No routes accessible.</div>'}</div>
+      <h2>DNS servers</h2><div class="panel">${info.dns.map(escapeHtml).join(', ') || 'No DNS servers found.'}</div>
+    </details>`;
 }
 
 function firewallView() {
