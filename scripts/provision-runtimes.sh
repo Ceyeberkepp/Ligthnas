@@ -19,6 +19,17 @@ chmod 0644 "${status_file}"
 
 # Native system containers are built into LightNAS through LXC/liblxc.
 if command -v lxc-create >/dev/null 2>&1 && command -v lxc-start >/dev/null 2>&1; then
+  # Give system containers a stable LightNAS-owned NAT bridge. NetworkManager
+  # shared mode supplies DHCP/DNS/NAT and follows whichever host uplink
+  # (Ethernet or Wi-Fi) is currently preferred.
+  if command -v nmcli >/dev/null 2>&1; then
+    if ! nmcli -t -f NAME connection show 2>/dev/null | grep -Fxq 'lightnas0'; then
+      nmcli connection add type bridge ifname lightnas0 con-name lightnas0 \
+        ipv4.method shared ipv4.addresses 10.77.0.1/24 ipv6.method disabled \
+        connection.autoconnect yes >/dev/null 2>&1 || true
+    fi
+    nmcli connection up lightnas0 >/dev/null 2>&1 || true
+  fi
   if systemctl list-unit-files lxc-net.service --no-legend 2>/dev/null | grep -q '^lxc-net.service'; then
     if [[ -f /etc/default/lxc-net ]]; then
       if grep -q '^USE_LXC_BRIDGE=' /etc/default/lxc-net; then
