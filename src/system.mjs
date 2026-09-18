@@ -106,11 +106,22 @@ export async function getStorageInventory() {
     local = { path: dataPath, mountPoint: coveringMount, dedicated: coveringMount !== '/', totalBytes, availableBytes, usedBytes: Math.max(0, totalBytes - availableBytes) };
   } catch {}
 
+  const usableStorage = {
+    totalBytes: (local?.totalBytes || 0) + virtualStorage.totalBytes,
+    availableBytes: (local?.availableBytes || 0) + virtualStorage.availableBytes,
+    usedBytes: (local?.usedBytes || 0) + virtualStorage.usedBytes,
+    count: (local ? 1 : 0) + virtualStorage.count
+  };
+  usableStorage.usedPercent = usableStorage.totalBytes
+    ? Math.round((usableStorage.usedBytes / usableStorage.totalBytes) * 100)
+    : 0;
+
   return {
     disks,
     local,
     attachedVolumes,
     virtualStorage,
+    usableStorage,
     environment: { container: inContainer, containerType: inContainer ? containerType : null },
     zfs: {
       available: pools !== null && datasets !== null,
