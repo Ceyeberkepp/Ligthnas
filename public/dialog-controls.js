@@ -100,12 +100,12 @@ document.addEventListener('click', async event => {
   if (containerEdit) {
     event.preventDefault();
     event.stopImmediatePropagation();
-    const vmid = Number(containerEdit.dataset.containerEdit);
-    const currentName = containerEdit.dataset.containerName || `CT-${vmid}`;
+    const id = containerEdit.dataset.containerEdit;
+    const currentName = containerEdit.dataset.containerName || id;
     showEditor({
       eyebrow: 'SYSTEM CONTAINER SETTINGS',
-      title: `Edit CT ${vmid}`,
-      description: 'Change the Proxmox LXC hostname, assigned memory, or virtual CPU count. Root disk and network changes remain separate storage/network operations.',
+      title: `Edit ${currentName}`,
+      description: 'Change CPU and memory limits for this native LightNAS LXC container. Rename is intentionally blocked until LightNAS can safely migrate its rootfs path.',
       fields: [
         { name: 'name', label: 'Container name', value: currentName, required: true },
         { name: 'memoryMiB', label: 'Memory (MiB)', type: 'number', value: containerEdit.dataset.containerMemory || '2048', min: 256, max: 262144, step: 1, required: true },
@@ -115,7 +115,7 @@ document.addEventListener('click', async event => {
         const memoryMiB = Number(values.memoryMiB);
         const cpus = Number(values.cpus);
         if (!Number.isInteger(memoryMiB) || !Number.isInteger(cpus)) throw new Error('Memory and CPU values must be whole numbers.');
-        await dialogApi('/api/containers', { method: 'POST', body: JSON.stringify({ vmid, action: 'update', name: values.name, memoryMiB, cpus }) });
+        await dialogApi('/api/containers', { method: 'POST', body: JSON.stringify({ id, action: 'update', name: values.name, memoryMiB, cpus }) });
         refreshRuntime();
       }
     });
@@ -126,21 +126,21 @@ document.addEventListener('click', async event => {
   if (vmEdit) {
     event.preventDefault();
     event.stopImmediatePropagation();
-    const vmid = Number(vmEdit.dataset.vmEdit);
+    const id = vmEdit.dataset.vmEdit;
     showEditor({
       eyebrow: 'VIRTUAL MACHINE SETTINGS',
-      title: `Edit VM ${vmid}`,
-      description: 'Change the VM name, assigned memory, or virtual CPU count on the connected Proxmox host.',
+      title: `Edit ${vmEdit.dataset.vmName || id}`,
+      description: 'Change the native KVM/libvirt VM name, assigned memory, or vCPU count. A running VM must be shut down before rename.',
       fields: [
-        { name: 'name', label: 'VM name', value: vmEdit.dataset.vmName || `VM-${vmid}`, required: true },
-        { name: 'memoryMiB', label: 'Memory (MiB)', type: 'number', value: vmEdit.dataset.vmMemory || '2048', min: 1024, max: 262144, step: 1, required: true },
+        { name: 'name', label: 'VM name', value: vmEdit.dataset.vmName || id, required: true },
+        { name: 'memoryMiB', label: 'Memory (MiB)', type: 'number', value: vmEdit.dataset.vmMemory || '2048', min: 512, max: 262144, step: 1, required: true },
         { name: 'cpus', label: 'Virtual CPUs', type: 'number', value: vmEdit.dataset.vmCpus || '2', min: 1, max: 128, step: 1, required: true }
       ],
       onSubmit: async values => {
         const memoryMiB = Number(values.memoryMiB);
         const cpus = Number(values.cpus);
         if (!Number.isInteger(memoryMiB) || !Number.isInteger(cpus)) throw new Error('Memory and CPU values must be whole numbers.');
-        await dialogApi('/api/vms', { method: 'POST', body: JSON.stringify({ vmid, action: 'update', name: values.name, memoryMiB, cpus }) });
+        await dialogApi('/api/vms', { method: 'POST', body: JSON.stringify({ id, action: 'update', name: values.name, memoryMiB, cpus }) });
         refreshRuntime();
       }
     });
