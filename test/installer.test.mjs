@@ -8,7 +8,7 @@ import { execFile } from 'node:child_process';
 
 const execute = promisify(execFile);
 
-test('installer keeps Docker optional for Apps and does not use it as the Containers backend', async () => {
+test('installer enables the local App Store engine while keeping System Containers on native LXC', async () => {
   const sandbox = await mkdtemp(join(tmpdir(), 'lightnas-provision-'));
   const envPath = join(sandbox, 'runtime.env');
   const statusPath = join(sandbox, 'status.txt');
@@ -24,29 +24,31 @@ test('installer keeps Docker optional for Apps and does not use it as the Contai
       PATH: `${sandbox}:${process.env.PATH}`,
       LIGHTNAS_RUNTIME_ENV_FILE: envPath,
       LIGHTNAS_RUNTIME_STATUS_FILE: statusPath,
-      LIGHTNAS_ALLOW_NESTED_LXC: '1'
+      LIGHTNAS_ALLOW_NESTED_LXC: '1',
+      LIGHTNAS_SKIP_VM: '1'
     };
 
-    // Default install: Docker is not the Containers backend and stays disabled.
+    // Default install enables the local OCI App Store engine, but System
+    // Containers remain native LXC/liblxc and never become Docker containers.
     await execute('bash', [resolve('scripts/provision-runtimes.sh')], { env: baseEnv });
     let result = await readFile(envPath, 'utf8');
-    assert.match(result, /LIGHTNAS_DOCKER_ENABLED=0/);
+    assert.match(result, /LIGHTNAS_DOCKER_ENABLED=1/);
     assert.match(result, /LIGHTNAS_VM_ENABLED=0/);
     let status = await readFile(statusPath, 'utf8');
     assert.match(status, /Containers: native LXC\/liblxc ready/);
-    assert.match(status, /Apps: optional Docker\/OCI engine disabled/);
-
-    // Explicit opt-in enables the optional App Store Docker engine when usable.
-    const appEnv = { ...baseEnv, LIGHTNAS_ENABLE_DOCKER_APPS: '1' };
-    await execute('bash', [resolve('scripts/provision-runtimes.sh')], { env: appEnv });
-    result = await readFile(envPath, 'utf8');
-    assert.match(result, /LIGHTNAS_DOCKER_ENABLED=1/);
-    status = await readFile(statusPath, 'utf8');
     assert.match(status, /Apps: optional Docker\/OCI engine ready/);
 
-    // A broken Docker daemon cannot leave the optional app engine enabled.
+    // Operators can still explicitly disable the App Store OCI engine.
+    const disabledEnv = { ...baseEnv, LIGHTNAS_ENABLE_DOCKER_APPS: '0' };
+    await execute('bash', [resolve('scripts/provision-runtimes.sh')], { env: disabledEnv });
+    result = await readFile(envPath, 'utf8');
+    assert.match(result, /LIGHTNAS_DOCKER_ENABLED=0/);
+    status = await readFile(statusPath, 'utf8');
+    assert.match(status, /Apps: optional Docker\/OCI engine disabled/);
+
+    // A broken Docker daemon cannot leave the App Store engine enabled.
     await writeFile(docker, '#!/bin/sh\nexit 1\n', { mode: 0o755 });
-    await execute('bash', [resolve('scripts/provision-runtimes.sh')], { env: appEnv });
+    await execute('bash', [resolve('scripts/provision-runtimes.sh')], { env: baseEnv });
     result = await readFile(envPath, 'utf8');
     assert.match(result, /LIGHTNAS_DOCKER_ENABLED=0/);
     assert.equal(result.includes('LIGHTNAS_DOCKER_ENABLED=1'), false);
