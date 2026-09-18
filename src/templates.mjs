@@ -128,15 +128,26 @@ export async function proxmoxTemplateCatalog() {
   const names = [...html.matchAll(/href="([^"]+\.(?:tar\.zst|tar\.xz|tar\.gz))"/gi)].map(match => decodeURIComponent(match[1]));
   const unique = [...new Set(names)].filter(name => templateName.test(name));
   return unique.map(filename => {
-    const family = filename.split('-')[0].replace(/_/g, ' ');
+    const withoutSuffix = filename.replace(/\.(?:tar\.zst|tar\.xz|tar\.gz)$/i, '');
+    const parts = withoutSuffix.split('_');
+    const packageName = parts[0] || withoutSuffix;
+    const version = parts.length > 2 ? parts.slice(1, -1).join('_') : (parts[1] || '');
+    const architecture = parts.at(-1) || 'amd64';
+    const family = packageName.split('-')[0].replace(/_/g, ' ');
     return {
       id: filename,
       filename,
+      type: 'lxc',
+      section: 'system',
+      package: packageName,
+      version,
+      architecture,
       name: family.charAt(0).toUpperCase() + family.slice(1),
+      description: `${packageName.replaceAll('-', ' ')} (${architecture})`,
       url: new URL(filename, PROXMOX_SYSTEM_URL).toString(),
-      source: 'Proxmox VE system templates'
+      source: 'Proxmox public system template repository'
     };
-  }).sort((a, b) => a.filename.localeCompare(b.filename, undefined, { numeric: true }));
+  }).sort((a, b) => a.package.localeCompare(b.package, undefined, { numeric: true }) || b.version.localeCompare(a.version, undefined, { numeric: true }));
 }
 
 function byteLimit() {
