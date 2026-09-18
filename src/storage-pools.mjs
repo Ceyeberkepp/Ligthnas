@@ -160,7 +160,13 @@ export async function listStoragePools() {
   }, { totalBytes: 0, availableBytes: 0, usedBytes: 0, count: 0 });
   summary.usedPercent = summary.totalBytes ? Math.round((summary.usedBytes / summary.totalBytes) * 100) : 0;
 
-  return { pools, availableSources, summary, contentTypes: STORAGE_CONTENT };
+  return {
+    pools,
+    availableSources,
+    summary,
+    visibleSummary: inventory.usableStorage || summary,
+    contentTypes: STORAGE_CONTENT
+  };
 }
 
 export async function createStoragePool(input) {
