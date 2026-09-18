@@ -196,12 +196,22 @@ function runtimeBanner(kind) {
 }
 
 function containersView() {
-  const runtime = state.runtimes?.docker;
-  const ready = runtime?.available && runtime?.enabled;
-  return `${pageHead('Containers', 'Create and manage Docker workloads on an enabled host.', '<div class="head-actions"><button class="secondary" data-action="refresh-runtime">Refresh</button><button class="primary" data-action="create-container">+ Create container</button></div>')}
-    ${runtimeBanner('docker')}
-    ${ready ? `<form id="container-form" class="panel creation-form"><h2>Create a container</h2><p class="muted">Runs on the Docker bridge with no host mounts or published ports. Use the Apps catalog for a configured web app.</p><label>Name<input name="name" required pattern="[a-z][a-z0-9-]{1,39}" placeholder="my-container"></label><label>Docker image<input name="image" required placeholder="nginx:stable-alpine"></label><label>Memory limit (MiB)<input type="number" name="memoryMiB" value="512" min="128" max="16384" required></label><button class="primary" type="submit">Create container</button><div class="form-error" role="alert"></div></form>` : ''}
-    <h2>Containers</h2><div class="storage-list">${runtime?.containers?.map(item => `<article class="storage-row"><div><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.image)}</p></div><p>${escapeHtml(item.status || item.state)}</p><div class="storage-size">${escapeHtml(item.ports || 'No ports')}</div></article>`).join('') || '<div class="empty"><p>No Docker containers are visible.</p></div>'}</div>`;
+  const runtime = state.runtimes?.containers;
+  const choices = items => (items || []).map(item => `<option value="${escapeHtml(item)}">${escapeHtml(item)}</option>`).join('');
+  const ready = runtime?.available && runtime?.enabled && runtime.pools?.length && runtime.networks?.length && runtime.templates?.length;
+  return `${pageHead('System containers', 'Create isolated Linux system containers using the connected host provider — Proxmox LXC on Proxmox, with Incus planned for generic hosts.', '<div class="head-actions"><button class="secondary" data-action="refresh-runtime">Refresh</button><button class="primary" data-action="create-container">+ Create container</button></div>')}
+    ${runtimeBanner('containers')}
+    ${runtime?.available && runtime?.enabled && !ready ? `<div class="module-hero"><h2>Provider needs resources</h2><p>${runtime.provider === 'proxmox-lxc' ? 'Download at least one LXC template in Proxmox and make sure a rootdir-capable storage and network bridge are active.' : escapeHtml(runtime.reason || 'Configure a system-container storage pool and network.')}</p></div>` : ''}
+    ${ready ? `<form id="container-form" class="panel creation-form"><h2>Create system container</h2><p class="muted">Creates an unprivileged Linux system container with its own root filesystem, CPU/RAM limits and virtual NIC. This is not a Docker container.</p>
+      <label>Container name<input name="name" required pattern="[A-Za-z][A-Za-z0-9-]{1,39}" placeholder="debian-services"></label>
+      <label>Template<select name="template">${choices(runtime.templates)}</select></label>
+      <label>Memory (MiB)<input type="number" name="memoryMiB" value="2048" min="256" max="65536" required></label>
+      <label>Virtual CPUs<input type="number" name="cpus" value="2" min="1" max="64" required></label>
+      <label>Root disk (GiB)<input type="number" name="diskGiB" value="16" min="2" max="2048" required></label>
+      <label>Storage<select name="pool">${choices(runtime.pools)}</select></label>
+      <label>Network bridge<select name="network">${choices(runtime.networks)}</select></label>
+      <button class="primary" type="submit">Create & start container</button><div class="form-error" role="alert"></div></form>` : ''}
+    <h2>Existing system containers</h2><div class="storage-list">${runtime?.containers?.map(item => `<article class="storage-row"><div><h3>${escapeHtml(item.name)} (${item.vmid})</h3><p>${escapeHtml(runtime.provider || 'system-container')} · ${escapeHtml(item.status)} · ${item.cpus || '—'} CPU · ${bytes(item.memory || 0)} RAM · ${bytes(item.disk || 0)} disk${item.protected ? ' · LightNAS appliance protected' : ''}</p></div><div class="storage-size">CT ${item.vmid}</div></article>`).join('') || '<div class="empty"><p>No system containers are visible.</p></div>'}</div>`;
 }
 
 function vmsView() {
@@ -301,12 +311,12 @@ function firewallView() {
     <h2>Visible tables</h2><div class="storage-list">${firewall?.tables?.map(item => `<article class="storage-row">${escapeHtml(item)}</article>`).join('') || '<div class="empty">No firewall tables accessible to the LightNAS account.</div>'}</div>`;
 }
 function integrationsView() {
-  const docker = state.runtimes?.docker, vm = state.runtimes?.virtualization;
-  return `${pageHead('Integrations', 'See which host services LightNAS can actually reach.', '<button class="secondary" data-action="refresh-runtime">Refresh</button>')}
+  const apps = state.runtimes?.docker, containers = state.runtimes?.containers, vm = state.runtimes?.virtualization;
+  return `${pageHead('Integrations', 'See which host services and compute providers LightNAS can actually reach.', '<button class="secondary" data-action="refresh-runtime">Refresh</button>')}
     <div class="tool-grid">
-      <article class="panel"><h2>App runtime</h2><p>${docker?.available && docker?.enabled ? 'Docker connected. App installation is enabled.' : escapeHtml(docker?.reason || 'Checking Docker…')}</p><button class="secondary" data-view-link="apps">Open App Store</button></article>
-      <article class="panel"><h2>Virtualization</h2><p>${vm?.available && vm?.enabled ? 'Libvirt/KVM connected.' : escapeHtml(vm?.reason || 'Checking libvirt…')}</p><button class="secondary" data-view-link="vms">Open virtual machines</button></article>
-      <article class="panel"><h2>Proxmox host</h2><p>Host integration is not connected. Scripts that create Proxmox containers require an authenticated executor on the Proxmox host; they cannot run inside this LXC.</p></article>
+      <article class="panel"><h2>System containers</h2><p>${containers?.available && containers?.enabled ? `${escapeHtml(containers.provider || 'provider')} connected. System-container creation is enabled.` : escapeHtml(containers?.reason || 'Checking system-container provider…')}</p><button class="secondary" data-view-link="containers">Open containers</button></article>
+      <article class="panel"><h2>Virtualization</h2><p>${vm?.available && vm?.enabled ? `${escapeHtml(vm.provider || 'KVM')} connected.` : escapeHtml(vm?.reason || 'Checking virtualization…')}</p><button class="secondary" data-view-link="vms">Open virtual machines</button></article>
+      <article class="panel"><h2>Optional App Store engine</h2><p>${apps?.available && apps?.enabled ? 'Docker/OCI app engine connected. This is separate from System Containers.' : escapeHtml(apps?.reason || 'Docker/OCI app engine is optional and currently disabled.')}</p><button class="secondary" data-view-link="apps">Open App Store</button></article>
     </div>`;
 }
 
@@ -335,8 +345,10 @@ function bindViewActions() {
     toast('Physical pool creation needs the disk safety agent before it can operate. Existing ZFS datasets can be created below.');
     $('#dataset-form', $('#content'))?.scrollIntoView({ behavior: 'smooth' });
   }));
-  $$('[data-action="create-container"]', $('#content')).forEach(button => button.addEventListener('click', () => {
-    if (!state.runtimes?.docker?.available || !state.runtimes.docker.enabled) return toast(state.runtimes?.docker?.reason || 'Docker must be installed and enabled on this host.');
+  $('[data-action="create-container"]', $('#content')).forEach(button => button.addEventListener('click', () => {
+    const containers = state.runtimes?.containers;
+    if (!containers?.available || !containers.enabled) return toast(containers?.reason || 'Connect a system-container provider first.');
+    if (!containers.pools?.length || !containers.networks?.length || !containers.templates?.length) return toast(containers.provider === 'proxmox-lxc' ? 'Download an LXC template and verify Proxmox container storage and a bridge first.' : 'Configure container storage, networking and an image first.');
     $('#container-form', $('#content'))?.scrollIntoView({ behavior: 'smooth' });
     $('#container-form input', $('#content'))?.focus();
   }));
