@@ -688,9 +688,14 @@ async function api(req, res, url) {
 
   if (req.method === 'GET' && url.pathname === '/api/overview') {
     const shouldLoadHost = isAdmin || ['storage.view', 'system.view', 'vms.manage'].some(permission => permissions.includes(permission));
-    const [system, filesystems, storage, runtimes] = await Promise.all([
-      getSystemSnapshot(), getFilesystems(), getStorageInventory(), shouldLoadHost ? runtimeInventory() : Promise.resolve(null)
+    const [system, filesystems, storage, storagePools, runtimes] = await Promise.all([
+      getSystemSnapshot(), getFilesystems(), getStorageInventory(), listStoragePools(),
+      shouldLoadHost ? runtimeInventory() : Promise.resolve(null)
     ]);
+    // Overview and Storage must use one authoritative capacity figure. This
+    // includes local storage once plus each unique attached virtual volume once.
+    storage.usableStorage = storagePools.visibleSummary || storage.usableStorage;
+    storage.poolSummary = storagePools.summary;
     return send(res, 200, {
       appliance: { deviceName: store.state.config.deviceName, username, role: isAdmin ? 'administrator' : context.apiToken ? 'api' : 'user', permissions, timezone: store.state.config.timezone },
       system, filesystems, storage, host: runtimes?.virtualization?.host || null,
