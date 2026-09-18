@@ -13,14 +13,14 @@ This repository contains the first runnable vertical slice of Lightweight AI NAS
 - Local user management with administrator-only control endpoints and regular users who can manage files
 - Dedicated Admin Center with account controls including disable, enable, password reset and session revocation
 - Grouped navigation with Admin Center anchored at the bottom, and system, light, or dark appearance preferences
-- Live Networking, Firewall, and Integrations status pages that read host inventory without modifying network policy
+- Editable local Networking and Firewall controls backed by the privileged LightNAS host daemon, including Ethernet/Wi-Fi connection selection, DHCP/static IPv4, DNS/gateway, bridges, VLANs and UFW rules
 - Available capacity and mount location of the actual LightNAS file directory, even when an LXC exposes no physical disk
 - Media and image folders for documents, photos, videos, and ISO uploads; multiple file uploads stream up to 1 GB each
 - FFmpeg-backed media conversion to MP4, WebM, MP3, JPEG, PNG and WebP (when the input contains a compatible stream)
 - SMTP relay settings with TLS or STARTTLS, optional authentication, certificate validation and a test-send action
 - Creation of ZFS datasets in existing pools and compression/quota edits on hosts that delegate ZFS permissions
-- Containers and VMs pages listing Docker and libvirt resources if their daemons are accessible
-- Optional Docker container creation, five in-app Docker recipes (Nginx, Jellyfin, Uptime Kuma, Heimdall and OpenSpeedTest) with install, start, stop, restart and removal controls, and ISO-based libvirt VM creation on equipped hosts
+- Native System Containers page backed by LXC/liblxc and native Virtual Machines page backed by QEMU/KVM + libvirt
+- Native LXC system-container creation/lifecycle/terminal, native KVM VM creation/lifecycle/edit/noVNC, and an optional separate Docker/OCI App Store engine
 - Authenticated file browser backed by the appliance data directory: create folders, streamed upload/download, and delete files or empty folders
 - Hardware eligibility estimates for core NAS, containers, VMs, local AI, and directory services
 - Persistent planned-share records for SMB, NFS, and SFTP workflows (create/remove plans; configuration only)
@@ -33,13 +33,20 @@ The storage screen displays the real available capacity of the appliance file di
 
 ## Container and VM runtimes
 
-The normal one-command installer now installs Docker, starts it, gives the LightNAS service account Docker access, and verifies it with a real `docker info` call as that account. This account then has **host-level privileges through Docker**. Set `LIGHTNAS_SKIP_DOCKER=1` before running the installer to opt out. It also installs KVM, libvirt, and `virt-install` on supported x86-64 bare-metal or nested-VM hosts with `/dev/kvm`, tests libvirt access as `lightnas`, and starts existing `default` storage and network resources. It never tries to install KVM inside an LXC or on a Proxmox host. A missing libvirt network, storage pool or installer ISO must still be configured. The installer reports the verified status of both runtimes in `/var/lib/lightnas/runtime-status.txt` and the VM/Containers pages show live checks.
+LightNAS now treats virtualization as a **built-in OS function**, not as a dependency on Proxmox or another hypervisor control plane.
 
-**Running on the existing `nasos` LXC:** Proxmox must enable `nesting=1,keyctl=1` for Docker inside this LXC; other host constraints can still prevent it from starting. The Proxmox-host helper `scripts/proxmox-lxc-install.sh 170` preserves existing feature flags, applies these two flags, gracefully restarts that LXC if its configuration changed, copies the public Proxmox CA certificate, and runs the normal installer inside it. Run that script **on the Proxmox host**, not inside the LXC, and expect a brief interruption if features change. If Docker still fails, read `/var/lib/lightnas/runtime-status.txt` and `journalctl -u docker`. For a production app host, [Proxmox recommends running Docker in a QEMU VM](https://pve.proxmox.com/wiki/Linux_Container).
+- **System containers:** native LXC/liblxc. LightNAS creates full Linux system containers with their own userspace, init/services, filesystem and network namespace while sharing the LightNAS kernel. Docker is not the Containers backend.
+- **Virtual machines:** native QEMU/KVM managed through libvirt. LightNAS creates qcow2-backed guests, attaches ISO media, uses VirtIO devices, controls lifecycle through libvirt and exposes the guest console through embedded noVNC.
+- **Privileged operations:** a root-owned `lightnas-host-agent.service` exposes a narrow Unix-socket API to the unprivileged Node control plane. It owns LXC lifecycle and host network/firewall mutations; it does not expose arbitrary shell execution.
+- **Networking:** NetworkManager is the editable host network layer for wired Ethernet, Wi-Fi, connection profiles, DHCP/static IPv4, DNS/gateway, bridges and VLANs. UFW/nftables provide the firewall layer. Wi-Fi can be the appliance uplink; guests should normally use a routed/NAT virtual network when a station-mode Wi-Fi device cannot participate in a transparent Ethernet bridge.
+- **Apps:** Docker/OCI is optional and separate. It is enabled only when `LIGHTNAS_ENABLE_DOCKER_APPS=1` is supplied. The App Store may use it, but the Containers page never does.
 
-A Proxmox LXC cannot host local KVM. To create VMs from LightNAS in this LXC, connect it to the Proxmox HTTPS API. The installer offers an interactive connection prompt on a terminal; enter the Proxmox HTTPS hostname, node name and a dedicated API token. It stores the token in the root-owned `/etc/lightnas/runtime.env` (mode 0600), verifies the server certificate using the OS trust store, and exposes only available storage, bridges and ISO images in the VM form. Create a dedicated Proxmox API token with permission to audit the node and storage, allocate VMs and storage, and edit VM configuration; add VM.PowerMgmt to boot the new VM. For a Proxmox-generated certificate, the LXC must trust the Proxmox cluster CA, and the URL hostname must match the server certificate. The host helper copies the public CA and runs `update-ca-certificates` automatically; it never copies a private key. You can rerun `bash /opt/lightnas/scripts/configure-proxmox.sh` from an interactive LXC root console to connect later. The token is never returned to the browser. VM creation waits for the Proxmox create task, then requests a boot when the token has VM.PowerMgmt. Open the VM console in Proxmox to complete the ISO installer. If a task fails or times out, check the Proxmox task log before trying again.
+On bare metal or a normal VM, `install.sh` installs the native LXC and KVM/libvirt stack automatically. Hardware virtualization requires `/dev/kvm`; if it is missing, LightNAS reports VMs as unavailable instead of silently delegating creation to another host.
 
-You can alternatively use local libvirt when LightNAS runs on a KVM-capable bare-metal or nested VM host. Upload a bootable ISO into `/var/lib/libvirt/images` (or configure `LIGHTNAS_VM_ISO_DIR`), and ensure there is an active pool and network. VM disk creation uses a new qcow2 volume without formatting an existing physical disk. The ISO build is still experimental and has its own package setup; this section covers the Debian/Ubuntu `install.sh` path.
+When LightNAS itself is installed inside an LXC, nested LXC/KVM depends on capabilities granted by the outer hypervisor. The Proxmox helper is only a **deployment/capability helper**: it enables nesting/mknod/keyctl and, when possible, passes `/dev/kvm` into the LightNAS appliance. After that, LightNAS creates and manages its own LXC containers and KVM virtual machines locally. Normal compute operations do not call `pct`, `qm`, or the Proxmox API.
+
+This mirrors the underlying open-source architecture used by virtualization appliances: LXC-style kernel isolation for system containers and QEMU/KVM for full virtual machines. Incus is another open-source implementation of the same distinction, using LXC for system containers and QEMU for VMs.
+
 
 ## Bootable installer build (experimental)
 
@@ -54,7 +61,7 @@ The build writes `dist/LightNAS-amd64.iso` and a SHA-256 file. A successful GitH
 
 ## App interoperability
 
-The built-in LightNAS catalog installs reviewed open-source Docker recipes for Nginx, Jellyfin, Uptime Kuma, Heimdall and OpenSpeedTest directly inside the LightNAS interface. It can start, stop, restart, or remove managed app containers; persistent app settings under `/var/lib/lightnas/apps` remain after removal. A Proxmox Helper Script targets the Proxmox host, and LightNAS never runs arbitrary downloaded scripts inside its NAS LXC. A future Proxmox integration will need a separate authenticated host connection and audited deployment plans. The complete upstream Helper Scripts collection cannot be installed by this LXC: those scripts require a root shell on the Proxmox host and can prompt for input. Integrating that collection safely requires an authenticated Proxmox host executor with audited plans and log streaming. Direct remote catalog syncing and Compose imports are not implemented. On an LXC without a Docker engine, the Install button explains the missing host runtime and cannot install until a supported Docker host is configured.
+The built-in App Store may use reviewed Docker/OCI recipes for services such as Nginx, Jellyfin, Uptime Kuma, Heimdall and OpenSpeedTest, but that engine is optional and intentionally separated from **System Containers**. Native LXC containers are for full Linux environments; OCI app containers are only an application deployment mechanism. Persistent app settings under `/var/lib/lightnas/apps` remain separate from LXC root filesystems.
 
 ## Run locally
 
@@ -87,7 +94,7 @@ The installer adds Node.js 22 when required, checks out LightNAS under
 an automatically starting `lightnas.service`. Open port `3080` at the IP shown
 when installation finishes.
 
-The installer now attempts Docker automatically and prepares KVM/libvirt when the host supports `/dev/kvm`. It reports which runtime is actually available. To skip Docker, run `LIGHTNAS_SKIP_DOCKER=1 bash /root/lightnas-install.sh` after downloading the installer.
+The installer prepares native LXC/liblxc and KVM/libvirt when the environment supports them. Docker is not installed for Containers; it is optional for the App Store and can be enabled explicitly with `LIGHTNAS_ENABLE_DOCKER_APPS=1`.
 
 On the **Proxmox node shell** (prompt such as `root@pve:~#`), with the existing LXC 170, you can use the host preparation and install helper instead. Do not run this helper at the `root@nasos:~#` prompt: `nasos` is inside the LXC and cannot change its own Proxmox configuration:
 
@@ -96,7 +103,7 @@ curl -fsSL https://raw.githubusercontent.com/Ceyeberkepp/Ligthnas/main/scripts/p
 bash /root/proxmox-lxc-install.sh 170
 ```
 
-To update the web service only from `root@nasos:~#`, run the normal `install.sh` command above instead. The host helper preserves the NAS account and data. If features have to change, it gracefully restarts the LXC before installation. Follow the secure API-token prompt to connect VM creation to Proxmox. If running without a terminal, run `/opt/lightnas/scripts/configure-proxmox.sh` later from a root console in the LXC. The Proxmox host remains the owner of the VM hardware and physical storage. Check `/var/lib/lightnas/runtime-status.txt` for the results.
+To update the web service only from inside the appliance, run the normal `install.sh` command above. The Proxmox helper preserves the NAS account and data, grants nested runtime capabilities, passes `/dev/kvm` when possible, and then installs the same local LightNAS engines used on bare metal. No Proxmox API token is required for normal LightNAS VM/container operations. Check `/var/lib/lightnas/runtime-status.txt` for capability results.
 
 To update an existing Git-based installation, run `install.sh` again. It performs a fast-forward-only source update and preserves state under `/var/lib/lightnas`.
 
@@ -120,24 +127,39 @@ State is written atomically with owner-only file permissions. Production deploym
 ## Architecture
 
 ```text
-Browser/PWA
+Browser / PWA
     │
     ├── Responsive management UI
     │
-HTTP API and job control plane
+HTTP API + job control plane (unprivileged)
     │
-    ├── Authentication and RBAC foundation
+    ├── Authentication, RBAC, groups, 2FA and API/webhook layer
     ├── Hardware/capability discovery
     ├── Persistent configuration
-    └── Future typed-operation queue
+    └── Typed operations / audit boundary
           │
-          └── Future privileged host agent
-                ├── Storage and file services
-                ├── Containers and applications
-                ├── KVM/QEMU virtual machines
-                ├── Network and firewall
-                └── Identity and backup
+          └── LightNAS privileged host daemon (local Unix socket)
+                ├── Storage and filesystem operations
+                ├── Native LXC/liblxc system containers
+                │     └── interactive browser terminal
+                ├── Native QEMU/KVM + libvirt virtual machines
+                │     └── embedded noVNC
+                ├── NetworkManager
+                │     ├── Ethernet / Wi-Fi
+                │     ├── DHCP / static addressing
+                │     ├── bridges / VLANs
+                │     └── DNS / gateways
+                ├── UFW / nftables firewall
+                └── Identity / backup adapters
+
+Optional application engine
+    └── Docker / OCI (App Store only; never the System Containers backend)
+
+Optional external integrations
+    └── Proxmox / other hypervisors for migration or interoperability only
+        (not required for normal LightNAS compute)
 ```
+
 
 ## Next engineering milestone
 
