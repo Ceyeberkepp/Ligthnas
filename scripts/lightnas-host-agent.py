@@ -30,10 +30,13 @@ CONNECTION_RE = re.compile(r"^[A-Za-z0-9 _.:@+-]{1,80}$")
 CIDR_RE = re.compile(r"^(?:[0-9A-Fa-f:.]+)/(?:[0-9]{1,3})$")
 
 IMAGES = [
-    {"id": "debian-13", "label": "Debian 13", "dist": "debian", "release": "trixie"},
-    {"id": "ubuntu-24.04", "label": "Ubuntu 24.04 LTS", "dist": "ubuntu", "release": "noble"},
-    {"id": "ubuntu-22.04", "label": "Ubuntu 22.04 LTS", "dist": "ubuntu", "release": "jammy"},
-    {"id": "alpine-3.21", "label": "Alpine Linux 3.21", "dist": "alpine", "release": "3.21"},
+    {"id": "debian-13", "label": "Debian 13", "dist": "debian", "release": "trixie", "builder": "debootstrap", "mirror": "https://deb.debian.org/debian", "nested": True},
+    {"id": "ubuntu-24.04", "label": "Ubuntu 24.04 LTS", "dist": "ubuntu", "release": "noble", "builder": "debootstrap", "mirror": "https://archive.ubuntu.com/ubuntu", "nested": True},
+    {"id": "ubuntu-22.04", "label": "Ubuntu 22.04 LTS", "dist": "ubuntu", "release": "jammy", "builder": "debootstrap", "mirror": "https://archive.ubuntu.com/ubuntu", "nested": True},
+    # Alpine's legacy LXC template refuses user-namespace builds. Keep it
+    # available on bare metal while nested LightNAS exposes only builders that
+    # do not depend on images.linuxcontainers.org/index-user.
+    {"id": "alpine-3.21", "label": "Alpine Linux 3.21", "dist": "alpine", "release": "3.21", "builder": "template", "template": "alpine", "arch": "x86_64", "nested": False},
 ]
 IMAGE_BY_ID = {item["id"]: item for item in IMAGES}
 
@@ -214,7 +217,7 @@ def container_inventory() -> dict:
         "provider": "local-lxc",
         "reason": reason,
         "containers": containers,
-        "images": IMAGES,
+        "images": [item for item in IMAGES if item.get("nested", True) or not in_container()],
         "networks": local_networks(),
         "storageRoot": "/var/lib/lxc",
         "diagnostics": diagnostics,
@@ -249,13 +252,87 @@ def append_unique(path: Path, line: str) -> None:
     path.write_text("\n".join(kept) + "\n", encoding="utf-8")
 
 
+def cleanup_container_path(name: str) -> None:
+    path = Path("/var/lib/lxc") / name
+    if not path.exists():
+        return
+    subprocess.run(["lxc-stop", "-n", name, "-k"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.run(["lxc-destroy", "-n", name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if path.exists():
+        shutil.rmtree(path, ignore_errors=True)
+
+
+def bootstrap_deb_container(name: str, image: dict) -> Path:
+    if not available("debootstrap"):
+        raise RuntimeError("debootstrap is not installed; rerun the LightNAS installer")
+    base = Path("/var/lib/lxc") / name
+    rootfs = base / "rootfs"
+    base.mkdir(parents=True, exist_ok=False)
+    rootfs.mkdir(parents=True, exist_ok=True)
+
+    include = ",".join([
+        "systemd-sysv", "ifupdown", "isc-dhcp-client", "iproute2",
+        "iputils-ping", "ca-certificates", "netbase", "procps"
+    ])
+    args = [
+        "debootstrap", "--variant=minbase", "--arch=amd64",
+        f"--include={include}", image["release"], str(rootfs), image["mirror"],
+    ]
+    try:
+        run(args, timeout=1800)
+    except Exception:
+        cleanup_container_path(name)
+        raise
+
+    (rootfs / "etc" / "hostname").write_text(f"{name}\n", encoding="utf-8")
+    (rootfs / "etc" / "hosts").write_text(
+        f"127.0.0.1\tlocalhost\n127.0.1.1\t{name}\n::1\tlocalhost ip6-localhost ip6-loopback\n",
+        encoding="utf-8",
+    )
+    network_dir = rootfs / "etc" / "network"
+    network_dir.mkdir(parents=True, exist_ok=True)
+    (network_dir / "interfaces").write_text(
+        "auto lo\niface lo inet loopback\n\nauto eth0\niface eth0 inet dhcp\n",
+        encoding="utf-8",
+    )
+    machine_id = rootfs / "etc" / "machine-id"
+    if machine_id.exists():
+        machine_id.write_text("", encoding="utf-8")
+
+    config = base / "config"
+    config.write_text(
+        "# LightNAS locally bootstrapped LXC system container\n"
+        "lxc.include = /usr/share/lxc/config/common.conf\n"
+        f"lxc.rootfs.path = dir:{rootfs}\n"
+        f"lxc.uts.name = {name}\n"
+        "lxc.arch = x86_64\n",
+        encoding="utf-8",
+    )
+    return config
+
+
+def bootstrap_template_container(name: str, image: dict) -> Path:
+    template = str(image.get("template") or image["dist"])
+    script = Path("/usr/share/lxc/templates") / f"lxc-{template}"
+    if not script.exists():
+        raise RuntimeError(f"local LXC template {template} is not installed")
+    arch = str(image.get("arch") or "amd64")
+    args = ["lxc-create", "-n", name, "-t", template, "--", "-r", image["release"], "-a", arch]
+    try:
+        run(args, timeout=1800)
+    except Exception:
+        cleanup_container_path(name)
+        raise
+    return Path("/var/lib/lxc") / name / "config"
+
+
 def create_container(data: dict) -> dict:
     ok, reason, _diagnostics = container_capability()
     if not ok:
         raise RuntimeError(reason)
     name = str(data.get("name") or "").strip()
     image_id = str(data.get("image") or "").strip()
-    network = str(data.get("network") or "lxcbr0").strip()
+    network = str(data.get("network") or "lightnas0").strip()
     try:
         memory = int(data.get("memoryMiB") or 2048)
         cpus = int(data.get("cpus") or 2)
@@ -264,22 +341,31 @@ def create_container(data: dict) -> dict:
     if not NAME_RE.fullmatch(name):
         raise ValueError("invalid container name")
     image = IMAGE_BY_ID.get(image_id)
-    if not image:
-        raise ValueError("select a built-in Linux system-container image")
+    if not image or (in_container() and not image.get("nested", True)):
+        raise ValueError("select a Linux system-container image supported by this LightNAS environment")
     if not IFACE_RE.fullmatch(network) or network not in local_networks():
-        raise ValueError("select an existing local bridge or interface")
+        raise ValueError("select an active local container bridge")
     host_cpus = max(1, os.cpu_count() or 1)
     if not (256 <= memory <= 262144 and 1 <= cpus <= min(128, host_cpus)):
         raise ValueError("container CPU or memory values are outside host limits")
-    if Path("/var/lib/lxc", name).exists():
-        raise ValueError("a container with this name already exists")
 
-    args = [
-        "lxc-create", "-n", name, "-t", "download", "--",
-        "--dist", image["dist"], "--release", image["release"], "--arch", "amd64",
-    ]
-    run(args, timeout=900)
-    config = Path("/var/lib/lxc") / name / "config"
+    container_path = Path("/var/lib/lxc") / name
+    if container_path.exists():
+        # Failed image downloads commonly leave a partial directory behind.
+        # Remove only clearly incomplete containers; never destroy an existing
+        # valid container implicitly.
+        partial = (container_path / "partial").exists()
+        valid = (container_path / "config").exists() and (container_path / "rootfs").exists()
+        if partial or not valid:
+            cleanup_container_path(name)
+        else:
+            raise ValueError("a container with this name already exists")
+
+    if image.get("builder") == "debootstrap":
+        config = bootstrap_deb_container(name, image)
+    else:
+        config = bootstrap_template_container(name, image)
+
     append_unique(config, "lxc.start.auto = 1")
     append_unique(config, f"lxc.cgroup2.memory.max = {memory * 1024 * 1024}")
     append_unique(config, f"lxc.cgroup2.cpu.max = {cpus * 100000} 100000")
@@ -292,8 +378,22 @@ def create_container(data: dict) -> dict:
         # inner AppArmor profile loading, which is commonly blocked in nested
         # Proxmox/LXC environments even when namespaces/cgroups are delegated.
         append_unique(config, "lxc.apparmor.profile = unconfined")
-    run(["lxc-start", "-n", name, "-d"], timeout=60)
-    return {"id": name, "name": name, "status": "running", "provider": "local-lxc"}
+
+    try:
+        run(["lxc-start", "-n", name, "-d"], timeout=60)
+    except Exception:
+        # Keep a completely built rootfs for troubleshooting rather than
+        # deleting user data after an image was successfully created.
+        raise RuntimeError(f"container {name} was built but could not start; inspect lxc-start -n {name} -F -l DEBUG")
+
+    return {
+        "id": name,
+        "name": name,
+        "status": "running",
+        "provider": "local-lxc",
+        "image": image_id,
+        "builder": image.get("builder"),
+    }
 
 
 def container_action(data: dict) -> dict:
