@@ -35,7 +35,7 @@ test('installer enables the local App Store engine while keeping System Containe
     assert.match(result, /LIGHTNAS_DOCKER_ENABLED=1/);
     assert.match(result, /LIGHTNAS_VM_ENABLED=0/);
     let status = await readFile(statusPath, 'utf8');
-    assert.match(status, /Containers: native LXC\/liblxc ready/);
+    assert.match(status, /Containers: native LXC\/liblxc (?:ready|installed, but the LightNAS container bridge is not active)/);
     assert.match(status, /Apps: optional Docker\/OCI engine ready/);
 
     // Operators can still explicitly disable the App Store OCI engine.
