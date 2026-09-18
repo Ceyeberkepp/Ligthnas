@@ -134,7 +134,7 @@ function refreshCurrent() {
 }
 
 async function enhance() {
-  await Promise.allSettled([renderGroups(), renderTotp(), renderAutomation(), renderEditableNetwork()]);
+  await Promise.allSettled([renderGroups(), renderTotp(), renderAutomation()]);
   // Use cached FFmpeg thumbnails for images and videos rendered by the other enhancement layer.
   if (location.hash === '#files') {
     const folder = qa('#content [data-folder]').at(-1)?.dataset.folder || '';
