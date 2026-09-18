@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { proxmoxInventory, proxmoxCreateVm, proxmoxManageVm, proxmoxUpdateVm } from './proxmox.mjs';
 import { localContainerInventory, localCreateContainer, localManageContainer, localUpdateContainer } from './local-host.mjs';
 import { listContainerTemplates, resolveContainerTemplate } from './templates.mjs';
+import { listStoragePools, listContentAcrossPools, resolveStoragePool } from './storage-pools.mjs';
 
 const execute = promisify(execFile);
 const dataRoot = dirname(process.env.NAS_DATA_FILE || 'data/state.json');
@@ -123,23 +124,21 @@ async function localUpdateVm(input) {
   return { id: target, name: target, memoryMiB: memory, cpus, status: 'updated' };
 }
 export async function runtimeInventory() {
-  const [dockerInfo, vmInfo, vmPools, vmNetworks, installer, hostBridges] = await Promise.all([
+  const [dockerInfo, vmInfo, vmNetworks, installer, hostBridges, lightnasStorage, storageIsos] = await Promise.all([
     command('docker', ['info', '--format', '{{.ServerVersion}}']),
     command('virsh', ['-c', 'qemu:///system', 'list', '--all', '--name']),
-    command('virsh', ['-c', 'qemu:///system', 'pool-list', '--name']),
     command('virsh', ['-c', 'qemu:///system', 'net-list', '--name']),
     command('virt-install', ['--version']),
-    command('ip', ['-j', 'link', 'show', 'type', 'bridge'])
+    command('ip', ['-j', 'link', 'show', 'type', 'bridge']),
+    listStoragePools().catch(() => ({ pools: [] })),
+    listContentAcrossPools('iso').catch(() => [])
   ]);
-  let images = [];
-  try {
-    images = (await readdir(vmIsoDirectory)).filter(name => /^[a-zA-Z0-9._-]+\.iso$/i.test(name));
-    images = (await Promise.all(images.map(async name => (await lstat(join(vmIsoDirectory, name))).isFile() ? name : null))).filter(Boolean);
-  } catch {}
+  const vmStoragePools = (lightnasStorage.pools || []).filter(pool => pool.online && pool.writable && pool.content.includes('images'));
+  const images = storageIsos.map(item => item.id);
   const runtime = {
     docker: { available: dockerInfo.ok, enabled: process.env.LIGHTNAS_DOCKER_ENABLED === '1', reason: dockerInfo.ok ? null : 'Optional app runtime is not installed or not accessible.', containers: [], presets: containerImages },
     containers: { available: false, enabled: false, provider: 'local-lxc', reason: 'Native LXC is not available on this LightNAS host.', containers: [], images: [], networks: [], storageRoot: null },
-    virtualization: { available: vmInfo.ok && installer.ok, enabled: process.env.LIGHTNAS_VM_ENABLED === '1', provider: 'libvirt', acceleration: process.env.LIGHTNAS_VM_ACCELERATION || 'auto', reason: vmInfo.ok && installer.ok ? null : 'QEMU/libvirt is unavailable on this LightNAS host.', warning: null, machines: [], machineDetails: [], pools: vmPools.ok && vmPools.output ? vmPools.output.split('\n').filter(Boolean) : [], networks: [], networkDetails: [], images }
+    virtualization: { available: vmInfo.ok && installer.ok, enabled: process.env.LIGHTNAS_VM_ENABLED === '1', provider: 'libvirt', acceleration: process.env.LIGHTNAS_VM_ACCELERATION || 'auto', reason: vmInfo.ok && installer.ok ? null : 'QEMU/libvirt is unavailable on this LightNAS host.', warning: null, machines: [], machineDetails: [], pools: vmStoragePools.map(pool => pool.id), storageDetails: vmStoragePools, networks: [], networkDetails: [], images, isoDetails: storageIsos.map(item => ({ id: item.id, name: item.name, storageId: item.storageId, storageName: item.storageName, sizeBytes: item.sizeBytes })) }
   };
   try {
     runtime.containers = await localContainerInventory();
@@ -316,16 +315,23 @@ export async function createVm(input) {
   const memory = Number(input.memoryMiB), cpus = Number(input.cpus), disk = Number(input.diskGiB);
   if (!Number.isInteger(memory) || memory < 1024 || memory > 65536 || !Number.isInteger(cpus) || cpus < 1 || cpus > 32 || !Number.isInteger(disk) || disk < 10 || disk > 2048) throw Object.assign(new Error('Use 1024–65536 MiB RAM, 1–32 CPUs and 10–2048 GiB disk.'), { status: 400 });
   const iso = String(input.iso || '').trim();
-  if (!/^[a-zA-Z0-9_-]{1,48}$/.test(input.pool || '') || !/^[a-zA-Z0-9._:-]{1,48}$/.test(input.network || '') || !virtualization.pools.includes(input.pool) || !virtualization.networks.includes(input.network) || (iso && !virtualization.images.includes(iso))) throw Object.assign(new Error('Select an accessible VM storage pool/network and, optionally, an available installer ISO.'), { status: 409 });
+  if (!/^[a-zA-Z0-9_-]{1,48}$/.test(input.pool || '') || !/^[a-zA-Z0-9._:-]{1,48}$/.test(input.network || '') || !virtualization.pools.includes(input.pool) || !virtualization.networks.includes(input.network) || (iso && !virtualization.images.includes(iso))) throw Object.assign(new Error('Select an accessible LightNAS VM storage/network and, optionally, an available installer ISO.'), { status: 409 });
 
   if (virtualization.provider?.startsWith('proxmox')) return proxmoxCreateVm(input, virtualization);
   if (virtualization.machineDetails.some(item => item.name === input.name)) throw Object.assign(new Error('A VM with this name already exists.'), { status: 409 });
 
+  const vmStorage = await resolveStoragePool(input.pool, 'images', true);
+  const diskDirectory = join(vmStorage.root, 'images', input.name);
+  await mkdir(diskDirectory, { recursive: true });
+  const diskPath = join(diskDirectory, `${input.name}.qcow2`);
+  const isoEntry = iso ? (await listContentAcrossPools('iso')).find(item => item.id === iso) : null;
+  if (iso && !isoEntry) throw Object.assign(new Error('Selected installer ISO is no longer available.'), { status: 409 });
+
   const networkDetail = virtualization.networkDetails?.find(item => item.name === input.network);
   const networkArg = networkDetail?.type === 'host-bridge' ? `bridge=${input.network},model=virtio` : `network=${input.network},model=virtio`;
   const virtType = virtualization.acceleration === 'kvm' ? 'kvm' : 'qemu';
-  const args = ['--connect', 'qemu:///system', '--virt-type', virtType, '--name', input.name, '--memory', String(memory), '--vcpus', String(cpus), '--disk', `pool=${input.pool},size=${disk},format=qcow2,bus=scsi`, '--controller', 'scsi,model=virtio-scsi', '--network', networkArg, '--graphics', 'vnc,listen=127.0.0.1', '--video', 'virtio', '--noautoconsole', '--wait', '0'];
-  if (iso) args.push('--cdrom', join(vmIsoDirectory, iso), '--osinfo', 'detect=on,require=off');
+  const args = ['--connect', 'qemu:///system', '--virt-type', virtType, '--name', input.name, '--memory', String(memory), '--vcpus', String(cpus), '--disk', `path=${diskPath},size=${disk},format=qcow2,bus=scsi`, '--controller', 'scsi,model=virtio-scsi', '--network', networkArg, '--graphics', 'vnc,listen=127.0.0.1', '--video', 'virtio', '--noautoconsole', '--wait', '0'];
+  if (isoEntry) args.push('--cdrom', isoEntry.path, '--osinfo', 'detect=on,require=off');
   else args.push('--import', '--boot', 'hd,menu=on', '--osinfo', 'generic');
   const response = await exclusive(() => command('virt-install', args, 180000));
   if (!response.ok) throw Object.assign(new Error(`VM creation failed: ${response.error}`), { status: 409 });
