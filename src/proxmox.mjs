@@ -108,6 +108,47 @@ export async function proxmoxConsoleSocket(vmid) {
   });
 }
 
+
+export async function proxmoxContainerConsoleSocket(vmid) {
+  const numericId = Number(vmid);
+  if (!Number.isInteger(numericId) || numericId < 100 || numericId > 999999) throw Object.assign(new Error('Invalid container ID.'), { status: 400 });
+  const settings = hostBridgeConfig();
+  if (!settings) throw operationError('Embedded container terminal currently requires the automatic Proxmox host bridge.');
+
+  return await new Promise((resolve, reject) => {
+    const socket = net.createConnection({ path: settings.socketPath });
+    let buffer = Buffer.alloc(0);
+    let settled = false;
+    const fail = error => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      reject(error);
+    };
+    const onData = chunk => {
+      buffer = Buffer.concat([buffer, chunk]);
+      if (buffer.length > 128 * 1024) return fail(operationError('Proxmox container console handshake was too large.'));
+      const newline = buffer.indexOf(10);
+      if (newline < 0) return;
+      let response;
+      try { response = JSON.parse(buffer.subarray(0, newline).toString('utf8')); }
+      catch { return fail(operationError('Proxmox container console returned an invalid handshake.')); }
+      if (!response?.ok) return fail(operationError(response?.error || 'Unable to open container terminal.', response?.code === 'forbidden' ? 403 : 409));
+      const remaining = buffer.subarray(newline + 1);
+      settled = true;
+      socket.off('data', onData);
+      socket.setTimeout(0);
+      if (remaining.length) socket.unshift(remaining);
+      resolve(socket);
+    };
+    socket.setTimeout(15000, () => fail(operationError('Proxmox container console timed out.')));
+    socket.on('error', error => fail(operationError(`Proxmox container console is unavailable: ${error.message}`)));
+    socket.on('connect', () => socket.write(`${JSON.stringify({ client: settings.client, secret: settings.secret, action: 'container-console', data: { vmid: numericId } })}\n`));
+    socket.on('data', onData);
+    socket.on('end', () => { if (!settled) fail(operationError('Proxmox container console closed before the terminal opened.')); });
+  });
+}
+
 async function api(settings, path, form, method = 'POST') {
   const url = new URL(`/api2/json/${path}`, settings.url);
   const response = await fetch(url, {
@@ -178,6 +219,111 @@ export async function proxmoxInventory() {
       disks: [], storages: hostStorages, zfs: { available: false, pools: [], datasets: [] }, networks: bridges, wifi: [], containers: []
     }
   };
+}
+
+
+export async function proxmoxContainerInventory() {
+  const bridge = hostBridgeConfig();
+  if (bridge) return await hostBridge(bridge, 'container-inventory');
+
+  const settings = apiConfig();
+  if (!settings) return null;
+  const node = encodeURIComponent(settings.node);
+  const [containers, rootStores, templateStores, bridges] = await Promise.all([
+    api(settings, `nodes/${node}/lxc`),
+    api(settings, `nodes/${node}/storage?content=rootdir`),
+    api(settings, `nodes/${node}/storage?content=vztmpl`),
+    api(settings, `nodes/${node}/network`)
+  ]);
+  const pools = rootStores.filter(item => item.enabled !== 0 && item.active !== 0 && /^[a-zA-Z0-9_-]+$/.test(item.storage || '')).map(item => ({
+    name: item.storage, type: item.type || 'unknown', total: Number(item.total) || 0, available: Number(item.avail) || 0
+  }));
+  const templates = [...new Set((await Promise.all(templateStores.filter(item => item.enabled !== 0 && item.active !== 0 && /^[a-zA-Z0-9_-]+$/.test(item.storage || '')).slice(0, 20).map(async item => {
+    const content = await api(settings, `nodes/${node}/storage/${encodeURIComponent(item.storage)}/content?content=vztmpl`);
+    return content.filter(entry => entry.content === 'vztmpl' && typeof entry.volid === 'string').map(entry => entry.volid);
+  }))).flat())].sort();
+  return {
+    available: true,
+    enabled: true,
+    provider: 'proxmox-lxc',
+    reason: null,
+    containers: containers.filter(item => Number.isInteger(Number(item.vmid))).map(item => ({
+      vmid: Number(item.vmid),
+      name: item.name || `CT-${item.vmid}`,
+      status: item.status || 'unknown',
+      memory: Number(item.maxmem) || 0,
+      disk: Number(item.maxdisk) || 0,
+      cpus: Number(item.cpus) || 0,
+      uptime: Number(item.uptime) || 0,
+      protected: false
+    })),
+    pools: pools.map(item => item.name),
+    poolDetails: pools,
+    networks: bridges.filter(item => item.type === 'bridge' && item.active !== 0 && /^[a-zA-Z0-9._-]{1,64}$/.test(item.iface || '')).map(item => item.iface),
+    templates,
+    node: settings.node
+  };
+}
+
+export async function proxmoxCreateContainer(input, inventory) {
+  const name = String(input.name || '').trim();
+  const memory = Number(input.memoryMiB);
+  const cpus = Number(input.cpus);
+  const disk = Number(input.diskGiB);
+  const pool = String(input.pool || '');
+  const network = String(input.network || '');
+  const template = String(input.template || '');
+  if (!/^[A-Za-z][A-Za-z0-9-]{1,39}$/.test(name)) throw Object.assign(new Error('Use a 2–40 character container name.'), { status: 400 });
+  if (!Number.isInteger(memory) || memory < 256 || memory > 65536 || !Number.isInteger(cpus) || cpus < 1 || cpus > 64 || !Number.isInteger(disk) || disk < 2 || disk > 2048) throw Object.assign(new Error('Use 256–65536 MiB RAM, 1–64 CPUs and 2–2048 GiB disk.'), { status: 400 });
+  if (!inventory?.available || !inventory.pools.includes(pool) || !inventory.networks.includes(network) || !inventory.templates.includes(template)) throw operationError('Select an available Proxmox container storage, bridge and LXC template.');
+
+  const bridge = hostBridgeConfig();
+  if (bridge) return await hostBridge(bridge, 'create-container', { name, memoryMiB: memory, cpus, diskGiB: disk, pool, network, template });
+
+  const settings = apiConfig();
+  if (!settings) throw operationError('Proxmox is not connected.');
+  const node = encodeURIComponent(settings.node);
+  const vmid = Number(await api(settings, 'cluster/nextid'));
+  if (!Number.isInteger(vmid) || vmid < 100) throw operationError('Proxmox returned an invalid container ID.');
+  await api(settings, `nodes/${node}/lxc`, {
+    vmid: String(vmid), hostname: name, ostemplate: template, memory: String(memory), cores: String(cpus),
+    rootfs: `${pool}:${disk}`, net0: `name=eth0,bridge=${network},ip=dhcp,type=veth`, unprivileged: '1', onboot: '1'
+  });
+  await api(settings, `nodes/${node}/lxc/${vmid}/status/start`, {});
+  return { vmid, name, provider: 'proxmox-lxc', status: 'running' };
+}
+
+export async function proxmoxManageContainer(vmid, action) {
+  const numericId = Number(vmid);
+  if (!Number.isInteger(numericId) || numericId < 100 || numericId > 999999) throw Object.assign(new Error('Invalid container ID.'), { status: 400 });
+  if (!['start', 'stop', 'shutdown', 'reboot', 'delete'].includes(action)) throw Object.assign(new Error('Invalid container action.'), { status: 400 });
+  const bridge = hostBridgeConfig();
+  if (bridge) return await hostBridge(bridge, 'container-action', { vmid: numericId, action });
+  const settings = apiConfig();
+  if (!settings) throw operationError('Proxmox is not connected.');
+  const node = encodeURIComponent(settings.node);
+  if (action === 'delete') {
+    try { await api(settings, `nodes/${node}/lxc/${numericId}/status/stop`, {}); } catch {}
+    await api(settings, `nodes/${node}/lxc/${numericId}`, { purge: '1' }, 'DELETE');
+    return { vmid: numericId, action, status: 'deleted' };
+  }
+  await api(settings, `nodes/${node}/lxc/${numericId}/status/${action}`, {});
+  return { vmid: numericId, action, status: 'submitted' };
+}
+
+export async function proxmoxUpdateContainer(input) {
+  const vmid = Number(input.vmid);
+  const memory = Number(input.memoryMiB);
+  const cpus = Number(input.cpus);
+  const name = String(input.name || '').trim();
+  if (!Number.isInteger(vmid) || vmid < 100 || vmid > 999999 || !/^[A-Za-z][A-Za-z0-9-]{1,39}$/.test(name)) throw Object.assign(new Error('Invalid container ID or name.'), { status: 400 });
+  if (!Number.isInteger(memory) || memory < 256 || memory > 262144 || !Number.isInteger(cpus) || cpus < 1 || cpus > 128) throw Object.assign(new Error('Invalid container CPU or memory values.'), { status: 400 });
+  const bridge = hostBridgeConfig();
+  if (bridge) return await hostBridge(bridge, 'container-update', { vmid, name, memoryMiB: memory, cpus });
+  const settings = apiConfig();
+  if (!settings) throw operationError('Proxmox is not connected.');
+  await api(settings, `nodes/${encodeURIComponent(settings.node)}/lxc/${vmid}/config`, { hostname: name, memory: String(memory), cores: String(cpus) }, 'PUT');
+  return { vmid, name, memoryMiB: memory, cpus, status: 'updated' };
 }
 
 export async function proxmoxCreateVm(input, inventory) {
