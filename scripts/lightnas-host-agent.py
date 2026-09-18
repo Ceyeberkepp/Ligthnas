@@ -127,16 +127,18 @@ def container_inventory() -> dict:
 
 
 def local_networks() -> list[str]:
+    # LXC veth devices need a bridge. Do not offer arbitrary physical or Wi-Fi
+    # interfaces here; Wi-Fi uplinks use a routed/NAT guest network instead.
     result = []
     try:
-        links = json.loads(run(["ip", "-j", "link", "show"], timeout=10) or "[]")
+        links = json.loads(run(["ip", "-j", "link", "show", "type", "bridge"], timeout=10) or "[]")
         for item in links:
             name = str(item.get("ifname") or "")
-            if IFACE_RE.fullmatch(name) and name != "lo":
+            if IFACE_RE.fullmatch(name):
                 result.append(name)
     except Exception:
         pass
-    for preferred in ["lightnas0", "lxcbr0"]:
+    for preferred in ["lightnas0", "lxcbr0", "virbr0"]:
         if preferred in result:
             result.remove(preferred)
             result.insert(0, preferred)
