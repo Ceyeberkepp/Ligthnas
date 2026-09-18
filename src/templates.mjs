@@ -7,7 +7,12 @@ import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import { listStoragePools } from './storage-pools.mjs';
 
-const PROXMOX_SYSTEM_URL = 'https://download.proxmox.com/images/system/';
+const PROXMOX_IMAGES_BASE = 'https://download.proxmox.com/images/';
+const PVE_APLINFO_MAJOR = String(process.env.LIGHTNAS_PVE_APLINFO_MAJOR || '9').replace(/[^0-9]/g, '') || '9';
+const PROXMOX_APLINFO_URL = `${PROXMOX_IMAGES_BASE}aplinfo-pve-${PVE_APLINFO_MAJOR}.dat`;
+const PROXMOX_FALLBACK_APLINFO_URL = `${PROXMOX_IMAGES_BASE}aplinfo.dat`;
+const TURNKEY_BASE = 'https://releases.turnkeylinux.org/pve/';
+const TURNKEY_APLINFO_URL = `${TURNKEY_BASE}aplinfo.dat`;
 const MAX_TEMPLATE_BYTES = Number(process.env.LIGHTNAS_TEMPLATE_MAX_BYTES || 4 * 1024 ** 3);
 const templateName = /^[A-Za-z0-9][A-Za-z0-9._+-]{1,180}\.(?:tar\.zst|tar\.xz|tar\.gz|tgz)$/i;
 
@@ -121,33 +126,68 @@ export async function resolveContainerTemplate(id) {
   return library.templates.find(item => item.id === id) || null;
 }
 
-export async function proxmoxTemplateCatalog() {
-  const { response } = await safeFetch(PROXMOX_SYSTEM_URL);
-  if (!response.ok) throw Object.assign(new Error(`Proxmox template catalog returned HTTP ${response.status}.`), { status: 502 });
-  const html = await response.text();
-  const names = [...html.matchAll(/href="([^"]+\.(?:tar\.zst|tar\.xz|tar\.gz))"/gi)].map(match => decodeURIComponent(match[1]));
-  const unique = [...new Set(names)].filter(name => templateName.test(name));
-  return unique.map(filename => {
-    const withoutSuffix = filename.replace(/\.(?:tar\.zst|tar\.xz|tar\.gz)$/i, '');
-    const parts = withoutSuffix.split('_');
-    const packageName = parts[0] || withoutSuffix;
-    const version = parts.length > 2 ? parts.slice(1, -1).join('_') : (parts[1] || '');
-    const architecture = parts.at(-1) || 'amd64';
-    const family = packageName.split('-')[0].replace(/_/g, ' ');
-    return {
-      id: filename,
+function parseAplInfo(text, baseUrl, sourceName) {
+  const records = [];
+  for (const block of String(text || '').split(/\n\s*\n/)) {
+    const record = {};
+    let currentKey = null;
+    for (const rawLine of block.split('\n')) {
+      if (/^\s/.test(rawLine) && currentKey) {
+        record[currentKey] = `${record[currentKey] || ''}\n${rawLine.trim()}`.trim();
+        continue;
+      }
+      const match = rawLine.match(/^([^:]+):\s*(.*)$/);
+      if (!match) continue;
+      currentKey = match[1].trim().toLowerCase();
+      record[currentKey] = match[2].trim();
+    }
+    if (record.type !== 'lxc' || !record.location || !record.package) continue;
+    const filename = record.location.split('/').pop();
+    if (!templateName.test(filename || '')) continue;
+    records.push({
+      id: `${sourceName}:${record.package}:${record.version || filename}`,
       filename,
-      type: 'lxc',
-      section: 'system',
-      package: packageName,
-      version,
-      architecture,
-      name: family.charAt(0).toUpperCase() + family.slice(1),
-      description: `${packageName.replaceAll('-', ' ')} (${architecture})`,
-      url: new URL(filename, PROXMOX_SYSTEM_URL).toString(),
-      source: 'Proxmox public system template repository'
-    };
-  }).sort((a, b) => a.package.localeCompare(b.package, undefined, { numeric: true }) || b.version.localeCompare(a.version, undefined, { numeric: true }));
+      type: record.type,
+      section: record.section || 'system',
+      package: record.package,
+      version: record.version || '',
+      architecture: record.architecture || '',
+      name: record.package,
+      description: record.description || record.package,
+      os: record.os || null,
+      url: new URL(record.location, baseUrl).toString(),
+      source: sourceName
+    });
+  }
+  return records;
+}
+
+async function fetchCatalogSource(url, baseUrl, sourceName) {
+  const { response } = await safeFetch(url);
+  if (!response.ok) throw new Error(`${sourceName} catalog returned HTTP ${response.status}`);
+  return parseAplInfo(await response.text(), baseUrl, sourceName);
+}
+
+export async function proxmoxTemplateCatalog() {
+  let proxmox = [];
+  try {
+    proxmox = await fetchCatalogSource(PROXMOX_APLINFO_URL, PROXMOX_IMAGES_BASE, 'Proxmox');
+  } catch {
+    try { proxmox = await fetchCatalogSource(PROXMOX_FALLBACK_APLINFO_URL, PROXMOX_IMAGES_BASE, 'Proxmox'); }
+    catch {}
+  }
+
+  let turnkey = [];
+  try { turnkey = await fetchCatalogSource(TURNKEY_APLINFO_URL, TURNKEY_BASE, 'TurnKey Linux'); }
+  catch {}
+
+  const combined = [...proxmox, ...turnkey];
+  if (!combined.length) throw Object.assign(new Error('The upstream Proxmox/TurnKey template catalogs are currently unavailable.'), { status: 502 });
+  return combined.sort((a, b) =>
+    a.section.localeCompare(b.section) ||
+    a.package.localeCompare(b.package, undefined, { numeric: true }) ||
+    b.version.localeCompare(a.version, undefined, { numeric: true })
+  );
 }
 
 function byteLimit() {
@@ -208,4 +248,5 @@ export async function deleteContainerTemplate(id) {
   return { id, deleted: true };
 }
 
-export const proxmoxTemplateSource = PROXMOX_SYSTEM_URL;
+export const proxmoxTemplateSource = PROXMOX_APLINFO_URL;
+export const containerTemplateSources = [PROXMOX_APLINFO_URL, TURNKEY_APLINFO_URL];
