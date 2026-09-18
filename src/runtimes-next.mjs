@@ -49,13 +49,86 @@ async function command(program, args, timeout = 4000) {
   }
 }
 
+
+function parseDomInfo(text) {
+  const values = {};
+  for (const line of String(text || '').split('\n')) {
+    const index = line.indexOf(':');
+    if (index > 0) values[line.slice(0, index).trim().toLowerCase()] = line.slice(index + 1).trim();
+  }
+  return values;
+}
+
+async function localVmDetails(names) {
+  const details = [];
+  for (const name of names.slice(0, 100)) {
+    const info = await command('virsh', ['-c', 'qemu:///system', 'dominfo', name], 10000);
+    if (!info.ok) continue;
+    const parsed = parseDomInfo(info.output);
+    details.push({
+      id: name,
+      name,
+      uuid: parsed.uuid || null,
+      status: parsed.state || 'unknown',
+      cpus: Number(parsed['cpu(s)']) || 0,
+      memory: (Number(String(parsed['max memory'] || '').split(/\s+/)[0]) || 0) * 1024,
+      persistent: parsed.persistent === 'yes'
+    });
+  }
+  return details;
+}
+
+async function localManageVm(id, action) {
+  const name = String(id || '');
+  if (!/^[A-Za-z][A-Za-z0-9-]{1,39}$/.test(name)) throw Object.assign(new Error('Invalid VM name.'), { status: 400 });
+  const allowed = new Set(['start', 'stop', 'shutdown', 'reboot', 'reset', 'delete']);
+  if (!allowed.has(action)) throw Object.assign(new Error('Invalid VM action.'), { status: 400 });
+  if (action === 'delete') {
+    await command('virsh', ['-c', 'qemu:///system', 'destroy', name], 30000);
+    const result = await command('virsh', ['-c', 'qemu:///system', 'undefine', name, '--remove-all-storage', '--nvram'], 120000);
+    if (!result.ok) throw Object.assign(new Error(`VM delete failed: ${result.error}`), { status: 409 });
+    return { id: name, action, status: 'deleted' };
+  }
+  const verb = action === 'stop' ? 'destroy' : action;
+  const result = await command('virsh', ['-c', 'qemu:///system', verb, name], 60000);
+  if (!result.ok) throw Object.assign(new Error(`VM ${action} failed: ${result.error}`), { status: 409 });
+  return { id: name, action, status: 'submitted' };
+}
+
+async function localUpdateVm(input) {
+  const id = String(input.id || input.name || '');
+  const requestedName = String(input.name || id);
+  const memory = Number(input.memoryMiB);
+  const cpus = Number(input.cpus);
+  if (!/^[A-Za-z][A-Za-z0-9-]{1,39}$/.test(id) || !/^[A-Za-z][A-Za-z0-9-]{1,39}$/.test(requestedName)) throw Object.assign(new Error('Invalid VM name.'), { status: 400 });
+  if (!Number.isInteger(memory) || memory < 512 || memory > 262144 || !Number.isInteger(cpus) || cpus < 1 || cpus > 128) throw Object.assign(new Error('Invalid VM CPU or memory values.'), { status: 400 });
+
+  if (requestedName !== id) {
+    const state = await command('virsh', ['-c', 'qemu:///system', 'domstate', id], 10000);
+    if (!state.ok || !/shut off|shutoff|inactive/i.test(state.output)) throw Object.assign(new Error('Shut down the VM before renaming it.'), { status: 409 });
+    const rename = await command('virsh', ['-c', 'qemu:///system', 'domrename', id, requestedName], 30000);
+    if (!rename.ok) throw Object.assign(new Error(`VM rename failed: ${rename.error}`), { status: 409 });
+  }
+  const target = requestedName;
+  const mem = await command('virsh', ['-c', 'qemu:///system', 'setmaxmem', target, `${memory}MiB`, '--config'], 30000);
+  if (!mem.ok) throw Object.assign(new Error(`Unable to change VM memory: ${mem.error}`), { status: 409 });
+  await command('virsh', ['-c', 'qemu:///system', 'setmem', target, `${memory}MiB`, '--config'], 30000);
+  const cpu = await command('virsh', ['-c', 'qemu:///system', 'setvcpus', target, String(cpus), '--config', '--maximum'], 30000);
+  if (!cpu.ok) {
+    const fallback = await command('virsh', ['-c', 'qemu:///system', 'setvcpus', target, String(cpus), '--config'], 30000);
+    if (!fallback.ok) throw Object.assign(new Error(`Unable to change VM CPUs: ${fallback.error}`), { status: 409 });
+  }
+  await command('virsh', ['-c', 'qemu:///system', 'setvcpus', target, String(cpus), '--config'], 30000);
+  return { id: target, name: target, memoryMiB: memory, cpus, status: 'updated' };
+}
 export async function runtimeInventory() {
-  const [dockerInfo, vmInfo, vmPools, vmNetworks, installer] = await Promise.all([
+  const [dockerInfo, vmInfo, vmPools, vmNetworks, installer, hostBridges] = await Promise.all([
     command('docker', ['info', '--format', '{{.ServerVersion}}']),
     command('virsh', ['-c', 'qemu:///system', 'list', '--all', '--name']),
     command('virsh', ['-c', 'qemu:///system', 'pool-list', '--name']),
     command('virsh', ['-c', 'qemu:///system', 'net-list', '--name']),
-    command('virt-install', ['--version'])
+    command('virt-install', ['--version']),
+    command('ip', ['-j', 'link', 'show', 'type', 'bridge'])
   ]);
   let images = [];
   try {
@@ -65,10 +138,26 @@ export async function runtimeInventory() {
   const runtime = {
     docker: { available: dockerInfo.ok, enabled: process.env.LIGHTNAS_DOCKER_ENABLED === '1', reason: dockerInfo.ok ? null : 'Optional app runtime is not installed or not accessible.', containers: [], presets: containerImages },
     containers: { available: false, enabled: false, provider: 'local-lxc', reason: 'Native LXC is not available on this LightNAS host.', containers: [], images: [], networks: [], storageRoot: null },
-    virtualization: { available: vmInfo.ok && installer.ok, enabled: process.env.LIGHTNAS_VM_ENABLED === '1', reason: vmInfo.ok && installer.ok ? null : 'Libvirt/KVM and virt-install must be installed and accessible on bare metal or a VM with nested virtualization.', machines: vmInfo.ok && vmInfo.output ? vmInfo.output.split('\n').filter(Boolean) : [], machineDetails: [], pools: vmPools.ok && vmPools.output ? vmPools.output.split('\n').filter(Boolean) : [], networks: vmNetworks.ok && vmNetworks.output ? vmNetworks.output.split('\n').filter(Boolean) : [], images }
+    virtualization: { available: vmInfo.ok && installer.ok, enabled: process.env.LIGHTNAS_VM_ENABLED === '1', provider: 'libvirt-kvm', reason: vmInfo.ok && installer.ok ? null : 'Native QEMU/KVM + libvirt is unavailable. LightNAS needs bare metal virtualization support or nested virtualization in a VM.', machines: [], machineDetails: [], pools: vmPools.ok && vmPools.output ? vmPools.output.split('\n').filter(Boolean) : [], networks: [], networkDetails: [], images }
   };
   try { runtime.containers = await localContainerInventory(); }
   catch (error) { runtime.containers = { available: false, enabled: false, provider: 'local-lxc', reason: `Native LXC host agent unavailable: ${error.message}`, containers: [], images: [], networks: [], storageRoot: null }; }
+
+  if (runtime.virtualization.available) {
+    const names = vmInfo.output ? vmInfo.output.split('\n').filter(Boolean) : [];
+    runtime.virtualization.machineDetails = await localVmDetails(names);
+    runtime.virtualization.machines = runtime.virtualization.machineDetails.map(item => `${item.name} · ${item.status}`);
+    const libvirtNetworks = vmNetworks.ok && vmNetworks.output ? vmNetworks.output.split('\n').filter(Boolean) : [];
+    let bridges = [];
+    if (hostBridges.ok && hostBridges.output) {
+      try { bridges = JSON.parse(hostBridges.output).map(item => item.ifname).filter(name => /^[A-Za-z0-9_.:-]{1,32}$/.test(name || '')); } catch {}
+    }
+    runtime.virtualization.networkDetails = [
+      ...libvirtNetworks.map(name => ({ name, type: 'libvirt-network' })),
+      ...bridges.filter(name => !libvirtNetworks.includes(name)).map(name => ({ name, type: 'host-bridge' }))
+    ];
+    runtime.virtualization.networks = runtime.virtualization.networkDetails.map(item => item.name);
+  }
 
   if (dockerInfo.ok) {
     const list = await command('docker', ['ps', '-a', '--format', '{{json .}}']);
@@ -162,22 +251,30 @@ export async function createContainer(input) {
 }
 
 export async function createVm(input) {
+  const { virtualization } = await runtimeInventory();
   if (input?.action) {
-    const { virtualization } = await runtimeInventory();
-    if (!virtualization.provider?.startsWith('proxmox')) throw Object.assign(new Error('VM lifecycle controls currently require the Proxmox integration.'), { status: 409 });
-    if (input.action === 'update') return await proxmoxUpdateVm(input);
-    return await proxmoxManageVm(input.vmid, input.action);
+    if (virtualization.provider?.startsWith('proxmox')) {
+      if (input.action === 'update') return await proxmoxUpdateVm(input);
+      return await proxmoxManageVm(input.vmid || input.id, input.action);
+    }
+    if (input.action === 'update') return await localUpdateVm(input);
+    return await localManageVm(input.id || input.name, input.action);
   }
-  if (!Object.keys(process.env).some(key => key.startsWith('LIGHTNAS_PVE_')) && process.env.LIGHTNAS_VM_ENABLED !== '1') throw Object.assign(new Error('VM creation is disabled on this host. Run LightNAS on a KVM-capable host/VM, or use the one-click Proxmox LXC installer.'), { status: 409 });
+
+  if (!virtualization.available || !virtualization.enabled) throw Object.assign(new Error(virtualization.reason || 'Native KVM virtualization is disabled on this host.'), { status: 409 });
   if (!/^[a-zA-Z][a-zA-Z0-9-]{1,39}$/.test(input.name || '')) throw Object.assign(new Error('Use a 2–40 character VM name.'), { status: 400 });
   const memory = Number(input.memoryMiB), cpus = Number(input.cpus), disk = Number(input.diskGiB);
   if (!Number.isInteger(memory) || memory < 1024 || memory > 65536 || !Number.isInteger(cpus) || cpus < 1 || cpus > 32 || !Number.isInteger(disk) || disk < 10 || disk > 2048) throw Object.assign(new Error('Use 1024–65536 MiB RAM, 1–32 CPUs and 10–2048 GiB disk.'), { status: 400 });
-  const { virtualization } = await runtimeInventory();
-  if (!/^[a-zA-Z0-9_-]{1,48}$/.test(input.pool || '') || !/^[a-zA-Z0-9._-]{1,48}$/.test(input.network || '') || !virtualization.available || !virtualization.pools.includes(input.pool) || !virtualization.networks.includes(input.network) || !virtualization.images.includes(input.iso)) throw Object.assign(new Error('Select an accessible active VM storage, network bridge and existing ISO image.'), { status: 409 });
+  if (!/^[a-zA-Z0-9_-]{1,48}$/.test(input.pool || '') || !/^[a-zA-Z0-9._:-]{1,48}$/.test(input.network || '') || !virtualization.pools.includes(input.pool) || !virtualization.networks.includes(input.network) || !virtualization.images.includes(input.iso)) throw Object.assign(new Error('Select an accessible VM storage pool, network and installer ISO.'), { status: 409 });
+
   if (virtualization.provider?.startsWith('proxmox')) return proxmoxCreateVm(input, virtualization);
-  if (virtualization.machines.includes(input.name)) throw Object.assign(new Error('A VM with this name already exists.'), { status: 409 });
-  const args = ['--connect', 'qemu:///system', '--name', input.name, '--memory', String(memory), '--vcpus', String(cpus), '--disk', `pool=${input.pool},size=${disk},format=qcow2`, '--cdrom', join(vmIsoDirectory, input.iso), '--network', `network=${input.network}`, '--osinfo', 'detect=on,require=off', '--graphics', 'vnc,listen=127.0.0.1', '--noautoconsole', '--wait', '0'];
-  const response = await exclusive(() => command('virt-install', args, 120000));
+  if (virtualization.machineDetails.some(item => item.name === input.name)) throw Object.assign(new Error('A VM with this name already exists.'), { status: 409 });
+
+  const networkDetail = virtualization.networkDetails?.find(item => item.name === input.network);
+  const networkArg = networkDetail?.type === 'host-bridge' ? `bridge=${input.network},model=virtio` : `network=${input.network},model=virtio`;
+  const args = ['--connect', 'qemu:///system', '--name', input.name, '--memory', String(memory), '--vcpus', String(cpus), '--disk', `pool=${input.pool},size=${disk},format=qcow2,bus=scsi`, '--controller', 'scsi,model=virtio-scsi', '--cdrom', join(vmIsoDirectory, input.iso), '--network', networkArg, '--osinfo', 'detect=on,require=off', '--graphics', 'vnc,listen=127.0.0.1', '--video', 'virtio', '--noautoconsole', '--wait', '0'];
+  const response = await exclusive(() => command('virt-install', args, 180000));
   if (!response.ok) throw Object.assign(new Error(`VM creation failed: ${response.error}`), { status: 409 });
-  return { name: input.name, details: response.output };
+  return { id: input.name, name: input.name, provider: 'libvirt-kvm', details: response.output || 'VM created and started.' };
 }
+
