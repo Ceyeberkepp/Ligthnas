@@ -29,6 +29,9 @@ fi
 
 config="$(pct config "$ctid")" || { echo "Unable to read LXC $ctid." >&2; exit 1; }
 
+pve_major="$(pveversion 2>/dev/null | sed -nE 's#^pve-manager/([0-9]+).*#\1#p' | head -1)"
+[[ "$pve_major" =~ ^[0-9]+$ ]] || pve_major=9
+
 wait_for_container() {
   for attempt in {1..40}; do
     pct exec "$ctid" -- true >/dev/null 2>&1 && return 0
@@ -147,8 +150,8 @@ pct exec "$ctid" -- bash -lc '
   install -d -m 0755 /etc/lightnas
   touch /etc/lightnas/runtime.env
   chmod 0600 /etc/lightnas/runtime.env
-  sed -i "/^LIGHTNAS_ALLOW_NESTED_LXC=/d;/^LIGHTNAS_ENABLE_PROXMOX_PROVIDER=/d;/^LIGHTNAS_PVE_/d" /etc/lightnas/runtime.env
-  printf "%s\n" "LIGHTNAS_ALLOW_NESTED_LXC=1" "LIGHTNAS_ENABLE_PROXMOX_PROVIDER=0" >> /etc/lightnas/runtime.env
+  sed -i "/^LIGHTNAS_ALLOW_NESTED_LXC=/d;/^LIGHTNAS_ENABLE_PROXMOX_PROVIDER=/d;/^LIGHTNAS_PVE_/d;/^LIGHTNAS_PVE_APLINFO_MAJOR=/d" /etc/lightnas/runtime.env
+  printf "%s\n" "LIGHTNAS_ALLOW_NESTED_LXC=1" "LIGHTNAS_ENABLE_PROXMOX_PROVIDER=0" "LIGHTNAS_PVE_APLINFO_MAJOR=${pve_major}" >> /etc/lightnas/runtime.env
 
   LIGHTNAS_ALLOW_NESTED_LXC=1 LIGHTNAS_RUNTIME_STATUS_FILE=/var/lib/lightnas/runtime-status.txt \
     bash /opt/lightnas/scripts/provision-runtimes.sh
