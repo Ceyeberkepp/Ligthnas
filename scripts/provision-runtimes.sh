@@ -17,13 +17,18 @@ report() { printf '%s: %s\n' "$1" "$2" | tee -a "${status_file}"; }
 : > "${status_file}"
 chmod 0644 "${status_file}"
 
-# The Docker socket grants host-level access. Only the authenticated LightNAS service account joins the group.
-if [[ "${LIGHTNAS_SKIP_DOCKER:-0}" == "1" ]]; then
+# System Containers are provider-backed (Proxmox LXC on Proxmox; Incus is
+# the generic-host provider). Docker is NOT the LightNAS Containers backend.
+report Containers 'system-container provider will be selected after host integration'
+
+# Docker/OCI is optional and is used only by the App Store. Do not install or
+# grant Docker-socket access unless the operator explicitly opts in.
+if [[ "${LIGHTNAS_ENABLE_DOCKER_APPS:-0}" != "1" ]]; then
   set_flag LIGHTNAS_DOCKER_ENABLED 0
-  report Containers 'skipped by operator (LIGHTNAS_SKIP_DOCKER=1)'
+  report Apps 'optional Docker/OCI engine disabled (set LIGHTNAS_ENABLE_DOCKER_APPS=1 to enable)'
 else
   if ! command -v docker >/dev/null 2>&1; then
-    if ! apt-get install -y docker.io; then report Containers 'docker.io package installation failed'; fi
+    if ! apt-get install -y docker.io; then report Apps 'docker.io package installation failed'; fi
   fi
   if command -v docker >/dev/null 2>&1; then
     systemctl enable --now docker.service >/dev/null 2>&1 || true
@@ -35,18 +40,18 @@ else
       if getent group docker >/dev/null 2>&1; then usermod -aG docker lightnas; fi
       if runuser -u lightnas -- docker info >/dev/null 2>&1; then
         set_flag LIGHTNAS_DOCKER_ENABLED 1
-        report Containers 'ready (Docker accessible to LightNAS)'
+        report Apps 'optional Docker/OCI engine ready'
       else
         set_flag LIGHTNAS_DOCKER_ENABLED 0
-        report Containers 'Docker is running but inaccessible to the service account'
+        report Apps 'Docker is running but inaccessible to the LightNAS service account'
       fi
     else
       set_flag LIGHTNAS_DOCKER_ENABLED 0
-      report Containers 'Docker could not start; Proxmox LXC may require nesting and host kernel support'
+      report Apps 'Docker could not start'
     fi
   else
     set_flag LIGHTNAS_DOCKER_ENABLED 0
-    report Containers 'Docker not installed'
+    report Apps 'Docker not installed'
   fi
 fi
 
