@@ -286,6 +286,11 @@ def create_container(data: dict) -> dict:
     append_unique(config, f"lxc.net.0.link = {network}")
     append_unique(config, "lxc.net.0.flags = up")
     append_unique(config, "lxc.net.0.name = eth0")
+    if in_container():
+        # The outer appliance container remains the security boundary. Avoid
+        # inner AppArmor profile loading, which is commonly blocked in nested
+        # Proxmox/LXC environments even when namespaces/cgroups are delegated.
+        append_unique(config, "lxc.apparmor.profile = unconfined")
     run(["lxc-start", "-n", name, "-d"], timeout=60)
     return {"id": name, "name": name, "status": "running", "provider": "local-lxc"}
 
