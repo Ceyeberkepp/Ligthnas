@@ -72,6 +72,7 @@ for group in libvirt kvm; do
 done
 install -d -o lightnas -g lightnas -m 0700 "${DATA_DIRECTORY}"
 install -d -o lightnas -g lightnas -m 0700 "${DATA_DIRECTORY}/files"
+install -d -o lightnas -g lightnas -m 0770 "${DATA_DIRECTORY}/storage" "${DATA_DIRECTORY}/storage/local"
 
 LIGHTNAS_RUNTIME_STATUS_FILE="${DATA_DIRECTORY}/runtime-status.txt" \
   bash "${INSTALL_DIRECTORY}/scripts/provision-runtimes.sh"
