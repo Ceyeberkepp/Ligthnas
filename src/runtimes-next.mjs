@@ -173,7 +173,13 @@ export async function runtimeInventory() {
     const libvirtNetworks = vmNetworks.ok && vmNetworks.output ? vmNetworks.output.split('\n').filter(Boolean) : [];
     let bridges = [];
     if (hostBridges.ok && hostBridges.output) {
-      try { bridges = JSON.parse(hostBridges.output).map(item => item.ifname).filter(name => /^[A-Za-z0-9_.:-]{1,32}$/.test(name || '')); } catch {}
+      try {
+        bridges = JSON.parse(hostBridges.output)
+          .filter(item => item.ifname !== 'docker0' && (item.flags || []).includes('UP'))
+          .map(item => item.ifname)
+          .filter(name => /^[A-Za-z0-9_.:-]{1,32}$/.test(name || ''));
+        if (bridges.includes('lightnas0')) bridges = ['lightnas0', ...bridges.filter(name => name !== 'lightnas0')];
+      } catch {}
     }
     runtime.virtualization.networkDetails = [
       ...libvirtNetworks.map(name => ({ name, type: 'libvirt-network' })),
