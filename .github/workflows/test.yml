@@ -46,7 +46,8 @@ jobs:
           bash -n scripts/provision-runtimes.sh
           bash -n scripts/start.sh
 
-      - name: Validate Proxmox host bridge syntax
+      - name: Validate privileged host agents
         run: |
+          python3 -m py_compile scripts/lightnas-host-agent.py
           python3 -m py_compile scripts/proxmox-host-agent.py
           python3 -m py_compile scripts/proxmox-host-agent-v2.py
