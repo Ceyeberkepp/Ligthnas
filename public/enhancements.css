@@ -93,3 +93,8 @@
   .template-table-head { display:none; }
   .template-table-row { grid-template-columns:1fr; }
 }
+
+.template-section-row { grid-column:1/-1; display:flex; justify-content:space-between; gap:1rem; padding:.55rem .8rem; background:rgba(127,127,127,.06); border-top:1px solid var(--line, #d8e2ea); }
+.template-section-row span { opacity:.65; }
+.template-table-row span:nth-child(2) { display:flex; flex-direction:column; gap:.15rem; }
+.template-table-row small { opacity:.6; font-size:.75rem; }
