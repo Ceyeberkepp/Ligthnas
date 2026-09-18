@@ -155,7 +155,7 @@ async function renderManageStorage(poolId,activeType=null) {
       await refreshStorageManager();await renderManageStorage(pool.id,selectedType);
     }catch(problem){error.textContent=problem.message;}
   },{once:true});
-  dialog.showModal();
+  if (!dialog.open) dialog.showModal();
 }
 
 document.addEventListener('click',async event=>{
