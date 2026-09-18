@@ -20,7 +20,7 @@ export DEBIAN_FRONTEND=noninteractive
 
 echo "[1/6] Installing system requirements..."
 apt-get update
-apt-get install -y ca-certificates curl git gnupg python3 ffmpeg acl novnc
+apt-get install -y ca-certificates curl git gnupg python3 ffmpeg acl novnc iproute2 nftables
 
 if ! command -v node >/dev/null 2>&1 || \
    [[ "$(node --version | sed -E 's/^v([0-9]+).*/\1/')" -lt 22 ]]; then
@@ -35,6 +35,18 @@ EOF
   apt-get install -y nodejs
 else
   echo "[2/6] Node.js $(node --version) is already installed."
+fi
+
+# LightNAS owns its compute stack locally. On bare metal or a VM this installs
+# the same open-source building blocks used by virtualization appliances:
+# LXC/liblxc for system containers and QEMU/KVM + libvirt for virtual machines.
+# Inside another container we do not assume nested virtualization is permitted.
+if ! systemd-detect-virt --container >/dev/null 2>&1 || [[ "${LIGHTNAS_ENABLE_NESTED_RUNTIMES:-0}" == "1" ]]; then
+  echo "      Installing native system-container and VM engines..."
+  apt-get install -y \
+    lxc lxc-templates lxcfs uidmap bridge-utils \
+    qemu-system-x86 qemu-utils libvirt-daemon-system libvirt-clients virtinst ovmf \
+    dnsmasq-base network-manager
 fi
 
 echo "[3/6] Installing LightNAS..."
@@ -55,22 +67,48 @@ echo "[4/6] Creating the service account and persistent storage..."
 if ! id lightnas >/dev/null 2>&1; then
   useradd --system --home-dir "${DATA_DIRECTORY}" --shell /usr/sbin/nologin lightnas
 fi
+for group in libvirt kvm; do
+  getent group "${group}" >/dev/null 2>&1 && usermod -aG "${group}" lightnas || true
+done
 install -d -o lightnas -g lightnas -m 0700 "${DATA_DIRECTORY}"
 install -d -o lightnas -g lightnas -m 0700 "${DATA_DIRECTORY}/files"
 
-if [[ "${LIGHTNAS_ENABLE_DOCKER:-1}" == "0" ]]; then export LIGHTNAS_SKIP_DOCKER=1; fi
 LIGHTNAS_RUNTIME_STATUS_FILE="${DATA_DIRECTORY}/runtime-status.txt" \
   bash "${INSTALL_DIRECTORY}/scripts/provision-runtimes.sh"
 chown lightnas:lightnas "${DATA_DIRECTORY}/runtime-status.txt"
 
 chown -R root:root "${INSTALL_DIRECTORY}"
 
-echo "[5/6] Installing the systemd service..."
+echo "[5/6] Installing the systemd services..."
+install -d -m 0755 /run/lightnas
+cat >/etc/systemd/system/lightnas-host-agent.service <<EOF
+[Unit]
+Description=LightNAS Privileged Local Host Agent
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+EnvironmentFile=-/etc/lightnas/runtime.env
+Environment=LIGHTNAS_HOST_SOCKET=/run/lightnas/host-agent.sock
+ExecStart=/usr/bin/python3 ${INSTALL_DIRECTORY}/scripts/lightnas-host-agent.py
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=false
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 cat >/etc/systemd/system/${SERVICE_NAME}.service <<EOF
 [Unit]
 Description=LightNAS Management Control Plane
-Wants=network-online.target
-After=network-online.target
+Wants=network-online.target lightnas-host-agent.service
+After=network-online.target lightnas-host-agent.service
 
 [Service]
 Type=simple
@@ -78,6 +116,7 @@ User=lightnas
 Group=lightnas
 WorkingDirectory=${INSTALL_DIRECTORY}
 EnvironmentFile=-/etc/lightnas/runtime.env
+Environment=LIGHTNAS_HOST_SOCKET=/run/lightnas/host-agent.sock
 Environment=NODE_ENV=production
 Environment=NAS_HOST=0.0.0.0
 Environment=NAS_PORT=3080
@@ -97,6 +136,7 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
+systemctl enable --now lightnas-host-agent.service
 systemctl enable "${SERVICE_NAME}"
 systemctl restart "${SERVICE_NAME}"
 
