@@ -293,29 +293,18 @@ async function enhanceRuntimeControls() {
   try {
     const runtimes = await apiRequest('/api/runtimes');
     if (location.hash === '#containers') {
-      const containers = runtimes.containers || {};
-      const form = content.querySelector('#container-form');
-      if (form && containers.poolDetails?.length) {
-        const select = form.querySelector('select[name="pool"]');
-        for (const detail of containers.poolDetails) {
-          const option = [...select.options].find(item => item.value === detail.name);
-          if (option) option.textContent = `${detail.name} · ${detail.type}${detail.available ? ` · ${bytes(detail.available)} free` : ''}`;
-        }
-      }
-      for (const item of containers.containers || []) {
-        const row = [...content.querySelectorAll('.storage-row')].find(candidate => candidate.querySelector('h3')?.textContent.includes(`(${item.vmid})`));
+      const runtime = runtimes.containers || {};
+      for (const item of runtime.containers || []) {
+        const id = String(item.id || item.name || '');
+        const row = [...content.querySelectorAll('.storage-row')].find(candidate => candidate.querySelector('h3')?.textContent === item.name);
         if (!row || row.querySelector('.runtime-actions')) continue;
         const actions = document.createElement('div');
         actions.className = 'runtime-actions';
-        const running = item.status === 'running';
-        const memoryMiB = Math.max(256, Math.round((item.memory || 0) / 1048576));
-        if (item.protected) {
-          actions.innerHTML = '<span class="content-badge">LIGHTNAS APPLIANCE · PROTECTED</span>';
-        } else {
-          actions.innerHTML = `${running ? `<button class="primary" data-container-console="${item.vmid}" data-container-name="${escapeHtml(item.name)}">Terminal</button><button class="secondary" data-container-action="shutdown" data-vmid="${item.vmid}">Shutdown</button><button class="secondary" data-container-action="reboot" data-vmid="${item.vmid}">Reboot</button><button class="secondary" data-container-action="stop" data-vmid="${item.vmid}">Stop</button>` : `<button class="primary" data-container-action="start" data-vmid="${item.vmid}">Start</button>`}
-            <button class="secondary" data-container-edit="${item.vmid}" data-container-name="${escapeHtml(item.name)}" data-container-memory="${memoryMiB}" data-container-cpus="${item.cpus || 1}">Edit</button>
-            <button class="secondary danger-button" data-container-action="delete" data-vmid="${item.vmid}">Delete</button>`;
-        }
+        const running = String(item.status || '').toLowerCase() === 'running';
+        const memoryMiB = Math.max(256, Math.round((item.memory || 0) / 1048576) || 2048);
+        actions.innerHTML = `${running ? `<button class="primary" data-container-console="${escapeHtml(id)}" data-container-name="${escapeHtml(item.name)}">Terminal</button><button class="secondary" data-container-action="shutdown" data-container-id="${escapeHtml(id)}">Shutdown</button><button class="secondary" data-container-action="reboot" data-container-id="${escapeHtml(id)}">Reboot</button><button class="secondary" data-container-action="stop" data-container-id="${escapeHtml(id)}">Stop</button>` : `<button class="primary" data-container-action="start" data-container-id="${escapeHtml(id)}">Start</button>`}
+          <button class="secondary" data-container-edit="${escapeHtml(id)}" data-container-name="${escapeHtml(item.name)}" data-container-memory="${memoryMiB}" data-container-cpus="${item.cpus || 2}">Edit</button>
+          <button class="secondary danger-button" data-container-action="delete" data-container-id="${escapeHtml(id)}">Delete</button>`;
         row.append(actions);
       }
     } else {
@@ -329,16 +318,17 @@ async function enhanceRuntimeControls() {
         }
       }
       for (const item of vm.machineDetails || []) {
-        const row = [...content.querySelectorAll('.storage-row')].find(candidate => candidate.querySelector('h3')?.textContent.includes(`(${item.vmid})`));
+        const id = String(item.id || item.vmid || item.name || '');
+        const row = [...content.querySelectorAll('.storage-row')].find(candidate => candidate.querySelector('h3')?.textContent === item.name);
         if (!row || row.querySelector('.runtime-actions')) continue;
         const actions = document.createElement('div');
         actions.className = 'runtime-actions';
-        const running = item.status === 'running';
-        const memoryMiB = Math.max(1, Math.round((item.memory || 0) / 1048576));
-        actions.innerHTML = `${running ? `<button class="primary" data-vm-console="${item.vmid}" data-vm-name="${escapeHtml(item.name)}">noVNC Console</button><button class="secondary" data-vm-action="shutdown" data-vmid="${item.vmid}">Shutdown</button><button class="secondary" data-vm-action="reboot" data-vmid="${item.vmid}">Reboot</button><button class="secondary" data-vm-action="stop" data-vmid="${item.vmid}">Stop</button>` : `<button class="primary" data-vm-action="start" data-vmid="${item.vmid}">Start</button>`}
-          <button class="secondary" data-vm-edit="${item.vmid}" data-vm-name="${escapeHtml(item.name)}" data-vm-memory="${memoryMiB}" data-vm-cpus="${item.cpus || 1}">Edit</button>
-          <button class="secondary" data-vm-action="reset" data-vmid="${item.vmid}">Reset</button>
-          <button class="secondary danger-button" data-vm-action="delete" data-vmid="${item.vmid}">Delete</button>`;
+        const running = /running/i.test(String(item.status || ''));
+        const memoryMiB = Math.max(512, Math.round((item.memory || 0) / 1048576) || 2048);
+        actions.innerHTML = `${running ? `<button class="primary" data-vm-console="${escapeHtml(id)}" data-vm-name="${escapeHtml(item.name)}">noVNC Console</button><button class="secondary" data-vm-action="shutdown" data-vm-id="${escapeHtml(id)}">Shutdown</button><button class="secondary" data-vm-action="reboot" data-vm-id="${escapeHtml(id)}">Reboot</button><button class="secondary" data-vm-action="stop" data-vm-id="${escapeHtml(id)}">Stop</button>` : `<button class="primary" data-vm-action="start" data-vm-id="${escapeHtml(id)}">Start</button>`}
+          <button class="secondary" data-vm-edit="${escapeHtml(id)}" data-vm-name="${escapeHtml(item.name)}" data-vm-memory="${memoryMiB}" data-vm-cpus="${item.cpus || 2}">Edit</button>
+          <button class="secondary" data-vm-action="reset" data-vm-id="${escapeHtml(id)}">Reset</button>
+          <button class="secondary danger-button" data-vm-action="delete" data-vm-id="${escapeHtml(id)}">Delete</button>`;
         row.append(actions);
       }
     }
@@ -490,19 +480,19 @@ document.addEventListener('click', async event => {
 
   const consoleButton = event.target.closest('[data-container-console]');
   if (consoleButton) {
-    window.open(`/container-console.html?vmid=${encodeURIComponent(consoleButton.dataset.containerConsole)}&name=${encodeURIComponent(consoleButton.dataset.containerName || '')}`, '_blank', 'noopener,width=1100,height=760');
+    window.open(`/container-console.html?id=${encodeURIComponent(consoleButton.dataset.containerConsole)}&name=${encodeURIComponent(consoleButton.dataset.containerName || '')}`, '_blank', 'noopener,width=1100,height=760');
     return;
   }
   const containerEdit = event.target.closest('[data-container-edit]');
   if (containerEdit) {
-    const vmid = Number(containerEdit.dataset.containerEdit);
-    const name = prompt('Container name', containerEdit.dataset.containerName || `CT-${vmid}`);
+    const id = containerEdit.dataset.containerEdit;
+    const name = prompt('Container name', containerEdit.dataset.containerName || id);
     if (!name) return;
     const memoryMiB = Number(prompt('Memory (MiB)', containerEdit.dataset.containerMemory || '2048'));
     const cpus = Number(prompt('Virtual CPUs', containerEdit.dataset.containerCpus || '2'));
     if (!Number.isInteger(memoryMiB) || !Number.isInteger(cpus)) return;
     try {
-      await apiRequest('/api/containers', { method: 'POST', body: JSON.stringify({ vmid, action: 'update', name, memoryMiB, cpus }) });
+      await apiRequest('/api/containers', { method: 'POST', body: JSON.stringify({ id, action: 'update', name, memoryMiB, cpus }) });
       document.querySelector('#content [data-action="refresh-runtime"]')?.click();
     } catch (error) { alert(error.message); }
     return;
@@ -510,11 +500,11 @@ document.addEventListener('click', async event => {
   const containerAction = event.target.closest('[data-container-action]');
   if (containerAction) {
     const action = containerAction.dataset.containerAction;
-    const vmid = Number(containerAction.dataset.vmid);
-    if (action === 'delete' && !confirm(`Delete system container CT ${vmid} and its root filesystem? This cannot be undone.`)) return;
+    const id = containerAction.dataset.containerId;
+    if (action === 'delete' && !confirm(`Delete system container ${id} and its root filesystem? This cannot be undone.`)) return;
     containerAction.disabled = true;
     try {
-      await apiRequest('/api/containers', { method: 'POST', body: JSON.stringify({ vmid, action }) });
+      await apiRequest('/api/containers', { method: 'POST', body: JSON.stringify({ id, action }) });
       document.querySelector('#content [data-action="refresh-runtime"]')?.click();
     } catch (error) { alert(error.message); }
     finally { containerAction.disabled = false; }
@@ -523,19 +513,19 @@ document.addEventListener('click', async event => {
 
   const vmConsole = event.target.closest('[data-vm-console]');
   if (vmConsole) {
-    window.open(`/vm-console.html?vmid=${encodeURIComponent(vmConsole.dataset.vmConsole)}&name=${encodeURIComponent(vmConsole.dataset.vmName || '')}`, '_blank', 'noopener,width=1280,height=820');
+    window.open(`/vm-console.html?id=${encodeURIComponent(vmConsole.dataset.vmConsole)}&name=${encodeURIComponent(vmConsole.dataset.vmName || '')}`, '_blank', 'noopener,width=1280,height=820');
     return;
   }
   const vmEdit = event.target.closest('[data-vm-edit]');
   if (vmEdit) {
-    const vmid = Number(vmEdit.dataset.vmEdit);
-    const name = prompt('VM name', vmEdit.dataset.vmName || `VM-${vmid}`);
+    const id = vmEdit.dataset.vmEdit;
+    const name = prompt('VM name', vmEdit.dataset.vmName || id);
     if (!name) return;
     const memoryMiB = Number(prompt('Memory (MiB)', vmEdit.dataset.vmMemory || '2048'));
     const cpus = Number(prompt('Virtual CPUs', vmEdit.dataset.vmCpus || '2'));
     if (!Number.isInteger(memoryMiB) || !Number.isInteger(cpus)) return;
     try {
-      await apiRequest('/api/vms', { method: 'POST', body: JSON.stringify({ vmid, action: 'update', name, memoryMiB, cpus }) });
+      await apiRequest('/api/vms', { method: 'POST', body: JSON.stringify({ id, action: 'update', name, memoryMiB, cpus }) });
       document.querySelector('#content [data-action="refresh-runtime"]')?.click();
     } catch (error) { alert(error.message); }
     return;
@@ -543,11 +533,11 @@ document.addEventListener('click', async event => {
   const vmAction = event.target.closest('[data-vm-action]');
   if (vmAction) {
     const action = vmAction.dataset.vmAction;
-    const vmid = Number(vmAction.dataset.vmid);
-    if (action === 'delete' && !confirm(`Delete VM ${vmid} and its disks? This cannot be undone.`)) return;
+    const id = vmAction.dataset.vmId;
+    if (action === 'delete' && !confirm(`Delete VM ${id} and its managed disks? This cannot be undone.`)) return;
     vmAction.disabled = true;
     try {
-      await apiRequest('/api/vms', { method: 'POST', body: JSON.stringify({ vmid, action }) });
+      await apiRequest('/api/vms', { method: 'POST', body: JSON.stringify({ id, action }) });
       document.querySelector('#content [data-action="refresh-runtime"]')?.click();
     } catch (error) { alert(error.message); }
     finally { vmAction.disabled = false; }
