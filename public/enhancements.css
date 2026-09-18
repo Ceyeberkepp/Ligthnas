@@ -77,3 +77,19 @@
   .runtime-actions { justify-content: flex-start; }
   .inventory-heading { display: grid; }
 }
+
+
+/* Storage manager and Proxmox-style template catalog */
+.storage-pool-card { cursor: default; }
+.content-check { display:flex; gap:.65rem; align-items:flex-start; padding:.65rem; border:1px solid var(--line, #d8e2ea); border-radius:.7rem; }
+.content-check input { margin-top:.2rem; }
+.content-check span { display:flex; flex-direction:column; gap:.15rem; }
+.content-check small { opacity:.65; }
+.template-table { display:grid; gap:0; border:1px solid var(--line, #d8e2ea); border-radius:.75rem; overflow:hidden; }
+.template-table-head,.template-table-row { display:grid; grid-template-columns:70px minmax(190px,1.2fr) 120px minmax(240px,2fr) 100px; gap:.75rem; align-items:center; padding:.65rem .8rem; }
+.template-table-head { font-weight:700; background:rgba(127,127,127,.08); }
+.template-table-row { border-top:1px solid var(--line, #d8e2ea); }
+@media (max-width: 900px) {
+  .template-table-head { display:none; }
+  .template-table-row { grid-template-columns:1fr; }
+}
