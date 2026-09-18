@@ -66,19 +66,19 @@ function renderTemplateLibrary() {
     <section class="panel">
       <div class="panel-head"><div><span class="eyebrow">CONTAINER TEMPLATE LIBRARY</span><h2>System container templates</h2></div>
         <div class="head-actions">
-          <button class="primary" type="button" data-template-browse>Browse Proxmox catalog</button>
+          <button class="primary" type="button" data-template-browse>Browse upstream templates</button>
           <button class="secondary" type="button" data-template-upload>Upload template</button>
           <button class="secondary" type="button" data-template-url>Import URL</button>
         </div>
       </div>
-      <p class="muted">LightNAS stores templates on the virtual storage you choose. Proxmox system templates come from the same public repository used by Proxmox VE. Stored archives become selectable when creating a native LXC container.</p>
+      <p class="muted">LightNAS reads the upstream appliance metadata feeds used by Proxmox pveam and downloads the selected archive from its published source. Templates are stored on the LightNAS storage you choose and become selectable for native LXC creation.</p>
       <div class="inventory-grid">
         <article class="inventory-card"><h3>${templates.length}</h3><p>templates stored locally</p></article>
         <article class="inventory-card"><h3>${virtualTargets.length}</h3><p>assigned virtual storage target${virtualTargets.length === 1 ? '' : 's'}</p></article>
         <article class="inventory-card"><h3>vztmpl</h3><p>container-template content role</p></article>
       </div>
       ${templates.length ? `<div class="storage-list">${templates.map(item => `<article class="storage-row"><div><h3>${tEsc(item.filename)}</h3><p>${tEsc(item.storageLabel)} · ${tBytes(item.sizeBytes)}</p></div><div class="runtime-actions"><button class="secondary danger-button" type="button" data-template-delete="${tEsc(item.id)}">Delete</button></div></article>`).join('')}</div>` : '<div class="empty"><p>No saved container templates yet.</p></div>'}
-      <p class="muted">Catalog source: ${tEsc(proxmoxSource || 'https://download.proxmox.com/images/system/')}</p>
+      <p class="muted">Primary metadata source: ${tEsc(proxmoxSource || 'https://download.proxmox.com/images/aplinfo-pve-9.dat')}</p>
     </section>`;
 }
 
@@ -179,7 +179,7 @@ function renderCatalog(dialog, query = '') {
     ${sections.map(section => {
       const rows = matches.filter(item => (item.section || 'system') === section);
       return `<div class="template-section-row"><b>Section: ${tEsc(section)}</b><span>${rows.length} item${rows.length === 1 ? '' : 's'}</span></div>
-        ${rows.map(item => `<div class="template-table-row"><span>${tEsc(item.type || 'lxc')}</span><span><b>${tEsc(item.package || item.filename)}</b><small>${tEsc(item.source || '')}</small></span><span>${tEsc(item.version || '')}</span><span>${tEsc(item.description || item.filename)}</span><span><button class="secondary" type="button" data-template-catalog-file="${tEsc(item.filename)}">Download</button></span></div>`).join('')}`;
+        ${rows.map(item => `<div class="template-table-row"><span>${tEsc(item.type || 'lxc')}</span><span><b>${tEsc(item.package || item.filename)}</b><small>${tEsc(item.source || '')}</small></span><span>${tEsc(item.version || '')}</span><span>${tEsc(item.description || item.filename)}</span><span><button class="secondary" type="button" data-template-catalog-file="${tEsc(item.id || item.filename)}">Download</button></span></div>`).join('')}`;
     }).join('')}
   </div>`;
 }
@@ -187,7 +187,7 @@ function renderCatalog(dialog, query = '') {
 async function openCatalogDialog(preferredStorageId = '') {
   const library = templateState.library || await loadTemplateLibrary();
   const dialog = ensureTemplateDialog();
-  dialog.querySelector('[data-template-title]').textContent = 'Proxmox system template catalog';
+  dialog.querySelector('[data-template-title]').textContent = 'Upstream system template catalog';
   dialog.querySelector('[data-template-error]').textContent = 'Loading official catalog…';
   dialog.querySelector('[data-template-body]').innerHTML = `
     <label>Save to storage<select data-template-catalog-storage>${targetOptions(library.targets)}</select></label>
@@ -223,7 +223,7 @@ document.addEventListener('click', async event => {
     const storageId = dialog.querySelector('[data-template-catalog-storage]')?.value;
     const error = dialog.querySelector('[data-template-error]');
     catalogFile.disabled = true;
-    error.textContent = `Downloading ${catalogFile.dataset.templateCatalogFile}…`;
+    error.textContent = 'Downloading selected upstream template…';
     try {
       await tRequest('/api/templates/import', {
         method: 'POST',
