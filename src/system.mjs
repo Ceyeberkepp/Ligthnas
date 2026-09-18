@@ -1,5 +1,5 @@
 import os from 'node:os';
-import { dirname, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { access, constants, readFile, statfs } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -94,16 +94,17 @@ export async function getStorageInventory() {
     : 0;
   virtualStorage.count = attachedVolumes.length;
 
-  const dataPath = dirname(resolve(process.env.NAS_DATA_FILE || 'data/state.json'));
+  const dataRoot = dirname(resolve(process.env.NAS_DATA_FILE || 'data/state.json'));
+  const localStoragePath = resolve(process.env.LIGHTNAS_LOCAL_STORAGE_ROOT || join(dataRoot, 'storage', 'local'));
   let local = null;
   try {
-    const stats = await statfs(dataPath, { bigint: true });
+    const stats = await statfs(localStoragePath, { bigint: true });
     const totalBytes = Number(stats.blocks * stats.bsize);
     const availableBytes = Number(stats.bavail * stats.bsize);
     const mounts = await readText('/proc/self/mountinfo');
     const mountPoints = mounts.split('\n').map(line => line.split(' - ')[0]?.split(' ')[4]?.replaceAll('\\040', ' ')).filter(Boolean);
-    const coveringMount = mountPoints.filter(point => dataPath === point || dataPath.startsWith(`${point.replace(/\/$/, '')}/`)).sort((a, b) => b.length - a.length)[0] || '/';
-    local = { path: dataPath, mountPoint: coveringMount, dedicated: coveringMount !== '/', totalBytes, availableBytes, usedBytes: Math.max(0, totalBytes - availableBytes) };
+    const coveringMount = mountPoints.filter(point => localStoragePath === point || localStoragePath.startsWith(`${point.replace(/\/$/, '')}/`)).sort((a, b) => b.length - a.length)[0] || '/';
+    local = { path: localStoragePath, mountPoint: coveringMount, dedicated: coveringMount !== '/', totalBytes, availableBytes, usedBytes: Math.max(0, totalBytes - availableBytes) };
   } catch {}
 
   const usableStorage = {
