@@ -145,13 +145,13 @@ if ! pct exec "$ctid" -- bash -lc 'command -v lxc-ls >/dev/null && command -v lx
   '
 fi
 
-pct exec "$ctid" -- bash -lc '
+pct exec "$ctid" -- env LIGHTNAS_DETECTED_PVE_MAJOR="$pve_major" bash -lc '
   set -Eeuo pipefail
   install -d -m 0755 /etc/lightnas
   touch /etc/lightnas/runtime.env
   chmod 0600 /etc/lightnas/runtime.env
   sed -i "/^LIGHTNAS_ALLOW_NESTED_LXC=/d;/^LIGHTNAS_ENABLE_PROXMOX_PROVIDER=/d;/^LIGHTNAS_PVE_/d;/^LIGHTNAS_PVE_APLINFO_MAJOR=/d" /etc/lightnas/runtime.env
-  printf "%s\n" "LIGHTNAS_ALLOW_NESTED_LXC=1" "LIGHTNAS_ENABLE_PROXMOX_PROVIDER=0" "LIGHTNAS_PVE_APLINFO_MAJOR=${pve_major}" >> /etc/lightnas/runtime.env
+  printf "%s\n" "LIGHTNAS_ALLOW_NESTED_LXC=1" "LIGHTNAS_ENABLE_PROXMOX_PROVIDER=0" "LIGHTNAS_PVE_APLINFO_MAJOR=${LIGHTNAS_DETECTED_PVE_MAJOR}" >> /etc/lightnas/runtime.env
 
   LIGHTNAS_ALLOW_NESTED_LXC=1 LIGHTNAS_RUNTIME_STATUS_FILE=/var/lib/lightnas/runtime-status.txt \
     bash /opt/lightnas/scripts/provision-runtimes.sh
