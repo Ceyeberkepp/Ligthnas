@@ -30,21 +30,21 @@
     import RFB from '/novnc/core/rfb.js';
 
     const params = new URLSearchParams(location.search);
-    const vmid = params.get('vmid');
-    const name = params.get('name') || `VM ${vmid || ''}`;
+    const id = params.get('id') || '';
+    const name = params.get('name') || id;
     const title = document.querySelector('#title');
     const status = document.querySelector('#status');
     const screen = document.querySelector('#screen');
     title.textContent = `${name} · console`;
 
-    if (!/^\d{3,6}$/.test(vmid || '')) {
-      status.textContent = 'Invalid VM ID';
+    if (!/^(?:[A-Za-z][A-Za-z0-9-]{1,39}|[1-9][0-9]{1,5})$/.test(id)) {
+      status.textContent = 'Invalid VM identifier';
       status.classList.add('error');
-      throw new Error('Invalid VM ID');
+      throw new Error('Invalid VM identifier');
     }
 
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const socketUrl = `${protocol}//${location.host}/api/console/vm/${encodeURIComponent(vmid)}`;
+    const socketUrl = `${protocol}//${location.host}/api/console/vm/${encodeURIComponent(id)}`;
     const rfb = new RFB(screen, socketUrl, { shared: true });
     rfb.scaleViewport = true;
     rfb.resizeSession = true;
