@@ -89,16 +89,18 @@ function metric(label, value, percent, detail) {
 
 function homeView() {
   const { system, filesystems, storage, shares, activity, appliance } = state.overview;
-  const total = storage.local?.totalBytes || 0;
-  const used = storage.local?.usedBytes || 0;
-  const storagePercent = total ? Math.round((used / total) * 100) : 0;
+  const visibleStorage = storage.usableStorage || storage.virtualStorage || storage.local || { totalBytes: 0, usedBytes: 0, availableBytes: 0, usedPercent: 0, count: 0 };
+  const total = visibleStorage.totalBytes || 0;
+  const used = visibleStorage.usedBytes || 0;
+  const available = visibleStorage.availableBytes ?? Math.max(0, total - used);
+  const storagePercent = visibleStorage.usedPercent ?? (total ? Math.round((used / total) * 100) : 0);
   return `${pageHead(`Good day, ${escapeHtml(appliance.username)}`, `Here’s what is happening on ${escapeHtml(appliance.deviceName)}.`)}
     <section class="hero">
       <div><span class="eyebrow">LIVE HOST INVENTORY</span><h2>Storage visible to this system</h2><p>Showing current host mounts and disks. An LXC may only expose its virtual storage.</p><div class="hero-actions"><button class="secondary" data-view-link="storage">Review storage</button></div></div>
-      <div class="hero-stat"><strong>${storage.local ? bytes(storage.local.availableBytes) : '—'}</strong><span>file space available</span></div>
+      <div class="hero-stat"><strong>${total ? bytes(total) : '—'}</strong><span>total usable storage · ${bytes(available)} free</span></div>
     </section>
     <section class="metric-grid">
-      ${metric('Storage', bytes(used), storagePercent, `${bytes(total - used)} available`)}
+      ${metric('Storage', bytes(used), storagePercent, `${bytes(available)} available of ${bytes(total)}`)}
       ${metric('Memory', bytes(system.memory.usedBytes), system.memory.usedPercent, `${bytes(system.memory.totalBytes)} installed`)}
       ${metric('CPU load', `${system.cpu.loadPercent}%`, system.cpu.loadPercent, `${system.cpu.cores} logical cores`)}
       ${metric('Mounts', filesystems.length, 0, 'Readable mounted filesystems')}
