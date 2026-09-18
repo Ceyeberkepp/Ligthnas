@@ -135,6 +135,13 @@ for group in libvirt kvm; do
 done
 
 install -d -o lightnas -g lightnas -m 0700 /var/lib/lightnas /var/lib/lightnas/files /var/lib/lightnas/storage /var/lib/lightnas/storage/local
+chmod 0770 /var/lib/lightnas/storage /var/lib/lightnas/storage/local
+for vm_user in libvirt-qemu qemu; do
+  if id "$vm_user" >/dev/null 2>&1; then
+    setfacl -m "u:${vm_user}:rwx" /var/lib/lightnas/storage /var/lib/lightnas/storage/local || true
+    setfacl -m "d:u:${vm_user}:rwx" /var/lib/lightnas/storage /var/lib/lightnas/storage/local || true
+  fi
+done
 install -m 0600 /dev/null /etc/lightnas/runtime.env
 npm --prefix /opt/lightnas install --omit=dev --no-audit --no-fund
 
