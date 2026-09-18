@@ -293,18 +293,29 @@ async function enhanceRuntimeControls() {
   try {
     const runtimes = await apiRequest('/api/runtimes');
     if (location.hash === '#containers') {
-      for (const item of runtimes.docker?.containers || []) {
-        const row = [...content.querySelectorAll('.storage-row')].find(candidate => candidate.querySelector('h3')?.textContent === item.name);
+      const containers = runtimes.containers || {};
+      const form = content.querySelector('#container-form');
+      if (form && containers.poolDetails?.length) {
+        const select = form.querySelector('select[name="pool"]');
+        for (const detail of containers.poolDetails) {
+          const option = [...select.options].find(item => item.value === detail.name);
+          if (option) option.textContent = `${detail.name} · ${detail.type}${detail.available ? ` · ${bytes(detail.available)} free` : ''}`;
+        }
+      }
+      for (const item of containers.containers || []) {
+        const row = [...content.querySelectorAll('.storage-row')].find(candidate => candidate.querySelector('h3')?.textContent.includes(`(${item.vmid})`));
         if (!row || row.querySelector('.runtime-actions')) continue;
         const actions = document.createElement('div');
         actions.className = 'runtime-actions';
-        const running = item.state === 'running';
-        const webPort = portFromDocker(item.ports);
-        actions.innerHTML = `${webPort ? `<button class="secondary" data-container-open="${webPort}">Open app</button>` : ''}
-          ${running ? `<button class="secondary" data-container-action="stop" data-container="${escapeHtml(item.name)}">Stop</button><button class="secondary" data-container-action="restart" data-container="${escapeHtml(item.name)}">Restart</button><button class="primary" data-container-console="${escapeHtml(item.name)}">Terminal</button>` : `<button class="primary" data-container-action="start" data-container="${escapeHtml(item.name)}">Start</button>`}
-          <button class="secondary" data-container-edit="${escapeHtml(item.name)}">Edit</button>
-          <button class="secondary" data-container-logs="${escapeHtml(item.name)}">Logs</button>
-          <button class="secondary danger-button" data-container-action="remove" data-container="${escapeHtml(item.name)}">Remove</button>`;
+        const running = item.status === 'running';
+        const memoryMiB = Math.max(256, Math.round((item.memory || 0) / 1048576));
+        if (item.protected) {
+          actions.innerHTML = '<span class="content-badge">LIGHTNAS APPLIANCE · PROTECTED</span>';
+        } else {
+          actions.innerHTML = `${running ? `<button class="primary" data-container-console="${item.vmid}" data-container-name="${escapeHtml(item.name)}">Terminal</button><button class="secondary" data-container-action="shutdown" data-vmid="${item.vmid}">Shutdown</button><button class="secondary" data-container-action="reboot" data-vmid="${item.vmid}">Reboot</button><button class="secondary" data-container-action="stop" data-vmid="${item.vmid}">Stop</button>` : `<button class="primary" data-container-action="start" data-vmid="${item.vmid}">Start</button>`}
+            <button class="secondary" data-container-edit="${item.vmid}" data-container-name="${escapeHtml(item.name)}" data-container-memory="${memoryMiB}" data-container-cpus="${item.cpus || 1}">Edit</button>
+            <button class="secondary danger-button" data-container-action="delete" data-vmid="${item.vmid}">Delete</button>`;
+        }
         row.append(actions);
       }
     } else {
@@ -477,35 +488,21 @@ document.addEventListener('click', async event => {
     return;
   }
 
-  const openPort = event.target.closest('[data-container-open]');
-  if (openPort) { window.open(`${location.protocol}//${location.hostname}:${openPort.dataset.containerOpen}`, '_blank', 'noopener'); return; }
-
   const consoleButton = event.target.closest('[data-container-console]');
   if (consoleButton) {
-    window.open(`/container-console.html?name=${encodeURIComponent(consoleButton.dataset.containerConsole)}`, '_blank', 'noopener,width=1100,height=760');
-    return;
-  }
-  const logsButton = event.target.closest('[data-container-logs]');
-  if (logsButton) {
-    const dialog = ensureRuntimeDialog();
-    dialog.querySelector('[data-runtime-title]').textContent = `${logsButton.dataset.containerLogs} logs`;
-    dialog.querySelector('[data-runtime-output]').textContent = 'Loading logs…';
-    dialog.showModal();
-    try {
-      const result = await apiRequest('/api/containers', { method: 'POST', body: JSON.stringify({ name: logsButton.dataset.containerLogs, action: 'logs' }) });
-      dialog.querySelector('[data-runtime-output]').textContent = result.output || '(no logs)';
-    } catch (error) { dialog.querySelector('[data-runtime-output]').textContent = error.message; }
+    window.open(`/container-console.html?vmid=${encodeURIComponent(consoleButton.dataset.containerConsole)}&name=${encodeURIComponent(consoleButton.dataset.containerName || '')}`, '_blank', 'noopener,width=1100,height=760');
     return;
   }
   const containerEdit = event.target.closest('[data-container-edit]');
   if (containerEdit) {
-    const name = containerEdit.dataset.containerEdit;
-    const memory = Number(prompt(`Memory limit for ${name} in MiB`, '512'));
-    if (!Number.isInteger(memory)) return;
-    const newName = prompt('Container name', name);
-    if (!newName) return;
+    const vmid = Number(containerEdit.dataset.containerEdit);
+    const name = prompt('Container name', containerEdit.dataset.containerName || `CT-${vmid}`);
+    if (!name) return;
+    const memoryMiB = Number(prompt('Memory (MiB)', containerEdit.dataset.containerMemory || '2048'));
+    const cpus = Number(prompt('Virtual CPUs', containerEdit.dataset.containerCpus || '2'));
+    if (!Number.isInteger(memoryMiB) || !Number.isInteger(cpus)) return;
     try {
-      await apiRequest('/api/containers', { method: 'POST', body: JSON.stringify({ name, action: 'update', memoryMiB: memory, newName }) });
+      await apiRequest('/api/containers', { method: 'POST', body: JSON.stringify({ vmid, action: 'update', name, memoryMiB, cpus }) });
       document.querySelector('#content [data-action="refresh-runtime"]')?.click();
     } catch (error) { alert(error.message); }
     return;
@@ -513,11 +510,11 @@ document.addEventListener('click', async event => {
   const containerAction = event.target.closest('[data-container-action]');
   if (containerAction) {
     const action = containerAction.dataset.containerAction;
-    const name = containerAction.dataset.container;
-    if (action === 'remove' && !confirm(`Remove ${name}? This deletes the container.`)) return;
+    const vmid = Number(containerAction.dataset.vmid);
+    if (action === 'delete' && !confirm(`Delete system container CT ${vmid} and its root filesystem? This cannot be undone.`)) return;
     containerAction.disabled = true;
     try {
-      await apiRequest('/api/containers', { method: 'POST', body: JSON.stringify({ name, action }) });
+      await apiRequest('/api/containers', { method: 'POST', body: JSON.stringify({ vmid, action }) });
       document.querySelector('#content [data-action="refresh-runtime"]')?.click();
     } catch (error) { alert(error.message); }
     finally { containerAction.disabled = false; }
