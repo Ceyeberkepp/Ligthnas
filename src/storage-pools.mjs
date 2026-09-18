@@ -38,20 +38,25 @@ function normalizeContent(value, fallback = []) {
   return [...new Set(input.map(String).filter(item => CONTENT_BY_ID.has(item)))];
 }
 
+const defaultLocalContent = ['iso', 'vztmpl', 'images', 'rootdir', 'backup', 'snippets', 'files'];
+
 async function readConfig() {
   try {
     const parsed = JSON.parse(await readFile(configPath, 'utf8'));
-    return Array.isArray(parsed?.pools) ? parsed.pools : [];
+    return {
+      localContent: normalizeContent(parsed?.localContent, defaultLocalContent),
+      pools: Array.isArray(parsed?.pools) ? parsed.pools : []
+    };
   } catch (error) {
-    if (error.code === 'ENOENT') return [];
+    if (error.code === 'ENOENT') return { localContent: [...defaultLocalContent], pools: [] };
     throw error;
   }
 }
 
-async function saveConfig(pools) {
+async function saveConfig(config) {
   await mkdir(dirname(configPath), { recursive: true });
   const temporary = `${configPath}.${process.pid}.tmp`;
-  await writeFile(temporary, JSON.stringify({ version: 1, pools }, null, 2), { mode: 0o600 });
+  await writeFile(temporary, JSON.stringify({ version: 1, localContent: normalizeContent(config.localContent, defaultLocalContent), pools: config.pools || [] }, null, 2), { mode: 0o600 });
   await rename(temporary, configPath);
 }
 
@@ -119,20 +124,20 @@ function publicPool(pool, source) {
 
 export async function listStoragePools() {
   const inventory = await getStorageInventory();
-  const configured = await readConfig();
+  const config = await readConfig();
   const local = {
     id: 'local',
     name: 'local',
     sourceId: 'local',
     mountPoint: inventory.local?.mountPoint || '/',
     root: localRoot,
-    content: ['iso', 'vztmpl', 'backup', 'snippets', 'files'],
+    content: config.localContent,
     createdAt: null
   };
   await ensureLayout(local.root, local.content).catch(() => {});
 
-  const pools = [local, ...configured].map(pool => publicPool(pool, sourceForPool(pool, inventory)));
-  const configuredSources = new Set(configured.map(pool => pool.sourceId));
+  const pools = [local, ...config.pools].map(pool => publicPool(pool, sourceForPool(pool, inventory)));
+  const configuredSources = new Set(config.pools.map(pool => pool.sourceId));
   const availableSources = inventory.attachedVolumes.map(volume => ({
     id: volume.id,
     mountPoint: volume.mountPoint,
@@ -171,9 +176,9 @@ export async function createStoragePool(input) {
   if (!source) throw Object.assign(new Error('Select an attached virtual storage volume.'), { status: 400 });
   if (source.readOnly || !source.writable) throw Object.assign(new Error('The selected virtual storage is read-only to LightNAS.'), { status: 409 });
 
-  const pools = await readConfig();
-  if (pools.some(pool => pool.id.toLowerCase() === name.toLowerCase())) throw Object.assign(new Error('A storage with this name already exists.'), { status: 409 });
-  if (pools.some(pool => pool.sourceId === sourceId)) throw Object.assign(new Error('This virtual volume is already assigned to a LightNAS storage. Edit that storage instead.'), { status: 409 });
+  const config = await readConfig();
+  if (config.pools.some(pool => pool.id.toLowerCase() === name.toLowerCase())) throw Object.assign(new Error('A storage with this name already exists.'), { status: 409 });
+  if (config.pools.some(pool => pool.sourceId === sourceId)) throw Object.assign(new Error('This virtual volume is already assigned to a LightNAS storage. Edit that storage instead.'), { status: 409 });
 
   const root = join(source.mountPoint, '.lightnas', 'storage', name);
   await ensureLayout(root, content);
@@ -186,32 +191,44 @@ export async function createStoragePool(input) {
     content,
     createdAt: new Date().toISOString()
   };
-  pools.push(pool);
-  await saveConfig(pools);
+  config.pools.push(pool);
+  await saveConfig(config);
   return publicPool(pool, source);
 }
 
 export async function updateStoragePool(id, input) {
-  if (id === 'local') throw Object.assign(new Error('The local storage cannot be removed or renamed; its content policy is fixed for appliance recovery.'), { status: 409 });
-  const pools = await readConfig();
-  const pool = pools.find(item => item.id === id);
-  if (!pool) throw Object.assign(new Error('Storage not found.'), { status: 404 });
-  const content = normalizeContent(input?.content, pool.content);
+  const config = await readConfig();
+  const content = normalizeContent(input?.content, id === 'local' ? config.localContent : []);
   if (!content.length) throw Object.assign(new Error('Select at least one allowed content type.'), { status: 400 });
+
+  if (id === 'local') {
+    config.localContent = content;
+    await ensureLayout(localRoot, content);
+    await saveConfig(config);
+    const inventory = await getStorageInventory();
+    return publicPool({
+      id: 'local', name: 'local', sourceId: 'local',
+      mountPoint: inventory.local?.mountPoint || '/', root: localRoot,
+      content, createdAt: null
+    }, sourceForPool({ id: 'local' }, inventory));
+  }
+
+  const pool = config.pools.find(item => item.id === id);
+  if (!pool) throw Object.assign(new Error('Storage not found.'), { status: 404 });
   pool.content = content;
   await ensureLayout(pool.root, content);
-  await saveConfig(pools);
+  await saveConfig(config);
   const inventory = await getStorageInventory();
   return publicPool(pool, sourceForPool(pool, inventory));
 }
 
 export async function deleteStoragePool(id) {
   if (id === 'local') throw Object.assign(new Error('The local storage is permanent.'), { status: 409 });
-  const pools = await readConfig();
-  const index = pools.findIndex(item => item.id === id);
+  const config = await readConfig();
+  const index = config.pools.findIndex(item => item.id === id);
   if (index < 0) throw Object.assign(new Error('Storage not found.'), { status: 404 });
-  const [pool] = pools.splice(index, 1);
-  await saveConfig(pools);
+  const [pool] = config.pools.splice(index, 1);
+  await saveConfig(config);
   return { id: pool.id, removed: true, filesPreserved: true };
 }
 
