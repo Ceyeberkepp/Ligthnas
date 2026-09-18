@@ -13,7 +13,7 @@ test('installer keeps Docker optional for Apps and does not use it as the Contai
   const envPath = join(sandbox, 'runtime.env');
   const statusPath = join(sandbox, 'status.txt');
   try {
-    for (const name of ['systemctl', 'usermod', 'runuser', 'systemd-detect-virt', 'sleep']) {
+    for (const name of ['systemctl', 'usermod', 'runuser', 'systemd-detect-virt', 'sleep', 'lxc-create', 'lxc-start']) {
       await writeFile(join(sandbox, name), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
     }
     const docker = join(sandbox, 'docker');
@@ -23,7 +23,8 @@ test('installer keeps Docker optional for Apps and does not use it as the Contai
       ...process.env,
       PATH: `${sandbox}:${process.env.PATH}`,
       LIGHTNAS_RUNTIME_ENV_FILE: envPath,
-      LIGHTNAS_RUNTIME_STATUS_FILE: statusPath
+      LIGHTNAS_RUNTIME_STATUS_FILE: statusPath,
+      LIGHTNAS_ALLOW_NESTED_LXC: '1'
     };
 
     // Default install: Docker is not the Containers backend and stays disabled.
@@ -32,7 +33,7 @@ test('installer keeps Docker optional for Apps and does not use it as the Contai
     assert.match(result, /LIGHTNAS_DOCKER_ENABLED=0/);
     assert.match(result, /LIGHTNAS_VM_ENABLED=0/);
     let status = await readFile(statusPath, 'utf8');
-    assert.match(status, /Containers: system-container provider/);
+    assert.match(status, /Containers: native LXC\/liblxc ready/);
     assert.match(status, /Apps: optional Docker\/OCI engine disabled/);
 
     // Explicit opt-in enables the optional App Store Docker engine when usable.
