@@ -17,9 +17,16 @@ report() { printf '%s: %s\n' "$1" "$2" | tee -a "${status_file}"; }
 : > "${status_file}"
 chmod 0644 "${status_file}"
 
-# System Containers are provider-backed (Proxmox LXC on Proxmox; Incus is
-# the generic-host provider). Docker is NOT the LightNAS Containers backend.
-report Containers 'system-container provider will be selected after host integration'
+# Native system containers are built into LightNAS through LXC/liblxc.
+if command -v lxc-create >/dev/null 2>&1 && command -v lxc-start >/dev/null 2>&1; then
+  if systemd-detect-virt --container >/dev/null 2>&1 && [[ "${LIGHTNAS_ALLOW_NESTED_LXC:-0}" != "1" ]]; then
+    report Containers 'native LXC installed, but this appliance is itself in a container and nested LXC was not enabled'
+  else
+    report Containers 'native LXC/liblxc ready'
+  fi
+else
+  report Containers 'native LXC/liblxc tools are not installed on this host'
+fi
 
 # Docker/OCI is optional and is used only by the App Store. Do not install or
 # grant Docker-socket access unless the operator explicitly opts in.
@@ -58,12 +65,9 @@ fi
 if [[ "${LIGHTNAS_SKIP_VM:-0}" == "1" ]]; then
   set_flag LIGHTNAS_VM_ENABLED 0
   report VMs 'skipped by operator (LIGHTNAS_SKIP_VM=1)'
-elif [[ -e /etc/pve ]]; then
+elif systemd-detect-virt --container >/dev/null 2>&1 && [[ ! -c /dev/kvm ]]; then
   set_flag LIGHTNAS_VM_ENABLED 0
-  report VMs 'Proxmox host detected; use a dedicated VM for local libvirt or connect the Proxmox API'
-elif systemd-detect-virt --container >/dev/null 2>&1; then
-  set_flag LIGHTNAS_VM_ENABLED 0
-  report VMs 'LXC cannot host KVM; run LightNAS in a VM with nested KVM or on bare metal'
+  report VMs 'this appliance is inside a container and /dev/kvm was not passed through; local KVM is unavailable'
 elif [[ ! -c /dev/kvm ]]; then
   set_flag LIGHTNAS_VM_ENABLED 0
   report VMs '/dev/kvm is unavailable; enable hardware or nested virtualization on the host'
@@ -90,7 +94,7 @@ else
     if runuser -u lightnas -- virsh -c qemu:///system list --all --name >/dev/null 2>&1 \
       && command -v virt-install >/dev/null 2>&1; then
       set_flag LIGHTNAS_VM_ENABLED 1
-      report VMs 'KVM/libvirt accessible; add an ISO and check the default pool and network'
+      report VMs 'native QEMU/KVM + libvirt ready; add an ISO and use a local storage pool/network'
     else
       set_flag LIGHTNAS_VM_ENABLED 0
       report VMs 'libvirt installed, but the service account cannot access qemu:///system'
