@@ -19,6 +19,12 @@ chmod 0644 "${status_file}"
 
 # Native system containers are built into LightNAS through LXC/liblxc.
 if command -v lxc-create >/dev/null 2>&1 && command -v lxc-start >/dev/null 2>&1; then
+  if systemctl list-unit-files lxc-net.service --no-legend 2>/dev/null | grep -q '^lxc-net.service'; then
+    if [[ -f /etc/default/lxc-net ]]; then
+      sed -i 's/^USE_LXC_BRIDGE=.*/USE_LXC_BRIDGE="true"/' /etc/default/lxc-net || true
+    fi
+    systemctl enable --now lxc-net.service >/dev/null 2>&1 || true
+  fi
   if systemd-detect-virt --container >/dev/null 2>&1 && [[ "${LIGHTNAS_ALLOW_NESTED_LXC:-0}" != "1" ]]; then
     report Containers 'native LXC installed, but this appliance is itself in a container and nested LXC was not enabled'
   else
