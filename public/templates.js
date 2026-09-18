@@ -184,7 +184,7 @@ function renderCatalog(dialog, query = '') {
   </div>`;
 }
 
-async function openCatalogDialog() {
+async function openCatalogDialog(preferredStorageId = '') {
   const library = templateState.library || await loadTemplateLibrary();
   const dialog = ensureTemplateDialog();
   dialog.querySelector('[data-template-title]').textContent = 'Proxmox system template catalog';
@@ -194,7 +194,8 @@ async function openCatalogDialog() {
     <label>Search<input data-template-catalog-search type="search" placeholder="Debian, Ubuntu, Alpine, Rocky…"></label>
     <div class="storage-list" data-template-catalog-list><div class="empty"><p>Loading catalog…</p></div></div>`;
   const select = dialog.querySelector('[data-template-catalog-storage]');
-  select.value = preferredTarget(library.targets);
+  const desired = preferredStorageId || preferredTarget(library.targets);
+  if ([...select.options].some(option => option.value === desired && !option.disabled)) select.value = desired;
   dialog.showModal();
   try {
     if (!templateState.catalog) templateState.catalog = (await tRequest('/api/templates/catalog')).templates || [];
@@ -208,7 +209,7 @@ async function openCatalogDialog() {
 
 document.addEventListener('click', async event => {
   const browse = event.target.closest('[data-template-browse]');
-  if (browse) { await openCatalogDialog(); return; }
+  if (browse) { await openCatalogDialog(browse.dataset.templateStorage || ''); return; }
 
   const upload = event.target.closest('[data-template-upload]');
   if (upload) { await openUploadDialog(); return; }
