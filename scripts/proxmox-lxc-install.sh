@@ -201,6 +201,11 @@ printf '%s\\n' \\
   'LIGHTNAS_PVE_SOCKET=${GUEST_BRIDGE_DIR}/agent.sock' \\
   'LIGHTNAS_PVE_CLIENT_ID=${ctid}' \\
   'LIGHTNAS_PVE_SECRET=${secret}' >> /etc/lightnas/runtime.env
+if grep -q '^Containers:' /var/lib/lightnas/runtime-status.txt 2>/dev/null; then
+  sed -i 's|^Containers:.*|Containers: ready through Proxmox LXC host provider|' /var/lib/lightnas/runtime-status.txt
+else
+  printf '%s\\n' 'Containers: ready through Proxmox LXC host provider' >> /var/lib/lightnas/runtime-status.txt
+fi
 if grep -q '^VMs:' /var/lib/lightnas/runtime-status.txt 2>/dev/null; then
   sed -i 's|^VMs:.*|VMs: ready through automatic Proxmox host bridge|' /var/lib/lightnas/runtime-status.txt
 else
