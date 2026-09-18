@@ -10,7 +10,9 @@ Unix-socket bridge. No Proxmox or VNC credential is sent to browser JavaScript.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
+import pty
 import secrets
 import subprocess
 import threading
@@ -157,7 +159,109 @@ def negotiate_browser_no_auth(connection) -> None:
     connection.sendall(b"\x00\x00\x00\x00")  # SecurityResult: OK
 
 
+
 class Handler(base.Handler):
+    def handle(self):
+        raw = self.rfile.readline(base.MAX_REQUEST + 1)
+        if len(raw) > base.MAX_REQUEST:
+            self._reply(False, error="request is too large")
+            return
+        try:
+            request = json.loads(raw.decode("utf-8"))
+            if not isinstance(request, dict):
+                raise ValueError("request must be an object")
+            action = request.get("action")
+            if action == "vm-console":
+                base.authenticate(request)
+                self._stream_vm_console(request.get("data"))
+                return
+            if action == "container-console":
+                client = base.authenticate(request)
+                self._stream_container_console(request.get("data"), client)
+                return
+            data = base.dispatch(request)
+            self._reply(True, data=data)
+        except PermissionError as exc:
+            self._reply(False, error=str(exc), code="forbidden")
+        except (ValueError, subprocess.CalledProcessError, subprocess.TimeoutExpired, RuntimeError) as exc:
+            detail = str(exc)
+            if isinstance(exc, subprocess.CalledProcessError):
+                detail = (exc.stderr or exc.stdout or str(exc)).strip()[:1200]
+            self._reply(False, error=detail[:1200], code="operation_failed")
+        except Exception as exc:
+            self._reply(False, error=f"unexpected host-agent failure: {str(exc)[:300]}", code="internal_error")
+
+    def _stream_container_console(self, data, client_id):
+        if not isinstance(data, dict):
+            raise ValueError("missing container console request")
+        try:
+            vmid = int(data.get("vmid"))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("invalid container ID") from exc
+        if vmid < 100 or vmid > 999999:
+            raise ValueError("invalid container ID")
+        if str(vmid) == str(client_id):
+            raise PermissionError("LightNAS will not open a root host console into its own appliance container")
+        state = base.run(["pct", "status", str(vmid)], timeout=15)
+        if "running" not in state:
+            raise ValueError("start the container before opening its terminal")
+
+        master_fd, slave_fd = pty.openpty()
+        environment = os.environ.copy()
+        environment["TERM"] = "xterm-256color"
+        process = subprocess.Popen(
+            ["pct", "exec", str(vmid), "--", "/bin/sh", "-l"],
+            stdin=slave_fd,
+            stdout=slave_fd,
+            stderr=slave_fd,
+            close_fds=True,
+            env=environment,
+        )
+        os.close(slave_fd)
+        self._reply(True, data={"mode": "pty", "vmid": vmid, "user": "root"})
+        self.wfile.flush()
+
+        def socket_to_terminal():
+            try:
+                while process.poll() is None:
+                    chunk = self.connection.recv(65536)
+                    if not chunk:
+                        break
+                    os.write(master_fd, chunk)
+            except (BrokenPipeError, ConnectionError, OSError):
+                pass
+            finally:
+                try:
+                    os.write(master_fd, b"exit\n")
+                except OSError:
+                    pass
+
+        feeder = threading.Thread(target=socket_to_terminal, daemon=True)
+        feeder.start()
+        try:
+            while process.poll() is None:
+                try:
+                    chunk = os.read(master_fd, 65536)
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                self.connection.sendall(chunk)
+        except (BrokenPipeError, ConnectionError, OSError):
+            pass
+        finally:
+            try:
+                os.close(master_fd)
+            except OSError:
+                pass
+            if process.poll() is None:
+                process.terminate()
+            try:
+                process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                process.kill()
+            feeder.join(timeout=1)
+
     def _stream_vm_console(self, data):
         if not isinstance(data, dict):
             raise ValueError("missing VM console request")
