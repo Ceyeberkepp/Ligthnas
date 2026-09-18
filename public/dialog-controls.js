@@ -169,6 +169,163 @@ document.addEventListener('click', async event => {
     return;
   }
 
+  const networkDevice = event.target.closest('[data-network-device]');
+  if (networkDevice) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const device = networkDevice.dataset.networkDevice;
+    const action = networkDevice.dataset.networkDeviceAction === 'disconnect' ? 'device-disconnect' : 'device-connect';
+    try {
+      await dialogApi('/api/network', { method: 'POST', body: JSON.stringify({ action, device }) });
+      location.reload();
+    } catch (problem) { alert(problem.message); }
+    return;
+  }
+
+  const networkEdit = event.target.closest('[data-network-edit]');
+  if (networkEdit) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const name = networkEdit.dataset.networkEdit;
+    showEditor({
+      eyebrow: 'NETWORK CONNECTION',
+      title: `Edit ${name}`,
+      description: 'Configure IPv4, gateway and DNS for this NetworkManager profile. Apply can interrupt the current management session if you change the active uplink.',
+      fields: [
+        { name: 'method', label: 'IPv4 method', type: 'select', value: 'auto', options: [{ value: 'auto', label: 'DHCP / automatic' }, { value: 'manual', label: 'Static / manual' }] },
+        { name: 'address', label: 'Static address / CIDR', placeholder: '192.168.1.20/24' },
+        { name: 'gateway', label: 'Gateway', placeholder: '192.168.1.1' },
+        { name: 'dns', label: 'DNS servers', placeholder: '1.1.1.1,8.8.8.8' },
+        { name: 'activate', label: 'Apply immediately', type: 'select', value: 'no', options: [{ value: 'no', label: 'Save only' }, { value: 'yes', label: 'Save and activate now' }] }
+      ],
+      onSubmit: async values => {
+        await dialogApi('/api/network', { method: 'POST', body: JSON.stringify({
+          action: 'connection-update', name,
+          method: values.method,
+          address: values.address || '',
+          gateway: values.gateway || '',
+          dns: values.dns || '',
+          activate: values.activate === 'yes',
+          autoconnect: true
+        }) });
+        location.reload();
+      }
+    });
+    return;
+  }
+
+  const networkDelete = event.target.closest('[data-network-delete]');
+  if (networkDelete) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const name = networkDelete.dataset.networkDelete;
+    if (!confirm(`Delete network connection profile "${name}"? Active management connectivity may be interrupted.`)) return;
+    try {
+      await dialogApi('/api/network', { method: 'POST', body: JSON.stringify({ action: 'connection-delete', name }) });
+      location.reload();
+    } catch (problem) { alert(problem.message); }
+    return;
+  }
+
+  const addBridge = event.target.closest('[data-network-add-bridge]');
+  if (addBridge) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    let info;
+    try { info = await dialogApi('/api/network'); } catch (problem) { alert(problem.message); return; }
+    const uplinks = (info.control?.devices || []).filter(item => item.type === 'ethernet').map(item => ({ value: item.name, label: `${item.name} · ${item.state}` }));
+    if (!uplinks.length) { alert('No wired Ethernet interface is available for a transparent bridge. Wi-Fi can still be used as the host uplink with routed/NAT guest networking.'); return; }
+    showEditor({
+      eyebrow: 'NETWORK BRIDGE',
+      title: 'Create bridge',
+      description: 'Create a local Linux bridge for VMs and system containers and attach a wired Ethernet uplink.',
+      fields: [
+        { name: 'name', label: 'Bridge name', value: 'lightnas0', required: true },
+        { name: 'uplink', label: 'Ethernet uplink', type: 'select', options: uplinks, required: true }
+      ],
+      submitLabel: 'Create bridge',
+      onSubmit: async values => {
+        await dialogApi('/api/network', { method: 'POST', body: JSON.stringify({ action: 'bridge-create', name: values.name, uplink: values.uplink }) });
+        location.reload();
+      }
+    });
+    return;
+  }
+
+  const addVlan = event.target.closest('[data-network-add-vlan]');
+  if (addVlan) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    let info;
+    try { info = await dialogApi('/api/network'); } catch (problem) { alert(problem.message); return; }
+    const parents = (info.control?.devices || []).filter(item => item.type !== 'loopback').map(item => ({ value: item.name, label: `${item.name} · ${item.type}` }));
+    if (!parents.length) { alert('No network interface is available for a VLAN.'); return; }
+    showEditor({
+      eyebrow: 'VLAN',
+      title: 'Create VLAN interface',
+      description: 'Create a tagged VLAN connection on an existing interface or bridge.',
+      fields: [
+        { name: 'name', label: 'Connection/interface name', placeholder: 'vlan20', required: true },
+        { name: 'parent', label: 'Parent interface', type: 'select', options: parents, required: true },
+        { name: 'vlanId', label: 'VLAN ID', type: 'number', min: 1, max: 4094, value: '20', required: true }
+      ],
+      submitLabel: 'Create VLAN',
+      onSubmit: async values => {
+        await dialogApi('/api/network', { method: 'POST', body: JSON.stringify({ action: 'vlan-create', name: values.name, parent: values.parent, vlanId: Number(values.vlanId) }) });
+        location.reload();
+      }
+    });
+    return;
+  }
+
+  const firewallAdd = event.target.closest('[data-firewall-add]');
+  if (firewallAdd) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    showEditor({
+      eyebrow: 'FIREWALL RULE',
+      title: 'Add firewall rule',
+      description: 'Add a local UFW rule to the LightNAS host.',
+      fields: [
+        { name: 'decision', label: 'Action', type: 'select', value: 'allow', options: ['allow', 'deny'] },
+        { name: 'protocol', label: 'Protocol', type: 'select', value: 'tcp', options: ['tcp', 'udp'] },
+        { name: 'port', label: 'Port', type: 'number', min: 1, max: 65535, required: true },
+        { name: 'source', label: 'Source IP/CIDR (optional)', placeholder: '10.0.0.0/24' }
+      ],
+      submitLabel: 'Add rule',
+      onSubmit: async values => {
+        await dialogApi('/api/network', { method: 'POST', body: JSON.stringify({ action: 'firewall-add', decision: values.decision, protocol: values.protocol, port: Number(values.port), source: values.source || '' }) });
+        location.reload();
+      }
+    });
+    return;
+  }
+
+  const firewallDelete = event.target.closest('[data-firewall-delete]');
+  if (firewallDelete) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (!confirm(`Delete firewall rule #${firewallDelete.dataset.firewallDelete}?`)) return;
+    try {
+      await dialogApi('/api/network', { method: 'POST', body: JSON.stringify({ action: 'firewall-delete', number: Number(firewallDelete.dataset.firewallDelete) }) });
+      location.reload();
+    } catch (problem) { alert(problem.message); }
+    return;
+  }
+
+  const firewallToggle = event.target.closest('[data-firewall-toggle]');
+  if (firewallToggle) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const action = firewallToggle.dataset.firewallToggle === 'disable' ? 'firewall-disable' : 'firewall-enable';
+    if (action === 'firewall-disable' && !confirm('Disable the LightNAS host firewall?')) return;
+    try {
+      await dialogApi('/api/network', { method: 'POST', body: JSON.stringify({ action }) });
+      location.reload();
+    } catch (problem) { alert(problem.message); }
+    return;
+  }
+
   const wifiConnect = event.target.closest('[data-wifi-connect]');
   if (wifiConnect) {
     event.preventDefault();
@@ -176,19 +333,24 @@ document.addEventListener('click', async event => {
     let info;
     try { info = await dialogApi('/api/network'); }
     catch (problem) { alert(problem.message); return; }
-    const device = info.wifi?.devices?.[0]?.name;
-    if (!device) { alert('No Wi-Fi device is available.'); return; }
+    const wifiDevices = (info.control?.devices || []).filter(item => item.type === 'wifi');
+    if (!wifiDevices.length) { alert('No Wi-Fi device is available.'); return; }
     const ssid = wifiConnect.dataset.wifiConnect;
     showEditor({
       eyebrow: 'WI-FI',
       title: `Connect to ${ssid}`,
-      description: `Connect ${device} to this wireless network. Leave the password blank only for an open network.`,
-      fields: [{ name: 'password', label: 'Wi-Fi password', type: 'password', value: '', autocomplete: 'new-password' }],
+      description: 'Use Wi-Fi as the LightNAS management/uplink connection. VMs and containers can use a routed/NAT virtual network when Wi-Fi cannot be transparently bridged.',
+      fields: [
+        { name: 'device', label: 'Wi-Fi adapter', type: 'select', options: wifiDevices.map(item => ({ value: item.name, label: `${item.name} · ${item.state}` })), required: true },
+        { name: 'password', label: 'Wi-Fi password', type: 'password', value: '', autocomplete: 'new-password' }
+      ],
       submitLabel: 'Connect',
       onSubmit: async values => {
-        await dialogApi('/api/network', { method: 'POST', body: JSON.stringify({ action: 'wifi-connect', device, ssid, password: values.password || '' }) });
+        await dialogApi('/api/network', { method: 'POST', body: JSON.stringify({ action: 'wifi-connect', device: values.device, ssid, password: values.password || '' }) });
         location.reload();
       }
     });
+    return;
   }
+
 }, true);
