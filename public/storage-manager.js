@@ -42,7 +42,7 @@ async function loadStoragePools() {
 }
 function storageCard(pool) {
   const contents=(pool.contentLabels||[]).join(' · ')||'No content types';
-  return `<article class="inventory-card storage-pool-card" data-storage-card="${sEsc(pool.id)}">
+  return `<article class="inventory-card storage-pool-card" data-storage-card="${sEsc(pool.id)}" role="button" tabindex="0" aria-label="Manage storage ${sEsc(pool.name)}">
     <div class="volume-title"><h3>${sEsc(pool.name)}</h3><span class="volume-state ${pool.online&&pool.writable?'writable':'readonly'}">${pool.online?(pool.writable?'ONLINE':'READ ONLY'):'OFFLINE'}</span></div>
     <p>${pool.local?'Local appliance storage · OS disk remainder':sEsc(pool.mountPoint||'Attached virtual storage')}</p>
     <div class="track"><span style="width:${Math.min(100,pool.usedPercent||0)}%"></span></div>
@@ -167,6 +167,8 @@ document.addEventListener('click',async event=>{
   if(source){openCreateStorage(source.dataset.createStorageSource);return;}
   const manage=event.target.closest('[data-manage-storage]');
   if(manage){await renderManageStorage(manage.dataset.manageStorage);return;}
+  const card=event.target.closest('[data-storage-card]');
+  if(card&&!event.target.closest('button,input,select,a')){await renderManageStorage(card.dataset.storageCard);return;}
   const tab=event.target.closest('[data-storage-content-tab]');
   if(tab){await renderManageStorage(tab.dataset.storageId,tab.dataset.storageContentTab);return;}
   const remove=event.target.closest('[data-storage-remove-definition]');
@@ -224,3 +226,10 @@ function maybeStorageManager(){
 new MutationObserver(maybeStorageManager).observe(document.documentElement,{childList:true,subtree:true});
 window.addEventListener('hashchange',maybeStorageManager);
 maybeStorageManager();
+
+document.addEventListener('keydown',async event=>{
+  const card=event.target.closest?.('[data-storage-card]');
+  if(!card||!['Enter',' '].includes(event.key)) return;
+  event.preventDefault();
+  await renderManageStorage(card.dataset.storageCard);
+});
