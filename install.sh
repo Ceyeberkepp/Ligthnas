@@ -73,6 +73,12 @@ done
 install -d -o lightnas -g lightnas -m 0700 "${DATA_DIRECTORY}"
 install -d -o lightnas -g lightnas -m 0700 "${DATA_DIRECTORY}/files"
 install -d -o lightnas -g lightnas -m 0770 "${DATA_DIRECTORY}/storage" "${DATA_DIRECTORY}/storage/local"
+for vm_user in libvirt-qemu qemu; do
+  if id "$vm_user" >/dev/null 2>&1; then
+    setfacl -m "u:${vm_user}:rwx" "${DATA_DIRECTORY}/storage" "${DATA_DIRECTORY}/storage/local" || true
+    setfacl -m "d:u:${vm_user}:rwx" "${DATA_DIRECTORY}/storage" "${DATA_DIRECTORY}/storage/local" || true
+  fi
+done
 
 LIGHTNAS_RUNTIME_STATUS_FILE="${DATA_DIRECTORY}/runtime-status.txt" \
   bash "${INSTALL_DIRECTORY}/scripts/provision-runtimes.sh"
