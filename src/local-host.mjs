@@ -97,3 +97,41 @@ export async function localContainerConsoleSocket(id) {
     socket.on('end', () => { if (!settled) fail(operationError('Local container console closed before the terminal opened.')); });
   });
 }
+
+
+export async function localVmConsoleSocket(id) {
+  const name = String(id || '');
+  if (!/^[A-Za-z][A-Za-z0-9-]{1,39}$/.test(name)) throw Object.assign(new Error('Invalid VM name.'), { status: 400 });
+  return await new Promise((resolve, reject) => {
+    const socket = net.createConnection({ path: socketPath });
+    let buffer = Buffer.alloc(0);
+    let settled = false;
+    const fail = error => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      reject(error);
+    };
+    const onData = chunk => {
+      buffer = Buffer.concat([buffer, chunk]);
+      if (buffer.length > 128 * 1024) return fail(operationError('Local VM console handshake was too large.'));
+      const newline = buffer.indexOf(10);
+      if (newline < 0) return;
+      let response;
+      try { response = JSON.parse(buffer.subarray(0, newline).toString('utf8')); }
+      catch { return fail(operationError('Local VM console returned an invalid handshake.')); }
+      if (!response?.ok) return fail(operationError(response?.error || 'Unable to open local VM console.', response?.code === 'forbidden' ? 403 : 409));
+      const remaining = buffer.subarray(newline + 1);
+      settled = true;
+      socket.off('data', onData);
+      socket.setTimeout(0);
+      if (remaining.length) socket.unshift(remaining);
+      resolve(socket);
+    };
+    socket.setTimeout(15000, () => fail(operationError('Local VM console timed out.')));
+    socket.on('error', error => fail(operationError(`Local VM console is unavailable: ${error.message}`)));
+    socket.on('connect', () => socket.write(`${JSON.stringify({ action: 'vm-console', data: { id: name } })}\n`));
+    socket.on('data', onData);
+    socket.on('end', () => { if (!settled) fail(operationError('Local VM console closed before the session opened.')); });
+  });
+}
