@@ -174,9 +174,17 @@ for guest_mount in "${guest_data_mounts[@]}"; do
     if [[ -d "$mount" ]]; then
       setfacl -m u:lightnas:rwx "$mount"
       setfacl -m d:u:lightnas:rwx "$mount"
-      install -d -m 0770 "$mount/.lightnas/template/cache"
+      install -d -m 0770 "$mount/.lightnas/template/cache" "$mount/.lightnas/storage"
       setfacl -R -m u:lightnas:rwx "$mount/.lightnas"
       setfacl -R -m d:u:lightnas:rwx "$mount/.lightnas"
+      for vm_user in libvirt-qemu qemu; do
+        if id "$vm_user" >/dev/null 2>&1; then
+          setfacl -m "u:${vm_user}:rwx" "$mount" "$mount/.lightnas"
+          setfacl -m "d:u:${vm_user}:rwx" "$mount/.lightnas"
+          setfacl -R -m "u:${vm_user}:rwx" "$mount/.lightnas/storage"
+          setfacl -R -m "d:u:${vm_user}:rwx" "$mount/.lightnas/storage"
+        fi
+      done
     fi
   ' _ "$guest_mount" || echo "Warning: unable to grant LightNAS access on $guest_mount; it will remain browse-only." >&2
 done
