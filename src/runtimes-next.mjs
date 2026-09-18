@@ -140,8 +140,24 @@ export async function runtimeInventory() {
     containers: { available: false, enabled: false, provider: 'local-lxc', reason: 'Native LXC is not available on this LightNAS host.', containers: [], images: [], networks: [], storageRoot: null },
     virtualization: { available: vmInfo.ok && installer.ok, enabled: process.env.LIGHTNAS_VM_ENABLED === '1', provider: 'libvirt-kvm', reason: vmInfo.ok && installer.ok ? null : 'Native QEMU/KVM + libvirt is unavailable. LightNAS needs bare metal virtualization support or nested virtualization in a VM.', machines: [], machineDetails: [], pools: vmPools.ok && vmPools.output ? vmPools.output.split('\n').filter(Boolean) : [], networks: [], networkDetails: [], images }
   };
-  try { runtime.containers = await localContainerInventory(); }
-  catch (error) { runtime.containers = { available: false, enabled: false, provider: 'local-lxc', reason: `Native LXC host agent unavailable: ${error.message}`, containers: [], images: [], networks: [], storageRoot: null }; }
+  try {
+    runtime.containers = await localContainerInventory();
+    runtime.virtualization.diagnostics = runtime.containers.diagnostics || null;
+    if (runtime.containers.diagnostics?.nested) {
+      const kvm = runtime.containers.diagnostics.kvm;
+      if (!kvm?.usable) {
+        runtime.virtualization.available = false;
+        runtime.virtualization.enabled = false;
+        runtime.virtualization.reason = `Nested KVM is unavailable: ${kvm?.error || '/dev/kvm is not usable inside this LightNAS container.'}`;
+      } else if (!runtime.containers.diagnostics.tun) {
+        runtime.virtualization.available = false;
+        runtime.virtualization.enabled = false;
+        runtime.virtualization.reason = 'Nested KVM is present, but /dev/net/tun is missing; VM networking cannot be created.';
+      }
+    }
+  } catch (error) {
+    runtime.containers = { available: false, enabled: false, provider: 'local-lxc', reason: `Native LXC host agent unavailable: ${error.message}`, containers: [], images: [], networks: [], storageRoot: null, diagnostics: null };
+  }
 
   if (runtime.virtualization.available) {
     const names = vmInfo.output ? vmInfo.output.split('\n').filter(Boolean) : [];
