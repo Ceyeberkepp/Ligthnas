@@ -223,37 +223,28 @@ function storageUsageCard(item) {
 
 async function enhanceStorage() {
   const content = document.querySelector('#content');
-  if (!content || !['#storage', '#pools'].includes(location.hash) || content.querySelector('.unified-storage') || content.dataset.storageEnhancing === '1') return;
+  if (!content || location.hash !== '#storage' || content.querySelector('.unified-storage') || content.dataset.storageEnhancing === '1') return;
   content.dataset.storageEnhancing = '1';
   try {
     const storage = await apiRequest('/api/storage');
     const volumes = storage.attachedVolumes || [];
-    const host = storage.host || null;
-    if (!volumes.length && !host) return;
+    const summary = storage.virtualStorage || { totalBytes: 0, availableBytes: 0, usedBytes: 0, usedPercent: 0, count: volumes.length };
     const section = document.createElement('section');
     section.className = 'unified-storage';
-
-    const memory = host?.status?.memory || null;
-    const memoryPercent = memory?.totalBytes ? percent(memory.usedBytes, memory.totalBytes) : 0;
-    const hostStorages = host?.storages || [];
-    const disks = host?.disks || [];
-    const zfs = host?.zfs || { pools: [], datasets: [] };
     section.innerHTML = `
-      <div class="inventory-heading"><div><span class="eyebrow">UNIFIED INFRASTRUCTURE INVENTORY</span><h2>Storage visible to LightNAS</h2><p class="muted">Local mounts, attached NAS volumes and Proxmox host storage are shown together. Physical disks remain protected unless the host bridge proves they are unused.</p></div><button class="secondary" type="button" data-refresh-inventory>Refresh</button></div>
-      ${host ? `<div class="host-monitor-grid">
-        <article class="monitor-card"><span>Proxmox host RAM</span><strong>${bytes(memory?.usedBytes || 0)}</strong><div class="track"><span style="width:${memoryPercent}%"></span></div><small>${bytes(memory?.freeBytes || 0)} free of ${bytes(memory?.totalBytes || 0)}</small></article>
-        <article class="monitor-card"><span>Host CPU</span><strong>${Number(host.status?.cpuPercent || 0).toFixed(1)}%</strong><div class="track"><span style="width:${Math.min(100, Number(host.status?.cpuPercent || 0))}%"></span></div><small>${host.status?.cpuCount || '—'} logical CPUs</small></article>
-        <article class="monitor-card"><span>Physical drives</span><strong>${disks.length}</strong><small>${disks.filter(item => item.osProtected).length} OS-protected · ${disks.filter(item => item.eligibleForClean).length} available to clean</small></article>
-        <article class="monitor-card"><span>Proxmox storages</span><strong>${hostStorages.length}</strong><small>${hostStorages.filter(item => item.active !== false).length} active storage definitions</small></article>
-      </div>` : ''}
-      ${volumes.length ? `<h2>Attached LightNAS volumes</h2><div class="inventory-grid">${volumes.map(volume => `<article class="inventory-card"><div class="volume-title"><h3>${escapeHtml(volume.mountPoint)}</h3><span class="volume-state ${volume.readOnly ? 'readonly' : 'writable'}">${volume.readOnly ? 'READ ONLY' : 'WRITABLE'}</span></div><p>${escapeHtml(volume.device)} · ${escapeHtml(volume.type)}</p><div class="track"><span style="width:${Math.min(100, volume.usedPercent || 0)}%"></span></div><p><strong>${bytes(volume.availableBytes)} free</strong> of ${bytes(volume.totalBytes)} · ${volume.usedPercent}% used</p></article>`).join('')}</div>` : ''}
-      ${hostStorages.length ? `<h2>Proxmox virtual storages</h2><div class="inventory-grid">${hostStorages.map(storageUsageCard).join('')}</div>` : ''}
-      ${disks.length ? `<h2>Host physical disks</h2><div class="inventory-grid">${disks.map(disk => `<article class="inventory-card disk-card"><div class="volume-title"><h3>${escapeHtml(disk.path)}</h3><span class="volume-state ${disk.osProtected || disk.inUse ? 'readonly' : 'writable'}">${disk.osProtected ? 'OS PROTECTED' : disk.inUse ? 'IN USE' : 'AVAILABLE'}</span></div><p>${escapeHtml(disk.model || 'Unknown model')} · ${escapeHtml(disk.transport || 'unknown transport')} · ${bytes(disk.sizeBytes)}</p><p class="muted">${disk.useReasons?.length ? escapeHtml(disk.useReasons.join(' · ')) : 'No mounted filesystem, LVM VG or ZFS membership detected.'}</p>${disk.eligibleForClean ? `<button class="secondary danger-button" type="button" data-clean-disk="${escapeHtml(disk.path)}">Reset / clean disk</button>` : ''}</article>`).join('')}</div>` : ''}
-      ${zfs.pools?.length ? `<h2>Host ZFS pools</h2><div class="inventory-grid">${zfs.pools.map(pool => `<article class="inventory-card"><h3>${escapeHtml(pool.name)}</h3><p>Health: ${escapeHtml(pool.health)}</p><div class="track"><span style="width:${percent(pool.allocatedBytes, pool.sizeBytes)}%"></span></div><p>${bytes(pool.allocatedBytes)} used · ${bytes(pool.freeBytes)} free of ${bytes(pool.sizeBytes)}</p></article>`).join('')}</div>` : ''}
-      ${zfs.datasets?.length ? `<h2>Host ZFS datasets</h2><div class="inventory-grid">${zfs.datasets.map(dataset => `<article class="inventory-card"><h3>${escapeHtml(dataset.name)}</h3><p>${escapeHtml(dataset.mountPoint)} · ${escapeHtml(dataset.compression)}</p><p>${bytes(dataset.usedBytes)} used · ${bytes(dataset.availableBytes)} available</p></article>`).join('')}</div>` : ''}`;
-
+      <div class="inventory-heading">
+        <div><span class="eyebrow">VIRTUAL STORAGE INVENTORY</span><h2>Storage visible to LightNAS</h2><p class="muted">Only non-OS virtual disks and mount points assigned to this LightNAS appliance are counted here. Duplicate bind mounts are removed.</p></div>
+        <button class="secondary" type="button" data-refresh-inventory>Refresh</button>
+      </div>
+      <div class="host-monitor-grid">
+        <article class="monitor-card"><span>Assigned capacity</span><strong>${bytes(summary.totalBytes)}</strong><small>${summary.count || 0} virtual volume${summary.count === 1 ? '' : 's'}</small></article>
+        <article class="monitor-card"><span>Used</span><strong>${bytes(summary.usedBytes)}</strong><div class="track"><span style="width:${Math.min(100, summary.usedPercent || 0)}%"></span></div><small>${summary.usedPercent || 0}% of assigned capacity</small></article>
+        <article class="monitor-card"><span>Available</span><strong>${bytes(summary.availableBytes)}</strong><small>Logical free capacity visible to LightNAS</small></article>
+      </div>
+      ${volumes.length ? `<h2>Assigned virtual volumes</h2><div class="inventory-grid">${volumes.map(volume => `<article class="inventory-card"><div class="volume-title"><h3>${escapeHtml(volume.mountPoint)}</h3><span class="volume-state ${volume.writable && !volume.readOnly ? 'writable' : 'readonly'}">${volume.writable && !volume.readOnly ? 'WRITABLE' : 'READ ONLY'}</span></div><p>${escapeHtml(volume.device)} · ${escapeHtml(volume.type)}</p><div class="track"><span style="width:${Math.min(100, volume.usedPercent || 0)}%"></span></div><p><strong>${bytes(volume.availableBytes)} free</strong> of ${bytes(volume.totalBytes)} · ${volume.usedPercent}% used</p></article>`).join('')}</div>` : '<div class="module-note">No non-OS virtual storage is currently assigned to LightNAS.</div>'}
+    `;
     content.querySelector('.page-head')?.insertAdjacentElement('afterend', section);
-    if (host) hideLegacySections(content, ['Disks', 'ZFS pools', 'ZFS datasets', 'Mounted filesystems', 'Existing ZFS pools']);
+    hideLegacySections(content, ['Disks', 'ZFS pools', 'ZFS datasets', 'Mounted filesystems']);
   } catch {}
   finally { delete content.dataset.storageEnhancing; }
 }
