@@ -9,6 +9,7 @@ arbitrary shell commands.
 
 from __future__ import annotations
 
+import fcntl
 import grp
 import json
 import os
@@ -54,14 +55,111 @@ def in_container() -> bool:
         return False
 
 
-def container_capability() -> tuple[bool, str | None]:
-    if not all(available(name) for name in ["lxc-create", "lxc-start", "lxc-stop", "lxc-attach", "lxc-ls"]):
-        return False, "Native LXC tools are not installed."
-    # Nested LXC is deliberately not assumed.  A nested appliance can be
-    # enabled by the operator, but LightNAS must not escape to the outer host.
-    if in_container() and os.environ.get("LIGHTNAS_ALLOW_NESTED_LXC") != "1":
-        return False, "LightNAS is itself inside a container. Native system containers require nested LXC support; run LightNAS on bare metal or a VM, or explicitly enable nested LXC."
-    return True, None
+def probe_command(args: list[str], timeout: int = 10) -> dict:
+    try:
+        result = subprocess.run(args, text=True, capture_output=True, timeout=timeout)
+        return {"ok": result.returncode == 0, "error": (result.stderr or result.stdout or "").strip()[:500] or None}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)[:500]}
+
+
+def nested_runtime_diagnostics() -> dict:
+    nested = in_container()
+    bridges = local_networks()
+    diagnostics = {
+        "nested": nested,
+        "nestedEnabled": os.environ.get("LIGHTNAS_ALLOW_NESTED_LXC") == "1",
+        "tools": all(available(name) for name in ["lxc-create", "lxc-start", "lxc-stop", "lxc-attach", "lxc-ls"]),
+        "bridges": bridges,
+        "cgroupWritable": True,
+        "mountNamespace": True,
+        "networkNamespace": True,
+        "veth": True,
+        "apparmorProfile": None,
+        "kvm": {"present": Path("/dev/kvm").exists(), "usable": False, "apiVersion": None, "error": None},
+        "tun": Path("/dev/net/tun").exists(),
+        "errors": [],
+    }
+
+    try:
+        diagnostics["apparmorProfile"] = Path("/proc/self/attr/current").read_text(encoding="utf-8").strip()
+    except OSError:
+        pass
+
+    if nested:
+        cgroup_probe = Path("/sys/fs/cgroup") / f"lightnas-probe-{os.getpid()}"
+        try:
+            cgroup_probe.mkdir()
+            cgroup_probe.rmdir()
+        except OSError as exc:
+            diagnostics["cgroupWritable"] = False
+            diagnostics["errors"].append(f"cgroup delegation is unavailable: {exc}")
+
+        if available("unshare"):
+            mount_probe = probe_command(["unshare", "--mount", "--propagation", "private", "true"])
+            diagnostics["mountNamespace"] = mount_probe["ok"]
+            if not mount_probe["ok"]:
+                diagnostics["errors"].append(f"mount namespace unavailable: {mount_probe['error'] or 'permission denied'}")
+            net_probe = probe_command(["unshare", "--net", "true"])
+            diagnostics["networkNamespace"] = net_probe["ok"]
+            if not net_probe["ok"]:
+                diagnostics["errors"].append(f"network namespace unavailable: {net_probe['error'] or 'permission denied'}")
+        else:
+            diagnostics["mountNamespace"] = False
+            diagnostics["networkNamespace"] = False
+            diagnostics["errors"].append("util-linux unshare is unavailable")
+
+        if available("ip"):
+            left = f"lnp{os.getpid() % 10000}a"
+            right = f"lnp{os.getpid() % 10000}b"
+            probe = probe_command(["ip", "link", "add", left, "type", "veth", "peer", "name", right])
+            diagnostics["veth"] = probe["ok"]
+            if probe["ok"]:
+                subprocess.run(["ip", "link", "delete", left], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            else:
+                diagnostics["errors"].append(f"veth creation unavailable: {probe['error'] or 'permission denied'}")
+        else:
+            diagnostics["veth"] = False
+            diagnostics["errors"].append("iproute2 is unavailable")
+
+    if diagnostics["kvm"]["present"]:
+        try:
+            fd = os.open("/dev/kvm", os.O_RDWR | getattr(os, "O_CLOEXEC", 0))
+            try:
+                api_version = fcntl.ioctl(fd, 0xAE00, 0)
+                diagnostics["kvm"].update({"usable": api_version == 12, "apiVersion": api_version})
+                if api_version != 12:
+                    diagnostics["kvm"]["error"] = f"unexpected KVM API version {api_version}"
+            finally:
+                os.close(fd)
+        except OSError as exc:
+            diagnostics["kvm"]["error"] = str(exc)
+    else:
+        diagnostics["kvm"]["error"] = "/dev/kvm is not present"
+
+    return diagnostics
+
+
+def container_capability() -> tuple[bool, str | None, dict]:
+    diagnostics = nested_runtime_diagnostics()
+    if not diagnostics["tools"]:
+        return False, "Native LXC tools are not installed.", diagnostics
+    if diagnostics["nested"] and not diagnostics["nestedEnabled"]:
+        return False, "LightNAS is inside another container and nested LXC has not been enabled.", diagnostics
+    if diagnostics["nested"]:
+        critical = [
+            ("cgroupWritable", "nested cgroup delegation is unavailable"),
+            ("mountNamespace", "nested mount namespaces are blocked"),
+            ("networkNamespace", "nested network namespaces are blocked"),
+            ("veth", "nested veth creation is blocked"),
+        ]
+        for key, message in critical:
+            if not diagnostics[key]:
+                detail = next((item for item in diagnostics["errors"] if key.split("Namespace")[0].lower() in item.lower()), None)
+                return False, detail or message, diagnostics
+    if not diagnostics["bridges"]:
+        return False, "No local Linux bridge is available for LXC networking. Start lxc-net or create a LightNAS bridge.", diagnostics
+    return True, None, diagnostics
 
 
 def lxc_state(name: str) -> str:
@@ -92,7 +190,7 @@ def container_limits(name: str) -> tuple[int, int]:
 
 
 def container_inventory() -> dict:
-    ok, reason = container_capability()
+    ok, reason, diagnostics = container_capability()
     names: list[str] = []
     if ok:
         try:
@@ -119,6 +217,7 @@ def container_inventory() -> dict:
         "images": IMAGES,
         "networks": local_networks(),
         "storageRoot": "/var/lib/lxc",
+        "diagnostics": diagnostics,
     }
 
 
@@ -150,7 +249,7 @@ def append_unique(path: Path, line: str) -> None:
 
 
 def create_container(data: dict) -> dict:
-    ok, reason = container_capability()
+    ok, reason, _diagnostics = container_capability()
     if not ok:
         raise RuntimeError(reason)
     name = str(data.get("name") or "").strip()
@@ -513,6 +612,8 @@ def dispatch(request: dict) -> dict:
         raise ValueError("operation data must be an object")
     if action == "container-inventory":
         return container_inventory()
+    if action == "runtime-diagnostics":
+        return nested_runtime_diagnostics()
     if action == "container-create":
         return create_container(data)
     if action == "container-action":
