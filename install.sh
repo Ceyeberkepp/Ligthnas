@@ -44,7 +44,7 @@ fi
 if ! systemd-detect-virt --container >/dev/null 2>&1 || [[ "${LIGHTNAS_ENABLE_NESTED_RUNTIMES:-0}" == "1" ]]; then
   echo "      Installing native system-container and VM engines..."
   apt-get install -y \
-    lxc lxc-templates lxcfs uidmap bridge-utils \
+    lxc lxc-templates lxcfs uidmap bridge-utils debootstrap debian-archive-keyring ubuntu-keyring \
     qemu-system-x86 qemu-utils libvirt-daemon-system libvirt-clients virtinst ovmf \
     dnsmasq-base network-manager
 fi
