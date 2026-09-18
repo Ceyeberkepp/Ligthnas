@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Install LightNAS inside an existing Proxmox LXC while keeping compute local
-# to LightNAS. Proxmox is used only to grant guest nesting/KVM capabilities.
+# Install or repair LightNAS inside an existing Proxmox LXC.
+# Proxmox only supplies nesting/device capabilities. LightNAS owns its native
+# LXC system containers and QEMU/libvirt VMs inside the appliance.
 set -Eeuo pipefail
 
 RAW_BASE="${LIGHTNAS_RAW_BASE:-https://raw.githubusercontent.com/Ceyeberkepp/Ligthnas/main}"
@@ -56,59 +57,44 @@ for option in nesting keyctl mknod; do
 done
 
 if [[ "$(pct status "$ctid")" == *'status: running'* ]]; then
-  echo "Stopping LXC $ctid to grant nested LightNAS runtime capabilities..."
+  echo "Stopping LXC $ctid to apply nested LightNAS capabilities..."
   pct shutdown "$ctid" --timeout 60 || pct stop "$ctid"
   wait_for_stopped
 fi
 
-# Remove the legacy Proxmox host-bridge mount from earlier LightNAS builds.
-# The new architecture runs LXC/KVM locally inside the LightNAS appliance.
+# Remove the legacy host-bridge mount used by old LightNAS builds.
 while IFS= read -r legacy_slot; do
   [[ -n "$legacy_slot" ]] || continue
-  echo "Removing legacy LightNAS Proxmox host bridge mount $legacy_slot..."
+  echo "Removing legacy LightNAS Proxmox bridge mount $legacy_slot..."
   pct set "$ctid" -delete "$legacy_slot" || true
 done < <(grep -E '^mp[0-9]+: /var/lib/lightnas-pve,mp=/var/lib/lightnas-pve([,[:space:]]|$)' <<<"$config" | cut -d: -f1 || true)
 rm -f "/etc/lightnas-pve/clients/${ctid}.secret" 2>/dev/null || true
 
-if [[ "$features" != "$(sed -n 's/^features: //p' <<<"$config" | head -1)" ]]; then
+current_features="$(sed -n 's/^features: //p' <<<"$config" | head -1)"
+if [[ "$features" != "$current_features" ]]; then
   echo "Setting LXC features: $features"
   pct set "$ctid" -features "$features"
 fi
+config="$(pct config "$ctid")"
 
 ensure_host_kvm() {
-  if [[ -c /dev/kvm ]]; then
-    return 0
-  fi
-
-  echo "Proxmox host does not currently expose /dev/kvm; trying to load KVM modules..."
+  if [[ -c /dev/kvm ]]; then return 0; fi
+  echo "Proxmox host does not expose /dev/kvm; trying KVM modules..."
   modprobe kvm >/dev/null 2>&1 || true
-
   vendor="$(awk -F: '/vendor_id/{gsub(/[[:space:]]/,"",$2); print $2; exit}' /proc/cpuinfo 2>/dev/null || true)"
   case "$vendor" in
     GenuineIntel) modprobe kvm_intel >/dev/null 2>&1 || true ;;
     AuthenticAMD) modprobe kvm_amd >/dev/null 2>&1 || true ;;
   esac
-
-  if [[ -c /dev/kvm ]]; then
-    echo "Host KVM device is now available."
-    return 0
+  if [[ ! -c /dev/kvm ]]; then
+    echo "WARNING: /dev/kvm is unavailable on the Proxmox host. LightNAS will use QEMU software virtualization (TCG)." >&2
   fi
-
-  echo "WARNING: /dev/kvm is still unavailable on the Proxmox host." >&2
-  if grep -Eq '(^|[[:space:]])(vmx|svm)([[:space:]]|$)' /proc/cpuinfo; then
-    echo "CPU virtualization flags are present, but the KVM device/module is unavailable. Check Proxmox host module errors." >&2
-  else
-    echo "CPU virtualization flags (vmx/svm) are not visible. Enable Intel VT-x/AMD-V in firmware or expose nested virtualization to this Proxmox host." >&2
-  fi
-  return 0
 }
 
-ensure_host_kvm
-
 pass_device() {
-  local path="$1" mode="${2:-0666}" label="$3"
-  [[ -e "$path" ]] || { echo "Host device $path is unavailable; $label will be limited." >&2; return 0; }
-  if grep -Eq "^dev[0-9]+: path=${path//\//\\/}([,[:space:]]|$)" <<<"$config"; then return 0; fi
+  local path="$1" mode="$2" label="$3"
+  [[ -e "$path" ]] || { echo "Host device $path unavailable; $label will be limited." >&2; return 0; }
+  if grep -Fq "path=$path" <<<"$config"; then return 0; fi
   local devslot=''
   for slot in $(seq 0 15); do
     if ! grep -q "^dev${slot}:" <<<"$config"; then devslot="$slot"; break; fi
@@ -116,16 +102,15 @@ pass_device() {
   [[ -n "$devslot" ]] || { echo "No free Proxmox device slot for $path." >&2; return 1; }
   echo "Passing $path into LXC $ctid for $label..."
   pct set "$ctid" "--dev${devslot}" "path=$path,mode=$mode" || {
-    echo "Warning: Proxmox could not pass $path; $label may remain unavailable." >&2
+    echo "Warning: Proxmox could not pass $path; $label may be unavailable." >&2
     return 0
   }
   config="$(pct config "$ctid")"
 }
 
-# These are capability passthrough devices only. LightNAS still creates and
-# manages its own QEMU/KVM guests; it does not call qm or the Proxmox API.
+ensure_host_kvm
 pass_device /dev/kvm 0666 'KVM acceleration'
-pass_device /dev/net/tun 0666 'tap/TUN guest networking'
+pass_device /dev/net/tun 0666 'TUN/TAP guest networking'
 pass_device /dev/vhost-net 0666 'VirtIO network acceleration'
 
 echo "Starting LXC $ctid..."
@@ -137,26 +122,28 @@ trap 'rm -f "$guest_installer"' EXIT
 curl -fsSL "${RAW_BASE}/install.sh" -o "$guest_installer"
 pct push "$ctid" "$guest_installer" /root/lightnas-install.sh
 pct exec "$ctid" -- chmod 0755 /root/lightnas-install.sh
+
 pct exec "$ctid" -- env \
   LIGHTNAS_ENABLE_NESTED_RUNTIMES=1 \
   LIGHTNAS_ALLOW_NESTED_LXC=1 \
   bash /root/lightnas-install.sh
 
 echo "Verifying native LightNAS engines inside LXC $ctid..."
-if ! pct exec "$ctid" -- bash -lc 'command -v lxc-ls >/dev/null && command -v lxc-create >/dev/null && command -v virsh >/dev/null && command -v virt-install >/dev/null'; then
+if ! pct exec "$ctid" -- bash -lc 'command -v lxc-ls >/dev/null && command -v lxc-create >/dev/null && command -v debootstrap >/dev/null && command -v virsh >/dev/null && command -v virt-install >/dev/null'; then
   echo "Native engines are incomplete; repairing packages inside LXC $ctid..."
   pct exec "$ctid" -- bash -lc '
     set -Eeuo pipefail
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
     apt-get install -y \
-      lxc lxc-templates lxcfs uidmap bridge-utils debootstrap debian-archive-keyring ubuntu-keyring \
+      lxc lxc-templates lxcfs uidmap bridge-utils debootstrap debian-archive-keyring ubuntu-keyring zstd \
       qemu-system-x86 qemu-utils libvirt-daemon-system libvirt-clients virtinst ovmf \
-      dnsmasq-base network-manager iproute2 nftables ufw zstd
+      dnsmasq-base network-manager iproute2 nftables ufw
   '
 fi
 
 pct exec "$ctid" -- bash -lc '
+  set -Eeuo pipefail
   install -d -m 0755 /etc/lightnas
   touch /etc/lightnas/runtime.env
   chmod 0600 /etc/lightnas/runtime.env
@@ -174,50 +161,15 @@ pct exec "$ctid" -- bash -lc '
   systemctl enable --now lightnas.service
 '
 
+# Grant the unprivileged LightNAS web service access to every virtual data mount
+# explicitly attached as mpN. The OS/root filesystem is not changed.
 latest_config="$(pct config "$ctid")"
-mapfile -t guest_data_mounts < <(sed -nE 's/^mp[0-9]+: .*mp=([^,]+).*/\1/p' <<<"$latest_config" | grep -v '^/var/lib/lightnas-pve
-echo
-echo "LightNAS local-runtime installation finished in LXC $ctid."
-echo 'Containers: native LXC/liblxc inside LightNAS.'
-echo 'VMs: native QEMU/KVM + libvirt inside LightNAS when /dev/kvm is available.'
-echo 'Proxmox host APIs are not used for normal LightNAS compute operations.'
-
-echo "Performing strict post-install verification..."
-latest_config="$(pct config "$ctid")"
-grep -Eq '(^|,)nesting=1(,|$)' <<<"${latest_config#*features: }" || { echo 'ERROR: nesting=1 is missing.' >&2; exit 1; }
-grep -Eq '^features: .*keyctl=1' <<<"$latest_config" || { echo 'ERROR: keyctl=1 is missing.' >&2; exit 1; }
-grep -Eq '^features: .*mknod=1' <<<"$latest_config" || { echo 'ERROR: mknod=1 is missing.' >&2; exit 1; }
-
-pct exec "$ctid" -- bash -lc '
-  set -Eeuo pipefail
-  command -v lxc-ls >/dev/null
-  command -v lxc-create >/dev/null
-  command -v debootstrap >/dev/null
-  command -v virsh >/dev/null
-  command -v virt-install >/dev/null
-  systemctl is-active --quiet lightnas-host-agent
-  systemctl is-active --quiet lightnas
-' || {
-  echo "ERROR: LightNAS nested runtime verification failed." >&2
-  pct exec "$ctid" -- systemctl status lightnas-host-agent lightnas --no-pager --full || true
-  exit 1
-}
-
-pct exec "$ctid" -- bash -lc '
-  echo "--- Runtime status ---"
-  cat /var/lib/lightnas/runtime-status.txt 2>/dev/null || true
-  echo "--- KVM ---"
-  ls -l /dev/kvm 2>/dev/null || echo "/dev/kvm unavailable"
-  echo "--- Services ---"
-  systemctl --no-pager is-active lightnas-host-agent lightnas || true
-'
-echo "--- Nested runtime self-test ---"
-pct exec "$ctid" -- python3 -c 'import json,socket; s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.connect("/run/lightnas/host-agent.sock"); s.sendall(b"{\"action\":\"runtime-diagnostics\"}\n"); line=s.makefile("rb").readline(); print(json.dumps(json.loads(line), indent=2))'
- || true)
+mapfile -t guest_data_mounts < <(sed -nE 's/^mp[0-9]+: .*mp=([^,]+).*/\1/p' <<<"$latest_config" | grep -v '^/var/lib/lightnas-pve$' || true)
 for guest_mount in "${guest_data_mounts[@]}"; do
   [[ "$guest_mount" == /* ]] || guest_mount="/$guest_mount"
-  echo "Granting LightNAS managed access to ${guest_mount}..."
+  echo "Granting LightNAS managed access to $guest_mount..."
   pct exec "$ctid" -- bash -lc '
+    set -Eeuo pipefail
     mount="$1"
     if [[ -d "$mount" ]]; then
       setfacl -m u:lightnas:rwx "$mount"
@@ -226,19 +178,19 @@ for guest_mount in "${guest_data_mounts[@]}"; do
       setfacl -R -m u:lightnas:rwx "$mount/.lightnas"
       setfacl -R -m d:u:lightnas:rwx "$mount/.lightnas"
     fi
-  ' _ "$guest_mount" || echo "Warning: unable to grant LightNAS access on ${guest_mount}; it will remain browse-only." >&2
+  ' _ "$guest_mount" || echo "Warning: unable to grant LightNAS access on $guest_mount; it will remain browse-only." >&2
 done
 pct exec "$ctid" -- systemctl restart lightnas-host-agent lightnas
 
 echo
 echo "LightNAS local-runtime installation finished in LXC $ctid."
 echo 'Containers: native LXC/liblxc inside LightNAS.'
-echo 'VMs: native QEMU/KVM + libvirt inside LightNAS when /dev/kvm is available.'
+echo 'VMs: QEMU/libvirt inside LightNAS; KVM is used when available and TCG otherwise.'
 echo 'Proxmox host APIs are not used for normal LightNAS compute operations.'
 
 echo "Performing strict post-install verification..."
 latest_config="$(pct config "$ctid")"
-grep -Eq '(^|,)nesting=1(,|$)' <<<"${latest_config#*features: }" || { echo 'ERROR: nesting=1 is missing.' >&2; exit 1; }
+grep -Eq '^features: .*nesting=1' <<<"$latest_config" || { echo 'ERROR: nesting=1 is missing.' >&2; exit 1; }
 grep -Eq '^features: .*keyctl=1' <<<"$latest_config" || { echo 'ERROR: keyctl=1 is missing.' >&2; exit 1; }
 grep -Eq '^features: .*mknod=1' <<<"$latest_config" || { echo 'ERROR: mknod=1 is missing.' >&2; exit 1; }
 
@@ -260,10 +212,13 @@ pct exec "$ctid" -- bash -lc '
 pct exec "$ctid" -- bash -lc '
   echo "--- Runtime status ---"
   cat /var/lib/lightnas/runtime-status.txt 2>/dev/null || true
-  echo "--- KVM ---"
-  ls -l /dev/kvm 2>/dev/null || echo "/dev/kvm unavailable"
+  echo "--- Bridges ---"
+  ip -br addr show type bridge 2>/dev/null || true
   echo "--- Services ---"
-  systemctl --no-pager is-active lightnas-host-agent lightnas || true
+  systemctl --no-pager is-active lightnas-host-agent lightnas lxc-net.service 2>/dev/null || true
+  echo "--- VM acceleration ---"
+  grep "^LIGHTNAS_VM_" /etc/lightnas/runtime.env 2>/dev/null || true
 '
+
 echo "--- Nested runtime self-test ---"
 pct exec "$ctid" -- python3 -c 'import json,socket; s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.connect("/run/lightnas/host-agent.sock"); s.sendall(b"{\"action\":\"runtime-diagnostics\"}\n"); line=s.makefile("rb").readline(); print(json.dumps(json.loads(line), indent=2))'
