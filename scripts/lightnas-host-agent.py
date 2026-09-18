@@ -82,14 +82,10 @@ def container_limits(name: str) -> tuple[int, int]:
                 raw = row.split("=", 1)[1].strip()
                 if raw.isdigit():
                     memory = int(raw)
-            elif row.startswith("lxc.cgroup2.cpuset.cpus"):
-                raw = row.split("=", 1)[1].strip()
-                if "-" in raw:
-                    first, last = raw.split("-", 1)
-                    if first.isdigit() and last.isdigit():
-                        cpus = max(0, int(last) - int(first) + 1)
-                elif raw.isdigit():
-                    cpus = 1
+            elif row.startswith("lxc.cgroup2.cpu.max"):
+                raw = row.split("=", 1)[1].strip().split()
+                if len(raw) == 2 and raw[0].isdigit() and raw[1].isdigit() and int(raw[1]) > 0:
+                    cpus = max(1, round(int(raw[0]) / int(raw[1])))
     except OSError:
         pass
     return memory, cpus
@@ -186,7 +182,7 @@ def create_container(data: dict) -> dict:
     config = Path("/var/lib/lxc") / name / "config"
     append_unique(config, "lxc.start.auto = 1")
     append_unique(config, f"lxc.cgroup2.memory.max = {memory * 1024 * 1024}")
-    append_unique(config, f"lxc.cgroup2.cpuset.cpus = 0-{cpus - 1}")
+    append_unique(config, f"lxc.cgroup2.cpu.max = {cpus * 100000} 100000")
     append_unique(config, "lxc.net.0.type = veth")
     append_unique(config, f"lxc.net.0.link = {network}")
     append_unique(config, "lxc.net.0.flags = up")
@@ -239,10 +235,10 @@ def update_container(data: dict) -> dict:
     if new_name != current:
         raise ValueError("renaming local LXC containers is not enabled yet; clone or recreate with the new name")
     append_unique(config, f"lxc.cgroup2.memory.max = {memory * 1024 * 1024}")
-    append_unique(config, f"lxc.cgroup2.cpuset.cpus = 0-{cpus - 1}")
+    append_unique(config, f"lxc.cgroup2.cpu.max = {cpus * 100000} 100000")
     if lxc_state(current) == "running":
         subprocess.run(["lxc-cgroup", "-n", current, "memory.max", str(memory * 1024 * 1024)], check=False, capture_output=True)
-        subprocess.run(["lxc-cgroup", "-n", current, "cpuset.cpus", f"0-{cpus - 1}"], check=False, capture_output=True)
+        subprocess.run(["lxc-cgroup", "-n", current, "cpu.max", f"{cpus * 100000} 100000"], check=False, capture_output=True)
     return {"id": current, "name": current, "memoryMiB": memory, "cpus": cpus, "status": "updated"}
 
 
