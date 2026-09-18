@@ -165,8 +165,11 @@ function renderCatalog(dialog, query = '') {
   const matches = catalog.filter(item => !normalized || item.filename.toLowerCase().includes(normalized)).slice(0, 80);
   const list = dialog.querySelector('[data-template-catalog-list]');
   if (!list) return;
-  list.innerHTML = matches.length ? matches.map(item => `
-    <article class="storage-row"><div><h3>${tEsc(item.filename)}</h3><p>Official Proxmox VE system template</p></div><button class="secondary" type="button" data-template-catalog-file="${tEsc(item.filename)}">Download</button></article>`).join('') : '<div class="empty"><p>No matching templates.</p></div>';
+  list.innerHTML = matches.length ? `
+    <div class="template-table">
+      <div class="template-table-head"><span>Type</span><span>Package</span><span>Version</span><span>Description</span><span></span></div>
+      ${matches.map(item => `<div class="template-table-row"><span>${tEsc(item.type || 'lxc')}</span><span><b>${tEsc(item.package || item.filename)}</b></span><span>${tEsc(item.version || '')}</span><span>${tEsc(item.description || item.filename)}</span><span><button class="secondary" type="button" data-template-catalog-file="${tEsc(item.filename)}">Download</button></span></div>`).join('')}
+    </div>` : '<div class="empty"><p>No matching templates.</p></div>';
 }
 
 async function openCatalogDialog() {
