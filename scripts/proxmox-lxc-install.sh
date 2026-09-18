@@ -61,6 +61,15 @@ if [[ "$(pct status "$ctid")" == *'status: running'* ]]; then
   wait_for_stopped
 fi
 
+# Remove the legacy Proxmox host-bridge mount from earlier LightNAS builds.
+# The new architecture runs LXC/KVM locally inside the LightNAS appliance.
+while IFS= read -r legacy_slot; do
+  [[ -n "$legacy_slot" ]] || continue
+  echo "Removing legacy LightNAS Proxmox host bridge mount $legacy_slot..."
+  pct set "$ctid" -delete "$legacy_slot" || true
+done < <(grep -E '^mp[0-9]+: /var/lib/lightnas-pve,mp=/var/lib/lightnas-pve([,[:space:]]|$)' <<<"$config" | cut -d: -f1 || true)
+rm -f "/etc/lightnas-pve/clients/${ctid}.secret" 2>/dev/null || true
+
 if [[ "$features" != "$(sed -n 's/^features: //p' <<<"$config" | head -1)" ]]; then
   echo "Setting LXC features: $features"
   pct set "$ctid" -features "$features"
