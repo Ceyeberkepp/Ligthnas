@@ -355,8 +355,9 @@ function bindViewActions() {
   }));
   $('[data-action="create-container"]', $('#content')).forEach(button => button.addEventListener('click', () => {
     const containers = state.runtimes?.containers;
-    if (!containers?.available || !containers.enabled) return toast(containers?.reason || 'Connect a system-container provider first.');
-    if (!containers.pools?.length || !containers.networks?.length || !containers.templates?.length) return toast(containers.provider === 'proxmox-lxc' ? 'Download an LXC template and verify Proxmox container storage and a bridge first.' : 'Configure container storage, networking and an image first.');
+    if (!containers?.available || !containers.enabled) return toast(containers?.reason || 'Native LXC is not ready on this LightNAS host.');
+    if (!containers.images?.length) return toast('No built-in Linux container images are available.');
+    if (!containers.networks?.length) return toast('No local LXC bridge is ready. Open Networking or rerun the LightNAS installer to prepare lxcbr0/lightnas0.');
     $('#container-form', $('#content'))?.scrollIntoView({ behavior: 'smooth' });
     $('#container-form input', $('#content'))?.focus();
   }));
