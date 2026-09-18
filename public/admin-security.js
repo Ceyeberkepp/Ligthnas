@@ -108,23 +108,9 @@ async function renderAutomation() {
 }
 
 async function renderEditableNetwork() {
-  if (!['#network', '#firewall'].includes(location.hash)) return;
-  const content = q('#content');
-  if (!content || q('.editable-network', content)) return;
-  let info;
-  try { info = await api('/api/network'); } catch { return; }
-  const section = document.createElement('section');
-  section.className = 'editable-network';
-  if (location.hash === '#firewall') {
-    section.innerHTML = `<div class="admin-section-head"><div><span class="eyebrow">EDITABLE FIREWALL</span><h2>UFW rules</h2><p class="muted">Rules apply inside the LightNAS appliance. This is suitable for Docker app/container published ports. Proxmox host firewall remains separate.</p></div></div>
-      ${info.firewall?.editable ? `<form class="panel security-inline-form" data-firewall-form><label>Action<select name="decision"><option value="allow">Allow</option><option value="deny">Deny</option></select></label><label>Protocol<select name="protocol"><option>tcp</option><option>udp</option></select></label><label>Port<input name="port" type="number" min="1" max="65535" required></label><label>Source IP/CIDR (optional)<input name="source" placeholder="10.0.0.0/8"></label><button class="primary" type="submit">Add rule</button><div class="form-error"></div></form>` : '<div class="module-hero"><p>UFW is not available to the LightNAS service account, so firewall editing is disabled.</p></div>'}
-      <div class="storage-list">${(info.firewall?.rules || []).map(rule => `<article class="storage-row"><div><h3>#${rule.number} · ${escapeText(rule.action)}</h3><p>${escapeText(rule.target)} · from ${escapeText(rule.source)}</p></div><button class="secondary danger-button" type="button" data-delete-firewall="${rule.number}">Delete</button></article>`).join('') || '<div class="empty"><p>No numbered UFW rules.</p></div>'}</div>`;
-  } else {
-    const wifi = info.wifi || {};
-    section.innerHTML = `<div class="admin-section-head"><div><span class="eyebrow">WIRELESS & DIRECT NETWORK</span><h2>Wi-Fi</h2><p class="muted">Wi-Fi controls appear only when NetworkManager can see an actual Wi-Fi interface inside LightNAS.</p></div></div>
-      ${wifi.available && wifi.devices?.length ? `<div class="inventory-grid">${wifi.devices.map(device => `<article class="inventory-card"><h3>${escapeText(device.name)}</h3><p>${escapeText(device.state)} · ${escapeText(device.connection || 'not connected')}</p>${device.state === 'connected' ? `<button class="secondary" type="button" data-wifi-disconnect="${escapeText(device.name)}">Disconnect</button>` : ''}</article>`).join('')}</div><h2>Available wireless networks</h2><div class="inventory-grid">${(wifi.networks || []).map(network => `<article class="inventory-card"><h3>${escapeText(network.ssid)}</h3><p>${network.signal}% signal · ${escapeText(network.security)} · channel ${network.channel || '—'}</p><button class="secondary" type="button" data-wifi-connect="${escapeText(network.ssid)}">Connect</button></article>`).join('')}</div>` : `<div class="module-hero"><p>${escapeText(wifi.reason || 'No Wi-Fi adapter is visible inside this LightNAS system.')}</p></div>`}`;
-  }
-  q('.page-head', content)?.insertAdjacentElement('afterend', section);
+  // Networking and firewall editing are rendered by app.js/dialog-controls.js.
+  // Keep this compatibility stub so older extension calls do not duplicate UI.
+  return;
 }
 
 function refreshCurrent() {
@@ -183,21 +169,7 @@ document.addEventListener('click', async event => {
   const deleteHook = event.target.closest('[data-delete-webhook]');
   if (deleteHook) { if (confirm('Delete this webhook?')) { try { await api(`/api/security/webhooks/${deleteHook.dataset.deleteWebhook}`, { method:'DELETE' }); refreshCurrent(); } catch (error) { alert(error.message); } } return; }
 
-  const deleteFirewall = event.target.closest('[data-delete-firewall]');
-  if (deleteFirewall) { if (confirm(`Delete firewall rule #${deleteFirewall.dataset.deleteFirewall}?`)) { try { await api('/api/network', { method:'POST', body:JSON.stringify({ action:'firewall-delete', number:Number(deleteFirewall.dataset.deleteFirewall) }) }); refreshCurrent(); } catch (error) { alert(error.message); } } return; }
 
-  const wifiConnect = event.target.closest('[data-wifi-connect]');
-  if (wifiConnect) {
-    let info; try { info = await api('/api/network'); } catch (error) { alert(error.message); return; }
-    const device = info.wifi?.devices?.[0]?.name;
-    if (!device) return alert('No Wi-Fi device is available.');
-    const secret = prompt(`Wi-Fi password for ${wifiConnect.dataset.wifiConnect}. Leave blank for an open network.`) ?? null;
-    if (secret === null) return;
-    try { await api('/api/network', { method:'POST', body:JSON.stringify({ action:'wifi-connect', device, ssid:wifiConnect.dataset.wifiConnect, password:secret }) }); refreshCurrent(); } catch (error) { alert(error.message); }
-    return;
-  }
-  const wifiDisconnect = event.target.closest('[data-wifi-disconnect]');
-  if (wifiDisconnect) { try { await api('/api/network', { method:'POST', body:JSON.stringify({ action:'wifi-disconnect', device:wifiDisconnect.dataset.wifiDisconnect }) }); refreshCurrent(); } catch (error) { alert(error.message); } }
 }, true);
 
 document.addEventListener('submit', async event => {
