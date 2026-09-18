@@ -20,6 +20,10 @@ import {
   listContainerTemplates, proxmoxTemplateCatalog, uploadContainerTemplate,
   importContainerTemplate, deleteContainerTemplate, proxmoxTemplateSource
 } from './templates.mjs';
+import {
+  listStoragePools, createStoragePool, updateStoragePool, deleteStoragePool,
+  listStorageContent, uploadStorageContent, importStorageContent, deleteStorageContent
+} from './storage-pools.mjs';
 import { generateTotpSecret, totpUri, verifyTotp } from './totp.mjs';
 import {
   normalizePermissions, effectivePermissions, groupsForUser,
@@ -727,6 +731,69 @@ async function api(req, res, url) {
     if (!requirePermission(res, permissions, 'storage.view')) return;
     const [filesystems, storage, runtimes] = await Promise.all([getFilesystems(), getStorageInventory(), runtimeInventory()]);
     return send(res, 200, { filesystems, ...storage, host: runtimes.virtualization?.host || null });
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/storage/pools') {
+    if (!requirePermission(res, permissions, 'storage.view')) return;
+    return send(res, 200, await listStoragePools());
+  }
+  if (req.method === 'POST' && url.pathname === '/api/storage/pools') {
+    if (!requirePermission(res, permissions, 'storage.manage')) return;
+    const pool = await createStoragePool(await bodyJson(req));
+    store.addActivity('storage', `Storage ${pool.name} was created on ${pool.mountPoint}.`);
+    await store.save();
+    return send(res, 201, { pool });
+  }
+  if (req.method === 'PATCH' && /^\/api\/storage\/pools\/[A-Za-z][A-Za-z0-9_-]{1,31}$/.test(url.pathname)) {
+    if (!requirePermission(res, permissions, 'storage.manage')) return;
+    const id = url.pathname.split('/').pop();
+    const pool = await updateStoragePool(id, await bodyJson(req));
+    store.addActivity('storage', `Storage ${pool.name} content policy was updated.`);
+    await store.save();
+    return send(res, 200, { pool });
+  }
+  if (req.method === 'DELETE' && /^\/api\/storage\/pools\/[A-Za-z][A-Za-z0-9_-]{1,31}$/.test(url.pathname)) {
+    if (!requirePermission(res, permissions, 'storage.manage')) return;
+    const id = url.pathname.split('/').pop();
+    const result = await deleteStoragePool(id);
+    store.addActivity('storage', `Storage definition ${id} was removed; files were preserved.`);
+    await store.save();
+    return send(res, 200, result);
+  }
+  if (req.method === 'GET' && /^\/api\/storage\/pools\/[A-Za-z][A-Za-z0-9_-]{1,31}\/content$/.test(url.pathname)) {
+    if (!requirePermission(res, permissions, 'storage.view')) return;
+    const id = url.pathname.split('/')[4];
+    const type = url.searchParams.get('type') || 'iso';
+    return send(res, 200, await listStorageContent(id, type));
+  }
+  if (req.method === 'PUT' && /^\/api\/storage\/pools\/[A-Za-z][A-Za-z0-9_-]{1,31}\/upload$/.test(url.pathname)) {
+    if (!requirePermission(res, permissions, 'storage.manage')) return;
+    const id = url.pathname.split('/')[4];
+    const type = url.searchParams.get('type') || '';
+    const name = url.searchParams.get('name') || '';
+    const result = await uploadStorageContent(id, type, name, req);
+    store.addActivity('storage', `${type} file ${result.name} was uploaded to ${id}.`);
+    await store.save();
+    return send(res, 201, result);
+  }
+  if (req.method === 'POST' && /^\/api\/storage\/pools\/[A-Za-z][A-Za-z0-9_-]{1,31}\/import$/.test(url.pathname)) {
+    if (!requirePermission(res, permissions, 'storage.manage')) return;
+    const id = url.pathname.split('/')[4];
+    const input = await bodyJson(req);
+    const result = await importStorageContent(id, input.type, input.url);
+    store.addActivity('storage', `${input.type} file ${result.name} was imported to ${id}.`);
+    await store.save();
+    return send(res, 201, result);
+  }
+  if (req.method === 'DELETE' && /^\/api\/storage\/pools\/[A-Za-z][A-Za-z0-9_-]{1,31}\/content$/.test(url.pathname)) {
+    if (!requirePermission(res, permissions, 'storage.manage')) return;
+    const id = url.pathname.split('/')[4];
+    const type = url.searchParams.get('type') || '';
+    const name = url.searchParams.get('name') || '';
+    const result = await deleteStorageContent(id, type, name);
+    store.addActivity('storage', `${type} file ${name} was removed from ${id}.`);
+    await store.save();
+    return send(res, 200, result);
   }
 
   if (req.method === 'GET' && url.pathname === '/api/templates') {
