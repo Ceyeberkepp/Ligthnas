@@ -5,6 +5,7 @@ import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
+import { createHash } from 'node:crypto';
 import { listStoragePools } from './storage-pools.mjs';
 
 const PROXMOX_IMAGES_BASE = 'https://download.proxmox.com/images/';
@@ -156,7 +157,8 @@ function parseAplInfo(text, baseUrl, sourceName) {
       description: record.description || record.package,
       os: record.os || null,
       url: new URL(record.location, baseUrl).toString(),
-      source: sourceName
+      source: sourceName,
+      sha512: record.sha512sum || null
     });
   }
   return records;
@@ -201,13 +203,26 @@ function byteLimit() {
   });
 }
 
-async function saveStream(stream, target, filename, contentLength = 0) {
+async function saveStream(stream, target, filename, contentLength = 0, expectedSha512 = null) {
   if (contentLength && contentLength > MAX_TEMPLATE_BYTES) throw Object.assign(new Error('Template exceeds the configured maximum size.'), { status: 413 });
   await mkdir(target.path, { recursive: true });
   const finalPath = join(target.path, filename);
   const temporary = `${finalPath}.part-${process.pid}-${Date.now()}`;
+  const hash = expectedSha512 ? createHash('sha512') : null;
+  const verify = new Transform({
+    transform(chunk, encoding, callback) {
+      if (hash) hash.update(chunk);
+      callback(null, chunk);
+    }
+  });
   try {
-    await pipeline(stream, byteLimit(), createWriteStream(temporary, { flags: 'wx', mode: 0o640 }));
+    await pipeline(stream, byteLimit(), verify, createWriteStream(temporary, { flags: 'wx', mode: 0o640 }));
+    if (hash) {
+      const actual = hash.digest('hex').toLowerCase();
+      if (actual !== String(expectedSha512).toLowerCase()) {
+        throw Object.assign(new Error('Template checksum did not match the upstream catalog. The downloaded file was rejected.'), { status: 502 });
+      }
+    }
     await rename(temporary, finalPath);
   } catch (error) {
     await rm(temporary, { force: true }).catch(() => {});
@@ -227,18 +242,20 @@ export async function uploadContainerTemplate(storageId, filename, request) {
 export async function importContainerTemplate({ storageId, url, proxmoxTemplate }) {
   const target = await targetFor(storageId, true);
   let source = String(url || '').trim();
+  let expectedSha512 = null;
   if (proxmoxTemplate) {
     const catalog = await proxmoxTemplateCatalog();
-    const item = catalog.find(entry => entry.filename === proxmoxTemplate);
-    if (!item) throw Object.assign(new Error('Choose a template from the current Proxmox catalog.'), { status: 400 });
+    const item = catalog.find(entry => entry.id === proxmoxTemplate || entry.filename === proxmoxTemplate);
+    if (!item) throw Object.assign(new Error('Choose a template from the current upstream catalog.'), { status: 400 });
     source = item.url;
+    expectedSha512 = item.sha512 || null;
   }
   const safeUrl = await validateUrl(source);
   const filename = safeFilename(safeUrl.pathname);
   const { response } = await safeFetch(safeUrl.toString());
   if (!response.ok || !response.body) throw Object.assign(new Error(`Template download failed with HTTP ${response.status}.`), { status: 502 });
   const length = Number(response.headers.get('content-length') || 0);
-  return await saveStream(Readable.fromWeb(response.body), target, filename, length);
+  return await saveStream(Readable.fromWeb(response.body), target, filename, length, expectedSha512);
 }
 
 export async function deleteContainerTemplate(id) {
