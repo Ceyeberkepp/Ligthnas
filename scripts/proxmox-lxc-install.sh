@@ -112,13 +112,36 @@ pct exec "$ctid" -- env \
   LIGHTNAS_ALLOW_NESTED_LXC=1 \
   bash /root/lightnas-install.sh
 
+echo "Verifying native LightNAS engines inside LXC $ctid..."
+if ! pct exec "$ctid" -- bash -lc 'command -v lxc-ls >/dev/null && command -v lxc-create >/dev/null && command -v virsh >/dev/null && command -v virt-install >/dev/null'; then
+  echo "Native engines are incomplete; repairing packages inside LXC $ctid..."
+  pct exec "$ctid" -- bash -lc '
+    set -Eeuo pipefail
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y \
+      lxc lxc-templates lxcfs uidmap bridge-utils \
+      qemu-system-x86 qemu-utils libvirt-daemon-system libvirt-clients virtinst ovmf \
+      dnsmasq-base network-manager iproute2 nftables ufw
+  '
+fi
+
 pct exec "$ctid" -- bash -lc '
   install -d -m 0755 /etc/lightnas
   touch /etc/lightnas/runtime.env
   chmod 0600 /etc/lightnas/runtime.env
   sed -i "/^LIGHTNAS_ALLOW_NESTED_LXC=/d;/^LIGHTNAS_ENABLE_PROXMOX_PROVIDER=/d;/^LIGHTNAS_PVE_/d" /etc/lightnas/runtime.env
   printf "%s\n" "LIGHTNAS_ALLOW_NESTED_LXC=1" "LIGHTNAS_ENABLE_PROXMOX_PROVIDER=0" >> /etc/lightnas/runtime.env
-  systemctl restart lightnas-host-agent lightnas
+
+  LIGHTNAS_ALLOW_NESTED_LXC=1 LIGHTNAS_RUNTIME_STATUS_FILE=/var/lib/lightnas/runtime-status.txt \
+    bash /opt/lightnas/scripts/provision-runtimes.sh
+
+  systemctl daemon-reload
+  systemctl enable --now NetworkManager.service >/dev/null 2>&1 || true
+  systemctl enable --now lxc-net.service >/dev/null 2>&1 || true
+  systemctl enable --now libvirtd.socket >/dev/null 2>&1 || true
+  systemctl enable --now lightnas-host-agent.service
+  systemctl enable --now lightnas.service
 '
 
 latest_config="$(pct config "$ctid")"
@@ -134,6 +157,27 @@ echo "LightNAS local-runtime installation finished in LXC $ctid."
 echo 'Containers: native LXC/liblxc inside LightNAS.'
 echo 'VMs: native QEMU/KVM + libvirt inside LightNAS when /dev/kvm is available.'
 echo 'Proxmox host APIs are not used for normal LightNAS compute operations.'
+
+echo "Performing strict post-install verification..."
+latest_config="$(pct config "$ctid")"
+grep -Eq '(^|,)nesting=1(,|$)' <<<"${latest_config#*features: }" || { echo 'ERROR: nesting=1 is missing.' >&2; exit 1; }
+grep -Eq '^features: .*keyctl=1' <<<"$latest_config" || { echo 'ERROR: keyctl=1 is missing.' >&2; exit 1; }
+grep -Eq '^features: .*mknod=1' <<<"$latest_config" || { echo 'ERROR: mknod=1 is missing.' >&2; exit 1; }
+
+pct exec "$ctid" -- bash -lc '
+  set -Eeuo pipefail
+  command -v lxc-ls >/dev/null
+  command -v lxc-create >/dev/null
+  command -v virsh >/dev/null
+  command -v virt-install >/dev/null
+  systemctl is-active --quiet lightnas-host-agent
+  systemctl is-active --quiet lightnas
+' || {
+  echo "ERROR: LightNAS nested runtime verification failed." >&2
+  pct exec "$ctid" -- systemctl status lightnas-host-agent lightnas --no-pager --full || true
+  exit 1
+}
+
 pct exec "$ctid" -- bash -lc '
   echo "--- Runtime status ---"
   cat /var/lib/lightnas/runtime-status.txt 2>/dev/null || true
