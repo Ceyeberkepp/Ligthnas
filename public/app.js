@@ -320,7 +320,17 @@ function networkView() {
   if (!info) return `${pageHead('Networking', 'Manage wired Ethernet, Wi‑Fi, bridges, VLANs, addressing, routes and DNS on the LightNAS host.', '<button class="secondary" data-action="refresh-network">Refresh</button>')}<div class="empty">Loading network inventory…</div>`;
 
   const uplinks = control?.uplinks || [];
-  const current = control?.currentUplink || null;
+  const defaultRoute = [...(info.routes || [])].filter(item => item.destination === 'default').sort((a, b) => (a.metric ?? 0) - (b.metric ?? 0))[0] || null;
+  const routeDevice = defaultRoute?.device || '';
+  const routeDeviceInfo = (control?.devices || []).find(item => item.name === routeDevice);
+  const current = control?.currentUplink || (routeDevice ? {
+    name: routeDevice,
+    kind: routeDeviceInfo?.type === 'wifi' ? 'Wi-Fi' : 'Ethernet',
+    connection: routeDeviceInfo?.connection || 'Kernel-managed connection',
+    gateway: defaultRoute?.gateway || null,
+    metric: defaultRoute?.metric ?? null,
+    active: true
+  } : null);
   const currentInterface = current ? info.interfaces.find(item => item.name === current.name) : null;
   const currentAddresses = currentInterface?.addresses?.filter(item => item.family === 'inet').map(item => `${item.address}/${item.prefix}`).join(', ') || 'No IPv4 address';
   const wifiDevices = (control?.devices || []).filter(item => item.type === 'wifi' && !['unavailable','unmanaged'].includes(item.state));
