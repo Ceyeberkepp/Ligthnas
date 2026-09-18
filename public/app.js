@@ -400,7 +400,7 @@ function bindViewActions() {
     toast('Physical pool creation needs the disk safety agent before it can operate. Existing ZFS datasets can be created below.');
     $('#dataset-form', $('#content'))?.scrollIntoView({ behavior: 'smooth' });
   }));
-  $('[data-action="create-container"]', $('#content')).forEach(button => button.addEventListener('click', () => {
+  $$('[data-action="create-container"]', $('#content')).forEach(button => button.addEventListener('click', () => {
     const containers = state.runtimes?.containers;
     if (!containers?.available || !containers.enabled) return toast(containers?.reason || 'Native LXC is not ready on this LightNAS host.');
     if (!containers.images?.length) return toast('No built-in Linux container images are available.');
