@@ -75,19 +75,28 @@ if [[ "$features" != "$(sed -n 's/^features: //p' <<<"$config" | head -1)" ]]; t
   pct set "$ctid" -features "$features"
 fi
 
-# Pass /dev/kvm into the appliance when available. This is hardware capability
-# passthrough only; LightNAS does not use qm or the Proxmox API afterwards.
-if [[ -e /dev/kvm ]] && ! grep -Eq '^dev[0-9]+: path=/dev/kvm([,[:space:]]|$)' <<<"$config"; then
-  devslot=''
-  for slot in $(seq 0 9); do
+pass_device() {
+  local path="$1" mode="${2:-0666}" label="$3"
+  [[ -e "$path" ]] || { echo "Host device $path is unavailable; $label will be limited." >&2; return 0; }
+  if grep -Eq "^dev[0-9]+: path=${path//\//\\/}([,[:space:]]|$)" <<<"$config"; then return 0; fi
+  local devslot=''
+  for slot in $(seq 0 15); do
     if ! grep -q "^dev${slot}:" <<<"$config"; then devslot="$slot"; break; fi
   done
-  if [[ -n $devslot ]]; then
-    echo "Passing /dev/kvm into LXC $ctid..."
-    pct set "$ctid" "--dev${devslot}" "path=/dev/kvm,mode=0666" || \
-      echo 'Warning: Proxmox could not pass /dev/kvm. Local VMs will remain disabled in this LXC.' >&2
-  fi
-fi
+  [[ -n "$devslot" ]] || { echo "No free Proxmox device slot for $path." >&2; return 1; }
+  echo "Passing $path into LXC $ctid for $label..."
+  pct set "$ctid" "--dev${devslot}" "path=$path,mode=$mode" || {
+    echo "Warning: Proxmox could not pass $path; $label may remain unavailable." >&2
+    return 0
+  }
+  config="$(pct config "$ctid")"
+}
+
+# These are capability passthrough devices only. LightNAS still creates and
+# manages its own QEMU/KVM guests; it does not call qm or the Proxmox API.
+pass_device /dev/kvm 0666 'KVM acceleration'
+pass_device /dev/net/tun 0666 'tap/TUN guest networking'
+pass_device /dev/vhost-net 0666 'VirtIO network acceleration'
 
 echo "Starting LXC $ctid..."
 pct start "$ctid"
@@ -132,4 +141,18 @@ pct exec "$ctid" -- bash -lc '
   ls -l /dev/kvm 2>/dev/null || echo "/dev/kvm unavailable"
   echo "--- Services ---"
   systemctl --no-pager is-active lightnas-host-agent lightnas || true
+  echo "--- Nested runtime self-test ---"
+  python3 - <<'"'"'PY'"'"'
+import json, socket
+sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+sock.connect("/run/lightnas/host-agent.sock")
+sock.sendall(b'{"action":"runtime-diagnostics"}\\n')
+data = b""
+while b"\\n" not in data:
+    chunk = sock.recv(65536)
+    if not chunk:
+        break
+    data += chunk
+print(json.dumps(json.loads(data.split(b"\\n",1)[0]), indent=2))
+PY
 '
