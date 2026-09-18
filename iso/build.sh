@@ -31,7 +31,7 @@ echo 'deb http://security.debian.org/debian-security trixie-security main contri
 cat >config/package-lists/lightnas.list.chroot <<'EOF'
 ca-certificates curl gnupg git systemd openssh-server util-linux python3 ffmpeg
 acl novnc iproute2 nftables ufw smartmontools
-lxc lxc-templates lxcfs uidmap bridge-utils
+lxc lxc-templates lxcfs uidmap bridge-utils debootstrap debian-archive-keyring ubuntu-keyring
 qemu-system-x86 qemu-utils libvirt-daemon-system libvirt-clients virtinst ovmf
 dnsmasq-base network-manager iw rfkill wpasupplicant
 zfsutils-linux
