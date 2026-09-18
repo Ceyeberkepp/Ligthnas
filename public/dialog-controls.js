@@ -169,6 +169,22 @@ document.addEventListener('click', async event => {
     return;
   }
 
+  const preferredUplink = event.target.closest('[data-uplink-prefer]');
+  if (preferredUplink) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const device = preferredUplink.dataset.uplinkPrefer;
+    preferredUplink.disabled = true;
+    try {
+      await dialogApi('/api/network', { method: 'POST', body: JSON.stringify({ action: 'uplink-prefer', device }) });
+      location.reload();
+    } catch (problem) {
+      alert(problem.message);
+      preferredUplink.disabled = false;
+    }
+    return;
+  }
+
   const networkDevice = event.target.closest('[data-network-device]');
   if (networkDevice) {
     event.preventDefault();
