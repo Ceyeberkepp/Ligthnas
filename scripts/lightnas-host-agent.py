@@ -72,6 +72,29 @@ def lxc_state(name: str) -> str:
         return "unknown"
 
 
+def container_limits(name: str) -> tuple[int, int]:
+    memory = 0
+    cpus = 0
+    path = Path("/var/lib/lxc") / name / "config"
+    try:
+        for row in path.read_text(encoding="utf-8").splitlines():
+            if row.startswith("lxc.cgroup2.memory.max"):
+                raw = row.split("=", 1)[1].strip()
+                if raw.isdigit():
+                    memory = int(raw)
+            elif row.startswith("lxc.cgroup2.cpuset.cpus"):
+                raw = row.split("=", 1)[1].strip()
+                if "-" in raw:
+                    first, last = raw.split("-", 1)
+                    if first.isdigit() and last.isdigit():
+                        cpus = max(0, int(last) - int(first) + 1)
+                elif raw.isdigit():
+                    cpus = 1
+    except OSError:
+        pass
+    return memory, cpus
+
+
 def container_inventory() -> dict:
     ok, reason = container_capability()
     names: list[str] = []
@@ -89,7 +112,8 @@ def container_inventory() -> dict:
             pid = int(raw_pid) if raw_pid.isdigit() else None
         except Exception:
             pass
-        containers.append({"id": name, "name": name, "status": state, "pid": pid, "provider": "local-lxc"})
+        memory, cpus = container_limits(name)
+        containers.append({"id": name, "name": name, "status": state, "pid": pid, "memory": memory, "cpus": cpus, "provider": "local-lxc"})
     return {
         "available": ok,
         "enabled": ok,
