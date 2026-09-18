@@ -222,6 +222,9 @@ function storageUsageCard(item) {
 }
 
 async function enhanceStorage() {
+  // Storage rendering is owned by storage-manager.js now. Keep this legacy
+  // hook inert so older enhancement events cannot inject a duplicate inventory.
+  if (document.querySelector('#storage-manager')) return;
   const content = document.querySelector('#content');
   if (!content || location.hash !== '#storage' || content.querySelector('.unified-storage') || content.dataset.storageEnhancing === '1') return;
   content.dataset.storageEnhancing = '1';
