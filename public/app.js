@@ -197,11 +197,19 @@ function runtimeBanner(kind) {
 
 function containersView() {
   const runtime = state.runtimes?.containers;
+  const diagnostics = runtime?.diagnostics;
   const networks = (runtime?.networks || []).map(item => `<option value="${escapeHtml(item)}">${escapeHtml(item)}</option>`).join('');
   const images = (runtime?.images || []).map(item => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.label)}</option>`).join('');
   const ready = runtime?.available && runtime?.enabled && runtime.images?.length && runtime.networks?.length;
+  const diagnosticPanel = diagnostics ? `<div class="inventory-grid">
+    <article class="inventory-card"><h3>Nested mode</h3><p>${diagnostics.nested ? (diagnostics.nestedEnabled ? 'Enabled' : 'Detected but not enabled') : 'Not nested'}</p></article>
+    <article class="inventory-card"><h3>cgroups</h3><p>${diagnostics.cgroupWritable ? 'Ready' : 'Blocked'}</p></article>
+    <article class="inventory-card"><h3>Namespaces / veth</h3><p>${diagnostics.mountNamespace && diagnostics.networkNamespace && diagnostics.veth ? 'Ready' : 'Blocked'}</p></article>
+    <article class="inventory-card"><h3>Container bridge</h3><p>${escapeHtml((diagnostics.bridges || []).join(', ') || 'Missing')}</p></article>
+  </div>${diagnostics.errors?.length ? `<div class="module-note"><b>Nested self-test:</b> ${diagnostics.errors.map(escapeHtml).join(' · ')}</div>` : ''}` : '';
   return `${pageHead('System containers', 'Native Linux system containers powered by LXC/liblxc inside LightNAS itself.', '<div class="head-actions"><button class="secondary" data-action="refresh-runtime">Refresh</button><button class="primary" data-action="create-container">+ Create container</button></div>')}
     ${runtimeBanner('containers')}
+    ${diagnosticPanel}
     ${runtime?.available && runtime?.enabled && !ready ? '<div class="module-hero"><h2>Container network unavailable</h2><p>Create or enable a local bridge/network under Connectivity before launching a system container.</p></div>' : ''}
     ${ready ? `<form id="container-form" class="panel creation-form"><h2>Create system container</h2><p class="muted">Runs a full Linux userspace with its own init, services, filesystem and network namespace while sharing the LightNAS kernel. This is not Docker.</p>
       <label>Container name<input name="name" required pattern="[A-Za-z][A-Za-z0-9-]{1,39}" placeholder="debian-services"></label>
@@ -216,10 +224,17 @@ function containersView() {
 
 function vmsView() {
   const runtime = state.runtimes?.virtualization;
+  const diagnostics = runtime?.diagnostics;
   const ready = runtime?.available && runtime?.enabled && runtime.pools?.length && runtime.networks?.length && runtime.images?.length;
   const choices = items => (items || []).map(item => `<option value="${escapeHtml(item)}">${escapeHtml(item)}</option>`).join('');
+  const nestedVmPanel = diagnostics?.nested ? `<div class="inventory-grid">
+    <article class="inventory-card"><h3>KVM</h3><p>${diagnostics.kvm?.usable ? `Ready · API ${diagnostics.kvm.apiVersion}` : escapeHtml(diagnostics.kvm?.error || 'Unavailable')}</p></article>
+    <article class="inventory-card"><h3>TUN/TAP</h3><p>${diagnostics.tun ? 'Ready' : 'Missing /dev/net/tun'}</p></article>
+    <article class="inventory-card"><h3>Mode</h3><p>Nested virtualization</p></article>
+  </div>` : '';
   return `${pageHead('Virtual machines', 'Native QEMU/KVM virtual machines managed by LightNAS through libvirt.', '<div class="head-actions"><button class="secondary" data-action="refresh-runtime">Refresh</button><button class="primary" data-action="create-vm">+ Create VM</button></div>')}
     ${runtimeBanner('virtualization')}
+    ${nestedVmPanel}
     ${runtime?.available && runtime?.enabled && !ready ? '<div class="module-hero"><h2>VM resources needed</h2><p>Activate a local libvirt storage pool and network/bridge, then place an ISO in /var/lib/libvirt/images. LightNAS will use those resources directly.</p></div>' : ''}
     ${ready ? `<form id="vm-form" class="panel creation-form"><h2>Create a VM</h2><p class="muted">Creates a native KVM/QEMU guest on this LightNAS host with VirtIO devices and an embedded noVNC console.</p><label>VM name<input name="name" required pattern="[a-zA-Z][a-zA-Z0-9-]{1,39}"></label><label>Memory (MiB)<input name="memoryMiB" type="number" min="1024" max="65536" value="2048" required></label><label>Virtual CPUs<input name="cpus" type="number" min="1" max="32" value="2" required></label><label>New disk (GiB)<input name="diskGiB" type="number" min="10" max="2048" value="20" required></label><label>Storage pool<select name="pool">${choices(runtime.pools)}</select></label><label>Network<select name="network">${choices(runtime.networks)}</select></label><label>Installer ISO<select name="iso">${choices(runtime.images)}</select></label><button class="primary" type="submit">Create & start VM</button><div class="form-error" role="alert"></div></form>` : ''}
     <h2>Existing VMs</h2><div class="storage-list">${runtime?.machineDetails?.map(item => `<article class="storage-row"><div><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.status)} · ${item.cpus || '—'} vCPU · ${bytes(item.memory || 0)} RAM</p></div><div class="storage-size">${escapeHtml(runtime.provider || 'libvirt-kvm')}</div></article>`).join('') || '<div class="empty"><p>No local KVM virtual machines are visible.</p></div>'}</div>`;
