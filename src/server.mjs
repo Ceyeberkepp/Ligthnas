@@ -691,14 +691,23 @@ async function api(req, res, url) {
   }
   if (req.method === 'GET' && url.pathname === '/api/network') {
     if (!requirePermission(res, permissions, 'network.view')) return;
-    const local = await networkInventory();
-    let host = null;
-    try { host = (await runtimeInventory()).virtualization?.host || null; } catch {}
-    return send(res, 200, { ...local, host });
+    const [observed, control] = await Promise.all([
+      networkInventory(),
+      localNetworkInventory().catch(error => ({ editable: false, manager: null, reason: error.message, devices: [], connections: [], wifi: [] }))
+    ]);
+    return send(res, 200, { ...observed, control, host: null });
   }
   if (req.method === 'POST' && url.pathname === '/api/network') {
     if (!requirePermission(res, permissions, 'network.manage')) return;
-    const result = await networkAction(await bodyJson(req));
+    const input = await bodyJson(req);
+    let result;
+    try { result = await localNetworkAction(input); }
+    catch (error) {
+      // Keep the old read-only helper compatible for installations that have
+      // not yet upgraded the local host daemon.
+      if (!['firewall-add', 'firewall-delete', 'wifi-connect', 'wifi-disconnect'].includes(String(input.action || ''))) throw error;
+      result = await networkAction(input);
+    }
     store.addActivity('network', `Network action ${result.action} completed.`);
     await store.save();
     return send(res, 200, result);
