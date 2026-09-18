@@ -53,24 +53,46 @@ export async function getStorageInventory() {
 
   const rootFilesystem = filesystems.find(item => item.mountPoint === '/');
   const rootDevice = rootFilesystem?.device || null;
-  const explicitDataPath = mountPoint => /^(\/mnt|\/media|\/srv|\/data|\/storage)(\/|$)/.test(mountPoint);
-  const attachedVolumes = filesystems
+
+  // In an LXC, systemd sandbox bind mounts can make the root filesystem appear
+  // again at /mnt, /media, /srv, /var/tmp, etc. Those are not extra storage.
+  // The storage UI should show each virtual disk/mount only once and should not
+  // count the OS/root filesystem toward NAS data capacity.
+  const volumeCandidates = filesystems
     .filter(item => !isSystemMount(item.mountPoint) && item.totalBytes > 0)
-    // systemd may create writable bind mounts such as /var/lib/lightnas and
-    // /var/tmp on the root filesystem. Do not present those as extra disks.
-    .filter(item => item.device !== rootDevice || explicitDataPath(item.mountPoint))
-    .map(item => ({
-      id: item.id,
-      device: item.device,
-      mountPoint: item.mountPoint,
-      type: item.type,
-      readOnly: item.readOnly,
-      writable: item.writable,
-      totalBytes: item.totalBytes,
-      availableBytes: item.availableBytes,
-      usedBytes: item.usedBytes,
-      usedPercent: item.usedPercent
-    }));
+    .filter(item => item.device !== rootDevice)
+    .filter(item => !/^\/(?:proc|sys|dev|run)(?:\/|$)/.test(item.mountPoint));
+
+  const uniqueVolumes = new Map();
+  for (const item of volumeCandidates) {
+    const key = `${item.device}:${item.type}:${item.totalBytes}`;
+    const existing = uniqueVolumes.get(key);
+    if (!existing || item.mountPoint.length < existing.mountPoint.length) uniqueVolumes.set(key, item);
+  }
+
+  const attachedVolumes = [...uniqueVolumes.values()].map(item => ({
+    id: item.id,
+    device: item.device,
+    mountPoint: item.mountPoint,
+    type: item.type,
+    readOnly: item.readOnly,
+    writable: item.writable,
+    totalBytes: item.totalBytes,
+    availableBytes: item.availableBytes,
+    usedBytes: item.usedBytes,
+    usedPercent: item.usedPercent
+  }));
+
+  const virtualStorage = attachedVolumes.reduce((summary, item) => {
+    summary.totalBytes += item.totalBytes;
+    summary.availableBytes += item.availableBytes;
+    summary.usedBytes += item.usedBytes;
+    return summary;
+  }, { totalBytes: 0, availableBytes: 0, usedBytes: 0 });
+  virtualStorage.usedPercent = virtualStorage.totalBytes
+    ? Math.round((virtualStorage.usedBytes / virtualStorage.totalBytes) * 100)
+    : 0;
+  virtualStorage.count = attachedVolumes.length;
 
   const dataPath = dirname(resolve(process.env.NAS_DATA_FILE || 'data/state.json'));
   let local = null;
@@ -88,6 +110,7 @@ export async function getStorageInventory() {
     disks,
     local,
     attachedVolumes,
+    virtualStorage,
     environment: { container: inContainer, containerType: inContainer ? containerType : null },
     zfs: {
       available: pools !== null && datasets !== null,
