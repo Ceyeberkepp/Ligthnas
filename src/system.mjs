@@ -51,6 +51,8 @@ export async function getStorageInventory() {
 
   if (inContainer) disks = [];
 
+  const dataRoot = dirname(resolve(process.env.NAS_DATA_FILE || 'data/state.json'));
+  const localStoragePath = resolve(process.env.LIGHTNAS_LOCAL_STORAGE_ROOT || join(dataRoot, 'storage', 'local'));
   const rootFilesystem = filesystems.find(item => item.mountPoint === '/');
   const rootDevice = rootFilesystem?.device || null;
 
@@ -61,6 +63,7 @@ export async function getStorageInventory() {
   const volumeCandidates = filesystems
     .filter(item => !isSystemMount(item.mountPoint) && item.totalBytes > 0)
     .filter(item => item.device !== rootDevice)
+    .filter(item => item.mountPoint !== localStoragePath)
     .filter(item => !/^\/(?:proc|sys|dev|run)(?:\/|$)/.test(item.mountPoint));
 
   const uniqueVolumes = new Map();
@@ -94,8 +97,6 @@ export async function getStorageInventory() {
     : 0;
   virtualStorage.count = attachedVolumes.length;
 
-  const dataRoot = dirname(resolve(process.env.NAS_DATA_FILE || 'data/state.json'));
-  const localStoragePath = resolve(process.env.LIGHTNAS_LOCAL_STORAGE_ROOT || join(dataRoot, 'storage', 'local'));
   let local = null;
   try {
     const stats = await statfs(localStoragePath, { bigint: true });
