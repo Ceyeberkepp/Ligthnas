@@ -107,10 +107,27 @@ else
     install -d -m 0755 /var/lib/libvirt/images
     setfacl -m u:lightnas:rwx /var/lib/libvirt/images >/dev/null 2>&1 || true
 
+    # Wait for libvirt before defining resources. Socket activation can take a
+    # moment after package installation, especially inside nested appliances.
+    for attempt in {1..15}; do
+      virsh -c qemu:///system list --all >/dev/null 2>&1 && break
+      sleep 1
+    done
+
     if ! virsh -c qemu:///system pool-info default >/dev/null 2>&1; then
-      virsh -c qemu:///system pool-define-as default dir --target /var/lib/libvirt/images >/dev/null 2>&1 || true
-      virsh -c qemu:///system pool-build default >/dev/null 2>&1 || true
+      pool_xml="$(mktemp)"
+      cat >"$pool_xml" <<'EOF'
+<pool type='dir'>
+  <name>default</name>
+  <target>
+    <path>/var/lib/libvirt/images</path>
+  </target>
+</pool>
+EOF
+      virsh -c qemu:///system pool-define "$pool_xml" >/dev/null 2>&1 || true
+      rm -f "$pool_xml"
     fi
+    virsh -c qemu:///system pool-build default >/dev/null 2>&1 || true
     virsh -c qemu:///system pool-start default >/dev/null 2>&1 || true
     virsh -c qemu:///system pool-autostart default >/dev/null 2>&1 || true
 
@@ -139,9 +156,11 @@ EOF
       sleep 1
     done
     if runuser -u lightnas -- virsh -c qemu:///system list --all --name >/dev/null 2>&1 \
+      && virsh -c qemu:///system pool-info default >/dev/null 2>&1 \
+      && virsh -c qemu:///system net-info default >/dev/null 2>&1 \
       && command -v virt-install >/dev/null 2>&1; then
       set_flag LIGHTNAS_VM_ENABLED 1
-      report VMs 'native QEMU/KVM + libvirt ready; add an ISO and use a local storage pool/network'
+      report VMs 'native QEMU/KVM + libvirt ready; default storage pool and NAT network are active'
     else
       set_flag LIGHTNAS_VM_ENABLED 0
       report VMs 'libvirt installed, but the service account cannot access qemu:///system'
