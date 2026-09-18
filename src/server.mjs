@@ -16,6 +16,10 @@ import { validateSmtp, sendSmtpTest } from './mailer.mjs';
 import { mediaAvailable, convertMedia } from './media.mjs';
 import { createDataset, updateDataset } from './zfs.mjs';
 import { networkInventory, networkAction } from './network.mjs';
+import {
+  listContainerTemplates, proxmoxTemplateCatalog, uploadContainerTemplate,
+  importContainerTemplate, deleteContainerTemplate, proxmoxTemplateSource
+} from './templates.mjs';
 import { generateTotpSecret, totpUri, verifyTotp } from './totp.mjs';
 import {
   normalizePermissions, effectivePermissions, groupsForUser,
@@ -723,6 +727,45 @@ async function api(req, res, url) {
     if (!requirePermission(res, permissions, 'storage.view')) return;
     const [filesystems, storage, runtimes] = await Promise.all([getFilesystems(), getStorageInventory(), runtimeInventory()]);
     return send(res, 200, { filesystems, ...storage, host: runtimes.virtualization?.host || null });
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/templates') {
+    if (!requireAnyPermission(res, permissions, ['storage.view', 'containers.manage'])) return;
+    const library = await listContainerTemplates();
+    return send(res, 200, { ...library, proxmoxSource: proxmoxTemplateSource });
+  }
+  if (req.method === 'GET' && url.pathname === '/api/templates/catalog') {
+    if (!requirePermission(res, permissions, 'containers.manage')) return;
+    return send(res, 200, { source: proxmoxTemplateSource, templates: await proxmoxTemplateCatalog() });
+  }
+  if (req.method === 'PUT' && url.pathname === '/api/templates/upload') {
+    if (!requirePermission(res, permissions, 'containers.manage')) return;
+    const storageId = url.searchParams.get('storage') || '';
+    const filename = url.searchParams.get('name') || '';
+    const template = await uploadContainerTemplate(storageId, filename, req);
+    store.addActivity('container-template', `Container template ${template.filename} was uploaded to ${template.storageLabel}.`);
+    await store.save();
+    return send(res, 201, { template });
+  }
+  if (req.method === 'POST' && url.pathname === '/api/templates/import') {
+    if (!requirePermission(res, permissions, 'containers.manage')) return;
+    const input = await bodyJson(req);
+    const template = await importContainerTemplate({
+      storageId: input.storageId,
+      url: input.url,
+      proxmoxTemplate: input.proxmoxTemplate
+    });
+    store.addActivity('container-template', `Container template ${template.filename} was imported to ${template.storageLabel}.`);
+    await store.save();
+    return send(res, 201, { template });
+  }
+  if (req.method === 'DELETE' && url.pathname === '/api/templates') {
+    if (!requirePermission(res, permissions, 'containers.manage')) return;
+    const id = url.searchParams.get('id') || '';
+    const result = await deleteContainerTemplate(id);
+    store.addActivity('container-template', 'A container template was removed.');
+    await store.save();
+    return send(res, 200, result);
   }
 
   if (url.pathname === '/api/files') {
