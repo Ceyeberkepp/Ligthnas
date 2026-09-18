@@ -9,8 +9,8 @@ import { getFilesystems, getStorageInventory, getSystemSnapshot } from './system
 import { hashPassword, Sessions, verifyPassword } from './auth.mjs';
 import { listFiles, createFolder, uploadFile, downloadFile, deleteEntry } from './files.mjs';
 import { thumbnailFor } from './thumbnails.mjs';
-import { catalog, runtimeInventory, installCatalogApp, manageCatalogApp, createContainer, createVm, openContainerShell } from './runtimes-next.mjs';
-import { proxmoxConsoleSocket, proxmoxUpdateStorage, proxmoxCleanDisk } from './proxmox.mjs';
+import { catalog, runtimeInventory, installCatalogApp, manageCatalogApp, createContainer, createVm } from './runtimes-next.mjs';
+import { proxmoxConsoleSocket, proxmoxContainerConsoleSocket, proxmoxUpdateStorage, proxmoxCleanDisk } from './proxmox.mjs';
 import { validateSmtp, sendSmtpTest } from './mailer.mjs';
 import { mediaAvailable, convertMedia } from './media.mjs';
 import { createDataset, updateDataset } from './zfs.mjs';
@@ -861,15 +861,12 @@ export function createServer() {
       if (!context) return rejectUpgrade(socket, 401, 'Authentication required.');
       const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
       const vm = url.pathname.match(/^\/api\/console\/vm\/([1-9][0-9]{1,5})$/);
-      const container = url.pathname.match(/^\/api\/console\/container\/(lightnas-[a-z0-9][a-z0-9-]{0,60})$/);
+      const container = url.pathname.match(/^\/api\/console\/container\/([1-9][0-9]{1,5})$/);
       if (!vm && !container) return rejectUpgrade(socket, 403, 'Unknown console endpoint.');
       if (vm && !context.permissions.includes('vms.manage')) return rejectUpgrade(socket, 403, 'VM management permission required.');
       if (container && !context.permissions.includes('containers.manage')) return rejectUpgrade(socket, 403, 'Container management permission required.');
-      const backend = vm ? await proxmoxConsoleSocket(Number(vm[1])) : await openContainerShell(container[1]);
-      wss.handleUpgrade(req, socket, head, ws => {
-        if (vm) bridgeWebSocketToSocket(ws, backend);
-        else bridgeWebSocketToProcess(ws, backend);
-      });
+      const backend = vm ? await proxmoxConsoleSocket(Number(vm[1])) : await proxmoxContainerConsoleSocket(Number(container[1]));
+      wss.handleUpgrade(req, socket, head, ws => bridgeWebSocketToSocket(ws, backend));
     } catch (error) {
       if (!socket.destroyed) rejectUpgrade(socket, error.status === 401 ? 401 : 403, error.message || 'Console unavailable.');
     }
