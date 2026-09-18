@@ -34,6 +34,7 @@ jobs:
           node --check public/dialog-controls.js
           node --check public/enhancements.js
           node --check public/templates.js
+          node --check public/storage-manager.js
           node --check public/admin-security.js
           node --check public/identity-providers.js
           for file in src/*.mjs; do node --check "$file"; done
