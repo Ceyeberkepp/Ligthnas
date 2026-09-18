@@ -5,7 +5,7 @@ import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
-import { getStorageInventory } from './system.mjs';
+import { listStoragePools } from './storage-pools.mjs';
 
 const PROXMOX_SYSTEM_URL = 'https://download.proxmox.com/images/system/';
 const MAX_TEMPLATE_BYTES = Number(process.env.LIGHTNAS_TEMPLATE_MAX_BYTES || 4 * 1024 ** 3);
@@ -61,32 +61,19 @@ async function safeFetch(value) {
 }
 
 export async function templateStorageTargets() {
-  const storage = await getStorageInventory();
-  const targets = (storage.attachedVolumes || []).map(volume => ({
-    id: volume.id,
-    label: volume.mountPoint,
-    mountPoint: volume.mountPoint,
-    kind: 'virtual',
-    writable: Boolean(volume.writable && !volume.readOnly),
-    totalBytes: volume.totalBytes,
-    availableBytes: volume.availableBytes,
-    path: join(volume.mountPoint, '.lightnas', 'template', 'cache')
-  }));
-
-  // Keep a local fallback for systems that have no attached data volume yet.
-  // When virtual storage exists the UI prefers it and labels this as OS storage.
-  const localRoot = dirname(resolve(process.env.NAS_DATA_FILE || 'data/state.json'));
-  targets.push({
-    id: 'local',
-    label: 'LightNAS system storage',
-    mountPoint: localRoot,
-    kind: 'system',
-    writable: true,
-    totalBytes: storage.local?.totalBytes || 0,
-    availableBytes: storage.local?.availableBytes || 0,
-    path: join(localRoot, 'templates')
-  });
-  return targets;
+  const storage = await listStoragePools();
+  return storage.pools
+    .filter(pool => pool.online && pool.content.includes('vztmpl'))
+    .map(pool => ({
+      id: pool.id,
+      label: pool.name,
+      mountPoint: pool.mountPoint,
+      kind: pool.local ? 'local' : 'virtual',
+      writable: pool.writable,
+      totalBytes: pool.totalBytes,
+      availableBytes: pool.availableBytes,
+      path: join(pool.root, 'template', 'cache')
+    }));
 }
 
 async function targetFor(id, requireWritable = false) {
