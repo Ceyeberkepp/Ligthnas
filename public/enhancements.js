@@ -223,7 +223,8 @@ function storageUsageCard(item) {
 
 async function enhanceStorage() {
   const content = document.querySelector('#content');
-  if (!content || !['#storage', '#pools'].includes(location.hash) || content.querySelector('.unified-storage')) return;
+  if (!content || !['#storage', '#pools'].includes(location.hash) || content.querySelector('.unified-storage') || content.dataset.storageEnhancing === '1') return;
+  content.dataset.storageEnhancing = '1';
   try {
     const storage = await apiRequest('/api/storage');
     const volumes = storage.attachedVolumes || [];
@@ -254,6 +255,7 @@ async function enhanceStorage() {
     content.querySelector('.page-head')?.insertAdjacentElement('afterend', section);
     if (host) hideLegacySections(content, ['Disks', 'ZFS pools', 'ZFS datasets', 'Mounted filesystems', 'Existing ZFS pools']);
   } catch {}
+  finally { delete content.dataset.storageEnhancing; }
 }
 
 let monitorTimer;
