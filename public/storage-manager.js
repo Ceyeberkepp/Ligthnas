@@ -6,9 +6,11 @@ function sEsc(value) {
 function sBytes(value) {
   const n0 = Number(value);
   if (!Number.isFinite(n0)) return '—';
-  const units = ['B','KB','MB','GB','TB','PB'];
+  const units = ['B','KiB','MiB','GiB','TiB','PiB'];
   let n=n0,u=0; while(n>=1024&&u<units.length-1){n/=1024;u+=1;}
-  return `${n>=10||u===0?n.toFixed(0):n.toFixed(1)} ${units[u]}`;
+  const decimals=u>=4?2:n>=100?0:n>=10?1:u===0?0:2;
+  const rendered=n.toFixed(decimals).replace(/\.0+$|(?<=\.[0-9])0+$/g,'');
+  return `${rendered} ${units[u]}`;
 }
 async function sRequest(path, options={}) {
   const response=await fetch(path,{...options,headers:{'X-LightNAS-Request':'1',...(options.headers||{})}});
