@@ -26,11 +26,13 @@ function escapeHtml(value) {
 
 function bytes(value) {
   if (!Number.isFinite(value)) return '—';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'];
   let number = value;
   let unit = 0;
   while (number >= 1024 && unit < units.length - 1) { number /= 1024; unit += 1; }
-  return `${number >= 10 || unit === 0 ? number.toFixed(0) : number.toFixed(1)} ${units[unit]}`;
+  const decimals = unit >= 4 ? 2 : number >= 100 ? 0 : number >= 10 ? 1 : unit === 0 ? 0 : 2;
+  const rendered = number.toFixed(decimals).replace(/\.0+$|(?<=\.[0-9])0+$/g, '');
+  return `${rendered} ${units[unit]}`;
 }
 
 function percent(used, total) {
