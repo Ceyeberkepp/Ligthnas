@@ -46,7 +46,7 @@ function storageCard(pool) {
   const contents=(pool.contentLabels||[]).join(' · ')||'No content types';
   return `<article class="inventory-card storage-pool-card" data-storage-card="${sEsc(pool.id)}" role="button" tabindex="0" aria-label="Manage storage ${sEsc(pool.name)}">
     <div class="volume-title"><h3>${sEsc(pool.name)}</h3><span class="volume-state ${pool.online&&pool.writable?'writable':'readonly'}">${pool.online?(pool.writable?'ONLINE':'READ ONLY'):'OFFLINE'}</span></div>
-    <p>${pool.local?'Local appliance storage · OS disk remainder':sEsc(pool.mountPoint||'Attached virtual storage')}</p>
+    <p>${pool.local?(pool.dedicated?'Local appliance storage · dedicated post-OS data partition':'Local appliance storage · shared with the OS filesystem'):sEsc(pool.mountPoint||'Attached virtual storage')}</p>
     <div class="track"><span style="width:${Math.min(100,pool.usedPercent||0)}%"></span></div>
     <p><strong>${sBytes(pool.availableBytes)} free</strong> of ${sBytes(pool.totalBytes)} · ${pool.usedPercent||0}% used</p>
     <p class="muted">${sEsc(contents)}</p>
@@ -61,10 +61,11 @@ function renderStorageManager() {
   const unconfigured=(data.availableSources||[]).filter(item=>!item.configured);
   slot.innerHTML=`
     <section class="module-hero">
-      <div class="panel-head"><div><span class="eyebrow">LIGHTNAS STORAGE MANAGER</span><h2>${sBytes(visible.totalBytes||0)} total usable storage</h2></div>
+      <div class="panel-head"><div><span class="eyebrow">LIGHTNAS STORAGE MANAGER</span><h2>${sBytes(visible.totalBytes||0)} total visible capacity</h2></div>
         <div class="head-actions"><button class="secondary" type="button" data-storage-refresh>Refresh</button>${unconfigured.length?'<button class="primary" type="button" data-create-storage>+ Create storage</button>':''}</div>
       </div>
       <p>${sBytes(visible.usedBytes||0)} used · ${sBytes(visible.availableBytes||0)} free across local storage and unique attached virtual volumes. The OS/root filesystem is counted once as <b>local</b>; duplicate bind mounts are not counted.</p>
+      <div class="storage-capacity-breakdown">${(data.pools||[]).filter(pool=>pool.local&&pool.online).map(pool=>`<span><b>${sEsc(pool.name)}</b> ${sBytes(pool.totalBytes)}</span>`).join('')}${(data.availableSources||[]).map(source=>`<span><b>${sEsc(source.mountPoint)}</b> ${sBytes(source.totalBytes)}</span>`).join('')}</div>
     </section>
     <h2>Storage</h2>
     <div class="inventory-grid">${(data.pools||[]).map(storageCard).join('')||'<div class="empty"><p>No storage pools are online.</p></div>'}</div>
