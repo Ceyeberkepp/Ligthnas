@@ -96,7 +96,8 @@ function sourceForPool(pool, inventory) {
         : 0,
       writable: true,
       readOnly: false,
-      type: 'local'
+      type: 'local',
+      dedicated: Boolean(inventory.local?.dedicated)
     };
   }
   return inventory.attachedVolumes.find(item => item.id === pool.sourceId) || null;
@@ -118,6 +119,7 @@ function publicPool(pool, source) {
     writable: Boolean(source?.writable !== false && !source?.readOnly),
     online: Boolean(source),
     local: pool.id === 'local',
+    dedicated: pool.id === 'local' ? Boolean(source?.dedicated) : true,
     createdAt: pool.createdAt || null
   };
 }
