@@ -168,9 +168,7 @@ pct exec "$ctid" -- env LIGHTNAS_DETECTED_PVE_MAJOR="$pve_major" bash -lc '
 # explicitly attached as mpN. The OS/root filesystem is not changed.
 latest_config="$(pct config "$ctid")"
 
-# Persist Proxmox's authoritative virtual-disk sizes inside the guest. For LXC
-# storage accounting, LightNAS should prefer the host pct config size= values
-# over apparent filesystem geometry reported by sparse/raw backing images.
+# Persist Proxmox's authoritative virtual-disk sizes inside the guest.
 storage_manifest="$(mktemp)"
 PCT_CONFIG="$latest_config" python3 - "$ctid" >"$storage_manifest" <<'PY'
 import json, os, re, sys
@@ -231,7 +229,8 @@ pct push "$ctid" "$storage_manifest" /etc/lightnas/proxmox-storage.json
 pct exec "$ctid" -- chmod 0644 /etc/lightnas/proxmox-storage.json
 rm -f "$storage_manifest"
 
-mapfile -t guest_data_mounts < <(sed -nE 's/^mp[0-9]+: .*mp=([^,]+).*/\1/p' <<<"$latest_config" | grep -v '^/var/lib/lightnas-pvefor guest_mount in "${guest_data_mounts[@]}"; do
+mapfile -t guest_data_mounts < <(sed -nE 's/^mp[0-9]+: .*mp=([^,]+).*/\1/p' <<<"$latest_config" | grep -v '^/var/lib/lightnas-pve$' || true)
+for guest_mount in "${guest_data_mounts[@]}"; do
   [[ "$guest_mount" == /* ]] || guest_mount="/$guest_mount"
   echo "Granting LightNAS managed access to $guest_mount..."
   pct exec "$ctid" -- bash -lc '
@@ -294,72 +293,6 @@ pct exec "$ctid" -- bash -lc '
   grep "^LIGHTNAS_VM_" /etc/lightnas/runtime.env 2>/dev/null || true
   echo "--- Proxmox storage manifest ---"
   cat /etc/lightnas/proxmox-storage.json 2>/dev/null || true
-'
-
-echo "--- Nested runtime self-test ---"
-pct exec "$ctid" -- python3 -c 'import json,socket; s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.connect("/run/lightnas/host-agent.sock"); s.sendall(b"{\"action\":\"runtime-diagnostics\"}\n"); line=s.makefile("rb").readline(); print(json.dumps(json.loads(line), indent=2))'
- || true)
-for guest_mount in "${guest_data_mounts[@]}"; do
-  [[ "$guest_mount" == /* ]] || guest_mount="/$guest_mount"
-  echo "Granting LightNAS managed access to $guest_mount..."
-  pct exec "$ctid" -- bash -lc '
-    set -Eeuo pipefail
-    mount="$1"
-    if [[ -d "$mount" ]]; then
-      setfacl -m u:lightnas:rwx "$mount"
-      setfacl -m d:u:lightnas:rwx "$mount"
-      install -d -m 0770 "$mount/.lightnas/template/cache" "$mount/.lightnas/storage"
-      setfacl -R -m u:lightnas:rwx "$mount/.lightnas"
-      setfacl -R -m d:u:lightnas:rwx "$mount/.lightnas"
-      for vm_user in libvirt-qemu qemu; do
-        if id "$vm_user" >/dev/null 2>&1; then
-          setfacl -m "u:${vm_user}:rwx" "$mount" "$mount/.lightnas"
-          setfacl -m "d:u:${vm_user}:rwx" "$mount/.lightnas"
-          setfacl -R -m "u:${vm_user}:rwx" "$mount/.lightnas/storage"
-          setfacl -R -m "d:u:${vm_user}:rwx" "$mount/.lightnas/storage"
-        fi
-      done
-    fi
-  ' _ "$guest_mount" || echo "Warning: unable to grant LightNAS access on $guest_mount; it will remain browse-only." >&2
-done
-pct exec "$ctid" -- systemctl restart lightnas-host-agent lightnas
-
-echo
-echo "LightNAS local-runtime installation finished in LXC $ctid."
-echo 'Containers: native LXC/liblxc inside LightNAS.'
-echo 'VMs: QEMU/libvirt inside LightNAS; KVM is used when available and TCG otherwise.'
-echo 'Proxmox host APIs are not used for normal LightNAS compute operations.'
-
-echo "Performing strict post-install verification..."
-latest_config="$(pct config "$ctid")"
-grep -Eq '^features: .*nesting=1' <<<"$latest_config" || { echo 'ERROR: nesting=1 is missing.' >&2; exit 1; }
-grep -Eq '^features: .*keyctl=1' <<<"$latest_config" || { echo 'ERROR: keyctl=1 is missing.' >&2; exit 1; }
-grep -Eq '^features: .*mknod=1' <<<"$latest_config" || { echo 'ERROR: mknod=1 is missing.' >&2; exit 1; }
-
-pct exec "$ctid" -- bash -lc '
-  set -Eeuo pipefail
-  command -v lxc-ls >/dev/null
-  command -v lxc-create >/dev/null
-  command -v debootstrap >/dev/null
-  command -v virsh >/dev/null
-  command -v virt-install >/dev/null
-  systemctl is-active --quiet lightnas-host-agent
-  systemctl is-active --quiet lightnas
-' || {
-  echo "ERROR: LightNAS nested runtime verification failed." >&2
-  pct exec "$ctid" -- systemctl status lightnas-host-agent lightnas --no-pager --full || true
-  exit 1
-}
-
-pct exec "$ctid" -- bash -lc '
-  echo "--- Runtime status ---"
-  cat /var/lib/lightnas/runtime-status.txt 2>/dev/null || true
-  echo "--- Bridges ---"
-  ip -br addr show type bridge 2>/dev/null || true
-  echo "--- Services ---"
-  systemctl --no-pager is-active lightnas-host-agent lightnas lxc-net.service 2>/dev/null || true
-  echo "--- VM acceleration ---"
-  grep "^LIGHTNAS_VM_" /etc/lightnas/runtime.env 2>/dev/null || true
 '
 
 echo "--- Nested runtime self-test ---"
