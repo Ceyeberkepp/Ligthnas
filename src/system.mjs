@@ -27,6 +27,33 @@ function isSystemMount(mountPoint) {
     mountPoint === '/var/lib/lightnas-pve' || mountPoint.startsWith('/var/lib/lightnas-pve/');
 }
 
+export function reconcileProxmoxMounts(filesystems, proxmoxStorage) {
+  const normalizeMount = value => String(value || '').replace(/\/+$/, '') || '/';
+  const filesystemByMount = new Map((filesystems || []).map(item => [normalizeMount(item.mountPoint), item]));
+  return (proxmoxStorage?.mounts || []).map(declared => {
+    const mountPoint = normalizeMount(declared.mountPoint);
+    const item = filesystemByMount.get(mountPoint) || null;
+    const totalBytes = Number(declared.sizeBytes) || 0;
+    const filesystemUsed = item ? Math.max(0, Number(item.usedBytes) || 0) : 0;
+    const usedBytes = Math.min(totalBytes, filesystemUsed);
+    return {
+      id: item?.id || Buffer.from(`${declared.volume || declared.slot}:${mountPoint}`).toString('base64url'),
+      device: item?.device || declared.volume || declared.slot,
+      mountPoint,
+      type: item?.type || 'virtual',
+      readOnly: item?.readOnly ?? false,
+      writable: item?.writable ?? true,
+      totalBytes,
+      availableBytes: Math.max(0, totalBytes - usedBytes),
+      usedBytes,
+      usedPercent: totalBytes ? Math.round((usedBytes / totalBytes) * 100) : 0,
+      capacitySource: 'proxmox-pct-config',
+      configuredSize: declared.size || null,
+      reportedFilesystemBytes: item?.totalBytes || null
+    };
+  }).filter(item => item.totalBytes > 0);
+}
+
 export async function getStorageInventory() {
   const [blockDevices, pools, datasets, containerType, filesystems, proxmoxManifestText] = await Promise.all([
     command('lsblk', ['-J', '-b', '-o', 'NAME,PATH,TYPE,SIZE,FSTYPE,MOUNTPOINT,MODEL,TRAN']),
@@ -73,33 +100,9 @@ export async function getStorageInventory() {
   // Proxmox helper provides pct config metadata, that manifest is authoritative:
   // only declared mpN mounts are treated as attached data volumes and their
   // size= values are used for capacity accounting.
-  const normalizeMount = value => String(value || '').replace(/\/+$/, '') || '/';
-  const filesystemByMount = new Map(filesystems.map(item => [normalizeMount(item.mountPoint), item]));
-
   let attachedVolumes = [];
   if (inContainer && proxmoxStorage) {
-    attachedVolumes = [...proxmoxMounts.values()].map(declared => {
-      const mountPoint = normalizeMount(declared.mountPoint);
-      const item = filesystemByMount.get(mountPoint) || null;
-      const totalBytes = Number(declared.sizeBytes) || 0;
-      const filesystemUsed = item ? Math.max(0, Number(item.usedBytes) || 0) : 0;
-      const usedBytes = Math.min(totalBytes, filesystemUsed);
-      return {
-        id: item?.id || Buffer.from(`${declared.volume || declared.slot}:${mountPoint}`).toString('base64url'),
-        device: item?.device || declared.volume || declared.slot,
-        mountPoint,
-        type: item?.type || 'virtual',
-        readOnly: item?.readOnly ?? false,
-        writable: item?.writable ?? true,
-        totalBytes,
-        availableBytes: Math.max(0, totalBytes - usedBytes),
-        usedBytes,
-        usedPercent: totalBytes ? Math.round((usedBytes / totalBytes) * 100) : 0,
-        capacitySource: 'proxmox-pct-config',
-        configuredSize: declared.size || null,
-        reportedFilesystemBytes: item?.totalBytes || null
-      };
-    }).filter(item => item.totalBytes > 0);
+    attachedVolumes = reconcileProxmoxMounts(filesystems, proxmoxStorage);
   } else {
     const volumeCandidates = filesystems
       .filter(item => !isSystemMount(item.mountPoint) && item.totalBytes > 0)
