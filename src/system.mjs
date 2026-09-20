@@ -28,12 +28,13 @@ function isSystemMount(mountPoint) {
 }
 
 export async function getStorageInventory() {
-  const [blockDevices, pools, datasets, containerType, filesystems] = await Promise.all([
+  const [blockDevices, pools, datasets, containerType, filesystems, proxmoxManifestText] = await Promise.all([
     command('lsblk', ['-J', '-b', '-o', 'NAME,PATH,TYPE,SIZE,FSTYPE,MOUNTPOINT,MODEL,TRAN']),
     command('zpool', ['list', '-H', '-p', '-o', 'name,size,alloc,free,health']),
     command('zfs', ['list', '-H', '-p', '-o', 'name,used,available,mountpoint,compression']),
     command('systemd-detect-virt', ['--container']),
-    getFilesystems()
+    getFilesystems(),
+    readText('/etc/lightnas/proxmox-storage.json')
   ]);
   const inContainer = Boolean(containerType && containerType !== 'none');
   let disks = [];
@@ -56,6 +57,17 @@ export async function getStorageInventory() {
   const rootFilesystem = filesystems.find(item => item.mountPoint === '/');
   const rootDevice = rootFilesystem?.device || null;
 
+  let proxmoxStorage = null;
+  try {
+    const parsed = JSON.parse(proxmoxManifestText || 'null');
+    if (parsed?.source === 'proxmox-pct-config' && Array.isArray(parsed.mounts)) proxmoxStorage = parsed;
+  } catch {}
+  const proxmoxMounts = new Map(
+    (proxmoxStorage?.mounts || [])
+      .filter(item => item?.mountPoint && Number(item?.sizeBytes) > 0)
+      .map(item => [item.mountPoint, item])
+  );
+
   // In an LXC, systemd sandbox bind mounts can make the root filesystem appear
   // again at /mnt, /media, /srv, /var/tmp, etc. Those are not extra storage.
   // The storage UI should show each virtual disk/mount only once and should not
@@ -73,18 +85,27 @@ export async function getStorageInventory() {
     if (!existing || item.mountPoint.length < existing.mountPoint.length) uniqueVolumes.set(key, item);
   }
 
-  const attachedVolumes = [...uniqueVolumes.values()].map(item => ({
-    id: item.id,
-    device: item.device,
-    mountPoint: item.mountPoint,
-    type: item.type,
-    readOnly: item.readOnly,
-    writable: item.writable,
-    totalBytes: item.totalBytes,
-    availableBytes: item.availableBytes,
-    usedBytes: item.usedBytes,
-    usedPercent: item.usedPercent
-  }));
+  const attachedVolumes = [...uniqueVolumes.values()].map(item => {
+    const declared = proxmoxMounts.get(item.mountPoint);
+    const totalBytes = declared?.sizeBytes || item.totalBytes;
+    const usedBytes = Math.min(totalBytes, item.usedBytes);
+    const availableBytes = Math.max(0, totalBytes - usedBytes);
+    return {
+      id: item.id,
+      device: item.device,
+      mountPoint: item.mountPoint,
+      type: item.type,
+      readOnly: item.readOnly,
+      writable: item.writable,
+      totalBytes,
+      availableBytes,
+      usedBytes,
+      usedPercent: totalBytes ? Math.round((usedBytes / totalBytes) * 100) : 0,
+      capacitySource: declared ? 'proxmox-pct-config' : 'filesystem',
+      configuredSize: declared?.size || null,
+      reportedFilesystemBytes: item.totalBytes
+    };
+  });
 
   const virtualStorage = attachedVolumes.reduce((summary, item) => {
     summary.totalBytes += item.totalBytes;
@@ -108,11 +129,18 @@ export async function getStorageInventory() {
     local = { path: localStoragePath, mountPoint: coveringMount, dedicated: coveringMount !== '/', totalBytes, availableBytes, usedBytes: Math.max(0, totalBytes - availableBytes) };
   } catch {}
 
+  // A local path that shares the OS/root filesystem is shown as a storage
+  // target but is not added to the NAS data-capacity headline when dedicated
+  // attached data volumes exist. A truly dedicated post-OS local partition is
+  // counted normally.
+  const includeLocalInUsable = Boolean(local && (local.dedicated || virtualStorage.count === 0));
   const usableStorage = {
-    totalBytes: (local?.totalBytes || 0) + virtualStorage.totalBytes,
-    availableBytes: (local?.availableBytes || 0) + virtualStorage.availableBytes,
-    usedBytes: (local?.usedBytes || 0) + virtualStorage.usedBytes,
-    count: (local ? 1 : 0) + virtualStorage.count
+    totalBytes: (includeLocalInUsable ? local?.totalBytes || 0 : 0) + virtualStorage.totalBytes,
+    availableBytes: (includeLocalInUsable ? local?.availableBytes || 0 : 0) + virtualStorage.availableBytes,
+    usedBytes: (includeLocalInUsable ? local?.usedBytes || 0 : 0) + virtualStorage.usedBytes,
+    count: (includeLocalInUsable ? 1 : 0) + virtualStorage.count,
+    includesSharedOsLocal: includeLocalInUsable && !local?.dedicated,
+    localExcludedBecauseSharedOs: Boolean(local && !local.dedicated && virtualStorage.count > 0)
   };
   usableStorage.usedPercent = usableStorage.totalBytes
     ? Math.round((usableStorage.usedBytes / usableStorage.totalBytes) * 100)
@@ -124,6 +152,7 @@ export async function getStorageInventory() {
     attachedVolumes,
     virtualStorage,
     usableStorage,
+    proxmoxStorage,
     environment: { container: inContainer, containerType: inContainer ? containerType : null },
     zfs: {
       available: pools !== null && datasets !== null,
