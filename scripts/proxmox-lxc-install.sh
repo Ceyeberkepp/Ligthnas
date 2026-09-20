@@ -168,10 +168,9 @@ pct exec "$ctid" -- env LIGHTNAS_DETECTED_PVE_MAJOR="$pve_major" bash -lc '
 # explicitly attached as mpN. The OS/root filesystem is not changed.
 latest_config="$(pct config "$ctid")"
 
-# Persist Proxmox's authoritative virtual-disk sizes inside LightNAS. Filesystem
-# geometry inside an LXC can report a backing filesystem/sparse-image capacity
-# that is larger than the virtual volume assigned in pct config. LightNAS must
-# use the Proxmox size= values for capacity accounting.
+# Persist Proxmox's authoritative virtual-disk sizes inside the guest. For LXC
+# storage accounting, LightNAS should prefer the host pct config size= values
+# over apparent filesystem geometry reported by sparse/raw backing images.
 storage_manifest="$(mktemp)"
 PCT_CONFIG="$latest_config" python3 - "$ctid" >"$storage_manifest" <<'PY'
 import json, os, re, sys
@@ -181,7 +180,7 @@ config = os.environ.get("PCT_CONFIG", "")
 units = {"": 1, "B": 1, "K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4, "P": 1024**5}
 
 def size_bytes(value):
-    match = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?)([BKMGTP]?)", value.strip(), re.I)
+    match = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?)([BKMGTP]?)", str(value or "").strip(), re.I)
     if not match:
         return 0
     return int(float(match.group(1)) * units[match.group(2).upper()])
@@ -194,17 +193,16 @@ def parse_entry(slot, raw):
         if "=" in part:
             key, value = part.split("=", 1)
             options[key] = value
-    storage = volume.split(":", 1)[0] if ":" in volume else None
     mount = "/" if slot == "rootfs" else options.get("mp")
     if mount and not mount.startswith("/"):
         mount = "/" + mount
     return {
         "slot": slot,
         "volume": volume,
-        "storage": storage,
+        "storage": volume.split(":", 1)[0] if ":" in volume else None,
         "mountPoint": mount,
         "size": options.get("size"),
-        "sizeBytes": size_bytes(options.get("size", "")),
+        "sizeBytes": size_bytes(options.get("size")),
     }
 
 rootfs = None
@@ -227,6 +225,7 @@ print(json.dumps({
     "mounts": mounts,
 }, indent=2))
 PY
+
 pct exec "$ctid" -- install -d -m 0755 /etc/lightnas
 pct push "$ctid" "$storage_manifest" /etc/lightnas/proxmox-storage.json
 pct exec "$ctid" -- chmod 0644 /etc/lightnas/proxmox-storage.json
