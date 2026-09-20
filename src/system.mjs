@@ -68,44 +68,68 @@ export async function getStorageInventory() {
       .map(item => [item.mountPoint, item])
   );
 
-  // In an LXC, systemd sandbox bind mounts can make the root filesystem appear
-  // again at /mnt, /media, /srv, /var/tmp, etc. Those are not extra storage.
-  // The storage UI should show each virtual disk/mount only once and should not
-  // count the OS/root filesystem toward NAS data capacity.
-  const volumeCandidates = filesystems
-    .filter(item => !isSystemMount(item.mountPoint) && item.totalBytes > 0)
-    .filter(item => item.device !== rootDevice)
-    .filter(item => item.mountPoint !== localStoragePath)
-    .filter(item => !/^\/(?:proc|sys|dev|run)(?:\/|$)/.test(item.mountPoint));
+  // In an LXC, filesystem geometry can reflect the backing filesystem or raw
+  // image rather than the virtual size assigned by the hypervisor. When the
+  // Proxmox helper provides pct config metadata, that manifest is authoritative:
+  // only declared mpN mounts are treated as attached data volumes and their
+  // size= values are used for capacity accounting.
+  const normalizeMount = value => String(value || '').replace(/\/+$/, '') || '/';
+  const filesystemByMount = new Map(filesystems.map(item => [normalizeMount(item.mountPoint), item]));
 
-  const uniqueVolumes = new Map();
-  for (const item of volumeCandidates) {
-    const key = `${item.device}:${item.type}:${item.totalBytes}`;
-    const existing = uniqueVolumes.get(key);
-    if (!existing || item.mountPoint.length < existing.mountPoint.length) uniqueVolumes.set(key, item);
-  }
+  let attachedVolumes = [];
+  if (inContainer && proxmoxStorage) {
+    attachedVolumes = [...proxmoxMounts.values()].map(declared => {
+      const mountPoint = normalizeMount(declared.mountPoint);
+      const item = filesystemByMount.get(mountPoint) || null;
+      const totalBytes = Number(declared.sizeBytes) || 0;
+      const filesystemUsed = item ? Math.max(0, Number(item.usedBytes) || 0) : 0;
+      const usedBytes = Math.min(totalBytes, filesystemUsed);
+      return {
+        id: item?.id || Buffer.from(`${declared.volume || declared.slot}:${mountPoint}`).toString('base64url'),
+        device: item?.device || declared.volume || declared.slot,
+        mountPoint,
+        type: item?.type || 'virtual',
+        readOnly: item?.readOnly ?? false,
+        writable: item?.writable ?? true,
+        totalBytes,
+        availableBytes: Math.max(0, totalBytes - usedBytes),
+        usedBytes,
+        usedPercent: totalBytes ? Math.round((usedBytes / totalBytes) * 100) : 0,
+        capacitySource: 'proxmox-pct-config',
+        configuredSize: declared.size || null,
+        reportedFilesystemBytes: item?.totalBytes || null
+      };
+    }).filter(item => item.totalBytes > 0);
+  } else {
+    const volumeCandidates = filesystems
+      .filter(item => !isSystemMount(item.mountPoint) && item.totalBytes > 0)
+      .filter(item => item.device !== rootDevice)
+      .filter(item => item.mountPoint !== localStoragePath)
+      .filter(item => !/^\/(?:proc|sys|dev|run)(?:\/|$)/.test(item.mountPoint));
 
-  const attachedVolumes = [...uniqueVolumes.values()].map(item => {
-    const declared = proxmoxMounts.get(item.mountPoint);
-    const totalBytes = declared?.sizeBytes || item.totalBytes;
-    const usedBytes = Math.min(totalBytes, item.usedBytes);
-    const availableBytes = Math.max(0, totalBytes - usedBytes);
-    return {
+    const uniqueVolumes = new Map();
+    for (const item of volumeCandidates) {
+      const key = `${item.device}:${item.type}:${item.totalBytes}`;
+      const existing = uniqueVolumes.get(key);
+      if (!existing || item.mountPoint.length < existing.mountPoint.length) uniqueVolumes.set(key, item);
+    }
+
+    attachedVolumes = [...uniqueVolumes.values()].map(item => ({
       id: item.id,
       device: item.device,
       mountPoint: item.mountPoint,
       type: item.type,
       readOnly: item.readOnly,
       writable: item.writable,
-      totalBytes,
-      availableBytes,
-      usedBytes,
-      usedPercent: totalBytes ? Math.round((usedBytes / totalBytes) * 100) : 0,
-      capacitySource: declared ? 'proxmox-pct-config' : 'filesystem',
-      configuredSize: declared?.size || null,
+      totalBytes: item.totalBytes,
+      availableBytes: item.availableBytes,
+      usedBytes: item.usedBytes,
+      usedPercent: item.usedPercent,
+      capacitySource: inContainer ? 'guest-filesystem-unverified' : 'filesystem',
+      configuredSize: null,
       reportedFilesystemBytes: item.totalBytes
-    };
-  });
+    }));
+  }
 
   const virtualStorage = attachedVolumes.reduce((summary, item) => {
     summary.totalBytes += item.totalBytes;
@@ -126,19 +150,30 @@ export async function getStorageInventory() {
     const mounts = await readText('/proc/self/mountinfo');
     const mountPoints = mounts.split('\n').map(line => line.split(' - ')[0]?.split(' ')[4]?.replaceAll('\\040', ' ')).filter(Boolean);
     const coveringMount = mountPoints.filter(point => localStoragePath === point || localStoragePath.startsWith(`${point.replace(/\/$/, '')}/`)).sort((a, b) => b.length - a.length)[0] || '/';
-    local = { path: localStoragePath, mountPoint: coveringMount, dedicated: coveringMount !== '/', totalBytes, availableBytes, usedBytes: Math.max(0, totalBytes - availableBytes) };
+    const declaredLocalMount = inContainer && proxmoxStorage
+      ? [...proxmoxMounts.keys()].find(point => localStoragePath === point || localStoragePath.startsWith(`${point.replace(/\/$/, '')}/`))
+      : null;
+    const dedicated = inContainer ? Boolean(declaredLocalMount) : coveringMount !== '/';
+    local = { path: localStoragePath, mountPoint: coveringMount, dedicated, totalBytes, availableBytes, usedBytes: Math.max(0, totalBytes - availableBytes) };
   } catch {}
 
-  // A local path that shares the OS/root filesystem is shown as a storage
-  // target but is not added to the NAS data-capacity headline when dedicated
-  // attached data volumes exist. A truly dedicated post-OS local partition is
-  // counted normally.
-  const includeLocalInUsable = Boolean(local && (local.dedicated || virtualStorage.count === 0));
+  // In container installs, the headline represents attached NAS data volumes.
+  // The OS/root-backed local target remains usable for metadata/ISOs but is not
+  // added to the data-capacity total when attached volumes exist.
+  const capacityVerified = !inContainer || Boolean(proxmoxStorage);
+  const includeLocalInUsable = Boolean(
+    local && (
+      (!inContainer && (local.dedicated || virtualStorage.count === 0)) ||
+      (inContainer && virtualStorage.count === 0)
+    )
+  );
   const usableStorage = {
-    totalBytes: (includeLocalInUsable ? local?.totalBytes || 0 : 0) + virtualStorage.totalBytes,
-    availableBytes: (includeLocalInUsable ? local?.availableBytes || 0 : 0) + virtualStorage.availableBytes,
-    usedBytes: (includeLocalInUsable ? local?.usedBytes || 0 : 0) + virtualStorage.usedBytes,
-    count: (includeLocalInUsable ? 1 : 0) + virtualStorage.count,
+    totalBytes: capacityVerified ? (includeLocalInUsable ? local?.totalBytes || 0 : 0) + virtualStorage.totalBytes : 0,
+    availableBytes: capacityVerified ? (includeLocalInUsable ? local?.availableBytes || 0 : 0) + virtualStorage.availableBytes : 0,
+    usedBytes: capacityVerified ? (includeLocalInUsable ? local?.usedBytes || 0 : 0) + virtualStorage.usedBytes : 0,
+    count: capacityVerified ? (includeLocalInUsable ? 1 : 0) + virtualStorage.count : 0,
+    verified: capacityVerified,
+    source: proxmoxStorage ? 'proxmox-pct-config' : (inContainer ? 'unverified-container' : 'local-filesystem'),
     includesSharedOsLocal: includeLocalInUsable && !local?.dedicated,
     localExcludedBecauseSharedOs: Boolean(local && !local.dedicated && virtualStorage.count > 0)
   };
