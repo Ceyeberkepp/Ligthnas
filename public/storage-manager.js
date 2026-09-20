@@ -59,13 +59,18 @@ function renderStorageManager() {
   if(!slot||!data) return;
   const visible=data.visibleSummary||data.summary||{};
   const unconfigured=(data.availableSources||[]).filter(item=>!item.configured);
+  const verified=visible.verified!==false;
+  const sharedLocalExcluded=Boolean(visible.localExcludedBecauseSharedOs);
+  const dataSources=(data.availableSources||[]);
   slot.innerHTML=`
     <section class="module-hero">
-      <div class="panel-head"><div><span class="eyebrow">LIGHTNAS STORAGE MANAGER</span><h2>${sBytes(visible.totalBytes||0)} total visible capacity</h2></div>
+      <div class="panel-head"><div><span class="eyebrow">LIGHTNAS STORAGE MANAGER</span><h2>${verified?sBytes(visible.totalBytes||0):'Host capacity metadata required'}${verified?' data capacity':''}</h2></div>
         <div class="head-actions"><button class="secondary" type="button" data-storage-refresh>Refresh</button>${unconfigured.length?'<button class="primary" type="button" data-create-storage>+ Create storage</button>':''}</div>
       </div>
-      <p>${sBytes(visible.usedBytes||0)} used · ${sBytes(visible.availableBytes||0)} free across local storage and unique attached virtual volumes. The OS/root filesystem is counted once as <b>local</b>; duplicate bind mounts are not counted.</p>
-      <div class="storage-capacity-breakdown">${(data.pools||[]).filter(pool=>pool.local&&pool.online).map(pool=>`<span><b>${sEsc(pool.name)}</b> ${sBytes(pool.totalBytes)}</span>`).join('')}${(data.availableSources||[]).map(source=>`<span><b>${sEsc(source.mountPoint)}</b> ${sBytes(source.totalBytes)}</span>`).join('')}</div>
+      <p>${verified
+        ? `${sBytes(visible.usedBytes||0)} used · ${sBytes(visible.availableBytes||0)} free across attached data volumes.${sharedLocalExcluded?' The OS/root-backed local storage is shown separately and is not included in this total.':''}`
+        : 'This LightNAS instance is running inside a container and has not received authoritative virtual-disk sizes from its host yet. Guest filesystem geometry is not used for the headline total.'}</p>
+      <div class="storage-capacity-breakdown">${dataSources.map(source=>`<span><b>${sEsc(source.mountPoint)}</b> ${source.capacitySource==='proxmox-pct-config'?sBytes(source.totalBytes):'unverified'}${source.configuredSize?` · host ${sEsc(source.configuredSize)}`:''}</span>`).join('')}</div>
     </section>
     <h2>Storage</h2>
     <div class="inventory-grid">${(data.pools||[]).map(storageCard).join('')||'<div class="empty"><p>No storage pools are online.</p></div>'}</div>
