@@ -150,7 +150,10 @@ export async function listStoragePools() {
     usedBytes: volume.usedBytes,
     usedPercent: volume.usedPercent,
     writable: Boolean(volume.writable && !volume.readOnly),
-    configured: configuredSources.has(volume.id)
+    configured: configuredSources.has(volume.id),
+    capacitySource: volume.capacitySource || 'filesystem',
+    configuredSize: volume.configuredSize || null,
+    reportedFilesystemBytes: volume.reportedFilesystemBytes || volume.totalBytes
   }));
 
   const summary = pools.filter(pool => pool.online).reduce((result, pool) => {
