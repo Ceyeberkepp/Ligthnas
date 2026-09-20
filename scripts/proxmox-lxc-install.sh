@@ -167,7 +167,139 @@ pct exec "$ctid" -- env LIGHTNAS_DETECTED_PVE_MAJOR="$pve_major" bash -lc '
 # Grant the unprivileged LightNAS web service access to every virtual data mount
 # explicitly attached as mpN. The OS/root filesystem is not changed.
 latest_config="$(pct config "$ctid")"
-mapfile -t guest_data_mounts < <(sed -nE 's/^mp[0-9]+: .*mp=([^,]+).*/\1/p' <<<"$latest_config" | grep -v '^/var/lib/lightnas-pve$' || true)
+
+# Persist Proxmox's authoritative virtual-disk sizes inside LightNAS. Filesystem
+# geometry inside an LXC can report a backing filesystem/sparse-image capacity
+# that is larger than the virtual volume assigned in pct config. LightNAS must
+# use the Proxmox size= values for capacity accounting.
+storage_manifest="$(mktemp)"
+PCT_CONFIG="$latest_config" python3 - "$ctid" >"$storage_manifest" <<'PY'
+import json, os, re, sys
+
+ctid = int(sys.argv[1])
+config = os.environ.get("PCT_CONFIG", "")
+units = {"": 1, "B": 1, "K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4, "P": 1024**5}
+
+def size_bytes(value):
+    match = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?)([BKMGTP]?)", value.strip(), re.I)
+    if not match:
+        return 0
+    return int(float(match.group(1)) * units[match.group(2).upper()])
+
+def parse_entry(slot, raw):
+    parts = [part.strip() for part in raw.split(",") if part.strip()]
+    volume = parts[0] if parts else ""
+    options = {}
+    for part in parts[1:]:
+        if "=" in part:
+            key, value = part.split("=", 1)
+            options[key] = value
+    storage = volume.split(":", 1)[0] if ":" in volume else None
+    mount = "/" if slot == "rootfs" else options.get("mp")
+    if mount and not mount.startswith("/"):
+        mount = "/" + mount
+    return {
+        "slot": slot,
+        "volume": volume,
+        "storage": storage,
+        "mountPoint": mount,
+        "size": options.get("size"),
+        "sizeBytes": size_bytes(options.get("size", "")),
+    }
+
+rootfs = None
+mounts = []
+for line in config.splitlines():
+    match = re.match(r"^(rootfs|mp\d+):\s*(.+)$", line)
+    if not match:
+        continue
+    entry = parse_entry(match.group(1), match.group(2))
+    if entry["slot"] == "rootfs":
+        rootfs = entry
+    elif entry["mountPoint"] != "/var/lib/lightnas-pve":
+        mounts.append(entry)
+
+print(json.dumps({
+    "version": 1,
+    "source": "proxmox-pct-config",
+    "ctid": ctid,
+    "rootfs": rootfs,
+    "mounts": mounts,
+}, indent=2))
+PY
+pct exec "$ctid" -- install -d -m 0755 /etc/lightnas
+pct push "$ctid" "$storage_manifest" /etc/lightnas/proxmox-storage.json
+pct exec "$ctid" -- chmod 0644 /etc/lightnas/proxmox-storage.json
+rm -f "$storage_manifest"
+
+mapfile -t guest_data_mounts < <(sed -nE 's/^mp[0-9]+: .*mp=([^,]+).*/\1/p' <<<"$latest_config" | grep -v '^/var/lib/lightnas-pvefor guest_mount in "${guest_data_mounts[@]}"; do
+  [[ "$guest_mount" == /* ]] || guest_mount="/$guest_mount"
+  echo "Granting LightNAS managed access to $guest_mount..."
+  pct exec "$ctid" -- bash -lc '
+    set -Eeuo pipefail
+    mount="$1"
+    if [[ -d "$mount" ]]; then
+      setfacl -m u:lightnas:rwx "$mount"
+      setfacl -m d:u:lightnas:rwx "$mount"
+      install -d -m 0770 "$mount/.lightnas/template/cache" "$mount/.lightnas/storage"
+      setfacl -R -m u:lightnas:rwx "$mount/.lightnas"
+      setfacl -R -m d:u:lightnas:rwx "$mount/.lightnas"
+      for vm_user in libvirt-qemu qemu; do
+        if id "$vm_user" >/dev/null 2>&1; then
+          setfacl -m "u:${vm_user}:rwx" "$mount" "$mount/.lightnas"
+          setfacl -m "d:u:${vm_user}:rwx" "$mount/.lightnas"
+          setfacl -R -m "u:${vm_user}:rwx" "$mount/.lightnas/storage"
+          setfacl -R -m "d:u:${vm_user}:rwx" "$mount/.lightnas/storage"
+        fi
+      done
+    fi
+  ' _ "$guest_mount" || echo "Warning: unable to grant LightNAS access on $guest_mount; it will remain browse-only." >&2
+done
+pct exec "$ctid" -- systemctl restart lightnas-host-agent lightnas
+
+echo
+echo "LightNAS local-runtime installation finished in LXC $ctid."
+echo 'Containers: native LXC/liblxc inside LightNAS.'
+echo 'VMs: QEMU/libvirt inside LightNAS; KVM is used when available and TCG otherwise.'
+echo 'Proxmox host APIs are not used for normal LightNAS compute operations.'
+
+echo "Performing strict post-install verification..."
+latest_config="$(pct config "$ctid")"
+grep -Eq '^features: .*nesting=1' <<<"$latest_config" || { echo 'ERROR: nesting=1 is missing.' >&2; exit 1; }
+grep -Eq '^features: .*keyctl=1' <<<"$latest_config" || { echo 'ERROR: keyctl=1 is missing.' >&2; exit 1; }
+grep -Eq '^features: .*mknod=1' <<<"$latest_config" || { echo 'ERROR: mknod=1 is missing.' >&2; exit 1; }
+
+pct exec "$ctid" -- bash -lc '
+  set -Eeuo pipefail
+  command -v lxc-ls >/dev/null
+  command -v lxc-create >/dev/null
+  command -v debootstrap >/dev/null
+  command -v virsh >/dev/null
+  command -v virt-install >/dev/null
+  systemctl is-active --quiet lightnas-host-agent
+  systemctl is-active --quiet lightnas
+' || {
+  echo "ERROR: LightNAS nested runtime verification failed." >&2
+  pct exec "$ctid" -- systemctl status lightnas-host-agent lightnas --no-pager --full || true
+  exit 1
+}
+
+pct exec "$ctid" -- bash -lc '
+  echo "--- Runtime status ---"
+  cat /var/lib/lightnas/runtime-status.txt 2>/dev/null || true
+  echo "--- Bridges ---"
+  ip -br addr show type bridge 2>/dev/null || true
+  echo "--- Services ---"
+  systemctl --no-pager is-active lightnas-host-agent lightnas lxc-net.service 2>/dev/null || true
+  echo "--- VM acceleration ---"
+  grep "^LIGHTNAS_VM_" /etc/lightnas/runtime.env 2>/dev/null || true
+  echo "--- Proxmox storage manifest ---"
+  cat /etc/lightnas/proxmox-storage.json 2>/dev/null || true
+'
+
+echo "--- Nested runtime self-test ---"
+pct exec "$ctid" -- python3 -c 'import json,socket; s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.connect("/run/lightnas/host-agent.sock"); s.sendall(b"{\"action\":\"runtime-diagnostics\"}\n"); line=s.makefile("rb").readline(); print(json.dumps(json.loads(line), indent=2))'
+ || true)
 for guest_mount in "${guest_data_mounts[@]}"; do
   [[ "$guest_mount" == /* ]] || guest_mount="/$guest_mount"
   echo "Granting LightNAS managed access to $guest_mount..."
