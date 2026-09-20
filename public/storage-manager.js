@@ -69,7 +69,7 @@ function renderStorageManager() {
     </section>
     <h2>Storage</h2>
     <div class="inventory-grid">${(data.pools||[]).map(storageCard).join('')||'<div class="empty"><p>No storage pools are online.</p></div>'}</div>
-    ${unconfigured.length?`<h2>Available virtual storage</h2><div class="inventory-grid">${unconfigured.map(source=>`<article class="inventory-card"><h3>${sEsc(source.mountPoint)}</h3><p>${sEsc(source.device)} · ${sEsc(source.type)}</p><p><strong>${sBytes(source.availableBytes)} free</strong> of ${sBytes(source.totalBytes)}</p><button class="primary" type="button" data-create-storage-source="${sEsc(source.id)}">Create storage here</button></article>`).join('')}</div>`:''}
+    ${unconfigured.length?`<h2>Available virtual storage</h2><div class="inventory-grid">${unconfigured.map(source=>`<article class="inventory-card"><h3>${sEsc(source.mountPoint)}</h3><p>${sEsc(source.device)} · ${sEsc(source.type)}</p><p><strong>${sBytes(source.availableBytes)} free</strong> of ${sBytes(source.totalBytes)}</p>${source.capacitySource==='proxmox-pct-config'?`<p class="muted">Proxmox configured size: <b>${sEsc(source.configuredSize||sBytes(source.totalBytes))}</b></p>`:''}<button class="primary" type="button" data-create-storage-source="${sEsc(source.id)}">Create storage here</button></article>`).join('')}</div>`:''}
   `;
 }
 async function refreshStorageManager() {
