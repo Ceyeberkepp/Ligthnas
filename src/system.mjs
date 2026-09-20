@@ -34,7 +34,7 @@ export async function getStorageInventory() {
     command('zfs', ['list', '-H', '-p', '-o', 'name,used,available,mountpoint,compression']),
     command('systemd-detect-virt', ['--container']),
     getFilesystems(),
-    readText('/etc/lightnas/proxmox-storage.json')
+    readText(process.env.LIGHTNAS_PROXMOX_STORAGE_MANIFEST || '/etc/lightnas/proxmox-storage.json')
   ]);
   const inContainer = Boolean(containerType && containerType !== 'none');
   let disks = [];
