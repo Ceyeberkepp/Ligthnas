@@ -11,6 +11,8 @@ const dataRoot = dirname(resolve(process.env.NAS_DATA_FILE || 'data/state.json')
 const configPath = process.env.LIGHTNAS_STORAGE_CONFIG || join(dataRoot, 'storage-pools.json');
 const localRoot = process.env.LIGHTNAS_LOCAL_STORAGE_ROOT || join(dataRoot, 'storage', 'local');
 const MAX_UPLOAD_BYTES = Number(process.env.LIGHTNAS_STORAGE_UPLOAD_MAX_BYTES || 16 * 1024 ** 3);
+const DOWNLOAD_TIMEOUT_MS = Number(process.env.LIGHTNAS_STORAGE_DOWNLOAD_TIMEOUT_MS || 2 * 60 * 60_000);
+const SPACE_RESERVE_BYTES = Number(process.env.LIGHTNAS_STORAGE_SPACE_RESERVE_BYTES || 128 * 1024 ** 2);
 
 export const STORAGE_CONTENT = Object.freeze([
   { id: 'iso', label: 'ISO images', directory: 'template/iso' },
@@ -345,22 +347,47 @@ async function validatePublicUrl(value) {
   return url;
 }
 
+export function normalizeStorageTransferError(error) {
+  if (error?.status) return error;
+  const code = error?.code || error?.cause?.code;
+  if (['AbortError', 'TimeoutError'].includes(error?.name) || ['ETIMEDOUT', 'UND_ERR_BODY_TIMEOUT'].includes(code)) {
+    return Object.assign(new Error('Image download timed out. Check the NAS internet connection or increase LIGHTNAS_STORAGE_DOWNLOAD_TIMEOUT_MS.'), { status: 504, cause: error });
+  }
+  if (code === 'ENOSPC') {
+    return Object.assign(new Error('The selected storage ran out of free space during the image transfer.'), { status: 507, cause: error });
+  }
+  if (['EACCES', 'EPERM'].includes(code)) {
+    return Object.assign(new Error('LightNAS cannot write to the selected storage. Correct its permissions or select another storage.'), { status: 403, cause: error });
+  }
+  if (['ECONNRESET', 'EAI_AGAIN', 'ENETUNREACH', 'UND_ERR_SOCKET'].includes(code)) {
+    return Object.assign(new Error('The image server could not be reached or closed the transfer. Check DNS and internet access, then try again.'), { status: 502, cause: error });
+  }
+  return error;
+}
+
 export async function importStorageContent(poolId, type, inputUrl) {
   const pool = await resolveStoragePool(poolId, type, true);
   let url = await validatePublicUrl(inputUrl);
   let response;
-  for (let hop = 0; hop < 5; hop += 1) {
-    response = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(30000), headers: { 'User-Agent': 'LightNAS/0.12 storage-manager' } });
-    if (response.status >= 300 && response.status < 400 && response.headers.get('location')) {
-      url = await validatePublicUrl(new URL(response.headers.get('location'), url).toString());
-      continue;
+  try {
+    for (let hop = 0; hop < 5; hop += 1) {
+      response = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS), headers: { 'User-Agent': 'LightNAS/0.12 storage-manager' } });
+      if (response.status >= 300 && response.status < 400 && response.headers.get('location')) {
+        url = await validatePublicUrl(new URL(response.headers.get('location'), url).toString());
+        continue;
+      }
+      break;
     }
-    break;
+  } catch (error) {
+    throw normalizeStorageTransferError(error);
   }
   if (!response?.ok || !response.body) throw Object.assign(new Error(`Download failed with HTTP ${response?.status || 'unknown'}.`), { status: 502 });
   const name = safeFilename(url.pathname, type);
   const length = Number(response.headers.get('content-length') || 0);
   if (length && length > MAX_UPLOAD_BYTES) throw Object.assign(new Error('Download exceeds the configured maximum size.'), { status: 413 });
+  if (length && pool.availableBytes > 0 && length + SPACE_RESERVE_BYTES > pool.availableBytes) {
+    throw Object.assign(new Error('The selected storage does not have enough free space for this image and the safety reserve.'), { status: 507 });
+  }
   const directory = contentDirectory(pool.root, type);
   await mkdir(directory, { recursive: true });
   const destination = join(directory, name);
@@ -370,7 +397,7 @@ export async function importStorageContent(poolId, type, inputUrl) {
     await rename(temporary, destination);
   } catch (error) {
     await rm(temporary, { force: true }).catch(() => {});
-    throw error;
+    throw normalizeStorageTransferError(error);
   }
   const info = await stat(destination);
   return { poolId, type, name, sizeBytes: info.size };
