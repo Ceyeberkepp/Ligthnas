@@ -30,6 +30,8 @@
     const status = document.querySelector('#status');
     const terminal = document.querySelector('#terminal');
     const input = document.querySelector('#command');
+    const form = document.querySelector('#command-form');
+    const submit = form.querySelector('button');
     title.textContent = `${name || id} · root terminal`;
 
     if (!/^[A-Za-z][A-Za-z0-9-]{1,39}$/.test(id)) {
@@ -38,38 +40,99 @@
       throw new Error('Invalid container name');
     }
 
-    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${protocol}//${location.host}/api/console/container/${encodeURIComponent(id)}`);
-    ws.binaryType = 'arraybuffer';
     const append = text => {
       terminal.textContent += text;
       terminal.scrollTop = terminal.scrollHeight;
     };
+    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    let socketOpen = false;
+    let commandMode = false;
+    let websocketFailed = false;
+    const ws = new WebSocket(`${protocol}//${location.host}/api/console/container/${encodeURIComponent(id)}`);
+    ws.binaryType = 'arraybuffer';
+
+    function enableCommandMode(reason = '') {
+      if (commandMode) return;
+      commandMode = true;
+      status.textContent = 'Command mode';
+      status.classList.remove('error');
+      append(`LightNAS command mode is ready for ${name} as root.\n`);
+      if (reason) append(`${reason}\n`);
+      append('Live terminal streaming is unavailable through this connection, but commands will still run normally.\n\n');
+      input.focus();
+    }
+
+    const connectionTimer = setTimeout(() => {
+      if (!socketOpen) {
+        websocketFailed = true;
+        enableCommandMode('The proxy did not complete the live WebSocket connection.');
+      }
+    }, 6000);
+
     ws.addEventListener('open', () => {
+      clearTimeout(connectionTimer);
+      if (websocketFailed || commandMode) {
+        ws.close();
+        return;
+      }
+      socketOpen = true;
       status.textContent = 'Connected';
       append(`Connected to ${name} as root\n`);
       input.focus();
     });
-    ws.addEventListener('message', async event => {
+    ws.addEventListener('message', event => {
       const text = typeof event.data === 'string' ? event.data : new TextDecoder().decode(event.data);
       append(text);
     });
     ws.addEventListener('close', event => {
-      status.textContent = 'Terminal closed';
-      append(`\n[connection closed: ${event.reason || event.code}]\n`);
+      clearTimeout(connectionTimer);
+      socketOpen = false;
+      if (!commandMode) enableCommandMode(`Live terminal closed: ${event.reason || event.code}.`);
     });
     ws.addEventListener('error', () => {
-      status.textContent = 'Connection error';
-      status.classList.add('error');
+      clearTimeout(connectionTimer);
+      websocketFailed = true;
+      enableCommandMode('The live terminal connection could not be established.');
     });
 
-    document.querySelector('#command-form').addEventListener('submit', event => {
+    async function runCommand(command) {
+      submit.disabled = true;
+      input.disabled = true;
+      append(`root@${name}:~# ${command}\n`);
+      try {
+        const response = await fetch(`/api/containers/${encodeURIComponent(id)}/exec`, {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json', 'X-LightNAS-Request': '1' },
+          body: JSON.stringify({ command })
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.error || `Command failed (HTTP ${response.status}).`);
+        if (payload.output) append(payload.output.endsWith('\n') ? payload.output : `${payload.output}\n`);
+        if (payload.truncated) append('[output truncated by LightNAS]\n');
+        if (payload.exitCode) append(`[command exited with code ${payload.exitCode}]\n`);
+      } catch (error) {
+        append(`[command error: ${error.message}]\n`);
+        status.textContent = 'Command failed';
+        status.classList.add('error');
+      } finally {
+        submit.disabled = false;
+        input.disabled = false;
+        input.focus();
+      }
+    }
+
+    form.addEventListener('submit', async event => {
       event.preventDefault();
-      const command = input.value;
-      if (!command || ws.readyState !== WebSocket.OPEN) return;
-      append(`${command}\n`);
-      ws.send(`${command}\n`);
+      const command = input.value.trim();
+      if (!command) return;
       input.value = '';
+      if (socketOpen && ws.readyState === WebSocket.OPEN) {
+        ws.send(`${command}\n`);
+        return;
+      }
+      enableCommandMode();
+      await runCommand(command);
     });
   </script>
 </body>

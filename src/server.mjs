@@ -11,7 +11,7 @@ import { listFiles, createFolder, uploadFile, downloadFile, deleteEntry } from '
 import { thumbnailFor } from './thumbnails.mjs';
 import { catalog, runtimeInventory, installCatalogApp, manageCatalogApp, createContainer, createVm } from './runtimes-next.mjs';
 import { proxmoxConsoleSocket, proxmoxUpdateStorage, proxmoxCleanDisk } from './proxmox.mjs';
-import { localContainerConsoleSocket, localVmConsoleSocket, localNetworkInventory, localNetworkAction } from './local-host.mjs';
+import { localContainerConsoleSocket, localContainerCommand, localVmConsoleSocket, localNetworkInventory, localNetworkAction } from './local-host.mjs';
 import { validateSmtp, sendSmtpTest } from './mailer.mjs';
 import { mediaAvailable, convertMedia } from './media.mjs';
 import { createDataset, updateDataset } from './zfs.mjs';
@@ -660,6 +660,13 @@ async function api(req, res, url) {
     store.addActivity('container', input.action ? `Container ${result.name}: ${input.action}.` : `Container ${result.name} was created.`);
     await store.save();
     return send(res, input.action ? 200 : 201, result);
+  }
+  if (req.method === 'POST' && /^\/api\/containers\/[A-Za-z][A-Za-z0-9-]{1,39}\/exec$/.test(url.pathname)) {
+    if (!requirePermission(res, permissions, 'containers.manage')) return;
+    const id = decodeURIComponent(url.pathname.split('/')[3]);
+    const input = await bodyJson(req);
+    const result = await localContainerCommand(id, input.command);
+    return send(res, 200, result);
   }
   if (req.method === 'POST' && url.pathname === '/api/vms') {
     if (!requirePermission(res, permissions, 'vms.manage')) return;

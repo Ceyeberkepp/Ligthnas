@@ -1043,6 +1043,45 @@ def stream_container(connection, data: dict) -> None:
         feeder.join(timeout=1)
 
 
+
+def execute_container_command(data: dict) -> dict:
+    name = str(data.get("id") or data.get("name") or "")
+    command = str(data.get("command") or "")
+    if not NAME_RE.fullmatch(name):
+        raise ValueError("invalid container name")
+    if not command.strip():
+        raise ValueError("enter a command")
+    if len(command) > 8192 or "\x00" in command:
+        raise ValueError("command is too long or contains invalid data")
+    if lxc_state(name) != "running":
+        raise ValueError("start the container before running commands")
+    try:
+        completed = subprocess.run(
+            ["lxc-attach", "-n", name, "--", "/bin/sh", "-lc", command],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=120,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        output = (exc.stdout or b"")
+        if isinstance(output, str):
+            output = output.encode("utf-8", "replace")
+        raise RuntimeError(f"command timed out after 120 seconds. Output: {output[-2000:].decode('utf-8', 'replace')}") from exc
+    limit = 1024 * 1024
+    raw = completed.stdout or b""
+    truncated = len(raw) > limit
+    if truncated:
+        raw = raw[:limit]
+    return {
+        "name": name,
+        "output": raw.decode("utf-8", "replace"),
+        "exitCode": completed.returncode,
+        "truncated": truncated,
+    }
+
+
 def dispatch(request: dict) -> dict:
     action = str(request.get("action") or "")
     data = request.get("data") or {}
@@ -1058,6 +1097,8 @@ def dispatch(request: dict) -> dict:
         return container_action(data)
     if action == "container-update":
         return update_container(data)
+    if action == "container-exec":
+        return execute_container_command(data)
     if action == "network-inventory":
         return network_inventory()
     if action == "network-action":

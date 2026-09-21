@@ -99,6 +99,16 @@ export async function localContainerConsoleSocket(id) {
 }
 
 
+export async function localContainerCommand(id, command) {
+  const name = String(id || '');
+  const text = String(command || '');
+  if (!/^[A-Za-z][A-Za-z0-9-]{1,39}$/.test(name)) throw Object.assign(new Error('Invalid system container name.'), { status: 400 });
+  if (!text.trim()) throw Object.assign(new Error('Enter a command.'), { status: 400 });
+  if (text.length > 8192 || text.includes('\0')) throw Object.assign(new Error('Command is too long or contains invalid data.'), { status: 400 });
+  return await request('container-exec', { id: name, command: text }, 125000);
+}
+
+
 export async function localVmConsoleSocket(id) {
   const name = String(id || '');
   if (!/^[A-Za-z][A-Za-z0-9-]{1,39}$/.test(name)) throw Object.assign(new Error('Invalid VM name.'), { status: 400 });
