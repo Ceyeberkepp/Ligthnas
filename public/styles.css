@@ -282,3 +282,106 @@ dialog::backdrop { background: rgba(1,7,13,.76); backdrop-filter: blur(5px); }
   font-size: 13px;
 }
 .storage-capacity-breakdown b { color: var(--text); }
+
+
+/* Template browser: wide, usable modal with clickable rows. */
+#lightnas-template-dialog {
+  width: min(1120px, calc(100vw - 40px));
+  max-width: 1120px;
+  max-height: min(88vh, 900px);
+  padding: 0;
+  overflow: hidden;
+}
+#lightnas-template-dialog .dialog-body {
+  display: flex;
+  flex-direction: column;
+  max-height: min(88vh, 900px);
+  padding: 24px;
+}
+#lightnas-template-dialog [data-template-body] {
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+}
+.template-catalog-toolbar {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(260px, 1fr);
+  gap: 14px;
+  align-items: end;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--panel);
+  padding-bottom: 12px;
+}
+.template-catalog-scroll {
+  max-height: 56vh;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+.template-table {
+  min-width: 860px;
+}
+.template-table-head,
+.template-table-row {
+  display: grid;
+  grid-template-columns: 70px minmax(200px, 1.1fr) 120px minmax(280px, 1.7fr) 110px;
+  gap: 12px;
+  align-items: center;
+  padding: 11px 14px;
+}
+.template-table-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .04em;
+}
+.template-table-row {
+  cursor: pointer;
+  border-bottom: 1px solid var(--line);
+}
+.template-table-row:hover,
+.template-table-row.selected {
+  background: var(--panel-2);
+}
+.template-table-row.selected {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.template-table-row small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+}
+.template-section-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+.template-catalog-actions {
+  position: sticky;
+  bottom: 0;
+  padding-top: 14px;
+  background: var(--panel);
+}
+.dialog-close {
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 22px;
+  cursor: pointer;
+}
+@media (max-width: 760px) {
+  #lightnas-template-dialog { width: calc(100vw - 18px); }
+  .template-catalog-toolbar { grid-template-columns: 1fr; }
+}
