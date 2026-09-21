@@ -142,6 +142,7 @@ async function renderManageStorage(poolId,activeType=null) {
       <div class="head-actions">${fileTypes.map(type=>`<button type="button" class="${type===selectedType?'primary':'secondary'}" data-storage-content-tab="${sEsc(type)}" data-storage-id="${sEsc(pool.id)}">${sEsc((data.contentTypes||[]).find(item=>item.id===type)?.label||type)}</button>`).join('')}</div>
 ${selectedType==='vztmpl'? `<div class="head-actions"><button class="primary" type="button" data-template-browse data-template-storage="${sEsc(pool.id)}">Browse templates</button><button class="secondary" type="button" data-template-upload data-template-storage="${sEsc(pool.id)}">Upload template</button><button class="secondary" type="button" data-template-url data-template-storage="${sEsc(pool.id)}">Import URL</button></div><p class="muted">Choose a template from the upstream catalog, upload an archive from your computer, or import a public URL into this storage.</p>` : ''}
       <form data-storage-upload-form data-storage-id="${sEsc(pool.id)}" data-storage-type="${sEsc(selectedType)}">
+        ${selectedType==='iso'?'<p class="module-note">ISO uploads up to 50 GiB are sent in proxy-friendly 16 MiB chunks. Keep this browser tab open until the completion message appears.</p>':''}
         <label>Upload ${sEsc((data.contentTypes||[]).find(item=>item.id===selectedType)?.label||selectedType)}<input name="file" type="file" required ${selectedType==='iso'?'accept=".iso"':selectedType==='vztmpl'?'accept=".tar.zst,.tar.xz,.tar.gz,.tgz"':''}></label>
         <button class="secondary" type="submit">Upload</button>
       </form>
@@ -208,7 +209,28 @@ document.addEventListener('submit',async event=>{
     error.textContent=`Uploading ${file.name}…`;
     const progress=window.LightNASProgress?.open(type==='iso'?'Uploading VM installer image':'Uploading storage image',file.name);
     try{
-      await sRequest(`/api/storage/pools/${encodeURIComponent(id)}/upload?type=${encodeURIComponent(type)}&name=${encodeURIComponent(file.name)}`,{method:'PUT',headers:{'Content-Type':'application/octet-stream'},body:file});
+      const maximum=50*1024**3;
+      if(file.size>maximum) throw new Error('ISO and storage image uploads are limited to 50 GiB.');
+      const chunkSize=16*1024**2;
+      const uploadId=crypto.randomUUID();
+      let offset=0;
+      while(offset<file.size){
+        const end=Math.min(file.size,offset+chunkSize);
+        const chunk=file.slice(offset,end);
+        await sRequest(`/api/storage/pools/${encodeURIComponent(id)}/upload?type=${encodeURIComponent(type)}&name=${encodeURIComponent(file.name)}`,{
+          method:'PUT',
+          headers:{
+            'Content-Type':'application/octet-stream',
+            'Content-Range':`bytes ${offset}-${end-1}/${file.size}`,
+            'X-LightNAS-Upload-Id':uploadId
+          },
+          body:chunk
+        });
+        offset=end;
+        const percent=Math.round((offset/file.size)*100);
+        error.textContent=`Uploading ${file.name}… ${percent}%`;
+        progress?.update(percent,`${sBytes(offset)} of ${sBytes(file.size)} uploaded`);
+      }
       error.textContent='';await renderManageStorage(id,type);
       progress?.succeed(`${file.name} uploaded successfully and is ready to use.`);
     }catch(problem){error.textContent=problem.message;progress?.fail(problem.message);}

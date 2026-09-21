@@ -10,8 +10,8 @@ import { getStorageInventory } from './system.mjs';
 const dataRoot = dirname(resolve(process.env.NAS_DATA_FILE || 'data/state.json'));
 const configPath = process.env.LIGHTNAS_STORAGE_CONFIG || join(dataRoot, 'storage-pools.json');
 const localRoot = process.env.LIGHTNAS_LOCAL_STORAGE_ROOT || join(dataRoot, 'storage', 'local');
-const MAX_UPLOAD_BYTES = Number(process.env.LIGHTNAS_STORAGE_UPLOAD_MAX_BYTES || 16 * 1024 ** 3);
-const DOWNLOAD_TIMEOUT_MS = Number(process.env.LIGHTNAS_STORAGE_DOWNLOAD_TIMEOUT_MS || 2 * 60 * 60_000);
+const MAX_UPLOAD_BYTES = Number(process.env.LIGHTNAS_STORAGE_UPLOAD_MAX_BYTES || 50 * 1024 ** 3);
+const DOWNLOAD_TIMEOUT_MS = Number(process.env.LIGHTNAS_STORAGE_DOWNLOAD_TIMEOUT_MS || 12 * 60 * 60_000);
 const SPACE_RESERVE_BYTES = Number(process.env.LIGHTNAS_STORAGE_SPACE_RESERVE_BYTES || 128 * 1024 ** 2);
 
 export const STORAGE_CONTENT = Object.freeze([
@@ -302,24 +302,58 @@ function byteLimit() {
   });
 }
 
+function parseContentRange(value) {
+  const match = String(value || '').match(/^bytes (\d+)-(\d+)\/(\d+)$/);
+  if (!match) return null;
+  const start = Number(match[1]), end = Number(match[2]), total = Number(match[3]);
+  if (![start, end, total].every(Number.isSafeInteger) || start < 0 || end < start || total <= end || total > MAX_UPLOAD_BYTES) {
+    throw Object.assign(new Error('Invalid or oversized chunked upload range.'), { status: 400 });
+  }
+  return { start, end, total, length: end - start + 1 };
+}
+
 export async function uploadStorageContent(poolId, type, filename, request) {
   const pool = await resolveStoragePool(poolId, type, true);
   const name = safeFilename(filename, type);
   const length = Number(request.headers['content-length'] || 0);
-  if (length && length > MAX_UPLOAD_BYTES) throw Object.assign(new Error('Upload exceeds the configured maximum size.'), { status: 413 });
+  const range = parseContentRange(request.headers['content-range']);
+  const uploadId = String(request.headers['x-lightnas-upload-id'] || '');
+  if (range && !/^[A-Za-z0-9-]{20,80}$/.test(uploadId)) {
+    throw Object.assign(new Error('Chunked uploads require a valid upload identifier.'), { status: 400 });
+  }
+  const expectedLength = range?.length || length;
+  const totalLength = range?.total || length;
+  if (expectedLength && length && expectedLength !== length) throw Object.assign(new Error('Upload chunk length does not match Content-Range.'), { status: 400 });
+  if (totalLength && totalLength > MAX_UPLOAD_BYTES) throw Object.assign(new Error('Upload exceeds the 50 GiB maximum size.'), { status: 413 });
+  if (totalLength && pool.availableBytes > 0 && totalLength + SPACE_RESERVE_BYTES > pool.availableBytes) {
+    throw Object.assign(new Error('The selected storage does not have enough free space for this upload and the safety reserve.'), { status: 507 });
+  }
   const directory = contentDirectory(pool.root, type);
   await mkdir(directory, { recursive: true });
   const destination = join(directory, name);
-  const temporary = `${destination}.part-${process.pid}-${Date.now()}`;
+  const temporary = range ? join(directory, `.${name}.${uploadId}.part`) : `${destination}.part-${process.pid}-${Date.now()}`;
   try {
-    await pipeline(request, byteLimit(), createWriteStream(temporary, { flags: 'wx', mode: 0o640 }));
+    if (range?.start) {
+      const current = await stat(temporary).catch(() => null);
+      if (!current || current.size !== range.start) {
+        throw Object.assign(new Error(`Upload resume position mismatch. Server has ${current?.size || 0} bytes; browser expected ${range.start}.`), { status: 409 });
+      }
+    } else if (range) {
+      await rm(temporary, { force: true });
+    }
+    await pipeline(request, byteLimit(), createWriteStream(temporary, { flags: range?.start ? 'a' : 'wx', mode: 0o640 }));
+    const received = (await stat(temporary)).size;
+    if (range && received !== range.end + 1) throw Object.assign(new Error('The uploaded chunk was incomplete.'), { status: 400 });
+    if (range && received < range.total) {
+      return { poolId, type, name, complete: false, receivedBytes: received, totalBytes: range.total };
+    }
     await rename(temporary, destination);
   } catch (error) {
-    await rm(temporary, { force: true }).catch(() => {});
-    throw error;
+    if (!range || error.status !== 409) await rm(temporary, { force: true }).catch(() => {});
+    throw normalizeStorageTransferError(error);
   }
   const info = await stat(destination);
-  return { poolId, type, name, sizeBytes: info.size };
+  return { poolId, type, name, complete: true, receivedBytes: info.size, totalBytes: info.size, sizeBytes: info.size };
 }
 
 function privateIp(address) {

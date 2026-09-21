@@ -123,6 +123,12 @@ async function localUpdateVm(input) {
   await command('virsh', ['-c', 'qemu:///system', 'setvcpus', target, String(cpus), '--config'], 30000);
   return { id: target, name: target, memoryMiB: memory, cpus, status: 'updated' };
 }
+function requireDeletionConfirmation(input, id, label) {
+  if (input?.deleteFiles !== true || String(input?.confirmation || '') !== id) {
+    throw Object.assign(new Error(`Deleting this ${label} requires “delete all files” and its exact ID.`), { status: 400 });
+  }
+}
+
 export async function runtimeInventory() {
   const [dockerInfo, vmInfo, vmNetworks, installer, hostBridges, lightnasStorage, storageIsos] = await Promise.all([
     command('docker', ['info', '--format', '{{.ServerVersion}}']),
@@ -147,7 +153,6 @@ export async function runtimeInventory() {
     runtime.containers.storageDetails = containerStoragePools;
     const templateLibrary = await listContainerTemplates().catch(() => ({ templates: [] }));
     runtime.containers.images = [
-      ...(runtime.containers.images || []),
       ...templateLibrary.templates.map(item => ({
         id: item.id,
         label: `${item.filename} · ${item.storageLabel}`,
@@ -155,7 +160,8 @@ export async function runtimeInventory() {
         filename: item.filename,
         storageLabel: item.storageLabel,
         sizeBytes: item.sizeBytes
-      }))
+      })),
+      ...(runtime.containers.images || [])
     ];
     runtime.containers.templateCount = templateLibrary.templates.length;
     runtime.virtualization.diagnostics = runtime.containers.diagnostics || null;
@@ -279,13 +285,15 @@ export async function createContainer(input) {
   const inventory = await localContainerInventory();
   if (!inventory?.available || !inventory.enabled) throw Object.assign(new Error(inventory?.reason || 'Native LXC is unavailable on this LightNAS host.'), { status: 409 });
   if (input?.action) {
+    const id = String(input.id || input.name || '');
     if (input.action === 'update') return await localUpdateContainer({
-      id: input.id || input.name,
+      id,
       name: input.name || input.id,
       memoryMiB: Number(input.memoryMiB),
       cpus: Number(input.cpus)
     });
-    return await localManageContainer(input.id || input.name, input.action);
+    if (input.action === 'delete') requireDeletionConfirmation(input, id, 'container');
+    return await localManageContainer(id, input.action, { deleteFiles: input.deleteFiles === true, confirmation: input.confirmation });
   }
 
   if (!/^[A-Za-z][A-Za-z0-9-]{1,39}$/.test(input.name || '')) throw Object.assign(new Error('Use a 2–40 character container name.'), { status: 400 });
@@ -332,12 +340,14 @@ export async function createContainer(input) {
 export async function createVm(input) {
   const { virtualization } = await runtimeInventory();
   if (input?.action) {
+    const id = String(input.vmid || input.id || input.name || '');
+    if (input.action === 'delete') requireDeletionConfirmation(input, id, 'virtual machine');
     if (virtualization.provider?.startsWith('proxmox')) {
       if (input.action === 'update') return await proxmoxUpdateVm(input);
-      return await proxmoxManageVm(input.vmid || input.id, input.action);
+      return await proxmoxManageVm(id, input.action);
     }
     if (input.action === 'update') return await localUpdateVm(input);
-    return await localManageVm(input.id || input.name, input.action);
+    return await localManageVm(id, input.action);
   }
 
   if (!virtualization.available || !virtualization.enabled) throw Object.assign(new Error(virtualization.reason || 'QEMU/libvirt virtualization is disabled on this host.'), { status: 409 });

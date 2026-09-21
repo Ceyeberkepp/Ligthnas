@@ -45,8 +45,8 @@ export async function localCreateContainer(input) {
   return await request('container-create', input, 15 * 60 * 1000);
 }
 
-export async function localManageContainer(id, action) {
-  return await request('container-action', { id, action }, 2 * 60 * 1000);
+export async function localManageContainer(id, action, options = {}) {
+  return await request('container-action', { id, action, ...options }, 2 * 60 * 1000);
 }
 
 export async function localUpdateContainer(input) {

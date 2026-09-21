@@ -123,12 +123,15 @@ function openProgressDialog(title, detail) {
     const elapsed = dialog.querySelector('[data-transfer-elapsed]');
     if (elapsed) elapsed.textContent = `Working… ${seconds}s elapsed`;
   }, 1000);
+  const progressBar = dialog.querySelector('.transfer-progress span');
+  const initialTitle = title;
   const finish = (kind, message) => {
     clearInterval(timer);
     const state = dialog.querySelector('[data-transfer-state]');
     state.classList.remove('is-running', 'is-success', 'is-error');
     state.classList.add(kind === 'success' ? 'is-success' : 'is-error');
-    dialog.querySelector('[data-transfer-title]').textContent = kind === 'success' ? 'Download complete' : 'Download failed';
+    const operation = /upload/i.test(initialTitle) ? 'Upload' : /creat/i.test(initialTitle) ? 'Creation' : /delet/i.test(initialTitle) ? 'Deletion' : 'Download';
+    dialog.querySelector('[data-transfer-title]').textContent = kind === 'success' ? `${operation} complete` : `${operation} failed`;
     dialog.querySelector('[data-transfer-detail]').textContent = message;
     dialog.querySelector('[data-transfer-elapsed]').textContent = kind === 'success' ? 'The image is ready to use.' : 'Nothing incomplete will be shown in the image library.';
     dialog.querySelector('[data-transfer-error]').textContent = kind === 'error' ? message : '';
@@ -139,8 +142,17 @@ function openProgressDialog(title, detail) {
   document.body.append(dialog);
   dialog.showModal();
   return {
-    succeed(message = 'The image finished downloading and is ready to use.') { finish('success', message); },
-    fail(message = 'The transfer could not be completed.') { finish('error', message); },
+    update(percent, message = '') {
+      const value = Math.max(0, Math.min(100, Number(percent) || 0));
+      progressBar.style.animation = 'none';
+      progressBar.style.inset = '0 auto 0 0';
+      progressBar.style.width = `${value}%`;
+      progressBar.style.background = 'var(--accent)';
+      dialog.querySelector('[data-transfer-elapsed]').textContent = `${value}% complete`;
+      if (message) dialog.querySelector('[data-transfer-detail]').textContent = message;
+    },
+    succeed(message = 'The operation completed successfully.') { finish('success', message); },
+    fail(message = 'The operation could not be completed.') { finish('error', message); },
     close() { closeDialog(dialog); }
   };
 }
@@ -152,7 +164,14 @@ function wizardOption(value, label, selected = false) {
 }
 
 async function showRuntimeWizard(kind) {
-  const inventory = await dialogApi('/api/runtimes');
+  const loading = openProgressDialog(kind === 'containers' ? 'Opening container wizard' : 'Opening VM wizard', 'Loading live storage, image, network, and runtime choices…');
+  let inventory;
+  try {
+    inventory = window.LightNASRuntimeInventory || await dialogApi('/api/runtimes');
+    window.LightNASRuntimeInventory = inventory;
+  } finally {
+    loading.close();
+  }
   const runtime = inventory?.[kind];
   const isContainer = kind === 'containers';
   if (!runtime?.available || !runtime?.enabled) throw new Error(runtime?.reason || `${isContainer ? 'Container' : 'VM'} runtime is unavailable.`);
@@ -324,9 +343,73 @@ async function showRuntimeWizard(kind) {
   return dialog;
 }
 
+
+function showRuntimeDeleteDialog(kind, id) {
+  const isContainer = kind === 'container';
+  const label = isContainer ? 'system container' : 'virtual machine';
+  const dialog = document.createElement('dialog');
+  dialog.className = 'lightnas-dialog';
+  dialog.innerHTML = `
+    <form class="dialog-body">
+      <div class="dialog-head">
+        <div><span class="eyebrow">DESTRUCTIVE OPERATION</span><h2>Delete ${dialogEsc(id)}</h2></div>
+        <button class="dialog-close" type="button" data-dialog-close aria-label="Close">×</button>
+      </div>
+      <p class="module-note danger-note">This permanently deletes the ${label} configuration and its managed ${isContainer ? 'root filesystem' : 'virtual disks'}. Shared ISO and template-library files are not deleted.</p>
+      <label class="wizard-check"><input name="deleteFiles" type="checkbox" required> <span>Delete all files belonging to this ${label}</span></label>
+      <label>Type the exact ${isContainer ? 'container' : 'VM'} ID to verify deletion
+        <input name="confirmation" autocomplete="off" placeholder="${dialogEsc(id)}" required>
+      </label>
+      <div class="form-error" role="alert"></div>
+      <div class="dialog-actions">
+        <button class="secondary" type="button" data-dialog-close>Cancel</button>
+        <button class="secondary danger-button" type="submit">Permanently delete</button>
+      </div>
+    </form>`;
+  const form = dialog.querySelector('form');
+  dialog.querySelectorAll('[data-dialog-close]').forEach(button => button.addEventListener('click', () => dialog.close()));
+  dialog.addEventListener('close', () => dialog.remove(), { once: true });
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    const error = form.querySelector('.form-error');
+    const confirmation = form.elements.confirmation.value;
+    if (!form.elements.deleteFiles.checked) { error.textContent = 'Select “Delete all files” before continuing.'; return; }
+    if (confirmation !== id) { error.textContent = `Type exactly: ${id}`; form.elements.confirmation.focus(); return; }
+    const submit = form.querySelector('button[type="submit"]');
+    submit.disabled = true;
+    const progress = openProgressDialog(`Deleting ${label}`, `Removing ${id} and all managed files…`);
+    try {
+      await dialogApi(isContainer ? '/api/containers' : '/api/vms', {
+        method: 'POST',
+        body: JSON.stringify({ id, action: 'delete', deleteFiles: true, confirmation })
+      });
+      dialog.close();
+      window.LightNASRuntimeInventory = null;
+      refreshRuntime();
+      progress.succeed(`${id} and its managed files were permanently deleted.`);
+    } catch (problem) {
+      progress.fail(problem.message);
+      error.textContent = problem.message;
+      submit.disabled = false;
+    }
+  });
+  document.body.append(dialog);
+  dialog.showModal();
+  setTimeout(() => form.elements.confirmation.focus(), 0);
+}
+
 // Register before enhancements/admin-security so these native LightNAS dialogs
 // replace the temporary browser prompt() implementations.
 document.addEventListener('click', async event => {
+  const containerDelete = event.target.closest('[data-container-action="delete"]');
+  const vmDelete = event.target.closest('[data-vm-action="delete"]');
+  if (containerDelete || vmDelete) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    showRuntimeDeleteDialog(containerDelete ? 'container' : 'vm', (containerDelete || vmDelete).dataset[containerDelete ? 'containerId' : 'vmId']);
+    return;
+  }
+
   const createContainerButton = event.target.closest('[data-action="create-container"]');
   const createVmButton = event.target.closest('[data-action="create-vm"]');
   if (createContainerButton || createVmButton) {

@@ -290,6 +290,7 @@ async function enhanceRuntimeControls() {
   content.dataset.runtimeEnhancing = '1';
   try {
     const runtimes = await apiRequest('/api/runtimes');
+    window.LightNASRuntimeInventory = runtimes;
     if (location.hash === '#containers') {
       const runtime = runtimes.containers || {};
       for (const item of runtime.containers || []) {

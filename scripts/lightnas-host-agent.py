@@ -322,8 +322,11 @@ def bootstrap_deb_container(name: str, image: dict, storage_root_value: str) -> 
     base.mkdir(parents=True, exist_ok=False)
     rootfs.mkdir(parents=True, exist_ok=False)
 
+    # systemd-resolved is not present in every release/component combination.
+    # A static resolv.conf is installed below, so DNS works without making the
+    # whole container build fail on that optional split package.
     include = ",".join([
-        "systemd-sysv", "systemd-resolved", "iproute2",
+        "systemd-sysv", "iproute2",
         "iputils-ping", "ca-certificates", "netbase", "procps"
     ])
     args = [
@@ -345,11 +348,15 @@ def bootstrap_deb_container(name: str, image: dict, storage_root_value: str) -> 
     try:
         if resolv.exists() or resolv.is_symlink():
             resolv.unlink()
-        resolv.symlink_to("/run/systemd/resolve/stub-resolv.conf")
+        host_resolv = Path("/etc/resolv.conf")
+        resolv.write_text(host_resolv.read_text(encoding="utf-8", errors="replace") if host_resolv.exists() else "nameserver 1.1.1.1\n", encoding="utf-8")
     except OSError:
         pass
+    services = ["systemd-networkd.service"]
+    if (rootfs / "usr" / "lib" / "systemd" / "system" / "systemd-resolved.service").exists():
+        services.append("systemd-resolved.service")
     subprocess.run(
-        ["systemctl", "--root", str(rootfs), "enable", "systemd-networkd.service", "systemd-resolved.service"],
+        ["systemctl", "--root", str(rootfs), "enable", *services],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
     )
     machine_id = rootfs / "etc" / "machine-id"
@@ -638,13 +645,12 @@ def container_action(data: dict) -> dict:
     elif action == "reboot":
         run(["lxc-stop", "-n", name, "-r", "-t", "30"], timeout=60)
     elif action == "delete":
-        try:
-            run(["lxc-stop", "-n", name, "-t", "10"], timeout=20, check=False)
-        finally:
-            run(["lxc-destroy", "-n", name], timeout=120)
+        if data.get("deleteFiles") is not True or str(data.get("confirmation") or "") != name:
+            raise ValueError("deleting a container requires delete all files and the exact container ID")
+        cleanup_container_path(name)
     else:
         raise ValueError("unsupported container action")
-    return {"id": name, "action": action, "status": "submitted"}
+    return {"id": name, "action": action, "status": "deleted" if action == "delete" else "submitted"}
 
 
 def update_container(data: dict) -> dict:
