@@ -15,6 +15,9 @@ const PROXMOX_FALLBACK_APLINFO_URL = `${PROXMOX_IMAGES_BASE}aplinfo.dat`;
 const TURNKEY_BASE = 'https://releases.turnkeylinux.org/pve/';
 const TURNKEY_APLINFO_URL = `${TURNKEY_BASE}aplinfo.dat`;
 const MAX_TEMPLATE_BYTES = Number(process.env.LIGHTNAS_TEMPLATE_MAX_BYTES || 4 * 1024 ** 3);
+const CATALOG_TIMEOUT_MS = Number(process.env.LIGHTNAS_TEMPLATE_CATALOG_TIMEOUT_MS || 30_000);
+const DOWNLOAD_TIMEOUT_MS = Number(process.env.LIGHTNAS_TEMPLATE_DOWNLOAD_TIMEOUT_MS || 2 * 60 * 60_000);
+const SPACE_RESERVE_BYTES = Number(process.env.LIGHTNAS_TEMPLATE_SPACE_RESERVE_BYTES || 128 * 1024 ** 2);
 const templateName = /^[A-Za-z0-9][A-Za-z0-9._+-]{1,180}\.(?:tar\.zst|tar\.xz|tar\.gz|tgz)$/i;
 
 function safeFilename(value) {
@@ -53,10 +56,10 @@ async function validateUrl(value) {
   return url;
 }
 
-async function safeFetch(value) {
+async function safeFetch(value, timeoutMs = CATALOG_TIMEOUT_MS) {
   let url = await validateUrl(value);
   for (let hop = 0; hop < 5; hop += 1) {
-    const response = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(30000), headers: { 'User-Agent': 'LightNAS/0.12 template-manager' } });
+    const response = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(timeoutMs), headers: { 'User-Agent': 'LightNAS/0.12 template-manager' } });
     if (response.status >= 300 && response.status < 400 && response.headers.get('location')) {
       url = await validateUrl(new URL(response.headers.get('location'), url).toString());
       continue;
@@ -203,8 +206,29 @@ function byteLimit() {
   });
 }
 
+export function normalizeTemplateTransferError(error) {
+  if (error?.status) return error;
+  const code = error?.code || error?.cause?.code;
+  if (['AbortError', 'TimeoutError'].includes(error?.name) || ['ETIMEDOUT', 'UND_ERR_BODY_TIMEOUT'].includes(code)) {
+    return Object.assign(new Error('Template download timed out. Check the NAS internet connection or increase LIGHTNAS_TEMPLATE_DOWNLOAD_TIMEOUT_MS.'), { status: 504, cause: error });
+  }
+  if (code === 'ENOSPC') {
+    return Object.assign(new Error('The selected storage ran out of free space while downloading the template.'), { status: 507, cause: error });
+  }
+  if (['EACCES', 'EPERM'].includes(code)) {
+    return Object.assign(new Error('LightNAS cannot write to the selected storage. Rerun the installer or correct the storage permissions.'), { status: 403, cause: error });
+  }
+  if (['ECONNRESET', 'EAI_AGAIN', 'ENETUNREACH', 'UND_ERR_SOCKET'].includes(code)) {
+    return Object.assign(new Error('The upstream template server could not be reached or closed the transfer. Check DNS and internet access, then try again.'), { status: 502, cause: error });
+  }
+  return error;
+}
+
 async function saveStream(stream, target, filename, contentLength = 0, expectedSha512 = null) {
   if (contentLength && contentLength > MAX_TEMPLATE_BYTES) throw Object.assign(new Error('Template exceeds the configured maximum size.'), { status: 413 });
+  if (contentLength && target.availableBytes > 0 && contentLength + SPACE_RESERVE_BYTES > target.availableBytes) {
+    throw Object.assign(new Error('The selected storage does not have enough free space for this template and the safety reserve.'), { status: 507 });
+  }
   await mkdir(target.path, { recursive: true });
   const finalPath = join(target.path, filename);
   const temporary = `${finalPath}.part-${process.pid}-${Date.now()}`;
@@ -226,7 +250,7 @@ async function saveStream(stream, target, filename, contentLength = 0, expectedS
     await rename(temporary, finalPath);
   } catch (error) {
     await rm(temporary, { force: true }).catch(() => {});
-    throw error;
+    throw normalizeTemplateTransferError(error);
   }
   const info = await stat(finalPath);
   return { id: templateId(target.id, filename), filename, storageId: target.id, storageLabel: target.label, sizeBytes: info.size };
@@ -252,7 +276,12 @@ export async function importContainerTemplate({ storageId, url, proxmoxTemplate 
   }
   const safeUrl = await validateUrl(source);
   const filename = safeFilename(safeUrl.pathname);
-  const { response } = await safeFetch(safeUrl.toString());
+  let response;
+  try {
+    ({ response } = await safeFetch(safeUrl.toString(), DOWNLOAD_TIMEOUT_MS));
+  } catch (error) {
+    throw normalizeTemplateTransferError(error);
+  }
   if (!response.ok || !response.body) throw Object.assign(new Error(`Template download failed with HTTP ${response.status}.`), { status: 502 });
   const length = Number(response.headers.get('content-length') || 0);
   return await saveStream(Readable.fromWeb(response.body), target, filename, length, expectedSha512);
