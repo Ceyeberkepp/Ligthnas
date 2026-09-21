@@ -195,9 +195,10 @@ export async function runtimeInventory() {
       } catch {}
     }
     runtime.virtualization.networkDetails = [
+      { name: 'qemu-user', type: 'qemu-user', label: 'QEMU user NAT (works without a host bridge)' },
       ...libvirtNetworks.map(name => ({ name, type: 'libvirt-network' })),
       ...bridges.filter(name => !libvirtNetworks.includes(name)).map(name => ({ name, type: 'host-bridge' }))
-    ];
+    ].filter((item, index, all) => all.findIndex(other => other.name === item.name) === index);
     runtime.virtualization.networks = runtime.virtualization.networkDetails.map(item => item.name);
   }
 
@@ -328,7 +329,11 @@ export async function createVm(input) {
   if (iso && !isoEntry) throw Object.assign(new Error('Selected installer ISO is no longer available.'), { status: 409 });
 
   const networkDetail = virtualization.networkDetails?.find(item => item.name === input.network);
-  const networkArg = networkDetail?.type === 'host-bridge' ? `bridge=${input.network},model=virtio` : `network=${input.network},model=virtio`;
+  const networkArg = networkDetail?.type === 'qemu-user'
+    ? 'user,model=virtio'
+    : networkDetail?.type === 'host-bridge'
+      ? `bridge=${input.network},model=virtio`
+      : `network=${input.network},model=virtio`;
   const virtType = virtualization.acceleration === 'kvm' ? 'kvm' : 'qemu';
   const args = ['--connect', 'qemu:///system', '--virt-type', virtType, '--name', input.name, '--memory', String(memory), '--vcpus', String(cpus), '--disk', `path=${diskPath},size=${disk},format=qcow2,bus=scsi`, '--controller', 'scsi,model=virtio-scsi', '--network', networkArg, '--graphics', 'vnc,listen=127.0.0.1', '--video', 'virtio', '--noautoconsole', '--wait', '0'];
   if (isoEntry) args.push('--cdrom', isoEntry.path, '--osinfo', 'detect=on,require=off');
