@@ -2,16 +2,29 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-test('container console falls back to authenticated HTTP command execution', async () => {
-  const [page, server, local, agent] = await Promise.all([
+test('console pages use CSP-compatible external scripts', async () => {
+  const [containerPage, containerScript, vmPage, vmScript] = await Promise.all([
     readFile(new URL('../public/container-console.html', import.meta.url), 'utf8'),
+    readFile(new URL('../public/container-console.js', import.meta.url), 'utf8'),
+    readFile(new URL('../public/vm-console.html', import.meta.url), 'utf8'),
+    readFile(new URL('../public/vm-console.js', import.meta.url), 'utf8')
+  ]);
+  assert.match(containerPage, /src="\/container-console\.js"/);
+  assert.doesNotMatch(containerPage, /<script>\s*const/);
+  assert.match(vmPage, /src="\/vm-console\.js"/);
+  assert.doesNotMatch(vmPage, /<script type="module">\s*import/);
+  assert.match(containerScript, /Command mode/);
+  assert.match(containerScript, /\/api\/containers\/\$\{encodeURIComponent\(id\)\}\/exec/);
+  assert.match(containerScript, /setTimeout\(\(\) =>/);
+  assert.match(vmScript, /import RFB from '\/novnc\/core\/rfb\.js'/);
+});
+
+test('container console fallback reaches the authenticated host-agent path', async () => {
+  const [server, local, agent] = await Promise.all([
     readFile(new URL('../src/server.mjs', import.meta.url), 'utf8'),
     readFile(new URL('../src/local-host.mjs', import.meta.url), 'utf8'),
     readFile(new URL('../scripts/lightnas-host-agent.py', import.meta.url), 'utf8')
   ]);
-  assert.match(page, /Command mode/);
-  assert.match(page, /\/api\/containers\/\$\{encodeURIComponent\(id\)\}\/exec/);
-  assert.match(page, /setTimeout\(\(\) =>/);
   assert.match(server, /localContainerCommand/);
   assert.match(server, /containers\\\/\[A-Za-z\]/);
   assert.match(local, /request\('container-exec'/);

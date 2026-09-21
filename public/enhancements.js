@@ -479,7 +479,7 @@ document.addEventListener('click', async event => {
 
   const consoleButton = event.target.closest('[data-container-console]');
   if (consoleButton) {
-    window.open(`/container-console.html?id=${encodeURIComponent(consoleButton.dataset.containerConsole)}&name=${encodeURIComponent(consoleButton.dataset.containerName || '')}`, '_blank', 'noopener,width=1100,height=760');
+    window.open(`/container-console.html?id=${encodeURIComponent(consoleButton.dataset.containerConsole)}&name=${encodeURIComponent(consoleButton.dataset.containerName || '')}&v=${Date.now()}`, '_blank', 'noopener,width=1100,height=760');
     return;
   }
   const containerEdit = event.target.closest('[data-container-edit]');
@@ -512,7 +512,7 @@ document.addEventListener('click', async event => {
 
   const vmConsole = event.target.closest('[data-vm-console]');
   if (vmConsole) {
-    window.open(`/vm-console.html?id=${encodeURIComponent(vmConsole.dataset.vmConsole)}&name=${encodeURIComponent(vmConsole.dataset.vmName || '')}`, '_blank', 'noopener,width=1280,height=820');
+    window.open(`/vm-console.html?id=${encodeURIComponent(vmConsole.dataset.vmConsole)}&name=${encodeURIComponent(vmConsole.dataset.vmName || '')}&v=${Date.now()}`, '_blank', 'noopener,width=1280,height=820');
     return;
   }
   const vmEdit = event.target.closest('[data-vm-edit]');
