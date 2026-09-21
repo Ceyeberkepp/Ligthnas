@@ -253,6 +253,21 @@ for guest_mount in "${guest_data_mounts[@]}"; do
     fi
   ' _ "$guest_mount" || echo "Warning: unable to grant LightNAS access on $guest_mount; it will remain browse-only." >&2
 done
+
+# The built-in local pool can also hold VM disks and ISO images. Ensure the
+# libvirt QEMU account can traverse and write LightNAS-managed VM content.
+pct exec "$ctid" -- bash -lc '
+  install -d -m 0770 /var/lib/lightnas/storage/local
+  setfacl -m u:lightnas:rwx /var/lib/lightnas/storage/local || true
+  setfacl -m d:u:lightnas:rwx /var/lib/lightnas/storage/local || true
+  for vm_user in libvirt-qemu qemu; do
+    if id "$vm_user" >/dev/null 2>&1; then
+      setfacl -m "u:${vm_user}:rwx" /var/lib/lightnas/storage/local || true
+      setfacl -m "d:u:${vm_user}:rwx" /var/lib/lightnas/storage/local || true
+      setfacl -R -m "u:${vm_user}:rwx" /var/lib/lightnas/storage/local || true
+    fi
+  done
+'
 pct exec "$ctid" -- systemctl restart lightnas-host-agent lightnas
 
 echo
