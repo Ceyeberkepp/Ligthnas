@@ -67,6 +67,66 @@ if command -v lxc-create >/dev/null 2>&1 && command -v lxc-start >/dev/null 2>&1
     done
   fi
 
+  # Ubuntu's stock lxc-net can fail inside a nested Proxmox LXC even when
+  # network namespaces/veth are available. Install a small LightNAS-owned
+  # bridge service as a fallback so system-container creation does not depend
+  # on that distro helper.
+  if ! (ip link show lightnas0 2>/dev/null | grep -q 'UP' \
+    && ip -4 address show dev lightnas0 2>/dev/null | grep -q '10\.77\.0\.1/24'); then
+    install -d -m 0755 /usr/local/libexec /run/lightnas
+    cat >/usr/local/libexec/lightnas-container-network <<'EOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+bridge=lightnas0
+subnet=10.77.0.0/24
+gateway=10.77.0.1
+pidfile=/run/lightnas/dnsmasq-lightnas0.pid
+case "${1:-start}" in
+  start)
+    ip link show "$bridge" >/dev/null 2>&1 || ip link add name "$bridge" type bridge
+    ip addr replace "$gateway/24" dev "$bridge"
+    ip link set "$bridge" up
+    sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1 || true
+    if [[ -s "$pidfile" ]]; then kill "$(cat "$pidfile")" >/dev/null 2>&1 || true; rm -f "$pidfile"; fi
+    dnsmasq --conf-file=/dev/null --interface="$bridge" --bind-dynamic \
+      --dhcp-range=10.77.0.20,10.77.0.250,255.255.255.0,12h \
+      --dhcp-option=3,"$gateway" --dhcp-option=6,"$gateway" \
+      --pid-file="$pidfile" >/dev/null 2>&1 || true
+    if command -v nft >/dev/null 2>&1; then
+      nft delete table ip lightnas_nat >/dev/null 2>&1 || true
+      nft add table ip lightnas_nat >/dev/null 2>&1 || true
+      nft 'add chain ip lightnas_nat postrouting { type nat hook postrouting priority srcnat; policy accept; }' >/dev/null 2>&1 || true
+      nft add rule ip lightnas_nat postrouting ip saddr "$subnet" masquerade >/dev/null 2>&1 || true
+    fi
+    ;;
+  stop)
+    if [[ -s "$pidfile" ]]; then kill "$(cat "$pidfile")" >/dev/null 2>&1 || true; rm -f "$pidfile"; fi
+    nft delete table ip lightnas_nat >/dev/null 2>&1 || true
+    ip link set "$bridge" down >/dev/null 2>&1 || true
+    ip link delete "$bridge" type bridge >/dev/null 2>&1 || true
+    ;;
+esac
+EOF
+    chmod 0755 /usr/local/libexec/lightnas-container-network
+    cat >/etc/systemd/system/lightnas-container-network.service <<'EOF'
+[Unit]
+Description=LightNAS native container bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/libexec/lightnas-container-network start
+ExecStop=/usr/local/libexec/lightnas-container-network stop
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl daemon-reload
+    systemctl enable --now lightnas-container-network.service >/dev/null 2>&1 || true
+  fi
+
   if systemd-detect-virt --container >/dev/null 2>&1 && [[ "${LIGHTNAS_ALLOW_NESTED_LXC:-0}" != "1" ]]; then
     report Containers 'native LXC installed, but this appliance is itself in a container and nested LXC was not enabled'
   elif ip link show lightnas0 2>/dev/null | grep -q 'UP' \
