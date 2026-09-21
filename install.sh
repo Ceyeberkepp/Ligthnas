@@ -75,6 +75,10 @@ install -d -o lightnas -g lightnas -m 0700 "${DATA_DIRECTORY}/files"
 install -d -o lightnas -g lightnas -m 0770 "${DATA_DIRECTORY}/storage" "${DATA_DIRECTORY}/storage/local"
 for vm_user in libvirt-qemu qemu; do
   if id "$vm_user" >/dev/null 2>&1; then
+    # QEMU must be able to traverse the private LightNAS data root before it
+    # can reach VM disks/ISOs underneath storage. Do not grant access to state,
+    # credentials, or the Files library.
+    setfacl -m "u:${vm_user}:--x" "${DATA_DIRECTORY}" || true
     setfacl -m "u:${vm_user}:rwx" "${DATA_DIRECTORY}/storage" "${DATA_DIRECTORY}/storage/local" || true
     setfacl -m "d:u:${vm_user}:rwx" "${DATA_DIRECTORY}/storage" "${DATA_DIRECTORY}/storage/local" || true
   fi
