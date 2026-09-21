@@ -327,26 +327,34 @@ export async function proxmoxUpdateContainer(input) {
 }
 
 export async function proxmoxCreateVm(input, inventory) {
+  const firmware = ['bios', 'uefi'].includes(input.firmware) ? input.firmware : 'bios';
+  const diskBus = ['scsi', 'virtio', 'sata'].includes(input.diskBus) ? input.diskBus : 'scsi';
+  const networkModel = ['virtio', 'e1000', 'rtl8139'].includes(input.networkModel) ? input.networkModel : 'virtio';
+  const startOnBoot = input.startOnBoot !== false && input.startOnBoot !== 'false';
   const bridge = hostBridgeConfig();
   if (bridge) {
     if (!inventory?.available) throw operationError('Proxmox host bridge is not available.');
     return await hostBridge(bridge, 'create-vm', {
       name: input.name, memoryMiB: input.memoryMiB, cpus: input.cpus, diskGiB: input.diskGiB,
-      pool: input.pool, network: input.network, iso: input.iso
+      pool: input.pool, network: input.network, iso: input.iso,
+      firmware, diskBus, networkModel, startOnBoot
     });
   }
 
   const settings = apiConfig();
   if (!settings || !inventory?.available) throw operationError('Proxmox is not connected.');
   if (inventory.machines.some(name => name.startsWith(`${input.name} (`))) throw operationError('A VM with this name already exists on Proxmox.');
-  if (!inventory.pools.includes(input.pool) || !inventory.networks.includes(input.network) || !inventory.images.includes(input.iso)) throw operationError('Choose a currently available Proxmox storage, bridge and ISO.');
+  if (!inventory.pools.includes(input.pool) || !inventory.networks.includes(input.network) || (input.iso && !inventory.images.includes(input.iso))) throw operationError('Choose a currently available Proxmox storage, bridge and optional ISO.');
   const node = encodeURIComponent(settings.node);
   const vmid = Number(await api(settings, 'cluster/nextid'));
   if (!Number.isInteger(vmid) || vmid < 100) throw operationError('Proxmox returned an invalid VM ID.');
   const task = await api(settings, `nodes/${node}/qemu`, {
     vmid: String(vmid), name: input.name, memory: String(input.memoryMiB), cores: String(input.cpus),
-    scsihw: 'virtio-scsi-pci', scsi0: `${input.pool}:${input.diskGiB}`, ide2: `${input.iso},media=cdrom`,
-    net0: `virtio,bridge=${input.network}`, boot: 'order=ide2;scsi0', ostype: 'l26'
+    bios: firmware === 'uefi' ? 'ovmf' : 'seabios',
+    scsihw: 'virtio-scsi-pci',
+    [diskBus === 'scsi' ? 'scsi0' : diskBus === 'virtio' ? 'virtio0' : 'sata0']: `${input.pool}:${input.diskGiB}`,
+    ...(input.iso ? { ide2: `${input.iso},media=cdrom`, boot: `order=ide2;${diskBus === 'scsi' ? 'scsi0' : diskBus === 'virtio' ? 'virtio0' : 'sata0'}` } : { boot: `order=${diskBus === 'scsi' ? 'scsi0' : diskBus === 'virtio' ? 'virtio0' : 'sata0'}` }),
+    net0: `${networkModel},bridge=${input.network}`, onboot: startOnBoot ? '1' : '0', ostype: 'l26'
   });
   if (typeof task !== 'string' || !task.startsWith('UPID:')) throw operationError('Proxmox did not return a VM creation task ID.');
 

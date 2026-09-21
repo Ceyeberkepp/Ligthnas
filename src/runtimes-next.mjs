@@ -134,14 +134,17 @@ export async function runtimeInventory() {
     listContentAcrossPools('iso').catch(() => [])
   ]);
   const vmStoragePools = (lightnasStorage.pools || []).filter(pool => pool.online && pool.writable && pool.content.includes('images'));
+  const containerStoragePools = (lightnasStorage.pools || []).filter(pool => pool.online && pool.writable && pool.content.includes('rootdir'));
   const images = storageIsos.map(item => item.id);
   const runtime = {
     docker: { available: dockerInfo.ok, enabled: process.env.LIGHTNAS_DOCKER_ENABLED === '1', reason: dockerInfo.ok ? null : 'Optional app runtime is not installed or not accessible.', containers: [], presets: containerImages },
-    containers: { available: false, enabled: false, provider: 'local-lxc', reason: 'Native LXC is not available on this LightNAS host.', containers: [], images: [], networks: [], storageRoot: null },
+    containers: { available: false, enabled: false, provider: 'local-lxc', reason: 'Native LXC is not available on this LightNAS host.', containers: [], images: [], networks: [], pools: containerStoragePools.map(pool => pool.id), storageDetails: containerStoragePools, storageRoot: null },
     virtualization: { available: vmInfo.ok && installer.ok, enabled: process.env.LIGHTNAS_VM_ENABLED === '1', provider: 'libvirt', acceleration: process.env.LIGHTNAS_VM_ACCELERATION || 'auto', reason: vmInfo.ok && installer.ok ? null : 'QEMU/libvirt is unavailable on this LightNAS host.', warning: null, machines: [], machineDetails: [], pools: vmStoragePools.map(pool => pool.id), storageDetails: vmStoragePools, networks: [], networkDetails: [], images, isoDetails: storageIsos.map(item => ({ id: item.id, name: item.name, storageId: item.storageId, storageName: item.storageName, sizeBytes: item.sizeBytes })) }
   };
   try {
     runtime.containers = await localContainerInventory();
+    runtime.containers.pools = containerStoragePools.map(pool => pool.id);
+    runtime.containers.storageDetails = containerStoragePools;
     const templateLibrary = await listContainerTemplates().catch(() => ({ templates: [] }));
     runtime.containers.images = [
       ...(runtime.containers.images || []),
@@ -284,6 +287,21 @@ export async function createContainer(input) {
     });
     return await localManageContainer(input.id || input.name, input.action);
   }
+
+  if (!/^[A-Za-z][A-Za-z0-9-]{1,39}$/.test(input.name || '')) throw Object.assign(new Error('Use a 2–40 character container name.'), { status: 400 });
+  const password = String(input.password || '');
+  if (password.length < 10 || password.length > 128 || /[\r\n:]/.test(password)) {
+    throw Object.assign(new Error('Set a 10–128 character root password without colons or line breaks.'), { status: 400 });
+  }
+  const memory = Number(input.memoryMiB), cpus = Number(input.cpus), disk = Number(input.diskGiB);
+  if (!Number.isInteger(memory) || memory < 256 || memory > 65536 || !Number.isInteger(cpus) || cpus < 1 || cpus > 32 || !Number.isInteger(disk) || disk < 2 || disk > 2048) {
+    throw Object.assign(new Error('Use 256–65536 MiB RAM, 1–32 CPUs and a 2–2048 GiB root disk allocation.'), { status: 400 });
+  }
+  const storage = await resolveStoragePool(String(input.pool || ''), 'rootdir', true);
+  if (storage.availableBytes > 0 && disk * 1024 ** 3 > storage.availableBytes) {
+    throw Object.assign(new Error('The selected storage does not have enough free space for this container disk allocation.'), { status: 507 });
+  }
+
   const importedTemplate = String(input.image || '').startsWith('template:')
     ? await resolveContainerTemplate(input.image)
     : null;
@@ -294,9 +312,20 @@ export async function createContainer(input) {
     name: input.name,
     image: importedTemplate ? '' : input.image,
     templatePath: importedTemplate?.path || '',
-    memoryMiB: Number(input.memoryMiB),
-    cpus: Number(input.cpus),
-    network: input.network
+    storageRoot: join(storage.root, 'rootdir'),
+    storageId: storage.id,
+    diskGiB: disk,
+    password,
+    memoryMiB: memory,
+    cpus,
+    network: input.network,
+    startOnBoot: input.startOnBoot !== false && input.startOnBoot !== 'false',
+    ipv4Mode: input.ipv4Mode === 'manual' ? 'manual' : 'dhcp',
+    ipv4Address: String(input.ipv4Address || ''),
+    gateway: String(input.gateway || ''),
+    dns: String(input.dns || ''),
+    vlanTag: input.vlanTag ? Number(input.vlanTag) : null,
+    macAddress: String(input.macAddress || '')
   });
 }
 
@@ -329,17 +358,26 @@ export async function createVm(input) {
   if (iso && !isoEntry) throw Object.assign(new Error('Selected installer ISO is no longer available.'), { status: 409 });
 
   const networkDetail = virtualization.networkDetails?.find(item => item.name === input.network);
+  const firmware = ['bios', 'uefi'].includes(input.firmware) ? input.firmware : 'bios';
+  const diskBus = ['scsi', 'virtio', 'sata'].includes(input.diskBus) ? input.diskBus : 'scsi';
+  const networkModel = ['virtio', 'e1000', 'rtl8139'].includes(input.networkModel) ? input.networkModel : 'virtio';
   const networkArg = networkDetail?.type === 'qemu-user'
-    ? 'user,model=virtio'
+    ? `user,model=${networkModel}`
     : networkDetail?.type === 'host-bridge'
-      ? `bridge=${input.network},model=virtio`
-      : `network=${input.network},model=virtio`;
+      ? `bridge=${input.network},model=${networkModel}`
+      : `network=${input.network},model=${networkModel}`;
   const virtType = virtualization.acceleration === 'kvm' ? 'kvm' : 'qemu';
-  const args = ['--connect', 'qemu:///system', '--virt-type', virtType, '--name', input.name, '--memory', String(memory), '--vcpus', String(cpus), '--disk', `path=${diskPath},size=${disk},format=qcow2,bus=scsi`, '--controller', 'scsi,model=virtio-scsi', '--network', networkArg, '--graphics', 'vnc,listen=127.0.0.1', '--video', 'virtio', '--noautoconsole', '--wait', '0'];
+  const diskController = diskBus === 'scsi' ? ['--controller', 'scsi,model=virtio-scsi'] : [];
+  const args = ['--connect', 'qemu:///system', '--virt-type', virtType, '--name', input.name, '--memory', String(memory), '--vcpus', String(cpus), '--disk', `path=${diskPath},size=${disk},format=qcow2,bus=${diskBus}`, ...diskController, '--network', networkArg, '--graphics', 'vnc,listen=127.0.0.1', '--video', 'virtio', '--noautoconsole', '--wait', '0'];
   if (isoEntry) args.push('--cdrom', isoEntry.path, '--osinfo', 'detect=on,require=off');
-  else args.push('--import', '--boot', 'hd,menu=on', '--osinfo', 'generic');
+  else args.push('--import', '--osinfo', 'generic');
+  args.push('--boot', firmware === 'uefi' ? 'uefi,menu=on' : (isoEntry ? 'cdrom,hd,menu=on' : 'hd,menu=on'));
   const response = await exclusive(() => command('virt-install', args, 180000));
   if (!response.ok) throw Object.assign(new Error(`VM creation failed: ${response.error}`), { status: 409 });
-  return { id: input.name, name: input.name, provider: virtualization.provider, acceleration: virtualization.acceleration, details: response.output || 'VM created and started.' };
+  if (input.startOnBoot !== false && input.startOnBoot !== 'false') {
+    const autostart = await command('virsh', ['-c', 'qemu:///system', 'autostart', input.name], 30000);
+    if (!autostart.ok) throw Object.assign(new Error(`VM was created, but autostart could not be enabled: ${autostart.error}`), { status: 409 });
+  }
+  return { id: input.name, name: input.name, provider: virtualization.provider, acceleration: virtualization.acceleration, firmware, diskBus, networkModel, details: response.output || 'VM created and started.' };
 }
 

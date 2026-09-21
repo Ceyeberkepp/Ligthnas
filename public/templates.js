@@ -150,6 +150,7 @@ async function openUrlDialog(preferredStorageId = '') {
     const form = event.currentTarget;
     const error = dialog.querySelector('[data-template-error]');
     error.textContent = 'Downloading…';
+    const progress = window.LightNASProgress?.open('Downloading container image', form.elements.url.value);
     try {
       await tRequest('/api/templates/import', {
         method: 'POST',
@@ -158,7 +159,11 @@ async function openUrlDialog(preferredStorageId = '') {
       });
       dialog.close();
       await refreshTemplateLibrary();
-    } catch (problem) { error.textContent = problem.message; }
+      progress?.succeed('The container image downloaded successfully and is ready in the template library.');
+    } catch (problem) {
+      error.textContent = problem.message;
+      progress?.fail(problem.message);
+    }
   }, { once: true });
   dialog.showModal();
 }
@@ -264,6 +269,8 @@ document.addEventListener('click', async event => {
     const error = dialog.querySelector('[data-template-error]');
     catalogFile.disabled = true;
     error.textContent = 'Downloading selected upstream template…';
+    const selected = templateState.catalog?.find(item => (item.id || item.filename) === catalogFile.dataset.templateCatalogFile);
+    const progress = window.LightNASProgress?.open('Downloading container image', selected?.filename || selected?.package || 'Selected system template');
     try {
       await tRequest('/api/templates/import', {
         method: 'POST',
@@ -273,9 +280,11 @@ document.addEventListener('click', async event => {
       error.textContent = 'Template downloaded.';
       await refreshTemplateLibrary();
       catalogFile.textContent = 'Downloaded';
+      progress?.succeed(`${selected?.package || selected?.filename || 'The container image'} downloaded successfully and is ready to use.`);
     } catch (problem) {
       error.textContent = problem.message;
       catalogFile.disabled = false;
+      progress?.fail(problem.message);
     }
     return;
   }

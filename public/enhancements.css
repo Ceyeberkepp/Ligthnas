@@ -98,3 +98,53 @@
 .template-section-row span { opacity:.65; }
 .template-table-row span:nth-child(2) { display:flex; flex-direction:column; gap:.15rem; }
 .template-table-row small { opacity:.6; font-size:.75rem; }
+
+
+/* Guided VM/container creation and transfer progress */
+.runtime-create-dialog { width: min(900px, calc(100vw - 28px)); max-height: 92vh; }
+.runtime-create-dialog .dialog-body { max-height: 88vh; overflow: auto; }
+.wizard-steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 4px 0 24px; }
+.wizard-steps span { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 9px 10px; border: 1px solid var(--line); border-radius: 11px; color: var(--muted); font-size: 11px; font-weight: 700; background: var(--panel-2); }
+.wizard-steps b { display: grid; place-items: center; width: 23px; height: 23px; flex: 0 0 23px; border-radius: 999px; border: 1px solid var(--line-strong); }
+.wizard-steps span.active { color: var(--text); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--panel)); }
+.wizard-steps span.active b, .wizard-steps span.complete b { color: #fff; border-color: var(--accent); background: var(--accent); }
+.wizard-steps span.complete { color: var(--text); }
+.wizard-page { display: none; min-height: 320px; }
+.wizard-page.active { display: block; }
+.wizard-page h3 { margin: 0 0 6px; font-size: 19px; }
+.wizard-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 18px; }
+.wizard-grid label { margin: 0; }
+.wizard-check { display: flex !important; grid-template-columns: none !important; align-items: center; gap: 9px; min-height: 46px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel-2); }
+.wizard-check input { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
+.wizard-review { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 18px; }
+.wizard-review div { display: grid; gap: 4px; padding: 13px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel-2); }
+.wizard-review span { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+.wizard-review b { overflow-wrap: anywhere; }
+
+.transfer-dialog { width: min(520px, calc(100vw - 28px)); }
+.transfer-state { text-align: center; padding: 12px 4px 4px; }
+.transfer-state h2 { margin: 8px 0; }
+.transfer-spinner { width: 54px; height: 54px; margin: 0 auto 18px; border: 5px solid color-mix(in srgb, var(--accent) 18%, var(--line)); border-top-color: var(--accent); border-radius: 50%; animation: lightnas-spin .9s linear infinite; }
+.transfer-result-icon { display: none; place-items: center; width: 58px; height: 58px; margin: 0 auto 18px; border-radius: 50%; font-size: 29px; font-weight: 800; }
+.transfer-state.is-success .transfer-result-icon { display: grid; color: #fff; background: var(--success); }
+.transfer-state.is-error .transfer-result-icon { display: grid; color: #fff; background: var(--danger); }
+.transfer-state.is-error .transfer-result-icon::before { content: '×'; }
+.transfer-state.is-error .transfer-result-icon { font-size: 0; }
+.transfer-state.is-error .transfer-result-icon::before { font-size: 32px; }
+.transfer-state:not(.is-running) .transfer-spinner,
+.transfer-state:not(.is-running) .transfer-progress { display: none; }
+.transfer-progress { position: relative; height: 9px; margin: 22px 0 12px; overflow: hidden; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--line); }
+.transfer-progress span { position: absolute; inset: 0 auto 0 -35%; width: 35%; border-radius: inherit; background: linear-gradient(90deg, transparent, var(--accent), transparent); animation: lightnas-progress 1.35s ease-in-out infinite; }
+.transfer-elapsed { color: var(--muted); font-size: 12px; }
+@keyframes lightnas-spin { to { transform: rotate(360deg); } }
+@keyframes lightnas-progress { from { left: -35%; } to { left: 100%; } }
+
+@media (max-width: 700px) {
+  .runtime-create-dialog { width: calc(100vw - 12px); max-height: 96vh; }
+  .runtime-create-dialog .dialog-body { padding: 17px; max-height: 93vh; }
+  .wizard-steps { grid-template-columns: repeat(4, minmax(40px, 1fr)); gap: 5px; }
+  .wizard-steps span { justify-content: center; padding: 8px 4px; font-size: 0; }
+  .wizard-steps b { font-size: 11px; }
+  .wizard-grid, .wizard-review { grid-template-columns: 1fr; }
+  .wizard-page { min-height: 0; }
+}

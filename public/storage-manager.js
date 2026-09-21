@@ -206,10 +206,12 @@ document.addEventListener('submit',async event=>{
     const id=upload.dataset.storageId,type=upload.dataset.storageType;
     const dialog=ensureStorageDialog(),error=dialog.querySelector('[data-storage-dialog-error]');
     error.textContent=`Uploading ${file.name}…`;
+    const progress=window.LightNASProgress?.open(type==='iso'?'Uploading VM installer image':'Uploading storage image',file.name);
     try{
       await sRequest(`/api/storage/pools/${encodeURIComponent(id)}/upload?type=${encodeURIComponent(type)}&name=${encodeURIComponent(file.name)}`,{method:'PUT',headers:{'Content-Type':'application/octet-stream'},body:file});
       error.textContent='';await renderManageStorage(id,type);
-    }catch(problem){error.textContent=problem.message;}
+      progress?.succeed(`${file.name} uploaded successfully and is ready to use.`);
+    }catch(problem){error.textContent=problem.message;progress?.fail(problem.message);}
     return;
   }
   const importer=event.target.closest('[data-storage-import-form]');
@@ -218,10 +220,12 @@ document.addEventListener('submit',async event=>{
     const id=importer.dataset.storageId,type=importer.dataset.storageType;
     const dialog=ensureStorageDialog(),error=dialog.querySelector('[data-storage-dialog-error]');
     error.textContent='Downloading…';
+    const progress=window.LightNASProgress?.open(type==='iso'?'Downloading VM installer image':'Downloading storage image',importer.elements.url.value);
     try{
       await sRequest(`/api/storage/pools/${encodeURIComponent(id)}/import`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type,url:importer.elements.url.value})});
       error.textContent='';await renderManageStorage(id,type);
-    }catch(problem){error.textContent=problem.message;}
+      progress?.succeed(type==='iso'?'The VM installer ISO downloaded successfully and is ready in the VM creation wizard.':'The image downloaded successfully and is ready to use.');
+    }catch(problem){error.textContent=problem.message;progress?.fail(problem.message);}
   }
 },true);
 

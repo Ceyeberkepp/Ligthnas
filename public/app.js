@@ -214,14 +214,7 @@ function containersView() {
     ${runtimeBanner('containers')}
     ${diagnosticPanel}
     ${runtime?.available && runtime?.enabled && !ready ? '<div class="module-hero"><h2>Container network unavailable</h2><p>Create or enable a local bridge/network under Connectivity before launching a system container.</p></div>' : ''}
-    ${ready ? `<form id="container-form" class="panel creation-form"><h2>Create system container</h2><p class="muted">Runs a full Linux userspace with its own init, services, filesystem and network namespace while sharing the LightNAS kernel. This is not Docker.</p>
-      <label>Container name<input name="name" required pattern="[A-Za-z][A-Za-z0-9-]{1,39}" placeholder="debian-services"></label>
-      <label>Linux image<select name="image">${images}</select></label>
-      <label>Memory (MiB)<input type="number" name="memoryMiB" value="2048" min="256" max="262144" required></label>
-      <label>Virtual CPUs<input type="number" name="cpus" value="2" min="1" max="128" required></label>
-      <label>Network / bridge<select name="network">${networks}</select></label>
-      <div class="module-note">Root filesystems currently use the LightNAS LXC storage root at <b>${escapeHtml(runtime.storageRoot || '/var/lib/lxc')}</b>. Storage-pool-backed quotas are being handled by the LightNAS storage layer rather than Docker volumes.</div>
-      <button class="primary" type="submit">Create & start container</button><div class="form-error" role="alert"></div></form>` : ''}
+    ${ready ? '<div class="module-note"><b>Ready to create.</b> Use the + Create container button to open the guided setup wizard.</div>' : ''}
     <h2>Existing system containers</h2><div class="storage-list">${runtime?.containers?.map(item => `<article class="storage-row"><div><h3>${escapeHtml(item.name)}</h3><p>Native LXC · ${escapeHtml(item.status)}${item.pid ? ` · PID ${item.pid}` : ''}</p></div><div class="storage-size">${escapeHtml(item.id || item.name)}</div></article>`).join('') || '<div class="empty"><p>No native system containers are visible.</p></div>'}</div>`;
 }
 
@@ -242,7 +235,7 @@ function vmsView() {
     ${runtime?.warning ? `<div class="module-note"><b>Software virtualization:</b> ${escapeHtml(runtime.warning)}</div>` : ''}
     ${nestedVmPanel}
     ${runtime?.available && runtime?.enabled && !ready ? '<div class="module-hero"><h2>VM resources needed</h2><p>LightNAS needs an active local libvirt storage pool and network. The installer creates default resources automatically.</p></div>' : ''}
-    ${ready ? `<form id="vm-form" class="panel creation-form"><h2>Create a VM</h2><p class="muted">Uses KVM when hardware virtualization exists and automatically falls back to QEMU software emulation when it does not.</p><label>VM name<input name="name" required pattern="[a-zA-Z][a-zA-Z0-9-]{1,39}"></label><label>Memory (MiB)<input name="memoryMiB" type="number" min="1024" max="65536" value="2048" required></label><label>Virtual CPUs<input name="cpus" type="number" min="1" max="32" value="2" required></label><label>New disk (GiB)<input name="diskGiB" type="number" min="10" max="2048" value="20" required></label><label>VM storage<select name="pool">${(runtime.storageDetails?.length ? runtime.storageDetails : (runtime.pools || []).map(id => ({ id, name: id }))).map(item => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name || item.id)}${item.availableBytes !== undefined ? ` · ${bytes(item.availableBytes)} free` : ''}</option>`).join('')}</select></label><label>Network<select name="network">${choices(runtime.networks)}</select></label><label>Installer ISO<select name="iso">${isoOptions}</select></label><p class="muted">You can create the VM without an ISO. It will boot to firmware/no-boot-media until installation media is attached.</p><button class="primary" type="submit">Create & start VM</button><div class="form-error" role="alert"></div></form>` : ''}
+    ${ready ? '<div class="module-note"><b>Ready to create.</b> Use the + Create VM button to open the guided setup wizard.</div>' : ''}
     <h2>Existing VMs</h2><div class="storage-list">${runtime?.machineDetails?.map(item => `<article class="storage-row"><div><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.status)} · ${item.cpus || '—'} vCPU · ${bytes(item.memory || 0)} RAM</p></div><div class="storage-size">${escapeHtml(runtime.provider || 'libvirt')}</div></article>`).join('') || '<div class="empty"><p>No local virtual machines are visible.</p></div>'}</div>`;
 }
 

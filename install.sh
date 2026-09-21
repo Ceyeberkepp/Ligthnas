@@ -147,7 +147,8 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable --now lightnas-host-agent.service
+systemctl enable lightnas-host-agent.service
+systemctl restart lightnas-host-agent.service
 systemctl enable "${SERVICE_NAME}"
 systemctl restart "${SERVICE_NAME}"
 

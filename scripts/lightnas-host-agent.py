@@ -10,6 +10,7 @@ arbitrary shell commands.
 from __future__ import annotations
 
 import fcntl
+import ipaddress
 import grp
 import json
 import os
@@ -252,23 +253,74 @@ def append_unique(path: Path, line: str) -> None:
     path.write_text("\n".join(kept) + "\n", encoding="utf-8")
 
 
+def managed_container_storage_root(value: str) -> Path:
+    path = Path(value or "/var/lib/lightnas/storage/local/rootdir").resolve()
+    text = str(path)
+    local_root = str(Path("/var/lib/lightnas/storage/local/rootdir").resolve())
+    attached = re.compile(
+        rf"{re.escape(os.sep)}\.lightnas{re.escape(os.sep)}storage{re.escape(os.sep)}"
+        rf"[A-Za-z][A-Za-z0-9_-]{{1,31}}{re.escape(os.sep)}rootdir$"
+    )
+    if text != local_root and not attached.search(text):
+        raise ValueError("container storage is outside a LightNAS-managed rootdir")
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def container_layout(name: str, storage_root_value: str) -> tuple[Path, Path]:
+    control = Path("/var/lib/lxc") / name
+    storage_root = managed_container_storage_root(storage_root_value)
+    rootfs = storage_root / name / "rootfs"
+    return control, rootfs
+
+
+def rootfs_from_config(config: Path) -> Path | None:
+    try:
+        text = config.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    match = re.search(r"^lxc\.rootfs\.path\s*=\s*(?:dir:)?(.+?)\s*$", text, re.MULTILINE)
+    return Path(match.group(1)).resolve() if match else None
+
+
+def managed_external_rootfs(path: Path | None, name: str) -> bool:
+    if not path:
+        return False
+    text = str(path)
+    return path.name == "rootfs" and path.parent.name == name and (
+        text.startswith(str(Path("/var/lib/lightnas/storage/local/rootdir").resolve()) + os.sep)
+        or re.search(
+            rf"{re.escape(os.sep)}\.lightnas{re.escape(os.sep)}storage{re.escape(os.sep)}"
+            rf"[A-Za-z][A-Za-z0-9_-]{{1,31}}{re.escape(os.sep)}rootdir{re.escape(os.sep)}"
+            rf"{re.escape(name)}{re.escape(os.sep)}rootfs$",
+            text,
+        )
+    )
+
+
 def cleanup_container_path(name: str) -> None:
     path = Path("/var/lib/lxc") / name
-    if not path.exists():
-        return
+    external_rootfs = rootfs_from_config(path / "config") if path.exists() else None
     subprocess.run(["lxc-stop", "-n", name, "-k"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     subprocess.run(["lxc-destroy", "-n", name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if path.exists():
         shutil.rmtree(path, ignore_errors=True)
+    if managed_external_rootfs(external_rootfs, name) and external_rootfs.parent.exists():
+        shutil.rmtree(external_rootfs.parent, ignore_errors=True)
 
 
-def bootstrap_deb_container(name: str, image: dict) -> Path:
+def cleanup_failed_container(name: str, rootfs: Path) -> None:
+    cleanup_container_path(name)
+    if managed_external_rootfs(rootfs, name) and rootfs.parent.exists():
+        shutil.rmtree(rootfs.parent, ignore_errors=True)
+
+
+def bootstrap_deb_container(name: str, image: dict, storage_root_value: str) -> Path:
     if not available("debootstrap"):
         raise RuntimeError("debootstrap is not installed; rerun the LightNAS installer")
-    base = Path("/var/lib/lxc") / name
-    rootfs = base / "rootfs"
+    base, rootfs = container_layout(name, storage_root_value)
     base.mkdir(parents=True, exist_ok=False)
-    rootfs.mkdir(parents=True, exist_ok=True)
+    rootfs.mkdir(parents=True, exist_ok=False)
 
     include = ",".join([
         "systemd-sysv", "systemd-resolved", "iproute2",
@@ -281,18 +333,12 @@ def bootstrap_deb_container(name: str, image: dict) -> Path:
     try:
         run(args, timeout=1800)
     except Exception:
-        cleanup_container_path(name)
+        cleanup_failed_container(name, rootfs)
         raise
 
     (rootfs / "etc" / "hostname").write_text(f"{name}\n", encoding="utf-8")
     (rootfs / "etc" / "hosts").write_text(
         f"127.0.0.1\tlocalhost\n127.0.1.1\t{name}\n::1\tlocalhost ip6-localhost ip6-loopback\n",
-        encoding="utf-8",
-    )
-    network_dir = rootfs / "etc" / "systemd" / "network"
-    network_dir.mkdir(parents=True, exist_ok=True)
-    (network_dir / "20-eth0.network").write_text(
-        "[Match]\nName=eth0\n\n[Network]\nDHCP=yes\nIPv6AcceptRA=yes\n",
         encoding="utf-8",
     )
     resolv = rootfs / "etc" / "resolv.conf"
@@ -322,7 +368,7 @@ def bootstrap_deb_container(name: str, image: dict) -> Path:
     return config
 
 
-def bootstrap_template_container(name: str, image: dict) -> Path:
+def bootstrap_template_container(name: str, image: dict, storage_root_value: str) -> Path:
     template = str(image.get("template") or image["dist"])
     script = Path("/usr/share/lxc/templates") / f"lxc-{template}"
     if not script.exists():
@@ -331,10 +377,18 @@ def bootstrap_template_container(name: str, image: dict) -> Path:
     args = ["lxc-create", "-n", name, "-t", template, "--", "-r", image["release"], "-a", arch]
     try:
         run(args, timeout=1800)
+        config = Path("/var/lib/lxc") / name / "config"
+        source_rootfs = rootfs_from_config(config) or (Path("/var/lib/lxc") / name / "rootfs")
+        _control, target_rootfs = container_layout(name, storage_root_value)
+        target_rootfs.parent.mkdir(parents=True, exist_ok=False)
+        shutil.move(str(source_rootfs), str(target_rootfs))
+        text = config.read_text(encoding="utf-8")
+        text = re.sub(r"^lxc\.rootfs\.path\s*=.*$", f"lxc.rootfs.path = dir:{target_rootfs}", text, flags=re.MULTILINE)
+        config.write_text(text, encoding="utf-8")
+        return config
     except Exception:
         cleanup_container_path(name)
         raise
-    return Path("/var/lib/lxc") / name / "config"
 
 
 def managed_template_archive(value: str) -> Path:
@@ -363,12 +417,11 @@ def managed_template_archive(value: str) -> Path:
     return path
 
 
-def bootstrap_archive_container(name: str, archive_value: str) -> Path:
+def bootstrap_archive_container(name: str, archive_value: str, storage_root_value: str) -> Path:
     archive = managed_template_archive(archive_value)
-    base = Path("/var/lib/lxc") / name
-    rootfs = base / "rootfs"
+    base, rootfs = container_layout(name, storage_root_value)
     base.mkdir(parents=True, exist_ok=False)
-    rootfs.mkdir(parents=True, exist_ok=True)
+    rootfs.mkdir(parents=True, exist_ok=False)
 
     try:
         listing = run(["tar", "-taf", str(archive)], timeout=120)
@@ -381,11 +434,11 @@ def bootstrap_archive_container(name: str, archive_value: str) -> Path:
             "-xaf", str(archive), "-C", str(rootfs)
         ], timeout=1800)
     except Exception:
-        cleanup_container_path(name)
+        cleanup_failed_container(name, rootfs)
         raise
 
     if not (rootfs / "etc").is_dir():
-        cleanup_container_path(name)
+        cleanup_failed_container(name, rootfs)
         raise ValueError("template archive does not contain a Linux root filesystem")
 
     (rootfs / "etc" / "hostname").write_text(f"{name}\n", encoding="utf-8")
@@ -396,16 +449,7 @@ def bootstrap_archive_container(name: str, archive_value: str) -> Path:
             encoding="utf-8",
         )
 
-    # Proxmox system templates generally already contain guest networking.
-    # Add a networkd DHCP profile only when systemd is present so imported
-    # templates remain bootable on the LightNAS NAT bridge.
     if (rootfs / "usr" / "lib" / "systemd").exists() or (rootfs / "lib" / "systemd").exists():
-        network_dir = rootfs / "etc" / "systemd" / "network"
-        network_dir.mkdir(parents=True, exist_ok=True)
-        (network_dir / "20-eth0.network").write_text(
-            "[Match]\nName=eth0\n\n[Network]\nDHCP=yes\nIPv6AcceptRA=yes\n",
-            encoding="utf-8",
-        )
         subprocess.run(
             ["systemctl", "--root", str(rootfs), "enable", "systemd-networkd.service"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
@@ -423,6 +467,67 @@ def bootstrap_archive_container(name: str, archive_value: str) -> Path:
     return config
 
 
+def configure_container_guest(config: Path, data: dict) -> None:
+    rootfs = rootfs_from_config(config)
+    if not rootfs or not rootfs.is_dir():
+        raise RuntimeError("container root filesystem is unavailable")
+
+    password = str(data.get("password") or "")
+    if not (10 <= len(password) <= 128) or any(character in password for character in ("\r", "\n", ":")):
+        raise ValueError("root password must contain 10-128 characters without colons or line breaks")
+    result = subprocess.run(
+        ["chroot", str(rootfs), "chpasswd"],
+        input=f"root:{password}\n",
+        text=True,
+        capture_output=True,
+        timeout=30,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"could not set the container root password: {(result.stderr or result.stdout).strip()[:300]}")
+
+    mode = str(data.get("ipv4Mode") or "dhcp")
+    address = str(data.get("ipv4Address") or "").strip()
+    gateway = str(data.get("gateway") or "").strip()
+    dns_values = [item.strip() for item in str(data.get("dns") or "").split(",") if item.strip()]
+    if mode not in {"dhcp", "manual"}:
+        raise ValueError("invalid container IPv4 mode")
+    if mode == "manual":
+        try:
+            ipaddress.ip_interface(address)
+            if gateway:
+                ipaddress.ip_address(gateway)
+            for item in dns_values:
+                ipaddress.ip_address(item)
+        except ValueError as exc:
+            raise ValueError("invalid static IPv4 address, gateway, or DNS server") from exc
+
+    systemd_present = (rootfs / "usr" / "lib" / "systemd").exists() or (rootfs / "lib" / "systemd").exists()
+    if mode == "manual" and not systemd_present:
+        raise ValueError("static networking currently requires a systemd-based container image")
+    if systemd_present:
+        network_dir = rootfs / "etc" / "systemd" / "network"
+        network_dir.mkdir(parents=True, exist_ok=True)
+        network_lines = ["[Match]", "Name=eth0", "", "[Network]"]
+        if mode == "dhcp":
+            network_lines += ["DHCP=yes", "IPv6AcceptRA=yes"]
+        else:
+            network_lines.append(f"Address={address}")
+            if gateway:
+                network_lines.append(f"Gateway={gateway}")
+            for item in dns_values:
+                network_lines.append(f"DNS={item}")
+        (network_dir / "20-eth0.network").write_text("\n".join(network_lines) + "\n", encoding="utf-8")
+
+    metadata = {
+        "storageId": str(data.get("storageId") or ""),
+        "diskGiB": int(data.get("diskGiB") or 0),
+        "network": str(data.get("network") or ""),
+        "createdBy": "LightNAS",
+    }
+    (config.parent / "lightnas.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+
+
+
 def create_container(data: dict) -> dict:
     ok, reason, _diagnostics = container_capability()
     if not ok:
@@ -430,12 +535,14 @@ def create_container(data: dict) -> dict:
     name = str(data.get("name") or "").strip()
     image_id = str(data.get("image") or "").strip()
     template_path = str(data.get("templatePath") or "").strip()
+    storage_root_value = str(data.get("storageRoot") or "").strip()
     requested_network = str(data.get("network") or "").strip()
     networks = local_networks()
     network = requested_network if requested_network in networks else (networks[0] if networks else "")
     try:
         memory = int(data.get("memoryMiB") or 2048)
         cpus = int(data.get("cpus") or 2)
+        disk_gib = int(data.get("diskGiB") or 8)
     except (TypeError, ValueError) as exc:
         raise ValueError("invalid container resource values") from exc
     if not NAME_RE.fullmatch(name):
@@ -446,8 +553,9 @@ def create_container(data: dict) -> dict:
     if not network or not IFACE_RE.fullmatch(network) or network not in networks:
         raise ValueError("no active local container bridge is available")
     host_cpus = max(1, os.cpu_count() or 1)
-    if not (256 <= memory <= 262144 and 1 <= cpus <= min(128, host_cpus)):
-        raise ValueError("container CPU or memory values are outside host limits")
+    if not (256 <= memory <= 65536 and 1 <= cpus <= min(32, host_cpus) and 2 <= disk_gib <= 2048):
+        raise ValueError("container CPU, memory, or disk values are outside host limits")
+    managed_container_storage_root(storage_root_value)
 
     container_path = Path("/var/lib/lxc") / name
     if container_path.exists():
@@ -455,26 +563,42 @@ def create_container(data: dict) -> dict:
         # Remove only clearly incomplete containers; never destroy an existing
         # valid container implicitly.
         partial = (container_path / "partial").exists()
-        valid = (container_path / "config").exists() and (container_path / "rootfs").exists()
+        existing_rootfs = rootfs_from_config(container_path / "config")
+        valid = (container_path / "config").exists() and bool(existing_rootfs and existing_rootfs.exists())
         if partial or not valid:
             cleanup_container_path(name)
         else:
             raise ValueError("a container with this name already exists")
 
     if template_path:
-        config = bootstrap_archive_container(name, template_path)
+        config = bootstrap_archive_container(name, template_path, storage_root_value)
     elif image.get("builder") == "debootstrap":
-        config = bootstrap_deb_container(name, image)
+        config = bootstrap_deb_container(name, image, storage_root_value)
     else:
-        config = bootstrap_template_container(name, image)
+        config = bootstrap_template_container(name, image, storage_root_value)
 
-    append_unique(config, "lxc.start.auto = 1")
+    configure_container_guest(config, data)
+    append_unique(config, f"lxc.start.auto = {1 if data.get('startOnBoot', True) else 0}")
     append_unique(config, f"lxc.cgroup2.memory.max = {memory * 1024 * 1024}")
     append_unique(config, f"lxc.cgroup2.cpu.max = {cpus * 100000} 100000")
     append_unique(config, "lxc.net.0.type = veth")
     append_unique(config, f"lxc.net.0.link = {network}")
     append_unique(config, "lxc.net.0.flags = up")
     append_unique(config, "lxc.net.0.name = eth0")
+    vlan_tag = data.get("vlanTag")
+    if vlan_tag is not None:
+        try:
+            vlan_tag = int(vlan_tag)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("invalid VLAN tag") from exc
+        if not 1 <= vlan_tag <= 4094:
+            raise ValueError("invalid VLAN tag")
+        append_unique(config, f"lxc.net.0.vlan.id = {vlan_tag}")
+    mac_address = str(data.get("macAddress") or "").strip()
+    if mac_address:
+        if not re.fullmatch(r"(?:[A-Fa-f0-9]{2}:){5}[A-Fa-f0-9]{2}", mac_address):
+            raise ValueError("invalid container MAC address")
+        append_unique(config, f"lxc.net.0.hwaddr = {mac_address}")
     if in_container():
         # The outer appliance container remains the security boundary. Avoid
         # inner AppArmor profile loading, which is commonly blocked in nested
@@ -495,6 +619,8 @@ def create_container(data: dict) -> dict:
         "provider": "local-lxc",
         "image": image_id,
         "builder": "archive" if template_path else image.get("builder"),
+        "storageId": str(data.get("storageId") or ""),
+        "diskGiB": disk_gib,
     }
 
 
