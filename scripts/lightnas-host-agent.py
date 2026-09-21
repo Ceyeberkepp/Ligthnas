@@ -430,7 +430,9 @@ def create_container(data: dict) -> dict:
     name = str(data.get("name") or "").strip()
     image_id = str(data.get("image") or "").strip()
     template_path = str(data.get("templatePath") or "").strip()
-    network = str(data.get("network") or "lightnas0").strip()
+    requested_network = str(data.get("network") or "").strip()
+    networks = local_networks()
+    network = requested_network if requested_network in networks else (networks[0] if networks else "")
     try:
         memory = int(data.get("memoryMiB") or 2048)
         cpus = int(data.get("cpus") or 2)
@@ -441,8 +443,8 @@ def create_container(data: dict) -> dict:
     image = IMAGE_BY_ID.get(image_id)
     if not template_path and (not image or (in_container() and not image.get("nested", True))):
         raise ValueError("select a Linux system-container image or imported LightNAS template")
-    if not IFACE_RE.fullmatch(network) or network not in local_networks():
-        raise ValueError("select an active local container bridge")
+    if not network or not IFACE_RE.fullmatch(network) or network not in networks:
+        raise ValueError("no active local container bridge is available")
     host_cpus = max(1, os.cpu_count() or 1)
     if not (256 <= memory <= 262144 and 1 <= cpus <= min(128, host_cpus)):
         raise ValueError("container CPU or memory values are outside host limits")
