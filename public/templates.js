@@ -1,4 +1,4 @@
-const templateState = { library: null, catalog: null };
+const templateState = { library: null, catalog: null, selectedCatalogId: null };
 
 function tEsc(value) {
   return String(value ?? '').replace(/[&<>'"]/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' })[ch]);
@@ -94,9 +94,10 @@ async function refreshTemplateLibrary() {
   }
 }
 
-async function openUploadDialog() {
+async function openUploadDialog(preferredStorageId = '') {
   const library = templateState.library || await loadTemplateLibrary();
   const dialog = ensureTemplateDialog();
+  document.querySelector('#lightnas-storage-dialog')?.close();
   dialog.querySelector('[data-template-title]').textContent = 'Upload container template';
   dialog.querySelector('[data-template-error]').textContent = '';
   dialog.querySelector('[data-template-body]').innerHTML = `
@@ -107,7 +108,7 @@ async function openUploadDialog() {
       <div class="dialog-actions"><button class="primary" type="submit">Upload template</button></div>
     </form>`;
   const select = dialog.querySelector('select[name="storageId"]');
-  select.value = preferredTarget(library.targets);
+  select.value = preferredStorageId || preferredTarget(library.targets);
   dialog.querySelector('[data-template-upload-form]').addEventListener('submit', async event => {
     event.preventDefault();
     const form = event.currentTarget;
@@ -129,9 +130,10 @@ async function openUploadDialog() {
   dialog.showModal();
 }
 
-async function openUrlDialog() {
+async function openUrlDialog(preferredStorageId = '') {
   const library = templateState.library || await loadTemplateLibrary();
   const dialog = ensureTemplateDialog();
+  document.querySelector('#lightnas-storage-dialog')?.close();
   dialog.querySelector('[data-template-title]').textContent = 'Import template from URL';
   dialog.querySelector('[data-template-error]').textContent = '';
   dialog.querySelector('[data-template-body]').innerHTML = `
@@ -142,7 +144,7 @@ async function openUrlDialog() {
       <div class="dialog-actions"><button class="primary" type="submit">Import template</button></div>
     </form>`;
   const select = dialog.querySelector('select[name="storageId"]');
-  select.value = preferredTarget(library.targets);
+  select.value = preferredStorageId || preferredTarget(library.targets);
   dialog.querySelector('[data-template-url-form]').addEventListener('submit', async event => {
     event.preventDefault();
     const form = event.currentTarget;
@@ -168,7 +170,7 @@ function renderCatalog(dialog, query = '') {
     if (!normalized) return true;
     return [item.filename, item.package, item.version, item.description, item.section, item.source]
       .some(value => String(value || '').toLowerCase().includes(normalized));
-  }).slice(0, 160);
+  }).slice(0, 200);
   const list = dialog.querySelector('[data-template-catalog-list]');
   if (!list) return;
   if (!matches.length) {
@@ -177,13 +179,25 @@ function renderCatalog(dialog, query = '') {
   }
   const sections = [...new Set(matches.map(item => item.section || 'system'))];
   list.innerHTML = `<div class="template-table">
-    <div class="template-table-head"><span>Type</span><span>Package</span><span>Version</span><span>Description</span><span></span></div>
+    <div class="template-table-head"><span>Type</span><span>Package</span><span>Version</span><span>Description</span><span>Action</span></div>
     ${sections.map(section => {
       const rows = matches.filter(item => (item.section || 'system') === section);
       return `<div class="template-section-row"><b>Section: ${tEsc(section)}</b><span>${rows.length} item${rows.length === 1 ? '' : 's'}</span></div>
-        ${rows.map(item => `<div class="template-table-row"><span>${tEsc(item.type || 'lxc')}</span><span><b>${tEsc(item.package || item.filename)}</b><small>${tEsc(item.source || '')}</small></span><span>${tEsc(item.version || '')}</span><span>${tEsc(item.description || item.filename)}</span><span><button class="secondary" type="button" data-template-catalog-file="${tEsc(item.id || item.filename)}">Download</button></span></div>`).join('')}`;
+        ${rows.map(item => {
+          const id = item.id || item.filename;
+          const selected = templateState.selectedCatalogId === id;
+          return `<div class="template-table-row ${selected ? 'selected' : ''}" role="button" tabindex="0" data-template-catalog-select="${tEsc(id)}">
+            <span>${tEsc(item.type || 'lxc')}</span>
+            <span><b>${tEsc(item.package || item.filename)}</b><small>${tEsc(item.source || '')}</small></span>
+            <span>${tEsc(item.version || '')}</span>
+            <span>${tEsc(item.description || item.filename)}</span>
+            <span><button class="secondary" type="button" data-template-catalog-file="${tEsc(id)}">Download</button></span>
+          </div>`;
+        }).join('')}`;
     }).join('')}
   </div>`;
+  const selectedButton = dialog.querySelector('[data-template-download-selected]');
+  if (selectedButton) selectedButton.disabled = !templateState.selectedCatalogId;
 }
 
 async function openCatalogDialog(preferredStorageId = '') {
@@ -191,10 +205,20 @@ async function openCatalogDialog(preferredStorageId = '') {
   const dialog = ensureTemplateDialog();
   dialog.querySelector('[data-template-title]').textContent = 'Upstream system template catalog';
   dialog.querySelector('[data-template-error]').textContent = 'Loading official catalog…';
+  document.querySelector('#lightnas-storage-dialog')?.close();
+  templateState.selectedCatalogId = null;
   dialog.querySelector('[data-template-body]').innerHTML = `
-    <label>Save to storage<select data-template-catalog-storage>${targetOptions(library.targets)}</select></label>
-    <label>Search<input data-template-catalog-search type="search" placeholder="Debian, Ubuntu, Alpine, Rocky…"></label>
-    <div class="storage-list" data-template-catalog-list><div class="empty"><p>Loading catalog…</p></div></div>`;
+    <div class="template-catalog-toolbar">
+      <label>Save to storage<select data-template-catalog-storage>${targetOptions(library.targets)}</select></label>
+      <label>Search<input data-template-catalog-search type="search" placeholder="Debian, Ubuntu, Alpine, Rocky…"></label>
+    </div>
+    <p class="muted">Click a template row to select it, then choose Download selected. You can also use the Download button on any row.</p>
+    <div class="storage-list template-catalog-scroll" data-template-catalog-list><div class="empty"><p>Loading catalog…</p></div></div>
+    <div class="dialog-actions template-catalog-actions">
+      <button class="secondary" type="button" data-template-upload data-template-storage="${tEsc(preferredStorageId)}">Upload template file</button>
+      <button class="secondary" type="button" data-template-url data-template-storage="${tEsc(preferredStorageId)}">Import URL</button>
+      <button class="primary" type="button" data-template-download-selected disabled>Download selected</button>
+    </div>`;
   const select = dialog.querySelector('[data-template-catalog-storage]');
   const desired = preferredStorageId || preferredTarget(library.targets);
   if ([...select.options].some(option => option.value === desired && !option.disabled)) select.value = desired;
@@ -214,12 +238,26 @@ document.addEventListener('click', async event => {
   if (browse) { await openCatalogDialog(browse.dataset.templateStorage || ''); return; }
 
   const upload = event.target.closest('[data-template-upload]');
-  if (upload) { await openUploadDialog(); return; }
+  if (upload) { await openUploadDialog(upload.dataset.templateStorage || ''); return; }
 
   const url = event.target.closest('[data-template-url]');
-  if (url) { await openUrlDialog(); return; }
+  if (url) { await openUrlDialog(url.dataset.templateStorage || ''); return; }
 
-  const catalogFile = event.target.closest('[data-template-catalog-file]');
+  const selectedRow = event.target.closest('[data-template-catalog-select]');
+  if (selectedRow && !event.target.closest('button')) {
+    templateState.selectedCatalogId = selectedRow.dataset.templateCatalogSelect;
+    renderCatalog(ensureTemplateDialog(), ensureTemplateDialog().querySelector('[data-template-catalog-search]')?.value || '');
+    return;
+  }
+
+  const selectedDownload = event.target.closest('[data-template-download-selected]');
+  if (selectedDownload) {
+    const id = templateState.selectedCatalogId;
+    if (!id) return;
+    selectedDownload.setAttribute('data-template-catalog-file', id);
+  }
+
+  const catalogFile = event.target.closest('[data-template-catalog-file]') || selectedDownload;
   if (catalogFile) {
     const dialog = ensureTemplateDialog();
     const storageId = dialog.querySelector('[data-template-catalog-storage]')?.value;
