@@ -71,7 +71,7 @@ if command -v lxc-create >/dev/null 2>&1 && command -v lxc-start >/dev/null 2>&1
   # network namespaces/veth are available. Install a small LightNAS-owned
   # bridge service as a fallback so system-container creation does not depend
   # on that distro helper.
-  if ! (ip link show lightnas0 2>/dev/null | grep -q 'UP' \
+  if [[ ${EUID} -eq 0 ]] && ! (ip link show lightnas0 2>/dev/null | grep -q 'UP' \
     && ip -4 address show dev lightnas0 2>/dev/null | grep -q '10\.77\.0\.1/24'); then
     install -d -m 0755 /usr/local/libexec /run/lightnas
     cat >/usr/local/libexec/lightnas-container-network <<'EOF'
