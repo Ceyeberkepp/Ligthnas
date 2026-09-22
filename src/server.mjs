@@ -955,7 +955,18 @@ function sameOrigin(req) {
   catch { return false; }
 }
 
+function keepWebSocketAlive(ws) {
+  const timer = setInterval(() => {
+    if (ws.readyState === 1) ws.ping();
+    else clearInterval(timer);
+  }, 25000);
+  const stop = () => clearInterval(timer);
+  ws.once('close', stop);
+  ws.once('error', stop);
+}
+
 function bridgeWebSocketToSocket(ws, backend) {
+  keepWebSocketAlive(ws);
   const close = () => {
     if (!backend.destroyed) backend.destroy();
     if (ws.readyState === 0 || ws.readyState === 1) ws.close();
@@ -969,6 +980,7 @@ function bridgeWebSocketToSocket(ws, backend) {
 }
 
 function bridgeWebSocketToProcess(ws, process) {
+  keepWebSocketAlive(ws);
   const output = chunk => { if (ws.readyState === 1) ws.send(chunk.toString('utf8')); };
   process.stdout?.on('data', output);
   process.stderr?.on('data', output);
