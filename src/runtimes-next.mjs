@@ -298,8 +298,8 @@ export async function createContainer(input) {
 
   if (!/^[A-Za-z][A-Za-z0-9-]{1,39}$/.test(input.name || '')) throw Object.assign(new Error('Use a 2–40 character container name.'), { status: 400 });
   const password = String(input.password || '');
-  if (password.length < 10 || password.length > 128 || /[\r\n:]/.test(password)) {
-    throw Object.assign(new Error('Set a 10–128 character root password without colons or line breaks.'), { status: 400 });
+  if (password.length < 4 || password.length > 128 || /[\r\n:]/.test(password)) {
+    throw Object.assign(new Error('Set a 4–128 character root password without colons or line breaks.'), { status: 400 });
   }
   const memory = Number(input.memoryMiB), cpus = Number(input.cpus), disk = Number(input.diskGiB);
   if (!Number.isInteger(memory) || memory < 256 || memory > 65536 || !Number.isInteger(cpus) || cpus < 1 || cpus > 32 || !Number.isInteger(disk) || disk < 2 || disk > 2048) {
