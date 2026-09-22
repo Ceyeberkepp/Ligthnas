@@ -103,7 +103,8 @@
       if (!command) return;
       input.value = '';
       if (socketOpen && ws.readyState === WebSocket.OPEN) {
-        ws.send(`${command}\n`);
+        // A terminal Enter key is carriage return; the PTY line discipline converts it to newline.
+        ws.send(`${command}\r`);
         return;
       }
       enableCommandMode();
