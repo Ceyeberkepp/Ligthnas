@@ -1211,6 +1211,12 @@ def network_action(data: dict) -> dict:
             if not re.fullmatch(r"[A-Fa-f0-9:.]+(?:/[0-9]{1,3})?", source):
                 raise ValueError("invalid firewall source address")
             args += ["from", source, "to", "any"]
+        else:
+            # UFW's long rule form requires an explicit destination.  Using
+            # ``allow port 8443 proto tcp`` makes UFW reject the request with
+            # "Need 'to' or 'from' clause", which used to make container app
+            # publishing look like an image-download failure in the UI.
+            args += ["to", "any"]
         args += ["port", str(port), "proto", protocol]
         run(args, timeout=30)
         return {"action": action, "decision": decision, "protocol": protocol, "port": port, "source": source or "any"}
@@ -1235,7 +1241,7 @@ def network_action(data: dict) -> dict:
         protocol = str(data.get("protocol") or "tcp").lower()
         if protocol not in {"tcp", "udp"} or not (1 <= port <= 65535):
             raise ValueError("invalid firewall rule")
-        run(["ufw", "--force", "delete", "allow", str(port), "proto", protocol], timeout=30, check=False)
+        run(["ufw", "--force", "delete", "allow", "to", "any", "port", str(port), "proto", protocol], timeout=30, check=False)
         return {"action": action, "protocol": protocol, "port": port}
     if action == "firewall-enable":
         if not available("ufw"):

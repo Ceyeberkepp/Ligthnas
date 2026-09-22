@@ -130,10 +130,19 @@ function openProgressDialog(title, detail) {
     const state = dialog.querySelector('[data-transfer-state]');
     state.classList.remove('is-running', 'is-success', 'is-error');
     state.classList.add(kind === 'success' ? 'is-success' : 'is-error');
-    const operation = /upload/i.test(initialTitle) ? 'Upload' : /creat/i.test(initialTitle) ? 'Creation' : /delet/i.test(initialTitle) ? 'Deletion' : 'Download';
+    const operation = /upload/i.test(initialTitle) ? 'Upload'
+      : /creat/i.test(initialTitle) ? 'Creation'
+      : /delet/i.test(initialTitle) ? 'Deletion'
+      : /install/i.test(initialTitle) ? 'Installation'
+      : /download/i.test(initialTitle) ? 'Download'
+      : /sav|publish|configur/i.test(initialTitle) ? 'Save'
+      : /open|load/i.test(initialTitle) ? 'Loading'
+      : 'Operation';
     dialog.querySelector('[data-transfer-title]').textContent = kind === 'success' ? `${operation} complete` : `${operation} failed`;
     dialog.querySelector('[data-transfer-detail]').textContent = message;
-    dialog.querySelector('[data-transfer-elapsed]').textContent = kind === 'success' ? 'The image is ready to use.' : 'Nothing incomplete will be shown in the image library.';
+    dialog.querySelector('[data-transfer-elapsed]').textContent = kind === 'success'
+      ? (/upload|download/i.test(initialTitle) ? 'The image is ready to use.' : 'The requested changes are active.')
+      : (/upload|download/i.test(initialTitle) ? 'Nothing incomplete will be shown in the image library.' : 'The requested changes were not completed.');
     dialog.querySelector('[data-transfer-error]').textContent = kind === 'error' ? message : '';
     dialog.querySelector('[data-transfer-ok]').classList.remove('hidden');
   };

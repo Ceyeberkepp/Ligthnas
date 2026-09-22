@@ -3,10 +3,12 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 test('catalog apps publish and verify their LightNAS endpoint automatically', async () => {
-  const [runtime, installer, app] = await Promise.all([
+  const [runtime, installer, app, agent, network] = await Promise.all([
     readFile(new URL('../src/runtimes-next.mjs', import.meta.url), 'utf8'),
     readFile(new URL('../scripts/provision-runtimes.sh', import.meta.url), 'utf8'),
-    readFile(new URL('../public/app.js', import.meta.url), 'utf8')
+    readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
+    readFile(new URL('../scripts/lightnas-host-agent.py', import.meta.url), 'utf8'),
+    readFile(new URL('../src/network.mjs', import.meta.url), 'utf8')
   ]);
 
   assert.match(runtime, /lightnas\.web\.port=/);
@@ -17,4 +19,7 @@ test('catalog apps publish and verify their LightNAS endpoint automatically', as
   assert.match(installer, /LightNAS managed app/);
   assert.match(app, /Open application/);
   assert.match(app, /No Proxmox configuration or manual port forwarding is required/);
+  assert.match(agent, /args \+= \["to", "any"\]/);
+  assert.match(agent, /"delete", "allow", "to", "any", "port"/);
+  assert.match(network, /else args\.push\('to', 'any'\)/);
 });

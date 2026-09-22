@@ -48,6 +48,7 @@ test('container manager exposes real resource and network controls', async () =>
   assert.match(dialog, /startOnBoot/);
   assert.match(dialog, /settingsChanged/);
   assert.match(dialog, /Saving container settings/);
+  assert.match(dialog, /\/sav\|publish\|configur\/i/);
   assert.match(dialog, /action: 'publish'/);
   assert.match(server, /containerReadyForPublication/);
   assert.match(server, /localManageContainer\(id, 'start'\)/);

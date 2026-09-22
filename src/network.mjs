@@ -97,6 +97,7 @@ export async function networkAction(input) {
     }
     const args = [decision];
     if (source) args.push('from', source, 'to', 'any');
+    else args.push('to', 'any');
     args.push('port', String(port), 'proto', protocol);
     const result = await command('ufw', args, 15000);
     if (!result.ok) throw Object.assign(new Error(`UFW: ${result.stderr}`), { status: 409 });
