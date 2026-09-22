@@ -643,6 +643,12 @@ async function api(req, res, url) {
 
   if (req.method === 'GET' && url.pathname === '/api/containers/inventory') {
     if (!requireAnyPermission(res, permissions, ['containers.manage', 'storage.view', 'system.view'])) return;
+    // The Containers page only needs existing LXC records and capability
+    // state. Keep storage/template discovery out of that critical path; the
+    // creation wizard requests the full inventory when it is opened.
+    if (url.searchParams.get('summary') === '1') {
+      return send(res, 200, await localContainerSummary());
+    }
     const withDeadline = (promise, fallback, ms = 4000) => Promise.race([
       promise,
       new Promise(resolve => setTimeout(() => resolve(fallback), ms))

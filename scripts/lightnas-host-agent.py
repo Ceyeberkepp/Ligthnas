@@ -248,31 +248,44 @@ def container_settings(name: str) -> dict:
     }
 
 
-def container_records() -> list[dict]:
+def container_records(fast: bool = False) -> list[dict]:
     names: list[str] = []
-    if available("lxc-ls"):
+    # The web container list must not wait on liblxc. Read the authoritative
+    # control directories first; lxc-ls is only a compatibility fallback for
+    # hosts whose control path is not readable.
+    try:
+        names = sorted(
+            item.name for item in Path("/var/lib/lxc").iterdir()
+            if item.is_dir() and NAME_RE.fullmatch(item.name) and (item / "config").is_file()
+        )
+    except OSError:
+        names = []
+    if not names and available("lxc-ls"):
         try:
             names = [line.strip() for line in run(["lxc-ls", "-1"], timeout=5, check=False).splitlines() if NAME_RE.fullmatch(line.strip())]
         except Exception:
             names = []
-    if not names:
+
+    running: set[str] = set()
+    if fast and names and available("lxc-ls"):
         try:
-            names = sorted(
-                item.name for item in Path("/var/lib/lxc").iterdir()
-                if item.is_dir() and NAME_RE.fullmatch(item.name) and (item / "config").is_file()
-            )
-        except OSError:
-            names = []
+            running = {
+                line.strip() for line in run(["lxc-ls", "--running", "-1"], timeout=2, check=False).splitlines()
+                if NAME_RE.fullmatch(line.strip())
+            }
+        except Exception:
+            running = set()
 
     containers = []
     for name in names:
-        state = lxc_state(name)
+        state = "running" if name in running else ("stopped" if fast else lxc_state(name))
         pid = None
-        try:
-            raw_pid = run(["lxc-info", "-n", name, "-pH"], timeout=3, check=False)
-            pid = int(raw_pid) if raw_pid.isdigit() else None
-        except Exception:
-            pass
+        if not fast:
+            try:
+                raw_pid = run(["lxc-info", "-n", name, "-pH"], timeout=3, check=False)
+                pid = int(raw_pid) if raw_pid.isdigit() else None
+            except Exception:
+                pass
         memory, cpus = container_limits(name)
         containers.append({
             "id": name, "name": name, "status": state, "pid": pid,
@@ -299,7 +312,7 @@ def container_summary() -> dict:
         "enabled": tools and (not nested or nested_enabled),
         "provider": "local-lxc",
         "reason": reason,
-        "containers": container_records(),
+        "containers": container_records(fast=True),
         "images": [item for item in IMAGES if item.get("nested", True) or not nested],
         "networks": networks,
         "networkReady": bool(networks),

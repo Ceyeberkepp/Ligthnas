@@ -188,7 +188,7 @@ async function loadRuntimes() {
 
 async function loadContainers() {
   try {
-    const containers = await request('/api/containers/inventory');
+    const containers = await request('/api/containers/inventory?summary=1');
     state.runtimes = { ...(state.runtimes || {}), containers };
     state.containerError = null;
   } catch (error) {
@@ -219,12 +219,17 @@ function containersView() {
     <article class="inventory-card"><h3>Namespaces / veth</h3><p>${diagnostics.mountNamespace && diagnostics.networkNamespace && diagnostics.veth ? 'Ready' : 'Blocked'}</p></article>
     <article class="inventory-card"><h3>Container bridge</h3><p>${escapeHtml((diagnostics.bridges || []).join(', ') || 'Missing')}</p></article>
   </div>${diagnostics.errors?.length ? `<div class="module-note"><b>Nested self-test:</b> ${diagnostics.errors.map(escapeHtml).join(' · ')}</div>` : ''}` : '';
+  const containerList = !runtime
+    ? '<div class="empty"><p>Loading existing system containers…</p></div>'
+    : runtime.containers?.length
+      ? runtime.containers.map(item => `<article class="storage-row"><div><h3>${escapeHtml(item.name)}</h3><p>Native LXC · ${escapeHtml(item.status)}${item.pid ? ` · PID ${item.pid}` : ''}</p></div><div class="storage-size">${escapeHtml(item.id || item.name)}</div></article>`).join('')
+      : '<div class="empty"><p>No native system containers are visible.</p></div>';
   return `${pageHead('System containers', 'Native Linux system containers powered by LXC/liblxc inside LightNAS itself.', '<div class="head-actions"><button class="secondary" data-action="refresh-runtime">Refresh</button><button class="primary" data-action="create-container">+ Create container</button></div>')}
     ${runtimeBanner('containers')}
     ${diagnosticPanel}
     ${runtime?.available && runtime?.enabled && !ready ? '<div class="module-hero"><h2>Container network unavailable</h2><p>Create or enable a local bridge/network under Connectivity before launching a system container.</p></div>' : ''}
     ${ready ? '<div class="module-note"><b>Ready to create.</b> Use the + Create container button to open the guided setup wizard.</div>' : ''}
-    <h2>Existing system containers</h2><div class="storage-list">${runtime?.containers?.map(item => `<article class="storage-row"><div><h3>${escapeHtml(item.name)}</h3><p>Native LXC · ${escapeHtml(item.status)}${item.pid ? ` · PID ${item.pid}` : ''}</p></div><div class="storage-size">${escapeHtml(item.id || item.name)}</div></article>`).join('') || '<div class="empty"><p>No native system containers are visible.</p></div>'}</div>`;
+    <h2>Existing system containers</h2><div class="storage-list">${containerList}</div>`;
 }
 
 function vmsView() {

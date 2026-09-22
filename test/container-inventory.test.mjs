@@ -13,11 +13,14 @@ test('container page uses dedicated fast inventory and keeps existing LXC visibl
 
   assert.match(server, /\/api\/containers\/inventory/);
   assert.match(agent, /def container_summary\(\)/);
-  assert.match(agent, /def container_records\(\)/);
+  assert.match(agent, /def container_records\(fast: bool = False\)/);
   assert.match(agent, /Path\("\/var\/lib\/lxc"\)\.iterdir\(\)/);
+  assert.match(agent, /container_records\(fast=True\)/);
   assert.match(agent, /"container-summary"/);
   assert.match(app, /async function loadContainers\(\)/);
-  assert.match(app, /\/api\/containers\/inventory/);
+  assert.match(app, /\/api\/containers\/inventory\?summary=1/);
+  assert.match(app, /Loading existing system containers/);
+  assert.match(server, /url\.searchParams\.get\('summary'\) === '1'/);
   assert.match(dialogs, /\/api\/containers\/inventory/);
   assert.match(presets, /\/api\/containers\/inventory/);
 });
