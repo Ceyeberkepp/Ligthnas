@@ -164,16 +164,22 @@ function wizardOption(value, label, selected = false) {
 }
 
 async function showRuntimeWizard(kind) {
-  const loading = openProgressDialog(kind === 'containers' ? 'Opening container wizard' : 'Opening VM wizard', 'Loading live storage, image, network, and runtime choices…');
+  const isContainer = kind === 'containers';
+  const loading = openProgressDialog(isContainer ? 'Opening container wizard' : 'Opening VM wizard', 'Loading live storage, image, network, and runtime choices…');
   let inventory;
   try {
-    inventory = window.LightNASRuntimeInventory || await dialogApi('/api/runtimes');
-    window.LightNASRuntimeInventory = inventory;
+    if (isContainer) {
+      const containers = window.LightNASContainerInventory || await dialogApi('/api/containers/inventory');
+      window.LightNASContainerInventory = containers;
+      inventory = { containers };
+    } else {
+      inventory = window.LightNASRuntimeInventory || await dialogApi('/api/runtimes');
+      window.LightNASRuntimeInventory = inventory;
+    }
   } finally {
     loading.close();
   }
   const runtime = inventory?.[kind];
-  const isContainer = kind === 'containers';
   if (!runtime?.available || !runtime?.enabled) throw new Error(runtime?.reason || `${isContainer ? 'Container' : 'VM'} runtime is unavailable.`);
 
   const storages = runtime.storageDetails || [];
@@ -388,6 +394,7 @@ function showRuntimeDeleteDialog(kind, id) {
       });
       dialog.close();
       window.LightNASRuntimeInventory = null;
+      window.LightNASContainerInventory = null;
       refreshRuntime();
       progress.succeed(`${id} and its managed files were permanently deleted.`);
     } catch (problem) {
@@ -403,11 +410,10 @@ function showRuntimeDeleteDialog(kind, id) {
 
 // Register before enhancements/admin-security so these native LightNAS dialogs
 async function showContainerManager(id) {
-  const [inventory, overview] = await Promise.all([
-    dialogApi('/api/runtimes'),
+  const [runtime, overview] = await Promise.all([
+    dialogApi('/api/containers/inventory'),
     dialogApi('/api/overview').catch(() => ({ activity: [], appliance: {} }))
   ]);
-  const runtime = inventory.containers || {};
   const item = (runtime.containers || []).find(entry => String(entry.id || entry.name) === id);
   if (!item) throw new Error('Container is no longer available.');
   const networks = runtime.networks || [];
