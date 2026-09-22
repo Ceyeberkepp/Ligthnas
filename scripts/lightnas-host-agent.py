@@ -1320,6 +1320,109 @@ def execute_container_command(data: dict) -> dict:
     }
 
 
+
+def service_active(name: str) -> bool:
+    if not available("systemctl"):
+        return False
+    try:
+        result = subprocess.run(
+            ["systemctl", "is-active", "--quiet", name],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def appliance_health() -> dict:
+    networks = local_networks()
+    container_tools = all(available(tool) for tool in ("lxc-create", "lxc-start", "lxc-ls"))
+    vm_tools = all(available(tool) for tool in ("virsh", "qemu-system-x86_64"))
+    docker_ready = available("docker") and probe_command(["docker", "info"], timeout=15).get("ok", False)
+    local_storage = Path("/var/lib/lightnas/storage/local")
+    checks = [
+        {
+            "id": "management",
+            "label": "Management control plane",
+            "healthy": service_active("lightnas.service"),
+            "detail": "LightNAS web service is active" if service_active("lightnas.service") else "LightNAS web service needs attention",
+        },
+        {
+            "id": "host-agent",
+            "label": "Privileged host agent",
+            "healthy": service_active("lightnas-host-agent.service"),
+            "detail": "Privileged appliance operations are available" if service_active("lightnas-host-agent.service") else "Privileged appliance operations need attention",
+        },
+        {
+            "id": "containers",
+            "label": "System containers",
+            "healthy": container_tools and bool(networks),
+            "detail": f"Native LXC ready on {networks[0]}" if container_tools and networks else ("LXC tools are installed but no active LightNAS bridge is ready" if container_tools else "Native LXC tools are missing"),
+        },
+        {
+            "id": "virtualization",
+            "label": "Virtual machines",
+            "healthy": vm_tools and (service_active("libvirtd.service") or service_active("libvirtd.socket")),
+            "detail": "QEMU/libvirt is ready" if vm_tools and (service_active("libvirtd.service") or service_active("libvirtd.socket")) else "QEMU/libvirt needs attention",
+        },
+        {
+            "id": "apps",
+            "label": "App Store runtime",
+            "healthy": docker_ready,
+            "detail": "Docker/OCI engine is ready" if docker_ready else "Docker/OCI engine needs attention",
+        },
+        {
+            "id": "storage",
+            "label": "Local appliance storage",
+            "healthy": local_storage.is_dir() and os.access(local_storage, os.W_OK | os.X_OK),
+            "detail": str(local_storage),
+        },
+    ]
+    healthy = all(item["healthy"] for item in checks)
+    return {
+        "healthy": healthy,
+        "status": "healthy" if healthy else "needs-attention",
+        "checks": checks,
+        "containerNetworks": networks,
+        "kvm": Path("/dev/kvm").exists(),
+        "softwareVirtualization": vm_tools,
+    }
+
+
+def appliance_repair() -> dict:
+    # Fixed, appliance-owned recovery actions only. This endpoint never accepts
+    # commands or paths from the browser.
+    Path("/var/lib/lightnas/storage/local").mkdir(parents=True, exist_ok=True)
+    Path("/var/lib/lightnas/app-data").mkdir(parents=True, exist_ok=True)
+
+    provisioner = Path("/opt/lightnas/scripts/provision-runtimes.sh")
+    if provisioner.is_file():
+        env = os.environ.copy()
+        if in_container():
+            env["LIGHTNAS_ALLOW_NESTED_LXC"] = "1"
+            env["LIGHTNAS_ENABLE_NESTED_RUNTIMES"] = "1"
+        env["LIGHTNAS_RUNTIME_STATUS_FILE"] = "/var/lib/lightnas/runtime-status.txt"
+        subprocess.run(
+            ["bash", str(provisioner)],
+            env=env, text=True, capture_output=True, timeout=900, check=False
+        )
+
+    if available("systemctl"):
+        subprocess.run(["systemctl", "daemon-reload"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+        for unit in (
+            "lightnas-container-network.service",
+            "lxc-net.service",
+            "libvirtd.socket",
+            "libvirtd.service",
+            "docker.service",
+        ):
+            subprocess.run(
+                ["systemctl", "enable", "--now", unit],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60, check=False
+            )
+    return appliance_health()
+
+
 def dispatch(request: dict) -> dict:
     action = str(request.get("action") or "")
     data = request.get("data") or {}
@@ -1341,6 +1444,10 @@ def dispatch(request: dict) -> dict:
         return network_inventory()
     if action == "network-action":
         return network_action(data)
+    if action == "appliance-health":
+        return appliance_health()
+    if action == "appliance-repair":
+        return appliance_repair()
     raise ValueError("unsupported LightNAS host operation")
 
 
