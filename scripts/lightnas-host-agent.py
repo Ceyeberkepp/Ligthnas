@@ -20,6 +20,7 @@ import shutil
 import socket
 import socketserver
 import subprocess
+import termios
 import threading
 from pathlib import Path
 
@@ -1016,7 +1017,22 @@ def stream_container(connection, data: dict) -> None:
     master, slave = pty.openpty()
     env = os.environ.copy()
     env["TERM"] = "xterm-256color"
-    process = subprocess.Popen(["lxc-attach", "-n", name, "--", "/bin/sh", "-l"], stdin=slave, stdout=slave, stderr=slave, close_fds=True, env=env)
+    # Give the attached shell a real session and controlling terminal. Without
+    # this, the PTY echoes browser input but an interactive shell may never
+    # consume Enter or display its prompt when LightNAS runs under systemd.
+    def child_setup():
+        os.setsid()
+        fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
+
+    process = subprocess.Popen(
+        ["lxc-attach", "-n", name, "--", "/bin/sh", "-il"],
+        stdin=slave,
+        stdout=slave,
+        stderr=slave,
+        close_fds=True,
+        env=env,
+        preexec_fn=child_setup,
+    )
     os.close(slave)
 
     def input_loop():
