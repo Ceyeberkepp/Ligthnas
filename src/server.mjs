@@ -11,7 +11,7 @@ import { listFiles, createFolder, uploadFile, downloadFile, deleteEntry } from '
 import { thumbnailFor } from './thumbnails.mjs';
 import { catalog, runtimeInventory, installCatalogApp, manageCatalogApp, createContainer, createVm } from './runtimes-next.mjs';
 import { proxmoxConsoleSocket, proxmoxUpdateStorage, proxmoxCleanDisk } from './proxmox.mjs';
-import { localContainerConsoleSocket, localContainerCommand, localVmConsoleSocket, localNetworkInventory, localNetworkAction, localApplianceHealth, localApplianceRepair } from './local-host.mjs';
+import { localContainerSummary, localContainerConsoleSocket, localContainerCommand, localVmConsoleSocket, localNetworkInventory, localNetworkAction, localApplianceHealth, localApplianceRepair } from './local-host.mjs';
 import { validateSmtp, sendSmtpTest } from './mailer.mjs';
 import { mediaAvailable, convertMedia } from './media.mjs';
 import { createDataset, updateDataset } from './zfs.mjs';
@@ -641,6 +641,34 @@ async function api(req, res, url) {
     return send(res, 200, { ok: true, signInRequired: changedPassword }, changedPassword ? { 'Set-Cookie': 'nas_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0' } : {});
   }
 
+  if (req.method === 'GET' && url.pathname === '/api/containers/inventory') {
+    if (!requireAnyPermission(res, permissions, ['containers.manage', 'storage.view', 'system.view'])) return;
+    const withDeadline = (promise, fallback, ms = 4000) => Promise.race([
+      promise,
+      new Promise(resolve => setTimeout(() => resolve(fallback), ms))
+    ]);
+    const [containers, storagePools, templateLibrary] = await Promise.all([
+      localContainerSummary(),
+      withDeadline(listStoragePools().catch(() => ({ pools: [] })), { pools: [] }),
+      withDeadline(listContainerTemplates().catch(() => ({ templates: [] })), { templates: [] })
+    ]);
+    const writable = (storagePools.pools || []).filter(pool => pool.online && pool.writable && pool.content?.includes('rootdir'));
+    containers.pools = writable.map(pool => pool.id);
+    containers.storageDetails = writable;
+    containers.images = [
+      ...(templateLibrary.templates || []).map(item => ({
+        id: item.id,
+        label: `${item.filename} · ${item.storageLabel}`,
+        source: 'template-library',
+        filename: item.filename,
+        storageLabel: item.storageLabel,
+        sizeBytes: item.sizeBytes
+      })),
+      ...(containers.images || [])
+    ];
+    containers.templateCount = (templateLibrary.templates || []).length;
+    return send(res, 200, containers);
+  }
   if (req.method === 'GET' && url.pathname === '/api/runtimes') {
     if (!requireAnyPermission(res, permissions, ['apps.manage', 'containers.manage', 'vms.manage', 'storage.view', 'system.view'])) return;
     return send(res, 200, { ...(await runtimeInventory()), catalog });
