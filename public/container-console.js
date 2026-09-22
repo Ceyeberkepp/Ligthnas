@@ -15,8 +15,52 @@
       throw new Error('Invalid container name');
     }
 
-    const append = text => {
-      terminal.textContent += text;
+    let ansiCarry = '';
+
+    function normalizeTerminalChunk(value) {
+      let text = ansiCarry + String(value ?? '');
+      ansiCarry = '';
+
+      // Keep an incomplete escape sequence for the next WebSocket frame.
+      const partial = text.match(/\x1b(?:\[[0-9;?]*[ -\/]*)?$/);
+      if (partial) {
+        ansiCarry = partial[0];
+        text = text.slice(0, -partial[0].length);
+      }
+
+      // A terminal clear should discard everything before the final clear code.
+      let clear = false;
+      let clearEnd = -1;
+      for (const match of text.matchAll(/\x1b\[(?:2|3)J/g)) {
+        clear = true;
+        clearEnd = match.index + match[0].length;
+      }
+      if (clearEnd >= 0) text = text.slice(clearEnd);
+
+      // Remove color, cursor, title, mode and other ANSI/VT control sequences.
+      text = text
+        .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, '')
+        .replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, '')
+        .replace(/\x1b[()][0-2A-Z]/g, '')
+        .replace(/\x1bc/g, '');
+
+      return { text, clear };
+    }
+
+    const append = value => {
+      const chunk = normalizeTerminalChunk(value);
+      let output = chunk.clear ? '' : terminal.textContent;
+      for (let index = 0; index < chunk.text.length; index += 1) {
+        const character = chunk.text[index];
+        if (character === '\b') output = output.slice(0, -1);
+        else if (character === '\r') {
+          // CRLF is represented by the following LF. A bare CR means return
+          // to the current line and does not need a visible glyph.
+        } else if (character === '\n' || character === '\t' || character >= ' ') {
+          output += character;
+        }
+      }
+      terminal.textContent = output;
       terminal.scrollTop = terminal.scrollHeight;
     };
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
