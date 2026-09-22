@@ -28,13 +28,34 @@ migrate_existing_workloads_to_lan_bridge() {
   if command -v lxc-info >/dev/null 2>&1; then
     for config in /var/lib/lxc/*/config; do
       [[ -f "$config" ]] || continue
-      grep -Eq '^lxc\.net\.[0-9]+\.link\s*=\s*(lightnas0|lxcbr0)\s*$' "$config" || continue
+      # Migrate old private bridges, but also restart containers that are
+      # already on virbr0 so they drop any stale 192.168.122.x lease and ask
+      # the real LAN DHCP server for a fresh address.
+      link="$(sed -nE 's/^lxc\.net\.[0-9]+\.link\s*=\s*([^[:space:]]+).*/\1/p' "$config" | head -1)"
+      [[ "$link" =~ ^(lightnas0|lxcbr0|${lan_bridge})$ ]] || continue
       name="$(basename "$(dirname "$config")")"
       was_running=0
       [[ "$(lxc-info -n "$name" -sH 2>/dev/null || true)" == "RUNNING" ]] && was_running=1
       [[ "$was_running" == "1" ]] && lxc-stop -n "$name" -t 30 >/dev/null 2>&1 || true
-      sed -Ei "s#^(lxc\.net\.[0-9]+\.link\s*=\s*)(lightnas0|lxcbr0)\s*$#\\1${lan_bridge}#" "$config"
-      [[ "$was_running" == "1" ]] && lxc-start -n "$name" -d >/dev/null 2>&1 || true
+      if [[ "$link" != "${lan_bridge}" ]]; then
+        sed -Ei "s#^(lxc\.net\.[0-9]+\.link\s*=\s*)(lightnas0|lxcbr0)\s*$#\\1${lan_bridge}#" "$config"
+      fi
+      if [[ "$was_running" == "1" ]]; then
+        lxc-start -n "$name" -d >/dev/null 2>&1 || true
+        for _ in {1..20}; do
+          if lxc-attach -n "$name" -- sh -lc 'ip -4 -o addr show dev eth0 scope global | grep -q " inet "' >/dev/null 2>&1; then
+            break
+          fi
+          sleep 1
+        done
+        if ! lxc-attach -n "$name" -- sh -lc 'ip -4 -o addr show dev eth0 scope global | grep -q " inet "' >/dev/null 2>&1; then
+          lxc-attach -n "$name" -- sh -lc '
+            command -v networkctl >/dev/null 2>&1 && networkctl renew eth0 >/dev/null 2>&1 || true
+            command -v dhclient >/dev/null 2>&1 && dhclient -v eth0 >/dev/null 2>&1 || true
+            command -v udhcpc >/dev/null 2>&1 && udhcpc -i eth0 -q -n >/dev/null 2>&1 || true
+          ' >/dev/null 2>&1 || true
+        fi
+      fi
     done
   fi
 
