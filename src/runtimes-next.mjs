@@ -318,7 +318,7 @@ export async function createContainer(input) {
   }
   return await localCreateContainer({
     name: input.name,
-    image: importedTemplate ? '' : input.image,
+    image: input.image,
     templatePath: importedTemplate?.path || '',
     storageRoot: join(storage.root, 'rootdir'),
     storageId: storage.id,
