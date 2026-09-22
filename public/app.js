@@ -571,8 +571,11 @@ function bindViewActions() {
   $('[data-library-tab]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     const folder = button.dataset.libraryTab || '';
     if (folder) {
-      try { await request(`/api/files?path=${encodeURIComponent(folder)}`, { method: 'POST' }); }
-      catch (error) { if (error.status !== 409) return toast(error.message); }
+      try { await request(`/api/files?path=${encodeURIComponent(folder)}`); }
+      catch {
+        try { await request(`/api/files?path=${encodeURIComponent(folder)}`, { method: 'POST' }); }
+        catch (error) { return toast(error.message); }
+      }
     }
     state.folder = folder;
     state.files = null;
