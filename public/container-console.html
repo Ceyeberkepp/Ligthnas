@@ -4,28 +4,30 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>LightNAS Container Terminal</title>
+  <link rel="stylesheet" href="/xterm/css/xterm.css">
   <style>
-    :root { color-scheme:dark; font-family:ui-monospace,SFMono-Regular,Consolas,monospace; background:#071019; color:#d8f3e8; }
+    :root { color-scheme:dark; font-family:Inter,ui-sans-serif,system-ui,sans-serif; background:#071019; color:#d8f3e8; }
     * { box-sizing:border-box; }
-    body { margin:0; min-height:100vh; display:flex; flex-direction:column; background:#05090d; }
-    header { min-height:52px; display:flex; align-items:center; gap:12px; padding:8px 14px; border-bottom:1px solid #20323e; background:#0c1821; font-family:Inter,ui-sans-serif,system-ui,sans-serif; }
+    html, body { width:100%; height:100%; }
+    body { margin:0; min-height:100vh; display:flex; flex-direction:column; overflow:hidden; background:#020608; }
+    header { min-height:52px; display:flex; align-items:center; gap:12px; padding:8px 14px; border-bottom:1px solid #20323e; background:#0c1821; }
     header strong { margin-right:auto; color:#e9f4f7; }
     #status { color:#9fb4bf; font-size:12px; }
-    #terminal { flex:1; min-height:300px; margin:0; padding:16px; overflow:auto; white-space:pre-wrap; word-break:break-word; color:#baf7dc; background:#020608; outline:none; cursor:text; }
-    #terminal:focus { box-shadow:inset 0 0 0 1px #176f62; }
-    #terminal.interactive:focus::after { content:' '; display:inline-block; width:.62em; height:1.05em; margin-left:1px; vertical-align:-.18em; background:#baf7dc; animation:blink 1s steps(1,end) infinite; }
-    @keyframes blink { 50% { opacity:0; } }
+    #terminal { flex:1; min-height:0; padding:8px; overflow:hidden; background:#020608; }
+    #terminal .xterm { height:100%; }
     [hidden] { display:none !important; }
     form { display:flex; gap:8px; padding:10px; border-top:1px solid #20323e; background:#0c1821; }
-    input { flex:1; min-width:0; border:1px solid #2b4655; background:#071019; color:#fff; border-radius:8px; padding:10px 12px; font:inherit; }
+    input { flex:1; min-width:0; border:1px solid #2b4655; background:#071019; color:#fff; border-radius:8px; padding:10px 12px; font:14px ui-monospace,SFMono-Regular,Consolas,monospace; }
     button { border:1px solid #287565; background:#0f8b78; color:white; border-radius:8px; padding:10px 14px; cursor:pointer; }
     .error { color:#ff9a9a !important; }
   </style>
 </head>
 <body>
   <header><strong id="title">Container terminal</strong><span id="status">Connecting…</span></header>
-  <pre id="terminal" tabindex="0" role="application" aria-label="Interactive root terminal" aria-live="polite"></pre>
+  <div id="terminal" role="application" aria-label="Interactive root terminal"></div>
   <form id="command-form" autocomplete="off" hidden><input id="command" placeholder="Fallback command mode"><button>Send</button></form>
-  <script src="/container-console.js?v=20260922-3" defer></script>
+  <script src="/xterm/lib/xterm.js" defer></script>
+  <script src="/xterm-addon-fit/lib/addon-fit.js" defer></script>
+  <script src="/container-console.js?v=20260922-4" defer></script>
 </body>
 </html>
