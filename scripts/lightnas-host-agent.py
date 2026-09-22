@@ -286,7 +286,8 @@ def container_inventory() -> dict:
 
 def local_networks() -> list[str]:
     # LXC veth devices need an administratively-up Linux bridge. Do not offer
-    # Docker's private bridge or inactive libvirt bridges as container targets.
+    # Docker's private bridge. Prefer the bridge that owns the real default
+    # route so new containers automatically join the appliance LAN.
     result = []
     try:
         links = json.loads(run(["ip", "-j", "link", "show", "type", "bridge"], timeout=10) or "[]")
@@ -297,7 +298,14 @@ def local_networks() -> list[str]:
                 result.append(name)
     except Exception:
         pass
-    for preferred in ["lightnas0", "lxcbr0", "virbr0"]:
+    default_device = ""
+    try:
+        routes = json.loads(run(["ip", "-j", "-4", "route", "show", "default"], timeout=10, check=False) or "[]")
+        default_device = str(routes[0].get("dev") or "") if routes else ""
+    except Exception:
+        pass
+    preferred_order = [default_device, "virbr0", "lightnas0", "lxcbr0"]
+    for preferred in reversed([name for name in preferred_order if name]):
         if preferred in result:
             result.remove(preferred)
             result.insert(0, preferred)
@@ -902,54 +910,101 @@ def parse_nmcli(text: str, count: int) -> list[list[str]]:
     return rows
 
 
+def lightnas_network_state() -> dict:
+    state = {}
+    path = Path("/etc/lightnas/network.env")
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            if key.startswith("LIGHTNAS_"):
+                state[key.strip()] = value.strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return state
+
+
 def network_inventory() -> dict:
     if not available("nmcli"):
         return {
             "editable": False, "manager": None, "reason": "NetworkManager is not installed.",
             "devices": [], "connections": [], "wifi": [], "wifiAvailable": False,
-            "uplinks": [], "currentUplink": None, "connectivity": "unknown"
+            "uplinks": [], "currentUplink": None, "connectivity": "unknown", "bridge": None
         }
 
-    devices_raw = run(["nmcli", "-t", "-f", "DEVICE,TYPE,STATE,CONNECTION", "device", "status"], timeout=15, check=False)
-    devices = [
+    raw_devices_text = run(["nmcli", "-t", "-f", "DEVICE,TYPE,STATE,CONNECTION", "device", "status"], timeout=15, check=False)
+    raw_devices = [
         {"name": row[0], "type": row[1], "state": row[2], "connection": row[3] or None}
-        for row in parse_nmcli(devices_raw, 4)
+        for row in parse_nmcli(raw_devices_text, 4)
         if IFACE_RE.fullmatch(row[0])
     ]
 
-    connections_raw = run(["nmcli", "-t", "-f", "NAME,UUID,TYPE,DEVICE,AUTOCONNECT", "connection", "show"], timeout=15, check=False)
-    connections = [
+    raw_connections_text = run(["nmcli", "-t", "-f", "NAME,UUID,TYPE,DEVICE,AUTOCONNECT", "connection", "show"], timeout=15, check=False)
+    raw_connections = [
         {"name": row[0], "uuid": row[1], "type": row[2], "device": row[3] or None, "autoconnect": row[4] == "yes"}
-        for row in parse_nmcli(connections_raw, 5)
+        for row in parse_nmcli(raw_connections_text, 5)
         if row[0]
     ]
 
     default_routes = []
     try:
-        default_routes = json.loads(run(["ip", "-j", "route", "show", "default"], timeout=10, check=False) or "[]")
+        default_routes = json.loads(run(["ip", "-j", "-4", "route", "show", "default"], timeout=10, check=False) or "[]")
     except Exception:
         default_routes = []
     default_routes = sorted(default_routes, key=lambda item: int(item.get("metric") or 0))
     preferred_route = default_routes[0] if default_routes else {}
     default_device = str(preferred_route.get("dev") or "")
 
+    state = lightnas_network_state()
+    bridge_mode = state.get("LIGHTNAS_NETWORK_MODE") == "bridge"
+    bridge_name = state.get("LIGHTNAS_LAN_BRIDGE") or ("virbr0" if bridge_mode else "")
+    bridge_port = state.get("LIGHTNAS_UPLINK") or ""
+
+    def internal_device(name: str) -> bool:
+        return bool(re.fullmatch(r"(?:lo|veth.*|tap.*|tun.*|docker\d*|br-[A-Fa-f0-9]+|lightnas\d*|lxcbr\d*)", name or ""))
+
+    devices = []
+    for item in raw_devices:
+        name = item["name"]
+        if internal_device(name):
+            continue
+        if bridge_mode and name == bridge_port:
+            # The physical NIC is now only a port of the appliance LAN bridge.
+            continue
+        devices.append(item)
+
+    connections = []
+    for item in raw_connections:
+        name = item["name"]
+        device = item.get("device") or ""
+        if internal_device(device) or internal_device(name):
+            continue
+        if bridge_mode and (device == bridge_port or name == f"{bridge_name}-uplink"):
+            continue
+        # Hide stale auto-generated wired profiles with no active device.
+        if not device and item["type"] in {"802-3-ethernet", "ethernet"}:
+            continue
+        connections.append(item)
+
     connectivity = run(["nmcli", "-t", "-f", "CONNECTIVITY", "general"], timeout=10, check=False).strip() or "unknown"
 
     uplinks = []
     for item in devices:
-        if item["type"] not in {"ethernet", "wifi"}:
+        name = item["name"]
+        is_default = name == default_device
+        is_bridge_uplink = is_default and item["type"] == "bridge"
+        if item["type"] not in {"ethernet", "wifi"} and not is_bridge_uplink:
             continue
-        is_default = item["name"] == default_device
-        # Proxmox commonly supplies the appliance eth0 outside NetworkManager.
-        # A real kernel default route is authoritative, so keep that interface
-        # as a valid active uplink even when nmcli labels it "unmanaged".
         if item["state"] == "unavailable" or (item["state"] == "unmanaged" and not is_default):
             continue
+        kind = "Wi-Fi" if item["type"] == "wifi" else ("Ethernet bridge" if is_bridge_uplink else "Ethernet")
         uplinks.append({
             **item,
             "active": is_default or (not default_device and item["state"] == "connected"),
-            "managed": item["state"] != "unmanaged",
-            "kind": "Wi-Fi" if item["type"] == "wifi" else "Ethernet",
+            "managed": item["state"] != "unmanaged" or is_bridge_uplink,
+            "kind": kind,
+            **({"physicalPort": bridge_port} if is_bridge_uplink and bridge_port else {}),
         })
 
     current_uplink = next((item for item in uplinks if item["active"]), None)
@@ -961,7 +1016,7 @@ def network_inventory() -> dict:
         }
 
     wifi = []
-    wifi_devices = [item for item in devices if item["type"] == "wifi" and item["state"] not in {"unavailable", "unmanaged"}]
+    wifi_devices = [item for item in raw_devices if item["type"] == "wifi" and item["state"] not in {"unavailable", "unmanaged"}]
     if wifi_devices:
         scan = run(["nmcli", "-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY", "device", "wifi", "list", "--rescan", "auto"], timeout=20, check=False)
         seen = set()
@@ -983,6 +1038,11 @@ def network_inventory() -> dict:
         "uplinks": uplinks,
         "currentUplink": current_uplink,
         "connectivity": connectivity,
+        "bridge": {
+            "mode": state.get("LIGHTNAS_NETWORK_MODE") or None,
+            "name": bridge_name or None,
+            "port": bridge_port or None,
+        },
     }
 
 
