@@ -11,7 +11,7 @@ import { listFiles, createFolder, uploadFile, downloadFile, deleteEntry } from '
 import { thumbnailFor } from './thumbnails.mjs';
 import { catalog, runtimeInventory, installCatalogApp, manageCatalogApp, createContainer, createVm } from './runtimes-next.mjs';
 import { proxmoxConsoleSocket, proxmoxUpdateStorage, proxmoxCleanDisk } from './proxmox.mjs';
-import { localContainerConsoleSocket, localContainerCommand, localVmConsoleSocket, localNetworkInventory, localNetworkAction } from './local-host.mjs';
+import { localContainerConsoleSocket, localContainerCommand, localVmConsoleSocket, localNetworkInventory, localNetworkAction, localApplianceHealth, localApplianceRepair } from './local-host.mjs';
 import { validateSmtp, sendSmtpTest } from './mailer.mjs';
 import { mediaAvailable, convertMedia } from './media.mjs';
 import { createDataset, updateDataset } from './zfs.mjs';
@@ -237,8 +237,14 @@ async function api(req, res, url) {
     };
     store.addActivity('setup', `Appliance ${input.deviceName} was configured.`, 'success');
     await store.save();
+    let readiness = null;
+    try { readiness = await localApplianceRepair(); }
+    catch (error) {
+      store.addActivity('health', `Initial appliance self-configuration needs attention: ${error.message}`, 'warning');
+      await store.save();
+    }
     const token = sessions.create(input.username);
-    return send(res, 201, { ok: true }, { 'Set-Cookie': `nas_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200` });
+    return send(res, 201, { ok: true, readiness }, { 'Set-Cookie': `nas_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200` });
   }
 
   if (req.method === 'POST' && url.pathname === '/api/login') {
@@ -735,6 +741,18 @@ async function api(req, res, url) {
     await store.save();
     return send(res, 200, result);
   }
+  if (req.method === 'GET' && url.pathname === '/api/appliance/health') {
+    if (!isAdmin && !permissions.includes('system.view')) return send(res, 403, { error: 'System health access is required.' });
+    return send(res, 200, await localApplianceHealth());
+  }
+  if (req.method === 'POST' && url.pathname === '/api/appliance/repair') {
+    if (!isAdmin) return send(res, 403, { error: 'Only the appliance administrator can run automatic repair.' });
+    const result = await localApplianceRepair();
+    store.addActivity('health', result.healthy ? 'Automatic appliance repair completed successfully.' : 'Automatic appliance repair completed with items still needing attention.', result.healthy ? 'success' : 'warning');
+    await store.save();
+    return send(res, 200, result);
+  }
+
   if (req.method === 'GET' && url.pathname === '/api/system') {
     if (!requirePermission(res, permissions, 'system.view')) return;
     const local = await getSystemSnapshot();
