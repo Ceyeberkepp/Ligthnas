@@ -91,6 +91,35 @@ function ensureFolderDialog() {
   return dialog;
 }
 
+function previewItems() {
+  return [...document.querySelectorAll('#content .file-name[data-directory="false"]')]
+    .map(button => button.dataset.open || '')
+    .filter(name => name && previewKind(name));
+}
+
+function updateViewerNavigation(dialog, name) {
+  const items = previewItems();
+  const index = items.indexOf(name);
+  dialog.dataset.currentName = name;
+  const previous = dialog.querySelector('[data-viewer-previous]');
+  const next = dialog.querySelector('[data-viewer-next]');
+  const multiple = items.length > 1;
+  previous.hidden = !multiple;
+  next.hidden = !multiple;
+  previous.disabled = index <= 0;
+  next.disabled = index < 0 || index >= items.length - 1;
+  dialog.querySelector('[data-viewer-position]').textContent = index >= 0 ? `${index + 1} of ${items.length}` : '';
+}
+
+async function navigatePreview(offset) {
+  const dialog = document.querySelector('#lightnas-viewer');
+  if (!dialog?.open) return;
+  const items = previewItems();
+  const current = items.indexOf(dialog.dataset.currentName || '');
+  const target = items[current + offset];
+  if (target) await openPreview(target);
+}
+
 function ensureViewer() {
   let dialog = document.querySelector('#lightnas-viewer');
   if (dialog) return dialog;
@@ -100,15 +129,26 @@ function ensureViewer() {
   dialog.innerHTML = `
     <div class="dialog-body">
       <div class="dialog-head"><div><span class="eyebrow">FILE VIEWER</span><h2 data-viewer-title>Preview</h2></div><button class="dialog-close" type="button" data-close-viewer aria-label="Close">×</button></div>
-      <div class="viewer-stage" data-viewer-stage></div>
-      <div class="viewer-meta" data-viewer-meta></div>
+      <div class="viewer-shell">
+        <button class="viewer-arrow viewer-previous" type="button" data-viewer-previous aria-label="Previous file">‹</button>
+        <div class="viewer-stage" data-viewer-stage></div>
+        <button class="viewer-arrow viewer-next" type="button" data-viewer-next aria-label="Next file">›</button>
+      </div>
+      <div class="viewer-meta"><span data-viewer-meta></span><span data-viewer-position></span></div>
       <div class="dialog-actions"><button class="secondary" type="button" data-viewer-download>Download</button><button class="primary" type="button" data-close-viewer>Close</button></div>
     </div>`;
   document.body.append(dialog);
   dialog.querySelectorAll('[data-close-viewer]').forEach(button => button.addEventListener('click', () => dialog.close()));
+  dialog.querySelector('[data-viewer-previous]').addEventListener('click', () => navigatePreview(-1));
+  dialog.querySelector('[data-viewer-next]').addEventListener('click', () => navigatePreview(1));
+  dialog.addEventListener('keydown', event => {
+    if (event.key === 'ArrowLeft') { event.preventDefault(); navigatePreview(-1); }
+    if (event.key === 'ArrowRight') { event.preventDefault(); navigatePreview(1); }
+  });
   dialog.addEventListener('close', () => {
     if (dialog.dataset.objectUrl) URL.revokeObjectURL(dialog.dataset.objectUrl);
     delete dialog.dataset.objectUrl;
+    delete dialog.dataset.currentName;
     dialog.querySelector('[data-viewer-stage]').replaceChildren();
   });
   return dialog;
@@ -147,7 +187,8 @@ async function openPreview(name) {
   dialog.querySelector('[data-viewer-download]').onclick = () => {
     const anchor = document.createElement('a'); anchor.href = objectUrl; anchor.download = name; anchor.click();
   };
-  dialog.showModal();
+  updateViewerNavigation(dialog, name);
+  if (!dialog.open) dialog.showModal();
   return true;
 }
 
