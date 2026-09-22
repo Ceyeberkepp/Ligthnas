@@ -37,6 +37,8 @@ import {
 const root = fileURLToPath(new URL('..', import.meta.url));
 const publicRoot = join(root, 'public');
 const novncRoot = process.env.LIGHTNAS_NOVNC_ROOT || '/usr/share/novnc';
+const xtermRoot = join(root, 'node_modules', '@xterm', 'xterm');
+const xtermFitRoot = join(root, 'node_modules', '@xterm', 'addon-fit');
 const store = new JsonStore();
 const sessions = new Sessions();
 await store.load();
@@ -912,8 +914,16 @@ async function api(req, res, url) {
 
 async function staticAsset(req, res, url) {
   const isNovnc = url.pathname.startsWith('/novnc/');
-  const base = resolve(isNovnc ? novncRoot : publicRoot);
-  const requested = isNovnc ? url.pathname.slice('/novnc/'.length) : (url.pathname === '/' ? 'index.html' : url.pathname.slice(1));
+  const isXterm = url.pathname.startsWith('/xterm/');
+  const isXtermFit = url.pathname.startsWith('/xterm-addon-fit/');
+  const base = resolve(isNovnc ? novncRoot : isXterm ? xtermRoot : isXtermFit ? xtermFitRoot : publicRoot);
+  const requested = isNovnc
+    ? url.pathname.slice('/novnc/'.length)
+    : isXterm
+      ? url.pathname.slice('/xterm/'.length)
+      : isXtermFit
+        ? url.pathname.slice('/xterm-addon-fit/'.length)
+        : (url.pathname === '/' ? 'index.html' : url.pathname.slice(1));
   const safePath = normalize(requested).replace(/^(\.\.[/\\])+/, '');
   const path = resolve(base, safePath);
   if (path !== base && !path.startsWith(`${base}/`)) return send(res, 403, 'Forbidden');
