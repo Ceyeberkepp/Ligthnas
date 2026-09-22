@@ -4,6 +4,23 @@ set -Eeuo pipefail
 
 status_file="${LIGHTNAS_RUNTIME_STATUS_FILE:-/var/lib/lightnas/runtime-status.txt}"
 runtime_env="${LIGHTNAS_RUNTIME_ENV_FILE:-/etc/lightnas/runtime.env}"
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+network_state=/etc/lightnas/network.env
+network_mode=""
+lan_bridge="virbr0"
+if [[ ${EUID} -eq 0 && -x "${script_dir}/configure-appliance-network.sh" ]]; then
+  "${script_dir}/configure-appliance-network.sh" || echo "Warning: automatic appliance LAN bridge configuration needs attention." >&2
+fi
+if [[ -r "${network_state}" ]]; then
+  # shellcheck disable=SC1090
+  source "${network_state}"
+  network_mode="${LIGHTNAS_NETWORK_MODE:-}"
+  lan_bridge="${LIGHTNAS_LAN_BRIDGE:-virbr0}"
+fi
+lan_bridge_ready=0
+if [[ "${network_mode}" == "bridge" ]] && ip link show "${lan_bridge}" 2>/dev/null | grep -q 'UP'; then
+  lan_bridge_ready=1
+fi
 mkdir -p "$(dirname "${status_file}")" "$(dirname "${runtime_env}")"
 if [[ ! -e "$runtime_env" ]]; then install -m 0600 /dev/null "$runtime_env"; fi
 chmod 0600 "$runtime_env"
@@ -23,7 +40,7 @@ if command -v lxc-create >/dev/null 2>&1 && command -v lxc-start >/dev/null 2>&1
   # bridge. This works even when the outer LXC's eth0 is intentionally
   # unmanaged by NetworkManager. lxc-net supplies the bridge, DHCP/DNS and
   # outbound NAT through the host's current default route.
-  if systemctl list-unit-files lxc-net.service --no-legend 2>/dev/null | grep -q '^lxc-net.service'; then
+  if [[ "${lan_bridge_ready}" != "1" ]] && systemctl list-unit-files lxc-net.service --no-legend 2>/dev/null | grep -q '^lxc-net.service'; then
     systemctl stop lxc-net.service >/dev/null 2>&1 || true
 
     # Older LightNAS builds created a NetworkManager profile with this name.
@@ -71,7 +88,7 @@ if command -v lxc-create >/dev/null 2>&1 && command -v lxc-start >/dev/null 2>&1
   # network namespaces/veth are available. Install a small LightNAS-owned
   # bridge service as a fallback so system-container creation does not depend
   # on that distro helper.
-  if [[ ${EUID} -eq 0 ]] && ! (ip link show lightnas0 2>/dev/null | grep -q 'UP' \
+  if [[ "${lan_bridge_ready}" != "1" && ${EUID} -eq 0 ]] && ! (ip link show lightnas0 2>/dev/null | grep -q 'UP' \
     && ip -4 address show dev lightnas0 2>/dev/null | grep -q '10\.77\.0\.1/24'); then
     install -d -m 0755 /usr/local/libexec /run/lightnas
     cat >/usr/local/libexec/lightnas-container-network <<'EOF'
@@ -129,6 +146,14 @@ EOF
 
   if systemd-detect-virt --container >/dev/null 2>&1 && [[ "${LIGHTNAS_ALLOW_NESTED_LXC:-0}" != "1" ]]; then
     report Containers 'native LXC installed, but this appliance is itself in a container and nested LXC was not enabled'
+  elif [[ "${lan_bridge_ready}" == "1" ]]; then
+    systemctl disable --now lxc-net.service >/dev/null 2>&1 || true
+    systemctl disable --now lightnas-container-network.service >/dev/null 2>&1 || true
+    if ip link show lightnas0 >/dev/null 2>&1; then
+      ip link set lightnas0 down >/dev/null 2>&1 || true
+      ip link delete lightnas0 type bridge >/dev/null 2>&1 || true
+    fi
+    report Containers "native LXC/liblxc ready on ${lan_bridge} (real LAN bridge)"
   elif ip link show lightnas0 2>/dev/null | grep -q 'UP' \
     && ip -4 address show dev lightnas0 2>/dev/null | grep -q '10\.77\.0\.1/24'; then
     report Containers 'native LXC/liblxc ready on lightnas0 (10.77.0.0/24 NAT)'
@@ -221,9 +246,18 @@ EOF
     virsh -c qemu:///system pool-start default >/dev/null 2>&1 || true
     virsh -c qemu:///system pool-autostart default >/dev/null 2>&1 || true
 
-    if ! virsh -c qemu:///system net-info default >/dev/null 2>&1; then
-      network_xml="$(mktemp)"
-      cat >"$network_xml" <<'EOF'
+    if [[ "${lan_bridge_ready}" == "1" ]]; then
+      # The appliance LAN bridge is the VM network. Do not recreate libvirt's
+      # private 192.168.122.0/24 default network.
+      if virsh -c qemu:///system net-info default >/dev/null 2>&1; then
+        virsh -c qemu:///system net-destroy default >/dev/null 2>&1 || true
+        virsh -c qemu:///system net-autostart default --disable >/dev/null 2>&1 || true
+        virsh -c qemu:///system net-undefine default >/dev/null 2>&1 || true
+      fi
+    else
+      if ! virsh -c qemu:///system net-info default >/dev/null 2>&1; then
+        network_xml="$(mktemp)"
+        cat >"$network_xml" <<'EOF'
 <network>
   <name>default</name>
   <forward mode='nat'/>
@@ -233,11 +267,12 @@ EOF
   </ip>
 </network>
 EOF
-      virsh -c qemu:///system net-define "$network_xml" >/dev/null 2>&1 || true
-      rm -f "$network_xml"
+        virsh -c qemu:///system net-define "$network_xml" >/dev/null 2>&1 || true
+        rm -f "$network_xml"
+      fi
+      virsh -c qemu:///system net-start default >/dev/null 2>&1 || true
+      virsh -c qemu:///system net-autostart default >/dev/null 2>&1 || true
     fi
-    virsh -c qemu:///system net-start default >/dev/null 2>&1 || true
-    virsh -c qemu:///system net-autostart default >/dev/null 2>&1 || true
 
     acceleration=tcg
     if [[ -c /dev/kvm ]]; then
@@ -250,15 +285,21 @@ EOF
       sleep 1
     done
 
+    vm_network_ready=0
+    if [[ "${lan_bridge_ready}" == "1" ]] && ip link show "${lan_bridge}" 2>/dev/null | grep -q 'UP'; then
+      vm_network_ready=1
+    elif virsh -c qemu:///system net-info default >/dev/null 2>&1; then
+      vm_network_ready=1
+    fi
     if runuser -u lightnas -- virsh -c qemu:///system list --all --name >/dev/null 2>&1 \
       && virsh -c qemu:///system pool-info default >/dev/null 2>&1 \
-      && virsh -c qemu:///system net-info default >/dev/null 2>&1 \
+      && [[ "${vm_network_ready}" == "1" ]] \
       && command -v virt-install >/dev/null 2>&1; then
       set_flag LIGHTNAS_VM_ENABLED 1
       if [[ "$acceleration" == kvm ]]; then
-        report VMs 'native QEMU/KVM + libvirt ready; hardware acceleration enabled'
+        if [[ "${lan_bridge_ready}" == "1" ]]; then report VMs "native QEMU/KVM + libvirt ready on ${lan_bridge} LAN bridge"; else report VMs 'native QEMU/KVM + libvirt ready; hardware acceleration enabled'; fi
       else
-        report VMs 'QEMU/libvirt software virtualization ready (TCG); VMs work without VT-x/AMD-V but run slower'
+        if [[ "${lan_bridge_ready}" == "1" ]]; then report VMs "QEMU/libvirt TCG ready on ${lan_bridge} LAN bridge; VMs work without VT-x/AMD-V but run slower"; else report VMs 'QEMU/libvirt software virtualization ready (TCG); VMs work without VT-x/AMD-V but run slower'; fi
       fi
     else
       set_flag LIGHTNAS_VM_ENABLED 0
