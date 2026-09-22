@@ -481,8 +481,8 @@ def configure_container_guest(config: Path, data: dict) -> None:
         raise RuntimeError("container root filesystem is unavailable")
 
     password = str(data.get("password") or "")
-    if not (10 <= len(password) <= 128) or any(character in password for character in ("\r", "\n", ":")):
-        raise ValueError("root password must contain 10-128 characters without colons or line breaks")
+    if not (4 <= len(password) <= 128) or any(character in password for character in ("\r", "\n", ":")):
+        raise ValueError("root password must contain 4-128 characters without colons or line breaks")
     result = subprocess.run(
         ["chroot", str(rootfs), "chpasswd"],
         input=f"root:{password}\n",
@@ -530,10 +530,42 @@ def configure_container_guest(config: Path, data: dict) -> None:
         "storageId": str(data.get("storageId") or ""),
         "diskGiB": int(data.get("diskGiB") or 0),
         "network": str(data.get("network") or ""),
+        "imageId": str(data.get("image") or ""),
+        "templateFile": Path(str(data.get("templatePath") or "")).name,
         "createdBy": "LightNAS",
     }
     (config.parent / "lightnas.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
 
+
+
+def verify_container_installation(config: Path, image: dict | None, template_path: str) -> dict:
+    rootfs = rootfs_from_config(config)
+    if not rootfs or not rootfs.is_dir():
+        raise RuntimeError("the selected image did not create a container root filesystem")
+    shell = rootfs / "bin" / "sh"
+    release_file = rootfs / "etc" / "os-release"
+    if not shell.exists() or not release_file.is_file():
+        raise RuntimeError("the selected image is incomplete: /bin/sh or /etc/os-release is missing")
+
+    values = {}
+    for row in release_file.read_text(encoding="utf-8", errors="replace").splitlines():
+        if "=" not in row:
+            continue
+        key, value = row.split("=", 1)
+        values[key] = value.strip().strip('"').strip("'")
+    actual_id = values.get("ID", "").lower()
+    id_like = set(values.get("ID_LIKE", "").lower().split())
+    if image:
+        expected = str(image.get("dist") or "").lower()
+        if expected and expected != actual_id and expected not in id_like:
+            raise RuntimeError(
+                f"selected image verification failed: expected {expected}, installed {actual_id or 'unknown'}"
+            )
+    return {
+        "id": actual_id or "linux",
+        "name": values.get("PRETTY_NAME") or values.get("NAME") or (Path(template_path).name if template_path else "Linux"),
+        "version": values.get("VERSION_ID") or values.get("VERSION_CODENAME") or "",
+    }
 
 
 def create_container(data: dict) -> dict:
@@ -585,7 +617,14 @@ def create_container(data: dict) -> dict:
     else:
         config = bootstrap_template_container(name, image, storage_root_value)
 
-    configure_container_guest(config, data)
+    try:
+        configure_container_guest(config, data)
+        installed_guest = verify_container_installation(config, image, template_path)
+    except Exception:
+        rootfs = rootfs_from_config(config)
+        if rootfs:
+            cleanup_failed_container(name, rootfs)
+        raise
     append_unique(config, f"lxc.start.auto = {1 if data.get('startOnBoot', True) else 0}")
     append_unique(config, f"lxc.cgroup2.memory.max = {memory * 1024 * 1024}")
     append_unique(config, f"lxc.cgroup2.cpu.max = {cpus * 100000} 100000")
@@ -626,6 +665,9 @@ def create_container(data: dict) -> dict:
         "status": "running",
         "provider": "local-lxc",
         "image": image_id,
+        "installedImage": Path(template_path).name if template_path else image.get("label"),
+        "guestOs": installed_guest,
+        "verified": True,
         "builder": "archive" if template_path else image.get("builder"),
         "storageId": str(data.get("storageId") or ""),
         "diskGiB": disk_gib,
