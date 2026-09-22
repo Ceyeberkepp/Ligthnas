@@ -26,8 +26,8 @@ test('console pages use CSP-compatible external scripts', async () => {
   assert.match(containerScript, /form\.hidden = false/);
   assert.match(containerScript, /new window\.Terminal/);
   assert.match(containerScript, /new window\.FitAddon\.FitAddon/);
-  assert.match(containerScript, /terminal\\?\\.onData/);
-  assert.match(containerScript, /terminal\\?\\.onBinary/);
+  assert.match(containerScript, /terminal\?\.onData/);
+  assert.match(containerScript, /terminal\?\.onBinary/);
   assert.match(containerScript, /Connected · interactive terminal/);
   assert.match(containerScript, /ResizeObserver/);
   assert.match(vmScript, /import RFB from '\/novnc\/core\/rfb\.js'/);
