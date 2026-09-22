@@ -15,36 +15,55 @@
       throw new Error('Invalid container name');
     }
 
-    let ansiCarry = '';
+    let terminalControlState = 'text';
+    let csiParameters = '';
 
     function normalizeTerminalChunk(value) {
-      let text = ansiCarry + String(value ?? '');
-      ansiCarry = '';
-
-      // Keep an incomplete escape sequence for the next WebSocket frame.
-      const partial = text.match(/\x1b(?:\[[0-9;?]*[ -\/]*)?$/);
-      if (partial) {
-        ansiCarry = partial[0];
-        text = text.slice(0, -partial[0].length);
-      }
-
-      // A terminal clear should discard everything before the final clear code.
+      const visible = [];
       let clear = false;
-      let clearEnd = -1;
-      for (const match of text.matchAll(/\x1b\[(?:2|3)J/g)) {
-        clear = true;
-        clearEnd = match.index + match[0].length;
+
+      // Parse terminal control sequences as a stream because WebSocket frames
+      // can split an OSC/CSI sequence at any byte. Regex-only cleanup leaks
+      // fragments such as "?2004h" and systemd "3008;start=..." records.
+      for (const character of String(value ?? '')) {
+        if (terminalControlState === 'text') {
+          if (character === '\x1b') terminalControlState = 'escape';
+          else if (character === '\u009b') { terminalControlState = 'csi'; csiParameters = ''; }
+          else if (character === '\u009d') terminalControlState = 'osc';
+          else if (character !== '\u009c') visible.push(character);
+          continue;
+        }
+
+        if (terminalControlState === 'escape') {
+          if (character === '[') { terminalControlState = 'csi'; csiParameters = ''; }
+          else if (character === ']' || character === 'P' || character === 'X' || character === '^' || character === '_') terminalControlState = 'osc';
+          else terminalControlState = 'text';
+          continue;
+        }
+
+        if (terminalControlState === 'csi') {
+          if (character >= '@' && character <= '~') {
+            if (character === 'J' && /(?:^|;)[23](?:;|$)/.test(csiParameters)) clear = true;
+            terminalControlState = 'text';
+            csiParameters = '';
+          } else {
+            csiParameters += character;
+          }
+          continue;
+        }
+
+        if (terminalControlState === 'osc') {
+          if (character === '\x07' || character === '\u009c') terminalControlState = 'text';
+          else if (character === '\x1b') terminalControlState = 'osc-escape';
+          continue;
+        }
+
+        if (terminalControlState === 'osc-escape') {
+          terminalControlState = character === '\\' ? 'text' : 'osc';
+        }
       }
-      if (clearEnd >= 0) text = text.slice(clearEnd);
 
-      // Remove color, cursor, title, mode and other ANSI/VT control sequences.
-      text = text
-        .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, '')
-        .replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, '')
-        .replace(/\x1b[()][0-2A-Z]/g, '')
-        .replace(/\x1bc/g, '');
-
-      return { text, clear };
+      return { text: visible.join(''), clear };
     }
 
     const append = value => {
@@ -67,6 +86,7 @@
     let socketOpen = false;
     let commandMode = false;
     let websocketFailed = false;
+    const decoder = new TextDecoder();
     const ws = new WebSocket(`${protocol}//${location.host}/api/console/container/${encodeURIComponent(id)}`);
     ws.binaryType = 'arraybuffer';
 
@@ -100,7 +120,7 @@
       input.focus();
     });
     ws.addEventListener('message', event => {
-      const text = typeof event.data === 'string' ? event.data : new TextDecoder().decode(event.data);
+      const text = typeof event.data === 'string' ? event.data : decoder.decode(event.data, { stream: true });
       append(text);
     });
     ws.addEventListener('close', event => {
