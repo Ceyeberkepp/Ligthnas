@@ -211,7 +211,7 @@ async function showRuntimeWizard(kind) {
         <div class="wizard-grid">
           <label>${isContainer ? 'Container' : 'VM'} name<input name="name" value="${defaultName}" pattern="[A-Za-z][A-Za-z0-9-]{1,39}" required></label>
           <label>${imageLabel}<select name="${isContainer ? 'image' : 'iso'}" ${isContainer ? 'required' : ''}>${images.map(item => wizardOption(item.value, item.label)).join('')}</select></label>
-          ${isContainer ? '<label>Root password<input name="password" type="password" minlength="10" maxlength="128" autocomplete="new-password" required placeholder="At least 10 characters"></label><label>Confirm root password<input name="passwordConfirm" type="password" minlength="10" maxlength="128" autocomplete="new-password" required></label>' : ''}
+          ${isContainer ? '<label>Root password<input name="password" type="password" minlength="4" maxlength="128" autocomplete="new-password" required placeholder="At least 4 characters"></label><label>Confirm root password<input name="passwordConfirm" type="password" minlength="4" maxlength="128" autocomplete="new-password" required></label>' : ''}
         </div>
         <p class="module-note">${isContainer ? 'The root password is sent only to the local privileged host agent and is not stored by the LightNAS web service.' : 'Upload or download ISO images from Storage → Pools & datasets → ISO images.'}</p>
       </section>
@@ -326,10 +326,13 @@ async function showRuntimeWizard(kind) {
     create.disabled = true;
     const progress = openProgressDialog(isContainer ? 'Creating system container' : 'Creating virtual machine', `Preparing ${name}. This can take several minutes.`);
     try {
-      await dialogApi(isContainer ? '/api/containers' : '/api/vms', { method: 'POST', body: JSON.stringify(payload) });
+      const result = await dialogApi(isContainer ? '/api/containers' : '/api/vms', { method: 'POST', body: JSON.stringify(payload) });
       dialog.close();
       refreshRuntime();
-      progress.succeed(`${name} was created successfully and is ready to use.`);
+      const selectedImage = images.find(item => item.value === (isContainer ? payload.image : payload.iso))?.label || payload.image || payload.iso || '';
+      progress.succeed(isContainer
+        ? `${name} was created, ${result.installedImage || selectedImage} was verified and installed, and the container is running.`
+        : `${name} was created successfully and is ready to use.`);
     } catch (problem) {
       progress.fail(problem.message);
       error.textContent = problem.message;
