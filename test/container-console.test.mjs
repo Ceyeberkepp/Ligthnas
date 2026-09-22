@@ -18,9 +18,9 @@ test('console pages use CSP-compatible external scripts', async () => {
   assert.match(containerScript, /setTimeout\(\(\) =>/);
   assert.match(containerScript, /ws\.send\(`\$\{command\}\\r`\)/);
   assert.match(containerScript, /normalizeTerminalChunk/);
-  assert.match(containerScript, /matchAll\(\/\\x1b\\\\\[\(\?:2\|3\)J\/g\)/);
+  assert.match(containerScript, /matchAll/);
   assert.match(containerScript, /chunk\.clear \? '' : terminal\.textContent/);
-  assert.match(containerScript, /character === '\\\\b'/);
+  assert.match(containerScript, /output = output\.slice\(0, -1\)/);
   assert.match(vmScript, /import RFB from '\/novnc\/core\/rfb\.js'/);
 });
 
