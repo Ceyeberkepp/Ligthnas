@@ -80,25 +80,9 @@ if [[ "$features" != "$current_features" ]]; then
 fi
 config="$(pct config "$ctid")"
 
-# LightNAS owns its firewall inside the appliance. Proxmox firewall filtering
-# on the outer LXC veth can reject frames from nested VM/container MAC
-# addresses, which prevents DHCP on a transparent LAN bridge. Preserve every
-# other NIC option and disable only the outer PVE firewall flag automatically.
-while IFS=: read -r net_slot net_value; do
-  [[ -n "$net_slot" && -n "$net_value" ]] || continue
-  net_slot="${net_slot//[[:space:]]/}"
-  net_value="${net_value# }"
-  new_value="$net_value"
-  if [[ "$new_value" == *",firewall=1"* ]]; then
-    new_value="${new_value/,firewall=1/,firewall=0}"
-  elif [[ "$new_value" != *",firewall="* ]]; then
-    new_value="${new_value},firewall=0"
-  fi
-  if [[ "$new_value" != "$net_value" ]]; then
-    echo "Preparing ${net_slot} for nested LAN bridging (Proxmox firewall -> off; LightNAS firewall remains authoritative)..."
-    pct set "$ctid" "-${net_slot}" "$new_value"
-  fi
-done < <(grep -E '^net[0-9]+:' <<<"$config")
+# Proxmox owns the outer CT network. LightNAS does not change the host bridge,
+# host firewall flag, or host veth behavior. Networking for nested workloads
+# remains internal to the appliance.
 config="$(pct config "$ctid")"
 
 ensure_host_kvm() {
@@ -141,25 +125,8 @@ echo "Starting LXC $ctid..."
 pct start "$ctid"
 wait_for_container
 
-# The outer Proxmox veth carries frames for the LightNAS appliance plus nested
-# VM/container MAC addresses. Put each CT network port into transparent bridge
-# mode so DHCP/ARP/broadcast traffic from nested guests is learned and flooded
-# normally by the host bridge.
-while IFS=: read -r net_slot _; do
-  [[ "$net_slot" =~ ^net([0-9]+)$ ]] || continue
-  net_index="${BASH_REMATCH[1]}"
-  host_veth="veth${ctid}i${net_index}"
-  for _ in {1..20}; do
-    ip link show "$host_veth" >/dev/null 2>&1 && break
-    sleep 1
-  done
-  if ip link show "$host_veth" >/dev/null 2>&1; then
-    ip link set "$host_veth" promisc on >/dev/null 2>&1 || true
-    bridge link set dev "$host_veth" learning on flood on mcast_flood on bcast_flood on hairpin on >/dev/null 2>&1 || true
-    echo "Prepared $host_veth for nested LightNAS LAN traffic."
-  fi
-done < <(grep -E '^net[0-9]+:' <<<"$config")
-
+# Do not modify the Proxmox host veth. The hypervisor supplies one normal NIC
+# to LightNAS; nested workload networking is handled inside the appliance.
 guest_installer="$(mktemp)"
 trap 'rm -f "$guest_installer"' EXIT
 curl -fsSL "${RAW_BASE}/install.sh" -o "$guest_installer"
