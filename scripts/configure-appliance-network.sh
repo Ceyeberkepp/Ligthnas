@@ -15,6 +15,50 @@ STATE_DIR=/etc/lightnas
 STATE_FILE="${STATE_DIR}/network.env"
 mkdir -p "${STATE_DIR}"
 
+bridge_uplink() {
+  local port
+  if [[ -r "${STATE_FILE}" ]]; then
+    port="$(sed -n 's/^LIGHTNAS_UPLINK=//p' "${STATE_FILE}" | tail -1)"
+    [[ -n "${port}" && -e "/sys/class/net/${port}" ]] && { printf '%s\n' "${port}"; return 0; }
+  fi
+  for path in "/sys/class/net/${BRIDGE}/brif/"*; do
+    [[ -e "${path}" ]] || continue
+    port="$(basename "${path}")"
+    [[ "${port}" =~ ^(veth|tap|tun|docker|br-|lightnas|lxcbr) ]] && continue
+    printf '%s\n' "${port}"
+    return 0
+  done
+  return 1
+}
+
+tune_transparent_bridge() {
+  local port="${1:-}"
+  [[ -e "/sys/class/net/${BRIDGE}" ]] || return 0
+  ip link set "${BRIDGE}" promisc on >/dev/null 2>&1 || true
+  if [[ -n "${port}" && -e "/sys/class/net/${port}" ]]; then
+    ip link set "${port}" promisc on >/dev/null 2>&1 || true
+    bridge link set dev "${port}" learning on flood on mcast_flood on bcast_flood on hairpin on >/dev/null 2>&1 || true
+  fi
+  for path in "/sys/class/net/${BRIDGE}/brif/"*; do
+    [[ -e "${path}" ]] || continue
+    local member
+    member="$(basename "${path}")"
+    bridge link set dev "${member}" learning on flood on mcast_flood on bcast_flood on >/dev/null 2>&1 || true
+  done
+
+  # Transparent guest traffic must remain Layer 2. br_netfilter would otherwise
+  # send bridged DHCP/ARP/IP frames through host firewall forwarding policy.
+  cat >/etc/sysctl.d/99-lightnas-transparent-bridge.conf <<'EOF'
+net.bridge.bridge-nf-call-iptables = 0
+net.bridge.bridge-nf-call-ip6tables = 0
+net.bridge.bridge-nf-call-arptables = 0
+EOF
+  modprobe br_netfilter >/dev/null 2>&1 || true
+  for setting in bridge-nf-call-iptables bridge-nf-call-ip6tables bridge-nf-call-arptables; do
+    [[ -e "/proc/sys/net/bridge/${setting}" ]] && printf '0' >"/proc/sys/net/bridge/${setting}" || true
+  done
+}
+
 default_dev="$(ip -4 route show default 2>/dev/null | awk 'NR==1 {for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')"
 default_gw="$(ip -4 route show default 2>/dev/null | awk 'NR==1 {for(i=1;i<=NF;i++) if($i=="via"){print $(i+1); exit}}')"
 
@@ -27,9 +71,12 @@ if [[ -z "${default_dev}" ]]; then
   exit 0
 fi
 
-# Already converted.
+# Already converted. Re-apply transparent switching settings every time so
+# existing installations are repaired after upgrades/reboots too.
 if [[ "${default_dev}" == "${BRIDGE}" ]]; then
-  printf 'LIGHTNAS_NETWORK_MODE=bridge\nLIGHTNAS_LAN_BRIDGE=%s\n' "${BRIDGE}" >"${STATE_FILE}"
+  uplink="$(bridge_uplink || true)"
+  tune_transparent_bridge "${uplink}"
+  printf 'LIGHTNAS_NETWORK_MODE=bridge\nLIGHTNAS_LAN_BRIDGE=%s\nLIGHTNAS_UPLINK=%s\n' "${BRIDGE}" "${uplink}" >"${STATE_FILE}"
   exit 0
 fi
 
@@ -196,6 +243,7 @@ fi
 # At this point eth0 (or the detected wired NIC) is a pure bridge port. The
 # appliance address/default route belong only to virbr0.
 ip addr flush dev "${uplink}" scope global >/dev/null 2>&1 || true
+tune_transparent_bridge "${uplink}"
 
 printf 'LIGHTNAS_NETWORK_MODE=bridge\nLIGHTNAS_LAN_BRIDGE=%s\nLIGHTNAS_UPLINK=%s\n' "${BRIDGE}" "${uplink}" >"${STATE_FILE}"
 echo "LightNAS network: ${uplink} is now the physical port for ${BRIDGE}; guests use the real LAN."
