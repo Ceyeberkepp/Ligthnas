@@ -10,6 +10,8 @@
     "test": "node --test"
   },
   "dependencies": {
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
     "ws": "^8.18.3"
   },
   "engines": {
