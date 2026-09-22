@@ -173,10 +173,7 @@ function smtpView() {
 }
 
 function mediaView() {
-  return `${pageHead('Media & images', 'Upload documents, photos, video, and VM installer images into persistent storage.')}
-    <div class="tool-grid">${[['Documents','Documents'],['Photos','Photos'],['Videos','Videos'],['ISO images','ISO']].map(([label, folder]) => `<article class="panel"><h2>${label}</h2><p class="muted">Keep files together in Files/${folder}.</p><button class="primary" data-media-folder="${folder}">Open ${label}</button></article>`).join('')}</div>
-    <div class="module-hero"><h2>Conversion</h2><p>${state.media?.converterAvailable ? 'FFmpeg is ready. Administrators can convert supported media from the Files page to MP4, WebM, MP3, JPEG, PNG or WebP.' : 'FFmpeg is unavailable on this host. Install FFmpeg to enable media conversions.'} Conversion takes CPU and creates a new file beside the original. Document indexing and format conversion need separate services.</p></div>
-    <div class="module-hero"><h2>VM image library</h2><p>ISO files uploaded here remain in LightNAS Files. A separate libvirt VM host must be configured to read its ISO directory; copying to that host is not automatic.</p></div>`;
+  return filesView();
 }
 
 async function loadMedia() {
@@ -245,14 +242,26 @@ function sharesView() {
     <div class="share-list">${shares.map(share => `<article class="share-row"><div><h3>${escapeHtml(share.name)}</h3><p>${escapeHtml(share.protocol)} · ${escapeHtml(share.description || 'No description')} · ${relativeTime(share.createdAt)}</p></div><button class="secondary" data-delete-share="${escapeHtml(share.id)}" data-name="${escapeHtml(share.name)}">Remove plan</button></article>`).join('') || '<div class="empty"><p>No share plans saved.</p></div>'}</div>`;
 }
 
+const librarySections = [
+  ['', 'All files'],
+  ['Documents', 'Documents'],
+  ['Photos', 'Photos'],
+  ['Videos', 'Videos'],
+  ['Audio', 'Audio'],
+  ['ISO', 'ISO images']
+];
+
 function filesView() {
   const segments = state.folder.split('/').filter(Boolean);
-  const crumbs = [`<button class="panel-link" data-folder="">Files</button>`, ...segments.map((segment, index) => `<span> / </span><button class="panel-link" data-folder="${escapeHtml(segments.slice(0, index + 1).join('/'))}">${escapeHtml(segment)}</button>`)].join('');
+  const section = librarySections.some(([folder]) => folder === (segments[0] || '')) ? (segments[0] || '') : '';
+  const crumbs = [`<button class="panel-link" data-folder="">Files & media</button>`, ...segments.map((segment, index) => `<span> / </span><button class="panel-link" data-folder="${escapeHtml(segments.slice(0, index + 1).join('/'))}">${escapeHtml(segment)}</button>`)].join('');
   const entries = state.files;
-  return `${pageHead('Files', 'Files stored in the LightNAS data directory on this host.', '<button class="secondary" data-action="refresh-files">Refresh</button>')}
+  const tabs = librarySections.map(([folder, label]) => `<button type="button" class="library-tab ${section === folder ? 'active' : ''}" data-library-tab="${escapeHtml(folder)}" aria-pressed="${section === folder}">${escapeHtml(label)}</button>`).join('');
+  return `${pageHead('Files & media', 'Browse documents, photos, audio, video, ISO images, and other files in one library.', '<button class="secondary" data-action="refresh-files">Refresh</button>')}
+    <nav class="library-tabs" aria-label="File library sections">${tabs}</nav>
     <div class="file-toolbar"><div class="breadcrumbs">${crumbs}</div><div><button class="secondary" data-action="new-folder">+ Folder</button> <label class="primary upload-button">Upload files<input id="file-upload" type="file" multiple hidden></label></div></div>
-    <p class="muted">Streamed uploads up to 1 GB; files stay on this host. These files are not an SMB or NFS share.</p>
-    <div class="storage-list">${entries === null ? '<div class="empty"><p>Loading files…</p></div>' : entries.length ? entries.map(entry => `<article class="file-row"><button class="file-name" data-open="${escapeHtml(entry.name)}" data-directory="${entry.directory}">${entry.directory ? '▣' : '▤'} ${escapeHtml(entry.name)}</button><span class="muted">${entry.directory ? 'Folder' : bytes(entry.sizeBytes)}</span>${!entry.directory && state.media?.converterAvailable && state.overview.appliance.role === 'administrator' ? `<button class="secondary" data-convert-file="${escapeHtml(entry.name)}">Convert</button>` : ''}<button class="secondary" data-delete-file="${escapeHtml(entry.name)}">Delete</button></article>`).join('') : '<div class="empty"><p>This folder is empty. Create a folder or upload a file.</p></div>'}</div>`;
+    <p class="muted">Select a tab to open that library. Previewable items open in the viewer; use its arrows to move through multiple files.</p>
+    <div class="storage-list">${entries === null ? '<div class="empty"><p>Loading files…</p></div>' : entries.length ? entries.map(entry => `<article class="file-row"><button class="file-name" data-open="${escapeHtml(entry.name)}" data-directory="${entry.directory}">${entry.directory ? '▣' : '▤'} ${escapeHtml(entry.name)}</button><span class="muted">${entry.directory ? 'Folder' : bytes(entry.sizeBytes)}</span>${!entry.directory && state.media?.converterAvailable && state.overview.appliance.role === 'administrator' ? `<button class="secondary" data-convert-file="${escapeHtml(entry.name)}">Convert</button>` : ''}<button class="secondary" data-delete-file="${escapeHtml(entry.name)}">Delete</button></article>`).join('') : '<div class="empty"><p>This section is empty. Create a folder or upload files here.</p></div>'}</div>`;
 }
 
 async function loadFiles() {
@@ -393,7 +402,8 @@ function integrationsView() {
 }
 
 function render(view) {
-  state.view = ['home', 'storage', 'pools', 'files', 'media', 'users', 'smtp', 'admin', 'shares', 'capabilities', 'apps', 'containers', 'vms', 'monitoring', 'settings', 'network', 'firewall', 'integrations'].includes(view) ? view : 'home';
+  if (view === 'media') view = 'files';
+  state.view = ['home', 'storage', 'pools', 'files', 'users', 'smtp', 'admin', 'shares', 'capabilities', 'apps', 'containers', 'vms', 'monitoring', 'settings', 'network', 'firewall', 'integrations'].includes(view) ? view : 'home';
   if (state.overview.appliance.role !== 'administrator' && !['home', 'files', 'media'].includes(state.view)) state.view = 'home';
   const content = $('#content');
   content.innerHTML = state.view === 'home' ? homeView() : state.view === 'storage' ? storageView() : state.view === 'pools' ? poolsView() : state.view === 'files' ? filesView() : state.view === 'media' ? mediaView() : state.view === 'users' ? usersView() : state.view === 'smtp' ? smtpView() : state.view === 'admin' ? adminView() : state.view === 'shares' ? sharesView() : state.view === 'containers' ? containersView() : state.view === 'vms' ? vmsView() : state.view === 'settings' ? settingsView() : state.view === 'capabilities' ? capabilitiesView() : state.view === 'network' ? networkView() : state.view === 'firewall' ? firewallView() : state.view === 'integrations' ? integrationsView() : moduleView(state.view);
@@ -557,7 +567,17 @@ function bindViewActions() {
   $$('[data-action="new-share"]', $('#content')).forEach(button => button.addEventListener('click', () => $('#share-dialog').showModal()));
   $$('[data-view-link]', $('#content')).forEach(button => button.addEventListener('click', () => { location.hash = button.dataset.viewLink; }));
   $$('[data-action="refresh"]', $('#content')).forEach(button => button.addEventListener('click', async () => { try { state.overview = await request('/api/overview'); render(state.view); toast('Readings updated.'); } catch (error) { toast(error.message); } }));
-  $$('[data-action="refresh-files"]', $('#content')).forEach(button => button.addEventListener('click', loadFiles));
+  $('[data-action="refresh-files"]', $('#content')).forEach(button => button.addEventListener('click', loadFiles));
+  $('[data-library-tab]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+    const folder = button.dataset.libraryTab || '';
+    if (folder) {
+      try { await request(`/api/files?path=${encodeURIComponent(folder)}`, { method: 'POST' }); }
+      catch (error) { if (error.status !== 409) return toast(error.message); }
+    }
+    state.folder = folder;
+    state.files = null;
+    render('files');
+  }));
   $$('[data-folder]', $('#content')).forEach(button => button.addEventListener('click', () => { state.folder = button.dataset.folder; state.files = null; render('files'); }));
   $$('[data-open]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     const path = [state.folder, button.dataset.open].filter(Boolean).join('/');
