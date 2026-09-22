@@ -37,6 +37,10 @@ async function request(action, data = undefined, timeout = 30000) {
   });
 }
 
+export async function localContainerSummary() {
+  return await request('container-summary', undefined, 10000);
+}
+
 export async function localContainerInventory() {
   return await request('container-inventory');
 }
