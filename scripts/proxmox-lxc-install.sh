@@ -80,6 +80,27 @@ if [[ "$features" != "$current_features" ]]; then
 fi
 config="$(pct config "$ctid")"
 
+# LightNAS owns its firewall inside the appliance. Proxmox firewall filtering
+# on the outer LXC veth can reject frames from nested VM/container MAC
+# addresses, which prevents DHCP on a transparent LAN bridge. Preserve every
+# other NIC option and disable only the outer PVE firewall flag automatically.
+while IFS=: read -r net_slot net_value; do
+  [[ -n "$net_slot" && -n "$net_value" ]] || continue
+  net_slot="${net_slot//[[:space:]]/}"
+  net_value="${net_value# }"
+  new_value="$net_value"
+  if [[ "$new_value" == *",firewall=1"* ]]; then
+    new_value="${new_value/,firewall=1/,firewall=0}"
+  elif [[ "$new_value" != *",firewall="* ]]; then
+    new_value="${new_value},firewall=0"
+  fi
+  if [[ "$new_value" != "$net_value" ]]; then
+    echo "Preparing ${net_slot} for nested LAN bridging (Proxmox firewall -> off; LightNAS firewall remains authoritative)..."
+    pct set "$ctid" "-${net_slot}" "$new_value"
+  fi
+done < <(grep -E '^net[0-9]+:' <<<"$config")
+config="$(pct config "$ctid")"
+
 ensure_host_kvm() {
   if [[ -c /dev/kvm ]]; then return 0; fi
   echo "Proxmox host does not expose /dev/kvm; trying KVM modules..."
