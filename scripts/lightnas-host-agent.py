@@ -285,9 +285,9 @@ def container_inventory() -> dict:
 
 
 def local_networks() -> list[str]:
-    # LXC veth devices need an administratively-up Linux bridge. Do not offer
-    # Docker's private bridge. Prefer the bridge that owns the real default
-    # route so new containers automatically join the appliance LAN.
+    # Native system containers always use a LightNAS-owned bridge. When
+    # LightNAS itself runs in an LXC, never attach nested containers to the
+    # libvirt virbr0 or to the hypervisor-provided uplink.
     result = []
     try:
         links = json.loads(run(["ip", "-j", "link", "show", "type", "bridge"], timeout=10) or "[]")
@@ -298,6 +298,12 @@ def local_networks() -> list[str]:
                 result.append(name)
     except Exception:
         pass
+
+    state = lightnas_network_state()
+    if state.get("LIGHTNAS_NETWORK_MODE") == "lxc-nat":
+        allowed = [name for name in ("lightnas0", "lxcbr0") if name in result]
+        return allowed
+
     default_device = ""
     try:
         routes = json.loads(run(["ip", "-j", "-4", "route", "show", "default"], timeout=10, check=False) or "[]")
