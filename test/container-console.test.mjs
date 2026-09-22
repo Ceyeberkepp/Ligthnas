@@ -30,6 +30,11 @@ test('console pages use CSP-compatible external scripts', async () => {
   assert.match(containerScript, /terminal\?\.onBinary/);
   assert.match(containerScript, /Connected · interactive terminal/);
   assert.match(containerScript, /ResizeObserver/);
+  assert.match(containerScript, /scheduleReconnect/);
+  assert.match(containerScript, /Reconnecting in/);
+  assert.doesNotMatch(containerScript, /Fallback command mode/);
+  assert.match(server, /keepWebSocketAlive/);
+  assert.match(server, /ws\.ping\(\)/);
   assert.match(vmScript, /import RFB from '\/novnc\/core\/rfb\.js'/);
   assert.match(appScript, /\$\$\('\[data-action="refresh-files"\]'/);
   assert.match(appScript, /\$\$\('\[data-library-tab\]'/);
