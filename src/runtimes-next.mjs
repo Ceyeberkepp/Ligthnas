@@ -213,14 +213,16 @@ export async function runtimeInventory() {
         else if (bridges.includes('lightnas0')) bridges = ['lightnas0', ...bridges.filter(name => name !== 'lightnas0')];
       } catch {}
     }
+    const networkState = await readFile('/etc/lightnas/network.env', 'utf8').catch(() => '');
+    const lxcNatMode = /^LIGHTNAS_NETWORK_MODE=lxc-nat$/m.test(networkState);
     const bridged = bridges.filter(name => !libvirtNetworks.includes(name)).map(name => ({
       name,
       type: 'host-bridge',
       label: name === bridges[0] ? `${name} · appliance LAN bridge` : `${name} · host bridge`
     }));
     runtime.virtualization.networkDetails = [
-      ...bridged,
-      ...libvirtNetworks.map(name => ({ name, type: 'libvirt-network', label: `${name} · libvirt network` })),
+      ...(lxcNatMode ? [] : bridged),
+      ...libvirtNetworks.map(name => ({ name, type: 'libvirt-network', label: `${name} · LightNAS managed NAT` })),
       { name: 'qemu-user', type: 'qemu-user', label: 'QEMU user NAT fallback' }
     ].filter((item, index, all) => all.findIndex(other => other.name === item.name) === index);
     runtime.virtualization.networks = runtime.virtualization.networkDetails.map(item => item.name);
