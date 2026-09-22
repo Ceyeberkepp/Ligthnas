@@ -194,6 +194,60 @@ def container_limits(name: str) -> tuple[int, int]:
     return memory, cpus
 
 
+def container_settings(name: str) -> dict:
+    config = Path("/var/lib/lxc") / name / "config"
+    try:
+        text = config.read_text(encoding="utf-8")
+    except OSError:
+        text = ""
+
+    def config_value(key: str) -> str:
+        match = re.search(rf"^{re.escape(key)}\\s*=\\s*(.+?)\\s*$", text, re.MULTILINE)
+        return match.group(1).strip() if match else ""
+
+    rootfs = rootfs_from_config(config)
+    mode = "dhcp"
+    address = ""
+    gateway = ""
+    dns: list[str] = []
+    if rootfs:
+        candidates = [
+            rootfs / "etc" / "systemd" / "network" / "10-lightnas-eth0.network",
+            rootfs / "etc" / "systemd" / "network" / "20-eth0.network",
+        ]
+        network_file = next((path for path in candidates if path.exists()), None)
+        if network_file:
+            try:
+                network_text = network_file.read_text(encoding="utf-8")
+                if not re.search(r"^DHCP\\s*=\\s*(?:yes|ipv4|true)\\s*$", network_text, re.MULTILINE | re.IGNORECASE):
+                    mode = "manual"
+                match = re.search(r"^Address\\s*=\\s*(.+?)\\s*$", network_text, re.MULTILINE)
+                address = match.group(1).strip() if match else ""
+                match = re.search(r"^Gateway\\s*=\\s*(.+?)\\s*$", network_text, re.MULTILINE)
+                gateway = match.group(1).strip() if match else ""
+                dns = [item.strip() for item in re.findall(r"^DNS\\s*=\\s*(.+?)\\s*$", network_text, re.MULTILINE)]
+            except OSError:
+                pass
+
+    metadata = {}
+    try:
+        metadata = json.loads((config.parent / "lightnas.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        pass
+    return {
+        "network": config_value("lxc.net.0.link"),
+        "macAddress": config_value("lxc.net.0.hwaddr"),
+        "startOnBoot": config_value("lxc.start.auto") != "0",
+        "ipv4Mode": mode,
+        "ipv4Address": address,
+        "gateway": gateway,
+        "dns": ", ".join(dns),
+        "storageId": str(metadata.get("storageId") or ""),
+        "diskGiB": int(metadata.get("diskGiB") or 0),
+        "imageId": str(metadata.get("imageId") or ""),
+    }
+
+
 def container_inventory() -> dict:
     ok, reason, diagnostics = container_capability()
     names: list[str] = []
@@ -212,7 +266,11 @@ def container_inventory() -> dict:
         except Exception:
             pass
         memory, cpus = container_limits(name)
-        containers.append({"id": name, "name": name, "status": state, "pid": pid, "memory": memory, "cpus": cpus, "provider": "local-lxc"})
+        containers.append({
+            "id": name, "name": name, "status": state, "pid": pid,
+            "memory": memory, "cpus": cpus, "provider": "local-lxc",
+            **container_settings(name),
+        })
     return {
         "available": ok,
         "enabled": ok,
@@ -757,16 +815,80 @@ def update_container(data: dict) -> dict:
     host_cpus = max(1, os.cpu_count() or 1)
     if not (256 <= memory <= 262144 and 1 <= cpus <= min(128, host_cpus)):
         raise ValueError("container CPU or memory values are outside host limits")
-    # Renaming an LXC safely involves its path/rootfs and is intentionally kept
-    # separate.  Resource edits are live/persistent.
     if new_name != current:
         raise ValueError("renaming local LXC containers is not enabled yet; clone or recreate with the new name")
+
     append_unique(config, f"lxc.cgroup2.memory.max = {memory * 1024 * 1024}")
     append_unique(config, f"lxc.cgroup2.cpu.max = {cpus * 100000} 100000")
+    append_unique(config, f"lxc.start.auto = {1 if data.get('startOnBoot', True) else 0}")
+
+    requested_network = str(data.get("network") or "").strip()
+    if requested_network:
+        networks = local_networks()
+        if requested_network not in networks:
+            raise ValueError("selected container network is not available")
+        append_unique(config, f"lxc.net.0.link = {requested_network}")
+
+    mode = str(data.get("ipv4Mode") or "dhcp")
+    address = str(data.get("ipv4Address") or "").strip()
+    gateway = str(data.get("gateway") or "").strip()
+    dns_values = [item.strip() for item in str(data.get("dns") or "").split(",") if item.strip()]
+    if mode not in {"dhcp", "manual"}:
+        raise ValueError("invalid container IPv4 mode")
+    try:
+        if mode == "manual":
+            ipaddress.ip_interface(address)
+            if gateway:
+                ipaddress.ip_address(gateway)
+        for item in dns_values:
+            ipaddress.ip_address(item)
+    except ValueError as exc:
+        raise ValueError("invalid static IPv4 address, gateway, or DNS server") from exc
+
+    rootfs = rootfs_from_config(config)
+    if not rootfs or not rootfs.is_dir():
+        raise RuntimeError("container root filesystem is unavailable")
+    network_dir = rootfs / "etc" / "systemd" / "network"
+    network_dir.mkdir(parents=True, exist_ok=True)
+    for existing in network_dir.glob("*.network"):
+        if existing.is_file() or existing.is_symlink():
+            existing.unlink()
+    lines = ["[Match]", "Name=eth0", "", "[Network]"]
+    if mode == "dhcp":
+        lines += ["DHCP=ipv4", "IPv6AcceptRA=yes"]
+    else:
+        lines.append(f"Address={address}")
+        if gateway:
+            lines.append(f"Gateway={gateway}")
+        for item in dns_values:
+            lines.append(f"DNS={item}")
+    (network_dir / "10-lightnas-eth0.network").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    interfaces = rootfs / "etc" / "network" / "interfaces"
+    if interfaces.parent.exists():
+        interfaces.write_text("auto lo\niface lo inet loopback\n", encoding="utf-8")
+    subprocess.run(
+        ["systemctl", "--root", str(rootfs), "disable", "NetworkManager.service", "networking.service"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+    )
+    subprocess.run(
+        ["systemctl", "--root", str(rootfs), "enable", "systemd-networkd.service"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+    )
+
     if lxc_state(current) == "running":
         subprocess.run(["lxc-cgroup", "-n", current, "memory.max", str(memory * 1024 * 1024)], check=False, capture_output=True)
         subprocess.run(["lxc-cgroup", "-n", current, "cpu.max", f"{cpus * 100000} 100000"], check=False, capture_output=True)
-    return {"id": current, "name": current, "memoryMiB": memory, "cpus": cpus, "status": "updated"}
+        subprocess.run(
+            ["lxc-attach", "-n", current, "--", "systemctl", "restart", "systemd-networkd.service"],
+            check=False, capture_output=True, timeout=30,
+        )
+    return {
+        "id": current, "name": current, "memoryMiB": memory, "cpus": cpus,
+        "network": requested_network, "ipv4Mode": mode, "ipv4Address": address,
+        "gateway": gateway, "dns": ", ".join(dns_values),
+        "startOnBoot": bool(data.get("startOnBoot", True)), "status": "updated",
+    }
 
 
 def parse_nmcli(text: str, count: int) -> list[list[str]]:
