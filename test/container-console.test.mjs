@@ -11,24 +11,28 @@ test('console pages use CSP-compatible external scripts', async () => {
     readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
     readFile(new URL('../src/runtimes-next.mjs', import.meta.url), 'utf8')
   ]);
-  assert.match(containerPage, /src="\/container-console\.js\?v=20260922-3"/);
-  assert.match(containerPage, /id="terminal" tabindex="0" role="application"/);
+  assert.match(containerPage, /src="\/container-console\.js\?v=20260922-4"/);
+  assert.match(containerPage, /href="\/xterm\/css\/xterm\.css"/);
+  assert.match(containerPage, /src="\/xterm\/lib\/xterm\.js"/);
+  assert.match(containerPage, /src="\/xterm-addon-fit\/lib\/addon-fit\.js"/);
+  assert.match(containerPage, /id="terminal" role="application"/);
   assert.match(containerPage, /id="command-form"[^>]+hidden/);
   assert.doesNotMatch(containerPage, /<script>\s*const/);
   assert.match(vmPage, /src="\/vm-console\.js"/);
   assert.doesNotMatch(vmPage, /<script type="module">\s*import/);
-  assert.match(containerScript, /Command mode/);
   assert.match(containerScript, /\/api\/containers\/\$\{encodeURIComponent\(id\)\}\/exec/);
   assert.match(containerScript, /setTimeout\(\(\) =>/);
   assert.match(containerScript, /ws\.send\(`\$\{command\}\\r`\)/);
   assert.match(containerScript, /terminal\.addEventListener\('keydown'/);
   assert.match(containerScript, /terminal\.addEventListener\('paste'/);
   assert.match(containerScript, /Ctrl\+C without Shift sends/);
-  assert.match(containerScript, /Connected · click terminal and type/);
   assert.match(containerScript, /form\.hidden = false/);
-  assert.match(containerScript, /normalizeTerminalChunk/);
-  assert.match(containerScript, /terminalControlState/);
-  assert.match(containerScript, /osc-escape/);
+  assert.match(containerScript, /new window\.Terminal/);
+  assert.match(containerScript, /new window\.FitAddon\.FitAddon/);
+  assert.match(containerScript, /terminal\.onData/);
+  assert.match(containerScript, /terminal\.onBinary/);
+  assert.match(containerScript, /Connected · interactive terminal/);
+  assert.match(containerScript, /ResizeObserver/);
   assert.match(containerScript, /decoder\.decode\(event\.data, \{ stream: true \}\)/);
   assert.match(containerScript, /chunk\.clear \? '' : terminal\.textContent/);
   assert.match(containerScript, /output = output\.slice\(0, -1\)/);
