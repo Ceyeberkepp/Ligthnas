@@ -1066,8 +1066,15 @@ def stream_container(connection, data: dict) -> None:
         os.setsid()
         fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
 
+    terminal_shell = (
+        "export HOME=/root USER=root LOGNAME=root; "
+        "cd /root 2>/dev/null || cd /; "
+        f'if [ -x /bin/bash ]; then export PS1="root@{name}:\\w# "; '
+        "exec /bin/bash --noprofile --norc -i; "
+        f'else export PS1="root@{name}:# "; exec /bin/sh -i; fi'
+    )
     process = subprocess.Popen(
-        ["lxc-attach", "-n", name, "--", "/bin/sh", "-il"],
+        ["lxc-attach", "-n", name, "--", "/bin/sh", "-c", terminal_shell],
         stdin=slave,
         stdout=slave,
         stderr=slave,
