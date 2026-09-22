@@ -19,11 +19,15 @@ async function refreshPresets() {
   if (loadingPresets) return;
   loadingPresets = true;
   try {
-    const response = await fetch('/api/runtimes', { headers: { 'X-LightNAS-Request': '1' } });
+    const response = await fetch('/api/containers/inventory', { headers: { 'X-LightNAS-Request': '1' } });
     if (!response.ok) return;
     const body = await response.json();
-    if (Array.isArray(body?.docker?.presets) && body.docker.presets.length) {
-      presets = body.docker.presets;
+    if (Array.isArray(body?.images) && body.images.length) {
+      presets = body.images.map(item => ({
+        name: item.label || item.name || item.id,
+        category: item.source === 'template-library' ? 'Template library' : (item.category || 'Linux'),
+        image: item.id
+      }));
       const form = document.querySelector('#container-form');
       if (form) {
         form.dataset.imagePicker = '';
@@ -52,7 +56,7 @@ function addPresetOptions(select) {
   }
   const custom = document.createElement('option');
   custom.value = '__custom__';
-  custom.textContent = 'Custom Docker image…';
+  custom.textContent = 'Custom system image ID…';
   select.append(custom);
 }
 
@@ -77,14 +81,14 @@ function enhanceContainerForm() {
 
   const help = document.createElement('small');
   help.className = 'muted';
-  help.textContent = 'Choose a built-in image. LightNAS downloads it automatically before creating the container.';
+  help.textContent = 'Choose a native Linux image or downloaded template. LightNAS prepares it automatically before creating the system container.';
   presetLabel.append(help);
 
   const customLabel = document.createElement('label');
-  customLabel.textContent = 'Custom Docker image';
+  customLabel.textContent = 'Custom system image ID';
   customLabel.style.display = 'none';
   const customInput = document.createElement('input');
-  customInput.placeholder = 'registry.example.com/image:tag';
+  customInput.placeholder = 'template:debian-13';
   customInput.pattern = '[a-z0-9][a-z0-9./:_-]{0,159}';
   customLabel.append(customInput);
 
