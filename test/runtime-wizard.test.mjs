@@ -51,7 +51,10 @@ test('files and media share one tabbed library with sequential previews', async 
   assert.doesNotMatch(page, /data-view="media"/);
   assert.match(app, /data-library-tab/);
   assert.match(app, /\['Photos', 'Photos'\]/);
-  assert.match(app, /\['ISO', 'ISO images'\]/);
+  assert.doesNotMatch(app, /\['ISO', 'ISO images'\]/);
+  assert.doesNotMatch(app, />Upload files</);
+  assert.match(app, />Upload<input id="file-upload"/);
+  assert.match(app, /entry\.name === 'ISO'/);
   assert.match(enhancements, /data-viewer-previous/);
   assert.match(enhancements, /data-viewer-next/);
   assert.match(enhancements, /ArrowLeft/);
