@@ -341,8 +341,19 @@ async function enhanceRuntimeControls() {
         const actions = document.createElement('div');
         actions.className = 'runtime-actions';
         const running = String(item.status || '').toLowerCase() === 'running';
-        const publication = item.publication;
-        const applicationUrl = publication ? `${publication.scheme || 'http'}://${location.hostname}:${publication.hostPort}/` : '';
+        let publication = item.publication;
+        if (running && !publication) {
+          const detected = await apiRequest('/api/containers', {
+            method: 'POST',
+            body: JSON.stringify({ id, action: 'auto-publish', attempts: 1 })
+          }).catch(() => null);
+          publication = detected?.mode ? detected : detected?.publication || null;
+        }
+        const applicationUrl = publication
+          ? (publication.mode === 'direct'
+            ? `${publication.scheme || 'http'}://${publication.targetHost}${((publication.scheme || 'http') === 'https' && Number(publication.targetPort) === 443) || ((publication.scheme || 'http') === 'http' && Number(publication.targetPort) === 80) ? '' : `:${publication.targetPort}`}/`
+            : `${publication.scheme || 'http'}://${location.hostname}:${publication.hostPort}/`)
+          : '';
         const memoryMiB = Math.max(256, Math.round((item.memory || 0) / 1048576) || 2048);
         actions.innerHTML = `${running ? `${publication ? `<a class="primary" href="${escapeHtml(applicationUrl)}" target="_blank" rel="noopener">Open application</a>` : ''}<button class="primary" data-container-console="${escapeHtml(id)}" data-container-name="${escapeHtml(item.name)}">Terminal</button><button class="secondary" data-container-action="shutdown" data-container-id="${escapeHtml(id)}">Shutdown</button><button class="secondary" data-container-action="reboot" data-container-id="${escapeHtml(id)}">Reboot</button><button class="secondary" data-container-action="stop" data-container-id="${escapeHtml(id)}">Stop</button>` : `<button class="primary" data-container-action="start" data-container-id="${escapeHtml(id)}">Start</button>`}
           <button class="secondary" data-container-edit="${escapeHtml(id)}" data-container-name="${escapeHtml(item.name)}" data-container-memory="${memoryMiB}" data-container-cpus="${item.cpus || 2}">Edit</button>
