@@ -789,7 +789,7 @@ async function api(req, res, url) {
       const automatic = await automaticContainerApplication(id, {
         preferredPort: Number(input.targetPort) || 0,
         requestedHostPort: Number(input.hostPort) || 0,
-        attempts: input.action === 'auto-publish' ? 3 : 1
+        attempts: input.action === 'auto-publish' ? Math.max(1, Math.min(3, Number(input.attempts) || 3)) : 1
       });
       const publication = automatic.publication;
       if (!publication && input.action === 'publish' && Number(input.targetPort)) {
