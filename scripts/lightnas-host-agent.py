@@ -250,11 +250,22 @@ def container_settings(name: str) -> dict:
 
 def container_inventory() -> dict:
     ok, reason, diagnostics = container_capability()
+    # Inventory existing containers independently of network readiness. A
+    # missing bridge must never make already-created containers disappear from
+    # the LightNAS UI.
     names: list[str] = []
-    if ok:
+    if available("lxc-ls"):
         try:
-            names = [line.strip() for line in run(["lxc-ls", "-1"], timeout=15).splitlines() if NAME_RE.fullmatch(line.strip())]
+            names = [line.strip() for line in run(["lxc-ls", "-1"], timeout=15, check=False).splitlines() if NAME_RE.fullmatch(line.strip())]
         except Exception:
+            names = []
+    if not names:
+        try:
+            names = sorted(
+                item.name for item in Path("/var/lib/lxc").iterdir()
+                if item.is_dir() and NAME_RE.fullmatch(item.name) and (item / "config").is_file()
+            )
+        except OSError:
             names = []
     containers = []
     for name in names:
@@ -271,6 +282,7 @@ def container_inventory() -> dict:
             "memory": memory, "cpus": cpus, "provider": "local-lxc",
             **container_settings(name),
         })
+    networks = local_networks()
     return {
         "available": ok,
         "enabled": ok,
@@ -278,7 +290,9 @@ def container_inventory() -> dict:
         "reason": reason,
         "containers": containers,
         "images": [item for item in IMAGES if item.get("nested", True) or not in_container()],
-        "networks": local_networks(),
+        "networks": networks,
+        "networkReady": bool(networks),
+        "inventoryAvailable": available("lxc-ls") or Path("/var/lib/lxc").is_dir(),
         "storageRoot": "/var/lib/lxc",
         "diagnostics": diagnostics,
     }
