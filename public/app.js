@@ -475,11 +475,27 @@ function bindViewActions() {
     toast('Physical pool creation needs the disk safety agent before it can operate. Existing ZFS datasets can be created below.');
     $('#dataset-form', $('#content'))?.scrollIntoView({ behavior: 'smooth' });
   }));
-  $$('[data-action="create-container"]', $('#content')).forEach(button => button.addEventListener('click', () => {
-    const containers = state.runtimes?.containers;
-    if (!containers?.available || !containers.enabled) return toast(containers?.reason || 'Native LXC is not ready on this LightNAS host.');
-    if (!containers.images?.length) return toast('No built-in Linux container images are available.');
-    if (!containers.networks?.length) return toast('No local LXC bridge is ready. Open Networking or rerun the LightNAS installer to prepare lxcbr0/lightnas0.');
+  $('[data-action="create-container"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+    let containers = state.runtimes?.containers;
+    if ((!containers?.networks?.length || !containers?.available || !containers.enabled) && containers?.inventoryAvailable !== false) {
+      button.disabled = true;
+      const original = button.textContent;
+      button.textContent = 'Preparing container network…';
+      try {
+        await request('/api/appliance/repair', { method: 'POST', body: '{}' });
+        state.runtimes = await request('/api/runtimes');
+        containers = state.runtimes?.containers;
+        render('containers');
+      } catch (error) {
+        toast(error.message);
+      } finally {
+        button.disabled = false;
+        button.textContent = original;
+      }
+    }
+    if (!containers?.available || !containers.enabled) return toast(containers?.reason || 'LightNAS could not prepare the native container runtime.');
+    if (!containers.images?.length) return toast('No Linux container images or templates are available.');
+    if (!containers.networks?.length) return toast('LightNAS could not start its internal container network.');
     $('#container-form', $('#content'))?.scrollIntoView({ behavior: 'smooth' });
     $('#container-form input', $('#content'))?.focus();
   }));
