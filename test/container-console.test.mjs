@@ -11,7 +11,7 @@ test('console pages use CSP-compatible external scripts', async () => {
     readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
     readFile(new URL('../src/runtimes-next.mjs', import.meta.url), 'utf8')
   ]);
-  assert.match(containerPage, /src="\/container-console\.js"/);
+  assert.match(containerPage, /src="\/container-console\.js\?v=20260922-3"/);
   assert.match(containerPage, /id="terminal" tabindex="0" role="application"/);
   assert.match(containerPage, /id="command-form"[^>]+hidden/);
   assert.doesNotMatch(containerPage, /<script>\s*const/);
