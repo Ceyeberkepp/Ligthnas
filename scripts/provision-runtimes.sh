@@ -41,7 +41,7 @@ if command -v lxc-create >/dev/null 2>&1 && command -v lxc-start >/dev/null 2>&1
   # bridge. This works even when the outer LXC's eth0 is intentionally
   # unmanaged by NetworkManager. lxc-net supplies the bridge, DHCP/DNS and
   # outbound NAT through the host's current default route.
-  if [[ "${lan_bridge_ready}" != "1" ]] && systemctl list-unit-files lxc-net.service --no-legend 2>/dev/null | grep -q '^lxc-net.service'; then
+  if [[ "${network_mode}" != "lxc-nat" && "${lan_bridge_ready}" != "1" ]] && systemctl list-unit-files lxc-net.service --no-legend 2>/dev/null | grep -q '^lxc-net.service'; then
     systemctl stop lxc-net.service >/dev/null 2>&1 || true
 
     # Older LightNAS builds created a NetworkManager profile with this name.
@@ -89,8 +89,8 @@ if command -v lxc-create >/dev/null 2>&1 && command -v lxc-start >/dev/null 2>&1
   # network namespaces/veth are available. Install a small LightNAS-owned
   # bridge service as a fallback so system-container creation does not depend
   # on that distro helper.
-  if [[ "${lan_bridge_ready}" != "1" && ${EUID} -eq 0 ]] && ! (ip link show lightnas0 2>/dev/null | grep -q 'UP' \
-    && ip -4 address show dev lightnas0 2>/dev/null | grep -q '10\.77\.0\.1/24'); then
+  if [[ ${EUID} -eq 0 ]] && { [[ "${network_mode}" == "lxc-nat" ]] || { [[ "${lan_bridge_ready}" != "1" ]] && ! (ip link show lightnas0 2>/dev/null | grep -q 'UP' \
+    && ip -4 address show dev lightnas0 2>/dev/null | grep -q '10\.77\.0\.1/24'); }; }; then
     install -d -m 0755 /usr/local/libexec /run/lightnas
     cat >/usr/local/libexec/lightnas-container-network <<'EOF'
 #!/usr/bin/env bash
@@ -142,7 +142,13 @@ ExecStop=/usr/local/libexec/lightnas-container-network stop
 WantedBy=multi-user.target
 EOF
     systemctl daemon-reload
-    systemctl enable --now lightnas-container-network.service >/dev/null 2>&1 || true
+    systemctl enable lightnas-container-network.service >/dev/null 2>&1 || true
+    if [[ "${network_mode}" == "lxc-nat" ]]; then
+      systemctl disable --now lxc-net.service >/dev/null 2>&1 || true
+      systemctl restart lightnas-container-network.service >/dev/null 2>&1 || /usr/local/libexec/lightnas-container-network start >/dev/null 2>&1 || true
+    else
+      systemctl enable --now lightnas-container-network.service >/dev/null 2>&1 || true
+    fi
   fi
 
   # LXC appliance mode always keeps nested system containers on LightNAS's
@@ -164,14 +170,6 @@ EOF
 
   if systemd-detect-virt --container >/dev/null 2>&1 && [[ "${LIGHTNAS_ALLOW_NESTED_LXC:-0}" != "1" ]]; then
     report Containers 'native LXC installed, but this appliance is itself in a container and nested LXC was not enabled'
-  elif [[ "${lan_bridge_ready}" == "1" ]]; then
-    systemctl disable --now lxc-net.service >/dev/null 2>&1 || true
-    systemctl disable --now lightnas-container-network.service >/dev/null 2>&1 || true
-    if ip link show lightnas0 >/dev/null 2>&1; then
-      ip link set lightnas0 down >/dev/null 2>&1 || true
-      ip link delete lightnas0 type bridge >/dev/null 2>&1 || true
-    fi
-    report Containers "native LXC/liblxc ready on ${lan_bridge} (real LAN bridge)"
   elif ip link show lightnas0 2>/dev/null | grep -q 'UP' \
     && ip -4 address show dev lightnas0 2>/dev/null | grep -q '10\.77\.0\.1/24'; then
     report Containers 'native LXC/liblxc ready on lightnas0 (10.77.0.0/24 NAT)'
