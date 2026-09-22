@@ -513,18 +513,63 @@ def configure_container_guest(config: Path, data: dict) -> None:
     if mode == "manual" and not systemd_present:
         raise ValueError("static networking currently requires a systemd-based container image")
     if systemd_present:
+        # LightNAS owns eth0 configuration. Distribution templates may ship
+        # ifupdown, NetworkManager, netplan, or an earlier networkd DHCP file.
+        # Leaving two managers active creates two IPv4 leases on one interface.
         network_dir = rootfs / "etc" / "systemd" / "network"
         network_dir.mkdir(parents=True, exist_ok=True)
+        for existing in network_dir.glob("*.network"):
+            if existing.is_file() or existing.is_symlink():
+                existing.unlink()
+
+        interfaces = rootfs / "etc" / "network" / "interfaces"
+        if interfaces.parent.exists():
+            interfaces.write_text("auto lo\niface lo inet loopback\n", encoding="utf-8")
+            interfaces_dropins = interfaces.parent / "interfaces.d"
+            if interfaces_dropins.exists():
+                for existing in interfaces_dropins.iterdir():
+                    if existing.is_file() or existing.is_symlink():
+                        existing.unlink()
+
+        netplan_dir = rootfs / "etc" / "netplan"
+        if netplan_dir.exists():
+            for existing in netplan_dir.glob("*.yaml"):
+                existing.unlink()
+            for existing in netplan_dir.glob("*.yml"):
+                existing.unlink()
+
+        cloud_dir = rootfs / "etc" / "cloud" / "cloud.cfg.d"
+        if cloud_dir.exists():
+            (cloud_dir / "99-lightnas-network.cfg").write_text(
+                "network: {config: disabled}\n", encoding="utf-8"
+            )
+
+        nm_dir = rootfs / "etc" / "NetworkManager" / "conf.d"
+        if nm_dir.parent.exists():
+            nm_dir.mkdir(parents=True, exist_ok=True)
+            (nm_dir / "90-lightnas-unmanaged.conf").write_text(
+                "[keyfile]\nunmanaged-devices=interface-name:eth0\n", encoding="utf-8"
+            )
+
+        subprocess.run(
+            ["systemctl", "--root", str(rootfs), "disable", "NetworkManager.service", "networking.service"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+        )
+        subprocess.run(
+            ["systemctl", "--root", str(rootfs), "enable", "systemd-networkd.service"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+        )
+
         network_lines = ["[Match]", "Name=eth0", "", "[Network]"]
         if mode == "dhcp":
-            network_lines += ["DHCP=yes", "IPv6AcceptRA=yes"]
+            network_lines += ["DHCP=ipv4", "IPv6AcceptRA=yes"]
         else:
             network_lines.append(f"Address={address}")
             if gateway:
                 network_lines.append(f"Gateway={gateway}")
             for item in dns_values:
                 network_lines.append(f"DNS={item}")
-        (network_dir / "20-eth0.network").write_text("\n".join(network_lines) + "\n", encoding="utf-8")
+        (network_dir / "10-lightnas-eth0.network").write_text("\n".join(network_lines) + "\n", encoding="utf-8")
 
     metadata = {
         "storageId": str(data.get("storageId") or ""),
