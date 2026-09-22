@@ -22,108 +22,6 @@ if [[ "${network_mode}" == "bridge" ]] && ip link show "${lan_bridge}" 2>/dev/nu
   lan_bridge_ready=1
 fi
 
-migrate_existing_workloads_to_lan_bridge() {
-  [[ "${lan_bridge_ready}" == "1" ]] || return 0
-
-  if command -v lxc-info >/dev/null 2>&1; then
-    for config in /var/lib/lxc/*/config; do
-      [[ -f "$config" ]] || continue
-      # Migrate old private bridges, but also restart containers that are
-      # already on virbr0 so they drop any stale 192.168.122.x lease and ask
-      # the real LAN DHCP server for a fresh address.
-      link="$(sed -nE 's/^lxc\.net\.[0-9]+\.link\s*=\s*([^[:space:]]+).*/\1/p' "$config" | head -1)"
-      [[ "$link" =~ ^(lightnas0|lxcbr0|${lan_bridge})$ ]] || continue
-      name="$(basename "$(dirname "$config")")"
-      was_running=0
-      [[ "$(lxc-info -n "$name" -sH 2>/dev/null || true)" == "RUNNING" ]] && was_running=1
-      [[ "$was_running" == "1" ]] && lxc-stop -n "$name" -t 30 >/dev/null 2>&1 || true
-      if [[ "$link" != "${lan_bridge}" ]]; then
-        sed -Ei "s#^(lxc\.net\.[0-9]+\.link\s*=\s*)(lightnas0|lxcbr0)\s*$#\\1${lan_bridge}#" "$config"
-      fi
-      if [[ "$was_running" == "1" ]]; then
-        lxc-start -n "$name" -d >/dev/null 2>&1 || true
-        for _ in {1..20}; do
-          if lxc-attach -n "$name" -- sh -lc 'ip -4 -o addr show dev eth0 scope global | grep -q " inet "' >/dev/null 2>&1; then
-            break
-          fi
-          sleep 1
-        done
-        if ! lxc-attach -n "$name" -- sh -lc 'ip -4 -o addr show dev eth0 scope global | grep -q " inet "' >/dev/null 2>&1; then
-          lxc-attach -n "$name" -- sh -lc '
-            command -v networkctl >/dev/null 2>&1 && networkctl renew eth0 >/dev/null 2>&1 || true
-            command -v dhclient >/dev/null 2>&1 && dhclient -v eth0 >/dev/null 2>&1 || true
-            command -v udhcpc >/dev/null 2>&1 && udhcpc -i eth0 -q -n >/dev/null 2>&1 || true
-          ' >/dev/null 2>&1 || true
-        fi
-      fi
-    done
-  fi
-
-  if command -v virsh >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
-    LIGHTNAS_LAN_BRIDGE="${lan_bridge}" python3 <<'PY'
-import os
-import subprocess
-import tempfile
-import time
-import xml.etree.ElementTree as ET
-
-bridge = os.environ.get("LIGHTNAS_LAN_BRIDGE", "virbr0")
-
-def cmd(*args):
-    return subprocess.run(args, text=True, capture_output=True)
-
-names = [line.strip() for line in cmd("virsh", "-c", "qemu:///system", "list", "--all", "--name").stdout.splitlines() if line.strip()]
-for name in names:
-    xml_result = cmd("virsh", "-c", "qemu:///system", "dumpxml", "--inactive", name)
-    if xml_result.returncode != 0:
-        continue
-    root = ET.fromstring(xml_result.stdout)
-    changed = False
-    for interface in root.findall("./devices/interface"):
-        if interface.get("type") != "network":
-            continue
-        source = interface.find("source")
-        if source is None or source.get("network") != "default":
-            continue
-        interface.set("type", "bridge")
-        source.attrib.clear()
-        source.set("bridge", bridge)
-        virtualport = interface.find("virtualport")
-        if virtualport is not None:
-            interface.remove(virtualport)
-        changed = True
-    if not changed:
-        continue
-
-    state = cmd("virsh", "-c", "qemu:///system", "domstate", name).stdout.strip().lower()
-    was_running = "running" in state or "paused" in state
-    if was_running:
-        cmd("virsh", "-c", "qemu:///system", "shutdown", name)
-        for _ in range(20):
-            time.sleep(1)
-            if "shut off" in cmd("virsh", "-c", "qemu:///system", "domstate", name).stdout.strip().lower():
-                break
-        else:
-            cmd("virsh", "-c", "qemu:///system", "destroy", name)
-
-    with tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False) as handle:
-        ET.ElementTree(root).write(handle, encoding="unicode", xml_declaration=False)
-        path = handle.name
-    try:
-        redefine = cmd("virsh", "-c", "qemu:///system", "define", path)
-        if redefine.returncode != 0:
-            raise RuntimeError(redefine.stderr or redefine.stdout)
-    finally:
-        os.unlink(path)
-
-    if was_running:
-        cmd("virsh", "-c", "qemu:///system", "start", name)
-PY
-  fi
-}
-
-migrate_existing_workloads_to_lan_bridge
-
 mkdir -p "$(dirname "${status_file}")" "$(dirname "${runtime_env}")"
 if [[ ! -e "$runtime_env" ]]; then install -m 0600 /dev/null "$runtime_env"; fi
 chmod 0600 "$runtime_env"
@@ -245,6 +143,23 @@ WantedBy=multi-user.target
 EOF
     systemctl daemon-reload
     systemctl enable --now lightnas-container-network.service >/dev/null 2>&1 || true
+  fi
+
+  # LXC appliance mode always keeps nested system containers on LightNAS's
+  # private container bridge. Migrate any containers created during the old
+  # transparent-bridge experiment back to lightnas0 automatically.
+  if [[ "${network_mode}" == "lxc-nat" ]] && ip link show lightnas0 >/dev/null 2>&1; then
+    for config in /var/lib/lxc/*/config; do
+      [[ -f "$config" ]] || continue
+      link="$(sed -nE 's/^lxc\.net\.[0-9]+\.link\s*=\s*([^[:space:]]+).*/\1/p' "$config" | head -1)"
+      [[ "$link" =~ ^(virbr0|lxcbr0)$ ]] || continue
+      name="$(basename "$(dirname "$config")")"
+      was_running=0
+      [[ "$(lxc-info -n "$name" -sH 2>/dev/null || true)" == "RUNNING" ]] && was_running=1
+      [[ "$was_running" == "1" ]] && lxc-stop -n "$name" -t 30 >/dev/null 2>&1 || true
+      sed -Ei 's#^(lxc\.net\.[0-9]+\.link\s*=\s*)(virbr0|lxcbr0)\s*$#\1lightnas0#' "$config"
+      [[ "$was_running" == "1" ]] && lxc-start -n "$name" -d >/dev/null 2>&1 || true
+    done
   fi
 
   if systemd-detect-virt --container >/dev/null 2>&1 && [[ "${LIGHTNAS_ALLOW_NESTED_LXC:-0}" != "1" ]]; then
@@ -375,6 +290,60 @@ EOF
       fi
       virsh -c qemu:///system net-start default >/dev/null 2>&1 || true
       virsh -c qemu:///system net-autostart default >/dev/null 2>&1 || true
+    fi
+
+    if [[ "${network_mode}" == "lxc-nat" ]] && command -v python3 >/dev/null 2>&1; then
+      python3 <<'PY'
+import os
+import subprocess
+import tempfile
+import time
+import xml.etree.ElementTree as ET
+
+def cmd(*args):
+    return subprocess.run(args, text=True, capture_output=True)
+
+names = [line.strip() for line in cmd("virsh", "-c", "qemu:///system", "list", "--all", "--name").stdout.splitlines() if line.strip()]
+for name in names:
+    dumped = cmd("virsh", "-c", "qemu:///system", "dumpxml", "--inactive", name)
+    if dumped.returncode != 0:
+        continue
+    root = ET.fromstring(dumped.stdout)
+    changed = False
+    for interface in root.findall("./devices/interface"):
+        if interface.get("type") != "bridge":
+            continue
+        source = interface.find("source")
+        if source is None or source.get("bridge") != "virbr0":
+            continue
+        interface.set("type", "network")
+        source.attrib.clear()
+        source.set("network", "default")
+        changed = True
+    if not changed:
+        continue
+
+    state = cmd("virsh", "-c", "qemu:///system", "domstate", name).stdout.strip().lower()
+    running = "running" in state or "paused" in state
+    if running:
+        cmd("virsh", "-c", "qemu:///system", "shutdown", name)
+        for _ in range(20):
+            time.sleep(1)
+            if "shut off" in cmd("virsh", "-c", "qemu:///system", "domstate", name).stdout.strip().lower():
+                break
+        else:
+            cmd("virsh", "-c", "qemu:///system", "destroy", name)
+
+    with tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False) as handle:
+        ET.ElementTree(root).write(handle, encoding="unicode", xml_declaration=False)
+        path = handle.name
+    try:
+        cmd("virsh", "-c", "qemu:///system", "define", path)
+    finally:
+        os.unlink(path)
+    if running:
+        cmd("virsh", "-c", "qemu:///system", "start", name)
+PY
     fi
 
     acceleration=tcg
