@@ -402,6 +402,153 @@ function showRuntimeDeleteDialog(kind, id) {
 }
 
 // Register before enhancements/admin-security so these native LightNAS dialogs
+async function showContainerManager(id) {
+  const [inventory, overview] = await Promise.all([
+    dialogApi('/api/runtimes'),
+    dialogApi('/api/overview').catch(() => ({ activity: [], appliance: {} }))
+  ]);
+  const runtime = inventory.containers || {};
+  const item = (runtime.containers || []).find(entry => String(entry.id || entry.name) === id);
+  if (!item) throw new Error('Container is no longer available.');
+  const networks = runtime.networks || [];
+  const currentNetwork = item.network || networks[0] || '';
+  const memoryMiB = Math.max(256, Math.round(Number(item.memory || 0) / 1024 / 1024) || 2048);
+  const tasks = (overview.activity || []).filter(entry =>
+    JSON.stringify(entry).toLowerCase().includes(id.toLowerCase())
+  );
+  const taskRows = tasks.length
+    ? tasks.map(entry => `<article class="manager-event"><b>${dialogEsc(entry.message || entry.detail || entry.type || 'Container task')}</b><span>${dialogEsc(entry.createdAt || entry.timestamp || '')}</span></article>`).join('')
+    : '<p class="muted">No recorded LightNAS tasks for this container yet.</p>';
+
+  const unavailable = (title, detail) => `
+    <div class="manager-capability">
+      <h3>${title}</h3><p>${detail}</p>
+      <button class="secondary" type="button" disabled>Not available on this storage provider</button>
+    </div>`;
+
+  const dialog = document.createElement('dialog');
+  dialog.className = 'lightnas-dialog container-manager-dialog';
+  dialog.innerHTML = `
+    <form class="dialog-body container-manager-form">
+      <div class="dialog-head">
+        <div><span class="eyebrow">SYSTEM CONTAINER</span><h2>Manage ${dialogEsc(item.name || id)}</h2></div>
+        <button class="dialog-close" type="button" data-manager-close aria-label="Close">×</button>
+      </div>
+      <div class="container-manager-layout">
+        <nav class="container-manager-tabs" aria-label="Container settings">
+          ${[
+            ['resources','Resources'],['network','Network'],['dns','DNS'],['options','Options'],
+            ['tasks','Task history'],['backups','Backups'],['replication','Replication'],
+            ['snapshots','Snapshots'],['firewall','Firewall'],['permissions','Permissions']
+          ].map(([key,label], index) => `<button type="button" class="${index ? '' : 'active'}" data-container-tab="${key}">${label}</button>`).join('')}
+        </nav>
+        <div class="container-manager-content">
+          <section data-container-panel="resources">
+            <h3>Resources</h3>
+            <p class="muted">CPU and memory limits are applied immediately and persist after restart.</p>
+            <div class="form-grid">
+              <label>Container ID<input name="name" value="${dialogEsc(item.name || id)}" readonly></label>
+              <label>Memory (MiB)<input name="memoryMiB" type="number" min="256" max="262144" value="${memoryMiB}" required></label>
+              <label>Virtual CPUs<input name="cpus" type="number" min="1" max="128" value="${Number(item.cpus) || 2}" required></label>
+              <label>Root disk allocation<input value="${Number(item.diskGiB) || '—'} GiB" readonly></label>
+              <label>Storage<input value="${dialogEsc(item.storageId || 'Local container storage')}" readonly></label>
+              <label>Image<input value="${dialogEsc(item.imageId || 'Installed system image')}" readonly></label>
+            </div>
+          </section>
+          <section data-container-panel="network" hidden>
+            <h3>Network</h3>
+            <div class="form-grid">
+              <label>Bridge / network<select name="network">${networks.map(value => `<option value="${dialogEsc(value)}" ${value === currentNetwork ? 'selected' : ''}>${dialogEsc(value)}</option>`).join('')}</select></label>
+              <label>IPv4 configuration<select name="ipv4Mode"><option value="dhcp" ${item.ipv4Mode !== 'manual' ? 'selected' : ''}>DHCP</option><option value="manual" ${item.ipv4Mode === 'manual' ? 'selected' : ''}>Static</option></select></label>
+              <label>IPv4 address / prefix<input name="ipv4Address" value="${dialogEsc(item.ipv4Address || '')}" placeholder="192.168.1.50/24"></label>
+              <label>Gateway<input name="gateway" value="${dialogEsc(item.gateway || '')}" placeholder="192.168.1.1"></label>
+              <label>MAC address<input value="${dialogEsc(item.macAddress || 'Automatically assigned')}" readonly></label>
+            </div>
+            <p class="module-note">Changing a running container’s address may temporarily interrupt its application connections. The LightNAS terminal uses the local host channel and remains available.</p>
+          </section>
+          <section data-container-panel="dns" hidden>
+            <h3>DNS</h3>
+            <label>DNS servers<input name="dns" value="${dialogEsc(item.dns || '')}" placeholder="1.1.1.1, 8.8.8.8"></label>
+            <p class="muted">Enter comma-separated IPv4 or IPv6 DNS server addresses. DHCP may also supply DNS when this field is empty.</p>
+          </section>
+          <section data-container-panel="options" hidden>
+            <h3>Options</h3>
+            <label class="check-line"><input name="startOnBoot" type="checkbox" ${item.startOnBoot !== false ? 'checked' : ''}> Start container automatically when LightNAS starts</label>
+            <div class="manager-summary">
+              <div><span>Provider</span><b>${dialogEsc(item.provider || 'local-lxc')}</b></div>
+              <div><span>Status</span><b>${dialogEsc(item.status || 'unknown')}</b></div>
+              <div><span>PID</span><b>${dialogEsc(item.pid || 'Not running')}</b></div>
+            </div>
+          </section>
+          <section data-container-panel="tasks" hidden><h3>Task history</h3><div class="manager-events">${taskRows}</div></section>
+          <section data-container-panel="backups" hidden>${unavailable('Backups', 'Backup jobs require a configured LightNAS backup target. The container root filesystem is not copied until that storage workflow is enabled.')}</section>
+          <section data-container-panel="replication" hidden>${unavailable('Replication', 'Container replication requires a second LightNAS host and a paired replication target.')}</section>
+          <section data-container-panel="snapshots" hidden>${unavailable('Snapshots', 'Snapshots require a snapshot-capable ZFS or Btrfs container storage pool. Directory-backed LXC storage cannot create atomic snapshots.')}</section>
+          <section data-container-panel="firewall" hidden>${unavailable('Firewall', 'Per-container firewall rules require the LightNAS nftables container policy engine. Host firewall rules remain available under Connectivity → Firewall.')}</section>
+          <section data-container-panel="permissions" hidden>
+            <h3>Permissions</h3>
+            <p>Managing this container requires the <code>containers.manage</code> permission. The appliance owner always retains access.</p>
+            <p class="muted">Per-container user assignments will be enabled with container-scoped RBAC. Current permissions are enforced at the container-management service level.</p>
+          </section>
+        </div>
+      </div>
+      <div class="form-error" role="alert"></div>
+      <div class="dialog-actions">
+        <button class="secondary" type="button" data-manager-close>Cancel</button>
+        <button class="primary" type="submit">Save changes</button>
+      </div>
+    </form>`;
+
+  const showTab = key => {
+    dialog.querySelectorAll('[data-container-tab]').forEach(button => button.classList.toggle('active', button.dataset.containerTab === key));
+    dialog.querySelectorAll('[data-container-panel]').forEach(panel => { panel.hidden = panel.dataset.containerPanel !== key; });
+  };
+  dialog.querySelectorAll('[data-container-tab]').forEach(button => button.addEventListener('click', () => showTab(button.dataset.containerTab)));
+  dialog.querySelectorAll('[data-manager-close]').forEach(button => button.addEventListener('click', () => dialog.close()));
+  dialog.addEventListener('close', () => dialog.remove(), { once: true });
+
+  const mode = dialog.querySelector('[name="ipv4Mode"]');
+  const updateNetworkFields = () => {
+    const manual = mode.value === 'manual';
+    dialog.querySelector('[name="ipv4Address"]').required = manual;
+    dialog.querySelector('[name="ipv4Address"]').disabled = !manual;
+    dialog.querySelector('[name="gateway"]').disabled = !manual;
+  };
+  mode.addEventListener('change', updateNetworkFields);
+  updateNetworkFields();
+
+  dialog.querySelector('form').addEventListener('submit', async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const error = form.querySelector('.form-error');
+    const submit = form.querySelector('button[type="submit"]');
+    error.textContent = '';
+    submit.disabled = true;
+    try {
+      const values = Object.fromEntries(new FormData(form));
+      const payload = {
+        id, action: 'update', name: values.name,
+        memoryMiB: Number(values.memoryMiB), cpus: Number(values.cpus),
+        network: values.network, ipv4Mode: values.ipv4Mode,
+        ipv4Address: values.ipv4Address || '', gateway: values.gateway || '',
+        dns: values.dns || '', startOnBoot: form.elements.startOnBoot.checked
+      };
+      if (!Number.isInteger(payload.memoryMiB) || !Number.isInteger(payload.cpus)) throw new Error('Memory and CPU values must be whole numbers.');
+      await dialogApi('/api/containers', { method: 'POST', body: JSON.stringify(payload) });
+      dialog.close();
+      refreshRuntime();
+    } catch (problem) {
+      error.textContent = problem.message;
+      submit.disabled = false;
+    }
+  });
+
+  document.body.append(dialog);
+  dialog.showModal();
+  return dialog;
+}
+
+
 // replace the temporary browser prompt() implementations.
 document.addEventListener('click', async event => {
   const containerDelete = event.target.closest('[data-container-action="delete"]');
@@ -427,25 +574,8 @@ document.addEventListener('click', async event => {
   if (containerEdit) {
     event.preventDefault();
     event.stopImmediatePropagation();
-    const id = containerEdit.dataset.containerEdit;
-    const currentName = containerEdit.dataset.containerName || id;
-    showEditor({
-      eyebrow: 'SYSTEM CONTAINER SETTINGS',
-      title: `Edit ${currentName}`,
-      description: 'Change CPU and memory limits for this native LightNAS LXC container. Rename is intentionally blocked until LightNAS can safely migrate its rootfs path.',
-      fields: [
-        { name: 'name', label: 'Container name', value: currentName, required: true },
-        { name: 'memoryMiB', label: 'Memory (MiB)', type: 'number', value: containerEdit.dataset.containerMemory || '2048', min: 256, max: 262144, step: 1, required: true },
-        { name: 'cpus', label: 'Virtual CPUs', type: 'number', value: containerEdit.dataset.containerCpus || '2', min: 1, max: 128, step: 1, required: true }
-      ],
-      onSubmit: async values => {
-        const memoryMiB = Number(values.memoryMiB);
-        const cpus = Number(values.cpus);
-        if (!Number.isInteger(memoryMiB) || !Number.isInteger(cpus)) throw new Error('Memory and CPU values must be whole numbers.');
-        await dialogApi('/api/containers', { method: 'POST', body: JSON.stringify({ id, action: 'update', name: values.name, memoryMiB, cpus }) });
-        refreshRuntime();
-      }
-    });
+    try { await showContainerManager(containerEdit.dataset.containerEdit); }
+    catch (problem) { alert(problem.message); }
     return;
   }
 
