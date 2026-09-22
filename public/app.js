@@ -313,7 +313,9 @@ function moduleView(view) {
       ${runtimeBanner('docker')}
       <div class="tool-grid">${state.runtimes?.catalog?.map(app => {
         const instance = docker?.containers?.find(container => container.name === `lightnas-app-${app.id}`);
-        return `<article class="panel"><span class="eyebrow">${escapeHtml(app.category)}</span><h2>${escapeHtml(app.name)}</h2><p class="muted">${escapeHtml(app.description)}</p><p class="muted">${escapeHtml(app.image)} · Port ${app.port}</p>${instance ? `<p class="muted">${escapeHtml(instance.status || instance.state)}</p><div class="head-actions"><button class="secondary" data-app-action="${instance.state === 'running' ? 'stop' : 'start'}" data-app-id="${app.id}">${instance.state === 'running' ? 'Stop' : 'Start'}</button><button class="secondary" data-app-action="restart" data-app-id="${app.id}">Restart</button><button class="secondary" data-app-action="remove" data-app-id="${app.id}">Remove</button></div>` : `<button class="primary" data-install="${app.id}">Install app</button>`}</article>`;
+        const appUrl = `http://${location.hostname}:${app.port}/`;
+        const running = instance?.state === 'running';
+        return `<article class="panel"><span class="eyebrow">${escapeHtml(app.category)}</span><h2>${escapeHtml(app.name)}</h2><p class="muted">${escapeHtml(app.description)}</p><p class="muted">${escapeHtml(app.image)} · Port ${app.port}</p>${instance ? `<p class="muted">${escapeHtml(instance.status || instance.state)}</p><div class="head-actions">${running ? `<a class="primary" href="${escapeHtml(appUrl)}" target="_blank" rel="noopener">Open application</a>` : ''}<button class="secondary" data-app-action="${running ? 'stop' : 'start'}" data-app-id="${app.id}">${running ? 'Stop' : 'Start'}</button><button class="secondary" data-app-action="restart" data-app-id="${app.id}">Restart</button><button class="secondary" data-app-action="remove" data-app-id="${app.id}">Remove</button></div>` : `<button class="primary" data-install="${app.id}">Install app</button>`}</article>`;
       }).join('') || '<div class="empty"><p>Loading catalog…</p></div>'}</div>
       <section class="module-hero"><h2>App hosting</h2><p>The app buttons install reviewed containers through the local Docker engine and keep app data on the host. ${docker?.available && docker?.enabled ? 'Docker is ready.' : 'The local App Store engine is not ready yet. Rerun the LightNAS installer to provision it.'}</p></section>`;
   }
@@ -528,10 +530,22 @@ function bindViewActions() {
   $$('[data-install]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     const docker = state.runtimes?.docker;
     if (!docker?.available || !docker?.enabled) return toast(docker?.reason || 'Docker needs to be installed and enabled on this host before app installation.');
-    if (!confirm(`Install ${button.dataset.install} on this NAS? This creates a container and publishes its web port.`)) return;
+    const app = state.runtimes?.catalog?.find(item => item.id === button.dataset.install);
+    if (!app) return toast('The selected application is no longer in the catalog.');
+    const setup = {};
+    if (app.requiresAdminPassword) {
+      const password = prompt(`Create the ${app.name} administrator password (8–128 characters):`);
+      if (password === null) return;
+      if (password.length < 8 || password.length > 128) return toast('The application administrator password must contain 8–128 characters.');
+      setup.adminPassword = password;
+    } else if (!confirm(`Install ${app.name} on this NAS? This creates a container and publishes its web port.`)) return;
     button.disabled = true;
     button.textContent = 'Installing…';
-    try { await request(`/api/catalog/${button.dataset.install}/install`, { method: 'POST' }); await loadRuntimes(); toast('App installed.'); }
+    try {
+      await request(`/api/catalog/${app.id}/install`, { method: 'POST', body: JSON.stringify(setup) });
+      await loadRuntimes();
+      toast(`${app.name} installed. Use Open application to access it.`);
+    }
     catch (error) { toast(error.message); button.disabled = false; button.textContent = 'Install'; }
   }));
   $$('[data-app-action]', $('#content')).forEach(button => button.addEventListener('click', async () => {
