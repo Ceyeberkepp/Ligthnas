@@ -141,6 +141,25 @@ echo "Starting LXC $ctid..."
 pct start "$ctid"
 wait_for_container
 
+# The outer Proxmox veth carries frames for the LightNAS appliance plus nested
+# VM/container MAC addresses. Put each CT network port into transparent bridge
+# mode so DHCP/ARP/broadcast traffic from nested guests is learned and flooded
+# normally by the host bridge.
+while IFS=: read -r net_slot _; do
+  [[ "$net_slot" =~ ^net([0-9]+)$ ]] || continue
+  net_index="${BASH_REMATCH[1]}"
+  host_veth="veth${ctid}i${net_index}"
+  for _ in {1..20}; do
+    ip link show "$host_veth" >/dev/null 2>&1 && break
+    sleep 1
+  done
+  if ip link show "$host_veth" >/dev/null 2>&1; then
+    ip link set "$host_veth" promisc on >/dev/null 2>&1 || true
+    bridge link set dev "$host_veth" learning on flood on mcast_flood on bcast_flood on hairpin on >/dev/null 2>&1 || true
+    echo "Prepared $host_veth for nested LightNAS LAN traffic."
+  fi
+done < <(grep -E '^net[0-9]+:' <<<"$config")
+
 guest_installer="$(mktemp)"
 trap 'rm -f "$guest_installer"' EXIT
 curl -fsSL "${RAW_BASE}/install.sh" -o "$guest_installer"
