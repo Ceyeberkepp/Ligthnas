@@ -39,4 +39,7 @@ test('container console fallback reaches the authenticated host-agent path', asy
   assert.match(agent, /os\.setsid\(\)/);
   assert.match(agent, /termios\.TIOCSCTTY/);
   assert.match(agent, /preexec_fn=child_setup/);
+  assert.match(agent, /\/bin\/bash --noprofile --norc -i/);
+  assert.match(agent, /root@\{name\}:\\\\w# /);
+  assert.match(agent, /export HOME=\/root USER=root LOGNAME=root/);
 });
