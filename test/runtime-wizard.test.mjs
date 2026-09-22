@@ -25,9 +25,31 @@ test('image and ISO transfers use the progress dialog', async () => {
 test('container backend requires credentials and selected root storage', async () => {
   const runtime = await readFile(new URL('../src/runtimes-next.mjs', import.meta.url), 'utf8');
   const agent = await readFile(new URL('../scripts/lightnas-host-agent.py', import.meta.url), 'utf8');
-  assert.match(runtime, /10–128 character root password/);
+  assert.match(runtime, /4–128 character root password/);
+  assert.match(dialogs, /minlength="4"/);
   assert.match(runtime, /resolveStoragePool\(String\(input\.pool/);
   assert.match(agent, /chpasswd/);
   assert.match(agent, /managed_container_storage_root/);
   assert.match(agent, /lightnas\.json/);
+  assert.match(agent, /def verify_container_installation/);
+  assert.match(agent, /etc" \/ "os-release/);
+  assert.match(agent, /"verified": True/);
+});
+
+test('files and media share one tabbed library with sequential previews', async () => {
+  const [page, app, enhancements] = await Promise.all([
+    readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
+    readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
+    readFile(new URL('../public/enhancements.js', import.meta.url), 'utf8')
+  ]);
+  assert.match(page, />Files & media</);
+  assert.doesNotMatch(page, /data-view="media"/);
+  assert.match(app, /data-library-tab/);
+  assert.match(app, /\['Photos', 'Photos'\]/);
+  assert.match(app, /\['ISO', 'ISO images'\]/);
+  assert.match(enhancements, /data-viewer-previous/);
+  assert.match(enhancements, /data-viewer-next/);
+  assert.match(enhancements, /ArrowLeft/);
+  assert.match(enhancements, /ArrowRight/);
+  assert.match(enhancements, /previewItems\(\)/);
 });
