@@ -46,6 +46,7 @@ jobs:
           bash -n scripts/proxmox-lxc-install.sh
           bash -n scripts/configure-proxmox.sh
           bash -n scripts/provision-runtimes.sh
+          bash -n scripts/configure-appliance-network.sh
           bash -n scripts/start.sh
 
       - name: Validate privileged host agents
