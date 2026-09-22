@@ -90,10 +90,65 @@
     const ws = new WebSocket(`${protocol}//${location.host}/api/console/container/${encodeURIComponent(id)}`);
     ws.binaryType = 'arraybuffer';
 
+    function sendTerminalInput(data) {
+      if (!socketOpen || ws.readyState !== WebSocket.OPEN || !data) return false;
+      ws.send(data);
+      return true;
+    }
+
+    const terminalKeys = {
+      Enter: '\r',
+      Backspace: '\x7f',
+      Tab: '\t',
+      Escape: '\x1b',
+      ArrowUp: '\x1b[A',
+      ArrowDown: '\x1b[B',
+      ArrowRight: '\x1b[C',
+      ArrowLeft: '\x1b[D',
+      Home: '\x1b[H',
+      End: '\x1b[F',
+      Delete: '\x1b[3~',
+      Insert: '\x1b[2~',
+      PageUp: '\x1b[5~',
+      PageDown: '\x1b[6~'
+    };
+
+    terminal.addEventListener('pointerdown', () => terminal.focus());
+    terminal.addEventListener('keydown', event => {
+      if (!socketOpen || ws.readyState !== WebSocket.OPEN || event.isComposing) return;
+      // Keep the browser's normal copy shortcut. Ctrl+C without Shift sends
+      // SIGINT to the process, matching a native Linux console.
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey) return;
+
+      let data = terminalKeys[event.key] || '';
+      if (event.ctrlKey && !event.altKey && !event.metaKey) {
+        const key = event.key.toUpperCase();
+        if (/^[A-Z]$/.test(key)) data = String.fromCharCode(key.charCodeAt(0) - 64);
+        else if (event.key === '[') data = '\x1b';
+        else if (event.key === '\\') data = '\x1c';
+        else if (event.key === ']') data = '\x1d';
+      } else if (!data && event.key.length === 1 && !event.metaKey) {
+        data = `${event.altKey ? '\x1b' : ''}${event.key}`;
+      }
+
+      if (!data) return;
+      event.preventDefault();
+      sendTerminalInput(data);
+    });
+    terminal.addEventListener('paste', event => {
+      if (!socketOpen || ws.readyState !== WebSocket.OPEN) return;
+      const text = event.clipboardData?.getData('text');
+      if (!text) return;
+      event.preventDefault();
+      sendTerminalInput(text.replace(/\r?\n/g, '\r'));
+    });
+
     function enableCommandMode(reason = '') {
       if (commandMode) return;
       commandMode = true;
-      status.textContent = 'Command mode';
+      terminal.classList.remove('interactive');
+      form.hidden = false;
+      status.textContent = 'Fallback command mode';
       status.classList.remove('error');
       append(`LightNAS command mode is ready for ${name} as root.\n`);
       if (reason) append(`${reason}\n`);
@@ -115,9 +170,11 @@
         return;
       }
       socketOpen = true;
-      status.textContent = 'Connected';
+      form.hidden = true;
+      terminal.classList.add('interactive');
+      status.textContent = 'Connected · click terminal and type';
       append(`Connected to ${name} as root\n`);
-      input.focus();
+      terminal.focus();
     });
     ws.addEventListener('message', event => {
       const text = typeof event.data === 'string' ? event.data : decoder.decode(event.data, { stream: true });
@@ -126,6 +183,7 @@
     ws.addEventListener('close', event => {
       clearTimeout(connectionTimer);
       socketOpen = false;
+      terminal.classList.remove('interactive');
       if (!commandMode) enableCommandMode(`Live terminal closed: ${event.reason || event.code}.`);
     });
     ws.addEventListener('error', () => {
