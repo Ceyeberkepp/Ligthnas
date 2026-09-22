@@ -1,6 +1,7 @@
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomBytes } from 'node:crypto';
+import net from 'node:net';
 import { mkdir, readdir, lstat, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { proxmoxInventory, proxmoxCreateVm, proxmoxManageVm, proxmoxUpdateVm } from './proxmox.mjs';
@@ -244,13 +245,34 @@ async function pullDockerImage(image) {
   catch (error) { throw Object.assign(new Error(`Unable to download Docker image ${image}: ${error.message.replace(/^Docker:\s*/, '')}`), { status: error.status || 409 }); }
 }
 
+async function waitForAppPort(port, timeoutMs = 90000) {
+  if (process.env.LIGHTNAS_SKIP_APP_READINESS === '1') return true;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const ready = await new Promise(resolve => {
+      const socket = net.createConnection({ host: '127.0.0.1', port });
+      const finish = value => { socket.destroy(); resolve(value); };
+      socket.setTimeout(1500, () => finish(false));
+      socket.once('connect', () => finish(true));
+      socket.once('error', () => finish(false));
+    });
+    if (ready) return true;
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+  return false;
+}
+
 export async function installCatalogApp(id, input = {}) {
   if (process.env.LIGHTNAS_DOCKER_ENABLED !== '1') throw Object.assign(new Error('Docker actions are disabled on this host.'), { status: 409 });
   const app = catalog.find(item => item.id === id);
   if (!app) throw Object.assign(new Error('Unknown catalog app.'), { status: 404 });
   const name = `lightnas-app-${app.id}`;
   await pullDockerImage(app.image);
-  const args = ['run', '-d', '--name', name, '--label', `lightnas.catalog=${app.id}`, '--restart', 'unless-stopped', '--memory', app.memory, '--pids-limit', '256', '--security-opt', 'no-new-privileges', '-p', `${app.port}:${app.containerPort}`];
+  const args = ['run', '-d', '--name', name,
+    '--label', `lightnas.catalog=${app.id}`,
+    '--label', `lightnas.web.port=${app.port}`,
+    '--restart', 'unless-stopped', '--memory', app.memory, '--pids-limit', '256',
+    '--security-opt', 'no-new-privileges', '-p', `0.0.0.0:${app.port}:${app.containerPort}`];
   const environment = [...(app.environment || [])];
   if (app.requiresAdminPassword) {
     const adminPassword = String(input.adminPassword || '');
@@ -271,7 +293,17 @@ export async function installCatalogApp(id, input = {}) {
     args.push('-v', `${hostPath}:${target}`);
   }
   args.push(app.image);
-  return { id: app.id, image: app.image, containerId: await runDocker(args), port: app.port };
+  const containerId = await runDocker(args);
+  const ready = await waitForAppPort(app.port);
+  return {
+    id: app.id,
+    image: app.image,
+    containerId,
+    port: app.port,
+    ready,
+    access: { scheme: 'http', port: app.port, path: '/' },
+    message: ready ? 'Application installed and reachable through LightNAS.' : 'Application was started but is still initializing. LightNAS will keep it running; refresh Installed Apps shortly.'
+  };
 }
 
 export async function manageCatalogApp(id, action) {
@@ -412,4 +444,3 @@ export async function createVm(input) {
   }
   return { id: input.name, name: input.name, provider: virtualization.provider, acceleration: virtualization.acceleration, firmware, diskBus, networkModel, details: response.output || 'VM created and started.' };
 }
-

@@ -158,7 +158,15 @@ else
       if getent group docker >/dev/null 2>&1; then usermod -aG docker lightnas; fi
       if runuser -u lightnas -- docker info >/dev/null 2>&1; then
         set_flag LIGHTNAS_DOCKER_ENABLED 1
-        report Apps 'optional Docker/OCI engine ready'
+        # Catalog applications publish these reviewed web ports on the
+        # LightNAS LAN address. Authorize them during the same installation so
+        # users never configure a second firewall or hypervisor port forward.
+        if command -v ufw >/dev/null 2>&1 && ufw status | grep -q '^Status: active'; then
+          for app_port in 3000 3001 8081 8082 8083 8096; do
+            ufw allow "${app_port}/tcp" comment 'LightNAS managed app' >/dev/null 2>&1 || true
+          done
+        fi
+        report Apps 'Docker/OCI engine ready; managed application publishing enabled'
       else
         set_flag LIGHTNAS_DOCKER_ENABLED 0
         report Apps 'Docker is running but inaccessible to the LightNAS service account'

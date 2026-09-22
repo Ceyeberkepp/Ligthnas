@@ -23,8 +23,11 @@ test('image and ISO transfers use the progress dialog', async () => {
 });
 
 test('container backend requires credentials and selected root storage', async () => {
-  const runtime = await readFile(new URL('../src/runtimes-next.mjs', import.meta.url), 'utf8');
-  const agent = await readFile(new URL('../scripts/lightnas-host-agent.py', import.meta.url), 'utf8');
+  const [runtime, agent, dialogs] = await Promise.all([
+    readFile(new URL('../src/runtimes-next.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../scripts/lightnas-host-agent.py', import.meta.url), 'utf8'),
+    readFile(new URL('../public/dialog-controls.js', import.meta.url), 'utf8')
+  ]);
   assert.match(runtime, /4–128 character root password/);
   assert.match(dialogs, /minlength="4"/);
   assert.match(runtime, /resolveStoragePool\(String\(input\.pool/);
