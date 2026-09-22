@@ -16,7 +16,7 @@ STATE_FILE="${STATE_DIR}/network.env"
 mkdir -p "${STATE_DIR}"
 
 bridge_uplink() {
-  local port
+  local port path
   if [[ -r "${STATE_FILE}" ]]; then
     port="$(sed -n 's/^LIGHTNAS_UPLINK=//p' "${STATE_FILE}" | tail -1)"
     [[ -n "${port}" && -e "/sys/class/net/${port}" ]] && { printf '%s\n' "${port}"; return 0; }
@@ -25,6 +25,18 @@ bridge_uplink() {
     [[ -e "${path}" ]] || continue
     port="$(basename "${path}")"
     [[ "${port}" =~ ^(veth|tap|tun|docker|br-|lightnas|lxcbr) ]] && continue
+    printf '%s\n' "${port}"
+    return 0
+  done
+  # Repair older partial conversions where virbr0 owns the host address but
+  # the actual Ethernet interface was never attached as a bridge port.
+  for path in /sys/class/net/*; do
+    [[ -e "${path}" ]] || continue
+    port="$(basename "${path}")"
+    [[ "${port}" == "${BRIDGE}" || "${port}" == "lo" ]] && continue
+    [[ "${port}" =~ ^(veth|tap|tun|docker|br-|lightnas|lxcbr|virbr) ]] && continue
+    [[ -d "${path}/wireless" ]] && continue
+    [[ "$(cat "${path}/operstate" 2>/dev/null || true)" =~ ^(up|unknown)$ ]] || continue
     printf '%s\n' "${port}"
     return 0
   done
@@ -75,6 +87,13 @@ fi
 # existing installations are repaired after upgrades/reboots too.
 if [[ "${default_dev}" == "${BRIDGE}" ]]; then
   uplink="$(bridge_uplink || true)"
+  if [[ -n "${uplink}" ]]; then
+    current_master="$(basename "$(readlink -f "/sys/class/net/${uplink}/master" 2>/dev/null || true)")"
+    if [[ "${current_master}" != "${BRIDGE}" ]]; then
+      ip link set "${uplink}" master "${BRIDGE}" >/dev/null 2>&1 || true
+      ip link set "${uplink}" up >/dev/null 2>&1 || true
+    fi
+  fi
   tune_transparent_bridge "${uplink}"
   printf 'LIGHTNAS_NETWORK_MODE=bridge\nLIGHTNAS_LAN_BRIDGE=%s\nLIGHTNAS_UPLINK=%s\n' "${BRIDGE}" "${uplink}" >"${STATE_FILE}"
   exit 0
