@@ -1,4 +1,4 @@
-const state = { overview: null, view: 'home', folder: '', files: null, fileError: null, runtimes: null, runtimeError: null, spaces: null, users: null, smtp: undefined, media: null, network: null };
+const state = { overview: null, view: 'home', folder: '', files: null, fileError: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, smtp: undefined, media: null, network: null };
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
 const themeChoices = ['system', 'light', 'dark'];
@@ -186,9 +186,21 @@ async function loadRuntimes() {
   if (['apps', 'containers', 'vms', 'integrations'].includes(state.view)) render(state.view);
 }
 
+async function loadContainers() {
+  try {
+    const containers = await request('/api/containers/inventory');
+    state.runtimes = { ...(state.runtimes || {}), containers };
+    state.containerError = null;
+  } catch (error) {
+    state.containerError = error.message;
+  }
+  if (state.view === 'containers') render('containers');
+}
+
 function runtimeBanner(kind) {
-  if (state.runtimeError) return `<div class="empty"><p>${escapeHtml(state.runtimeError)}</p><button class="secondary" data-action="refresh-runtime">Retry</button></div>`;
-  if (!state.runtimes) return '<div class="empty"><p>Checking this host’s runtimes…</p></div>';
+  const scopedError = kind === 'containers' ? state.containerError : state.runtimeError;
+  if (scopedError) return `<div class="empty"><p>${escapeHtml(scopedError)}</p><button class="secondary" data-action="refresh-runtime">Retry</button></div>`;
+  if (!state.runtimes || !state.runtimes[kind]) return `<div class="empty"><p>${kind === 'containers' ? 'Checking system containers…' : 'Checking this host’s runtimes…'}</p></div>`;
   const runtime = state.runtimes[kind];
   if (!runtime.available) return `<div class="module-hero"><h2>Runtime unavailable</h2><p>${escapeHtml(runtime.reason)}</p></div>`;
   if (!runtime.enabled) return '<div class="module-hero"><h2>Creation is disabled</h2><p>The host operator must explicitly enable this runtime and grant the LightNAS service account access. Existing resources remain visible below.</p></div>';
@@ -442,7 +454,8 @@ function render(view) {
   if (state.view === 'smtp' && state.smtp === undefined) loadSmtp();
   if (['files', 'media'].includes(state.view) && state.media === null) loadMedia();
   if (['network', 'firewall'].includes(state.view) && !state.network) loadNetwork();
-  if (['apps', 'containers', 'vms', 'integrations'].includes(state.view) && !state.runtimes && !state.runtimeError) loadRuntimes();
+  if (state.view === 'containers' && !state.runtimes?.containers && !state.containerError) loadContainers();
+  if (['apps', 'vms', 'integrations'].includes(state.view) && (!state.runtimes?.docker || !state.runtimes?.virtualization) && !state.runtimeError) loadRuntimes();
 }
 
 function bindViewActions() {
@@ -483,9 +496,8 @@ function bindViewActions() {
       button.textContent = 'Preparing container network…';
       try {
         await request('/api/appliance/repair', { method: 'POST', body: '{}' });
-        state.runtimes = await request('/api/runtimes');
+        await loadContainers();
         containers = state.runtimes?.containers;
-        render('containers');
       } catch (error) {
         toast(error.message);
       } finally {
@@ -582,7 +594,7 @@ function bindViewActions() {
     state.folder = folder; state.files = null; location.hash = 'files';
   }));
   $$('[data-action="refresh-network"]', $('#content')).forEach(button => button.addEventListener('click', loadNetwork));
-  $$('[data-action="refresh-runtime"]', $('#content')).forEach(button => button.addEventListener('click', loadRuntimes));
+  $('[data-action="refresh-runtime"]', $('#content')).forEach(button => button.addEventListener('click', () => state.view === 'containers' ? loadContainers() : loadRuntimes()));
   $$('[data-install]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     const docker = state.runtimes?.docker;
     if (!docker?.available || !docker?.enabled) return toast(docker?.reason || 'Docker needs to be installed and enabled on this host before app installation.');
@@ -619,7 +631,11 @@ function bindViewActions() {
       const error = $('.form-error', form);
       error.textContent = '';
       button.disabled = true;
-      try { await request(path, { method: 'POST', body: JSON.stringify(Object.fromEntries(new FormData(form))) }); await loadRuntimes(); toast(message); }
+      try {
+        await request(path, { method: 'POST', body: JSON.stringify(Object.fromEntries(new FormData(form))) });
+        if (path === '/api/containers') await loadContainers(); else await loadRuntimes();
+        toast(message);
+      }
       catch (problem) { error.textContent = problem.message; }
       finally { button.disabled = false; }
     });
