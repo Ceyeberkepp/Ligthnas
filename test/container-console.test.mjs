@@ -3,12 +3,13 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 test('console pages use CSP-compatible external scripts', async () => {
-  const [containerPage, containerScript, vmPage, vmScript, appScript] = await Promise.all([
+  const [containerPage, containerScript, vmPage, vmScript, appScript, runtimes] = await Promise.all([
     readFile(new URL('../public/container-console.html', import.meta.url), 'utf8'),
     readFile(new URL('../public/container-console.js', import.meta.url), 'utf8'),
     readFile(new URL('../public/vm-console.html', import.meta.url), 'utf8'),
     readFile(new URL('../public/vm-console.js', import.meta.url), 'utf8'),
-    readFile(new URL('../public/app.js', import.meta.url), 'utf8')
+    readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/runtimes-next.mjs', import.meta.url), 'utf8')
   ]);
   assert.match(containerPage, /src="\/container-console\.js"/);
   assert.doesNotMatch(containerPage, /<script>\s*const/);
@@ -28,6 +29,11 @@ test('console pages use CSP-compatible external scripts', async () => {
   assert.match(appScript, /\$\$\('\[data-action="refresh-files"\]'/);
   assert.match(appScript, /\$\$\('\[data-library-tab\]'/);
   assert.match(appScript, /Files could not be loaded\./);
+  assert.match(appScript, /Open application/);
+  assert.match(appScript, /requiresAdminPassword/);
+  assert.match(runtimes, /id: 'ansible-semaphore'/);
+  assert.match(runtimes, /SEMAPHORE_DB_DIALECT/);
+  assert.match(runtimes, /SEMAPHORE_ADMIN_PASSWORD/);
 });
 
 test('container console fallback reaches the authenticated host-agent path', async () => {
