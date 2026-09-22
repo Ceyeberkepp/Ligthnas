@@ -35,13 +35,23 @@
 .lightnas-dialog .dialog-close { width: 36px; height: 36px; border-radius: 10px; border: 1px solid var(--line); background: var(--button); color: var(--text); }
 
 .lightnas-viewer { width: min(1100px, calc(100vw - 28px)); max-height: 90vh; }
+.viewer-shell { position: relative; }
+.viewer-arrow { position: absolute; z-index: 2; top: 50%; translate: 0 -50%; width: 46px; height: 58px; border-radius: 999px; border: 1px solid var(--line-strong); background: color-mix(in srgb, var(--panel) 88%, transparent); color: var(--text); font-size: 34px; line-height: 1; box-shadow: var(--shadow); }
+.viewer-arrow:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
+.viewer-arrow:disabled { opacity: .3; cursor: not-allowed; }
+.viewer-previous { left: 14px; }
+.viewer-next { right: 14px; }
 .lightnas-viewer .viewer-stage { min-height: 280px; max-height: 68vh; display: grid; place-items: center; overflow: auto; background: #03070c; border-radius: 13px; border: 1px solid var(--line); }
 .lightnas-viewer img { max-width: 100%; max-height: 66vh; object-fit: contain; }
 .lightnas-viewer video { width: 100%; max-height: 66vh; background: #000; }
 .lightnas-viewer audio { width: min(720px, 92%); }
 .lightnas-viewer iframe { width: 100%; height: 66vh; border: 0; background: white; }
 .lightnas-viewer pre { width: 100%; max-height: 66vh; overflow: auto; margin: 0; padding: 18px; white-space: pre-wrap; word-break: break-word; color: #dbe7ef; }
-.viewer-meta { color: var(--muted); font-size: 12px; margin-top: 10px; }
+.viewer-meta { color: var(--muted); font-size: 12px; margin-top: 10px; display: flex; justify-content: space-between; gap: 14px; }
+.library-tabs { display: flex; gap: 8px; overflow-x: auto; padding: 3px 1px 14px; margin-bottom: 6px; scrollbar-width: thin; }
+.library-tab { flex: 0 0 auto; border: 1px solid var(--line); background: var(--panel); color: var(--muted); border-radius: 999px; padding: 9px 14px; font-weight: 750; }
+.library-tab:hover { border-color: var(--line-strong); color: var(--text); }
+.library-tab.active { background: var(--accent); border-color: var(--accent); color: #042d2a; }
 
 .runtime-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 7px; flex-wrap: wrap; padding-top: 10px; border-top: 1px solid var(--line); margin-top: 8px; }
 .runtime-actions .secondary, .runtime-actions .primary { padding: 8px 11px; font-size: 12px; }
