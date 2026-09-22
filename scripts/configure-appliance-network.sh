@@ -80,20 +80,20 @@ if [[ -n "$container_kind" && "$container_kind" != "none" ]]; then
   uplink="$(sed -n 's/^LIGHTNAS_UPLINK=//p' "$STATE_FILE" 2>/dev/null | tail -1 || true)"
   [[ -n "$uplink" && -e "/sys/class/net/$uplink" ]] || uplink=eth0
 
-  # Undo legacy LightNAS bridge conversions from development builds. This is
-  # entirely inside the LightNAS appliance; it does not touch Proxmox bridges,
-  # firewall settings, or the host veth configuration.
-  if ip link show "$BRIDGE" >/dev/null 2>&1; then
+  # Undo only a legacy LightNAS bridge conversion. A normal libvirt virbr0
+  # is an internal VM NAT bridge and must be left alone.
+  uplink_master="$(basename "$(readlink -f "/sys/class/net/$uplink/master" 2>/dev/null || true)")"
+  bridge_is_default=0
+  ip -4 route show default dev "$BRIDGE" 2>/dev/null | grep -q . && bridge_is_default=1
+  if ip link show "$BRIDGE" >/dev/null 2>&1 && { [[ "$uplink_master" == "$BRIDGE" ]] || [[ "$bridge_is_default" == "1" ]]; }; then
     bridge_addr="$(ip -4 -o addr show dev "$BRIDGE" scope global 2>/dev/null | awk 'NR==1{print $4}')"
     bridge_gw="$(ip -4 route show default dev "$BRIDGE" 2>/dev/null | awk 'NR==1{for(i=1;i<=NF;i++) if($i=="via"){print $(i+1); exit}}')"
 
-    if [[ -e "/sys/class/net/$uplink" ]]; then
-      ip link set "$uplink" nomaster >/dev/null 2>&1 || true
-      ip link set "$uplink" up >/dev/null 2>&1 || true
-      if [[ -n "$bridge_addr" ]]; then
-        ip addr replace "$bridge_addr" dev "$uplink" >/dev/null 2>&1 || true
-        [[ -n "$bridge_gw" ]] && ip route replace default via "$bridge_gw" dev "$uplink" >/dev/null 2>&1 || true
-      fi
+    ip link set "$uplink" nomaster >/dev/null 2>&1 || true
+    ip link set "$uplink" up >/dev/null 2>&1 || true
+    if [[ -n "$bridge_addr" && "$bridge_addr" != 192.168.122.* ]]; then
+      ip addr replace "$bridge_addr" dev "$uplink" >/dev/null 2>&1 || true
+      [[ -n "$bridge_gw" ]] && ip route replace default via "$bridge_gw" dev "$uplink" >/dev/null 2>&1 || true
     fi
 
     ip addr flush dev "$BRIDGE" scope global >/dev/null 2>&1 || true
