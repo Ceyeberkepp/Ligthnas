@@ -8,8 +8,8 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 network_state=/etc/lightnas/network.env
 network_mode=""
 lan_bridge="virbr0"
-if [[ ${EUID} -eq 0 && -x "${script_dir}/configure-appliance-network.sh" ]]; then
-  "${script_dir}/configure-appliance-network.sh" || echo "Warning: automatic appliance LAN bridge configuration needs attention." >&2
+if [[ ${EUID} -eq 0 && -f "${script_dir}/configure-appliance-network.sh" ]]; then
+  bash "${script_dir}/configure-appliance-network.sh" || echo "Warning: automatic appliance LAN bridge configuration needs attention." >&2
 fi
 if [[ -r "${network_state}" ]]; then
   # shellcheck disable=SC1090
