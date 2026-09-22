@@ -107,8 +107,22 @@ if [[ -n "${nm_state}" && "${nm_state}" != *unmanaged* && -n "${nm_connection}" 
   nmcli connection down "${nm_connection}" >/dev/null 2>&1 || true
   nmcli connection up "${BRIDGE}" >/dev/null
 else
-  # Proxmox LXC commonly presents eth0 as NetworkManager-unmanaged. systemd-
-  # networkd is the durable configuration layer in that environment.
+  # Proxmox LXC commonly presents eth0 as NetworkManager-unmanaged. Perform
+  # the bridge cutover live first so the appliance keeps its current address
+  # during installation, then persist the topology with systemd-networkd.
+  ip link add name "${BRIDGE}" type bridge 2>/dev/null || true
+  ip link set dev "${BRIDGE}" address "${mac}" 2>/dev/null || true
+  ip link set "${BRIDGE}" up
+  ip link set "${uplink}" master "${BRIDGE}"
+
+  # Keep the current appliance address alive while ownership moves from the
+  # physical NIC to the bridge. This prevents a management outage while DHCP
+  # or persistent network configuration catches up.
+  ip addr replace "${address}" dev "${BRIDGE}"
+  [[ -n "${default_gw}" ]] && ip route replace default via "${default_gw}" dev "${BRIDGE}"
+  ip addr del "${address}" dev "${uplink}" >/dev/null 2>&1 || true
+  ip link set "${uplink}" up
+
   mkdir -p /etc/systemd/network
   cat >"/etc/systemd/network/05-lightnas-${BRIDGE}.netdev" <<EOF
 [NetDev]
@@ -156,7 +170,10 @@ EOF
   fi
 
   systemctl enable systemd-networkd.service >/dev/null 2>&1 || true
-  systemctl restart systemd-networkd.service
+  systemctl daemon-reload >/dev/null 2>&1 || true
+  networkctl reload >/dev/null 2>&1 || true
+  networkctl reconfigure "${uplink}" >/dev/null 2>&1 || true
+  networkctl reconfigure "${BRIDGE}" >/dev/null 2>&1 || true
 fi
 
 # Wait for the bridge to become the real appliance default route.
@@ -169,11 +186,16 @@ done
 
 if ! ip -4 route show default dev "${BRIDGE}" 2>/dev/null | grep -q .; then
   echo "LightNAS network: LAN bridge did not acquire the default route; restoring live address on ${uplink}." >&2
+  ip addr flush dev "${BRIDGE}" scope global >/dev/null 2>&1 || true
   ip link set "${uplink}" nomaster >/dev/null 2>&1 || true
   ip addr replace "${address}" dev "${uplink}" >/dev/null 2>&1 || true
   [[ -n "${default_gw}" ]] && ip route replace default via "${default_gw}" dev "${uplink}" >/dev/null 2>&1 || true
   exit 1
 fi
+
+# At this point eth0 (or the detected wired NIC) is a pure bridge port. The
+# appliance address/default route belong only to virbr0.
+ip addr flush dev "${uplink}" scope global >/dev/null 2>&1 || true
 
 printf 'LIGHTNAS_NETWORK_MODE=bridge\nLIGHTNAS_LAN_BRIDGE=%s\nLIGHTNAS_UPLINK=%s\n' "${BRIDGE}" "${uplink}" >"${STATE_FILE}"
 echo "LightNAS network: ${uplink} is now the physical port for ${BRIDGE}; guests use the real LAN."
