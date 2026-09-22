@@ -71,6 +71,76 @@ EOF
   done
 }
 
+# When LightNAS itself runs inside an LXC, the hypervisor owns the outer NIC.
+# Never bridge, enslave, readdress, or otherwise modify that host-provided NIC.
+# LightNAS keeps eth0 as its appliance uplink and builds private managed
+# networks behind it for VMs and system containers.
+container_kind="$(systemd-detect-virt --container 2>/dev/null || true)"
+if [[ -n "$container_kind" && "$container_kind" != "none" ]]; then
+  uplink="$(sed -n 's/^LIGHTNAS_UPLINK=//p' "$STATE_FILE" 2>/dev/null | tail -1 || true)"
+  [[ -n "$uplink" && -e "/sys/class/net/$uplink" ]] || uplink=eth0
+
+  # Undo legacy LightNAS bridge conversions from development builds. This is
+  # entirely inside the LightNAS appliance; it does not touch Proxmox bridges,
+  # firewall settings, or the host veth configuration.
+  if ip link show "$BRIDGE" >/dev/null 2>&1; then
+    bridge_addr="$(ip -4 -o addr show dev "$BRIDGE" scope global 2>/dev/null | awk 'NR==1{print $4}')"
+    bridge_gw="$(ip -4 route show default dev "$BRIDGE" 2>/dev/null | awk 'NR==1{for(i=1;i<=NF;i++) if($i=="via"){print $(i+1); exit}}')"
+
+    if [[ -e "/sys/class/net/$uplink" ]]; then
+      ip link set "$uplink" nomaster >/dev/null 2>&1 || true
+      ip link set "$uplink" up >/dev/null 2>&1 || true
+      if [[ -n "$bridge_addr" ]]; then
+        ip addr replace "$bridge_addr" dev "$uplink" >/dev/null 2>&1 || true
+        [[ -n "$bridge_gw" ]] && ip route replace default via "$bridge_gw" dev "$uplink" >/dev/null 2>&1 || true
+      fi
+    fi
+
+    ip addr flush dev "$BRIDGE" scope global >/dev/null 2>&1 || true
+    ip link set "$BRIDGE" down >/dev/null 2>&1 || true
+    ip link delete "$BRIDGE" type bridge >/dev/null 2>&1 || true
+  fi
+
+  rm -f \
+    "/etc/systemd/network/05-lightnas-$BRIDGE.netdev" \
+    "/etc/systemd/network/06-lightnas-$uplink.network" \
+    "/etc/systemd/network/07-lightnas-$BRIDGE.network" \
+    /etc/sysctl.d/99-lightnas-transparent-bridge.conf
+
+  if [[ -e "/sys/class/net/$uplink" ]]; then
+    current_addr="$(ip -4 -o addr show dev "$uplink" scope global 2>/dev/null | awk 'NR==1{print $4}')"
+    current_gw="$(ip -4 route show default dev "$uplink" 2>/dev/null | awk 'NR==1{for(i=1;i<=NF;i++) if($i=="via"){print $(i+1); exit}}')"
+    mkdir -p /etc/systemd/network
+    if ip -4 -o addr show dev "$uplink" scope global dynamic 2>/dev/null | grep -q . || [[ -z "$current_addr" ]]; then
+      cat >"/etc/systemd/network/10-lightnas-lxc-uplink.network" <<EOF
+[Match]
+Name=$uplink
+
+[Network]
+DHCP=yes
+IPv6AcceptRA=yes
+
+[DHCPv4]
+RouteMetric=50
+ClientIdentifier=mac
+EOF
+    else
+      {
+        printf '[Match]\nName=%s\n\n[Network]\nAddress=%s\n' "$uplink" "$current_addr"
+        [[ -n "$current_gw" ]] && printf 'Gateway=%s\n' "$current_gw"
+        printf 'IPv6AcceptRA=yes\n'
+      } >"/etc/systemd/network/10-lightnas-lxc-uplink.network"
+    fi
+    systemctl enable systemd-networkd.service >/dev/null 2>&1 || true
+    networkctl reload >/dev/null 2>&1 || true
+    networkctl reconfigure "$uplink" >/dev/null 2>&1 || true
+  fi
+
+  printf 'LIGHTNAS_NETWORK_MODE=lxc-nat\nLIGHTNAS_UPLINK=%s\nLIGHTNAS_CONTAINER_BRIDGE=lightnas0\nLIGHTNAS_VM_NETWORK=default\n' "$uplink" >"$STATE_FILE"
+  echo "LightNAS network: LXC appliance mode on $uplink; VM/container networking stays internal to LightNAS."
+  exit 0
+fi
+
 default_dev="$(ip -4 route show default 2>/dev/null | awk 'NR==1 {for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')"
 default_gw="$(ip -4 route show default 2>/dev/null | awk 'NR==1 {for(i=1;i<=NF;i++) if($i=="via"){print $(i+1); exit}}')"
 
