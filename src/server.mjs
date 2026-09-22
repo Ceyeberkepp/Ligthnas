@@ -33,6 +33,7 @@ import {
 import {
   normalizeIdentityProvider, publicIdentityProvider, testIdentityProvider
 } from './identity-providers.mjs';
+import { ContainerPublisher } from './container-publish.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const publicRoot = join(root, 'public');
@@ -42,6 +43,8 @@ const xtermFitRoot = join(root, 'node_modules', '@xterm', 'addon-fit');
 const store = new JsonStore();
 const sessions = new Sessions();
 await store.load();
+const containerPublisher = new ContainerPublisher(store);
+await containerPublisher.restore();
 store.state.users ||= [];
 store.state.groups ||= [];
 store.state.spaces ||= [];
@@ -647,7 +650,7 @@ async function api(req, res, url) {
     // state. Keep storage/template discovery out of that critical path; the
     // creation wizard requests the full inventory when it is opened.
     if (url.searchParams.get('summary') === '1') {
-      return send(res, 200, await localContainerSummary());
+      return send(res, 200, containerPublisher.decorate(await localContainerSummary()));
     }
     const withDeadline = (promise, fallback, ms = 4000) => Promise.race([
       promise,
@@ -673,11 +676,13 @@ async function api(req, res, url) {
       ...(containers.images || [])
     ];
     containers.templateCount = (templateLibrary.templates || []).length;
-    return send(res, 200, containers);
+    return send(res, 200, containerPublisher.decorate(containers));
   }
   if (req.method === 'GET' && url.pathname === '/api/runtimes') {
     if (!requireAnyPermission(res, permissions, ['apps.manage', 'containers.manage', 'vms.manage', 'storage.view', 'system.view'])) return;
-    return send(res, 200, { ...(await runtimeInventory()), catalog });
+    const runtimes = await runtimeInventory();
+    containerPublisher.decorate(runtimes.containers);
+    return send(res, 200, { ...runtimes, catalog });
   }
   if (req.method === 'POST' && /^\/api\/catalog\/[a-z0-9-]+\/install$/.test(url.pathname)) {
     if (!requirePermission(res, permissions, 'apps.manage')) return;
@@ -699,7 +704,28 @@ async function api(req, res, url) {
   if (req.method === 'POST' && url.pathname === '/api/containers') {
     if (!requirePermission(res, permissions, 'containers.manage')) return;
     const input = await bodyJson(req);
+    if (input.action === 'publish') {
+      const inventory = await localContainerInventory();
+      const item = (inventory.containers || []).find(entry => String(entry.id || entry.name) === String(input.id || ''));
+      if (!item) return send(res, 404, { error: 'Container was not found.' });
+      if (String(item.status || '').toLowerCase() !== 'running') return send(res, 409, { error: 'Start the container before publishing its application.' });
+      const targetHost = item.ipv4 || (item.addresses || []).find(address => !String(address).includes(':'));
+      await localNetworkAction({ action: 'firewall-add', decision: 'allow', protocol: 'tcp', port: Number(input.hostPort), source: '' });
+      const publication = await containerPublisher.configure({ ...input, targetHost });
+      store.addActivity('container', `Container ${item.name} application published on port ${publication.hostPort}.`);
+      await store.save();
+      return send(res, 200, publication);
+    }
+    if (input.action === 'unpublish') {
+      const existing = containerPublisher.forContainer(String(input.id || ''));
+      await containerPublisher.remove(String(input.id || ''));
+      if (existing?.hostPort) await localNetworkAction({ action: 'firewall-remove-port', protocol: 'tcp', port: existing.hostPort });
+      store.addActivity('container', `Container ${input.id} application publication was removed.`);
+      await store.save();
+      return send(res, 200, { id: input.id, publication: null });
+    }
     const result = await createContainer(input);
+    if (input.action === 'delete') await containerPublisher.remove(String(input.id || input.name || ''));
     store.addActivity('container', input.action ? `Container ${result.name}: ${input.action}.` : `Container ${result.name} was created.`);
     await store.save();
     return send(res, input.action ? 200 : 201, result);

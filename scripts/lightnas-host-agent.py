@@ -194,6 +194,25 @@ def container_limits(name: str) -> tuple[int, int]:
     return memory, cpus
 
 
+def container_addresses(name: str) -> list[str]:
+    if lxc_state(name) != "running":
+        return []
+    try:
+        values = run(["lxc-info", "-n", name, "-iH"], timeout=5, check=False).splitlines()
+    except Exception:
+        return []
+    addresses = []
+    for value in values:
+        value = value.strip()
+        try:
+            address = ipaddress.ip_address(value)
+        except ValueError:
+            continue
+        if not address.is_loopback and not address.is_link_local:
+            addresses.append(value)
+    return addresses
+
+
 def container_settings(name: str) -> dict:
     config = Path("/var/lib/lxc") / name / "config"
     try:
@@ -287,9 +306,12 @@ def container_records(fast: bool = False) -> list[dict]:
             except Exception:
                 pass
         memory, cpus = container_limits(name)
+        addresses = [] if fast else container_addresses(name)
         containers.append({
             "id": name, "name": name, "status": state, "pid": pid,
             "memory": memory, "cpus": cpus, "provider": "local-lxc",
+            "addresses": addresses,
+            "ipv4": next((value for value in addresses if ":" not in value), None),
             **container_settings(name),
         })
     return containers
@@ -1203,6 +1225,18 @@ def network_action(data: dict) -> dict:
             raise ValueError("invalid firewall rule number")
         run(["ufw", "--force", "delete", str(number)], timeout=30)
         return {"action": action, "number": number}
+    if action == "firewall-remove-port":
+        if not available("ufw"):
+            raise RuntimeError("UFW is not installed on this LightNAS host")
+        try:
+            port = int(data.get("port"))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("invalid firewall port") from exc
+        protocol = str(data.get("protocol") or "tcp").lower()
+        if protocol not in {"tcp", "udp"} or not (1 <= port <= 65535):
+            raise ValueError("invalid firewall rule")
+        run(["ufw", "--force", "delete", "allow", str(port), "proto", protocol], timeout=30, check=False)
+        return {"action": action, "protocol": protocol, "port": port}
     if action == "firewall-enable":
         if not available("ufw"):
             raise RuntimeError("UFW is not installed on this LightNAS host")

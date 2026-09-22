@@ -418,6 +418,7 @@ async function showContainerManager(id) {
   if (!item) throw new Error('Container is no longer available.');
   const networks = runtime.networks || [];
   const currentNetwork = item.network || networks[0] || '';
+  const publication = item.publication || null;
   const memoryMiB = Math.max(256, Math.round(Number(item.memory || 0) / 1024 / 1024) || 2048);
   const tasks = (overview.activity || []).filter(entry =>
     JSON.stringify(entry).toLowerCase().includes(id.toLowerCase())
@@ -443,7 +444,7 @@ async function showContainerManager(id) {
       <div class="container-manager-layout">
         <nav class="container-manager-tabs" aria-label="Container settings">
           ${[
-            ['resources','Resources'],['network','Network'],['dns','DNS'],['options','Options'],
+            ['resources','Resources'],['network','Network'],['dns','DNS'],['application','Application access'],['options','Options'],
             ['tasks','Task history'],['backups','Backups'],['replication','Replication'],
             ['snapshots','Snapshots'],['firewall','Firewall'],['permissions','Permissions']
           ].map(([key,label], index) => `<button type="button" class="${index ? '' : 'active'}" data-container-tab="${key}">${label}</button>`).join('')}
@@ -476,6 +477,18 @@ async function showContainerManager(id) {
             <h3>DNS</h3>
             <label>DNS servers<input name="dns" value="${dialogEsc(item.dns || '')}" placeholder="1.1.1.1, 8.8.8.8"></label>
             <p class="muted">Enter comma-separated IPv4 or IPv6 DNS server addresses. DHCP may also supply DNS when this field is empty.</p>
+          </section>
+          <section data-container-panel="application" hidden>
+            <h3>Application access</h3>
+            <p class="muted">Publish a web service running inside this private system container through the LightNAS LAN address.</p>
+            <label class="check-line"><input name="publishApplication" type="checkbox" ${publication ? 'checked' : ''}> Make this application accessible from the LightNAS network</label>
+            <div class="form-grid" data-publication-fields>
+              <label>LightNAS port<input name="hostPort" type="number" min="1024" max="65535" value="${Number(publication?.hostPort) || 8443}"></label>
+              <label>Container port<input name="targetPort" type="number" min="1" max="65535" value="${Number(publication?.targetPort) || 443}"></label>
+              <label>Protocol<select name="scheme"><option value="https" ${publication?.scheme !== 'http' ? 'selected' : ''}>HTTPS</option><option value="http" ${publication?.scheme === 'http' ? 'selected' : ''}>HTTP</option></select></label>
+              <label>Container address<input value="${dialogEsc(item.ipv4 || publication?.targetHost || 'Detected automatically when saved')}" readonly></label>
+            </div>
+            <p class="module-note">For TurnKey Faveo use container port <b>443</b>, protocol <b>HTTPS</b>. LightNAS will create and preserve the port publication automatically.</p>
           </section>
           <section data-container-panel="options" hidden>
             <h3>Options</h3>
@@ -514,6 +527,7 @@ async function showContainerManager(id) {
   dialog.addEventListener('close', () => dialog.remove(), { once: true });
 
   const mode = dialog.querySelector('[name="ipv4Mode"]');
+  const publishApplication = dialog.querySelector('[name="publishApplication"]');
   const updateNetworkFields = () => {
     const manual = mode.value === 'manual';
     dialog.querySelector('[name="ipv4Address"]').required = manual;
@@ -522,6 +536,11 @@ async function showContainerManager(id) {
   };
   mode.addEventListener('change', updateNetworkFields);
   updateNetworkFields();
+  const updatePublicationFields = () => {
+    dialog.querySelectorAll('[data-publication-fields] input, [data-publication-fields] select').forEach(field => { field.disabled = !publishApplication.checked; });
+  };
+  publishApplication.addEventListener('change', updatePublicationFields);
+  updatePublicationFields();
 
   dialog.querySelector('form').addEventListener('submit', async event => {
     event.preventDefault();
@@ -541,6 +560,13 @@ async function showContainerManager(id) {
       };
       if (!Number.isInteger(payload.memoryMiB) || !Number.isInteger(payload.cpus)) throw new Error('Memory and CPU values must be whole numbers.');
       await dialogApi('/api/containers', { method: 'POST', body: JSON.stringify(payload) });
+      if (form.elements.publishApplication.checked) {
+        await dialogApi('/api/containers', { method: 'POST', body: JSON.stringify({
+          id, action: 'publish', hostPort: Number(values.hostPort), targetPort: Number(values.targetPort), scheme: values.scheme
+        }) });
+      } else if (publication) {
+        await dialogApi('/api/containers', { method: 'POST', body: JSON.stringify({ id, action: 'unpublish' }) });
+      }
       dialog.close();
       refreshRuntime();
     } catch (problem) {

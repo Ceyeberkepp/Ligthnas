@@ -341,8 +341,10 @@ async function enhanceRuntimeControls() {
         const actions = document.createElement('div');
         actions.className = 'runtime-actions';
         const running = String(item.status || '').toLowerCase() === 'running';
+        const publication = item.publication;
+        const applicationUrl = publication ? `${publication.scheme || 'http'}://${location.hostname}:${publication.hostPort}/` : '';
         const memoryMiB = Math.max(256, Math.round((item.memory || 0) / 1048576) || 2048);
-        actions.innerHTML = `${running ? `<button class="primary" data-container-console="${escapeHtml(id)}" data-container-name="${escapeHtml(item.name)}">Terminal</button><button class="secondary" data-container-action="shutdown" data-container-id="${escapeHtml(id)}">Shutdown</button><button class="secondary" data-container-action="reboot" data-container-id="${escapeHtml(id)}">Reboot</button><button class="secondary" data-container-action="stop" data-container-id="${escapeHtml(id)}">Stop</button>` : `<button class="primary" data-container-action="start" data-container-id="${escapeHtml(id)}">Start</button>`}
+        actions.innerHTML = `${running ? `${publication ? `<a class="primary" href="${escapeHtml(applicationUrl)}" target="_blank" rel="noopener">Open application</a>` : ''}<button class="primary" data-container-console="${escapeHtml(id)}" data-container-name="${escapeHtml(item.name)}">Terminal</button><button class="secondary" data-container-action="shutdown" data-container-id="${escapeHtml(id)}">Shutdown</button><button class="secondary" data-container-action="reboot" data-container-id="${escapeHtml(id)}">Reboot</button><button class="secondary" data-container-action="stop" data-container-id="${escapeHtml(id)}">Stop</button>` : `<button class="primary" data-container-action="start" data-container-id="${escapeHtml(id)}">Start</button>`}
           <button class="secondary" data-container-edit="${escapeHtml(id)}" data-container-name="${escapeHtml(item.name)}" data-container-memory="${memoryMiB}" data-container-cpus="${item.cpus || 2}">Edit</button>
           <button class="secondary danger-button" data-container-action="delete" data-container-id="${escapeHtml(id)}">Delete</button>`;
         row.append(actions);
