@@ -16,6 +16,7 @@ test('console pages use CSP-compatible external scripts', async () => {
   assert.match(containerScript, /Command mode/);
   assert.match(containerScript, /\/api\/containers\/\$\{encodeURIComponent\(id\)\}\/exec/);
   assert.match(containerScript, /setTimeout\(\(\) =>/);
+  assert.match(containerScript, /ws\.send\(`\$\{command\}\\\\r`\)/);
   assert.match(vmScript, /import RFB from '\/novnc\/core\/rfb\.js'/);
 });
 
@@ -30,4 +31,8 @@ test('container console fallback reaches the authenticated host-agent path', asy
   assert.match(local, /request\('container-exec'/);
   assert.match(agent, /def execute_container_command/);
   assert.match(agent, /"container-exec"/);
+  assert.match(agent, /import termios/);
+  assert.match(agent, /os\.setsid\(\)/);
+  assert.match(agent, /termios\.TIOCSCTTY/);
+  assert.match(agent, /preexec_fn=child_setup/);
 });
