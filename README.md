@@ -61,7 +61,7 @@ The build writes `dist/LightNAS-amd64.iso` and a SHA-256 file. A successful GitH
 
 ## App interoperability
 
-The built-in App Store may use reviewed Docker/OCI recipes for services such as Nginx, Jellyfin, Uptime Kuma, Heimdall and OpenSpeedTest, but that engine is optional and intentionally separated from **System Containers**. Native LXC containers are for full Linux environments; OCI app containers are only an application deployment mechanism. Persistent app settings under `/var/lib/lightnas/apps` remain separate from LXC root filesystems.
+The built-in App Store uses reviewed Docker/OCI recipes for services such as Nginx, Jellyfin, Uptime Kuma, Heimdall, OpenSpeedTest, and Ansible Semaphore. Installing an app from LightNAS downloads it, creates it inside the appliance, publishes its web service on the LightNAS address, and displays an **Open application** button. App installation does not require a Proxmox command, a nested LXC, or a manual `socat` port forward. The engine is optional and intentionally separated from **System Containers**. Native LXC containers are for full Linux environments; OCI app containers are the application deployment mechanism. Persistent app settings under `/var/lib/lightnas/apps` remain separate from LXC root filesystems.
 
 ## Run locally
 
