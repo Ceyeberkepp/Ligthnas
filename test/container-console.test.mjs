@@ -16,7 +16,7 @@ test('console pages use CSP-compatible external scripts', async () => {
   assert.match(containerScript, /Command mode/);
   assert.match(containerScript, /\/api\/containers\/\$\{encodeURIComponent\(id\)\}\/exec/);
   assert.match(containerScript, /setTimeout\(\(\) =>/);
-  assert.match(containerScript, /ws\.send\(`\$\{command\}\\\\r`\)/);
+  assert.match(containerScript, /ws\.send\(`\$\{command\}\\r`\)/);
   assert.match(vmScript, /import RFB from '\/novnc\/core\/rfb\.js'/);
 });
 
