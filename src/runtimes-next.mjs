@@ -39,7 +39,8 @@ export const catalog = Object.freeze([
   { id: 'jellyfin', name: 'Jellyfin', category: 'Media', image: 'jellyfin/jellyfin:latest', port: 8096, containerPort: 8096, memory: '2g', description: 'Open-source media server. Reads your LightNAS Files as a library.', source: 'https://jellyfin.org/docs/general/installation/container/', volumes: [['config', '/config'], ['cache', '/cache'], ['@files', '/media:ro']] },
   { id: 'uptime-kuma', name: 'Uptime Kuma', category: 'Monitoring', image: 'louislam/uptime-kuma:2', port: 3001, containerPort: 3001, memory: '1g', description: 'Self-hosted uptime and status monitoring.', source: 'https://github.com/louislam/uptime-kuma', volumes: [['data', '/app/data']] },
   { id: 'heimdall', name: 'Heimdall', category: 'Dashboard', image: 'lscr.io/linuxserver/heimdall:latest', port: 8083, containerPort: 80, memory: '512m', description: 'Personal dashboard for your hosted applications. Configure a password before exposing it publicly.', source: 'https://docs.linuxserver.io/images/docker-heimdall/', volumes: [['config', '/config']] },
-  { id: 'openspeedtest', name: 'OpenSpeedTest', category: 'Network', image: 'openspeedtest/latest', port: 8082, containerPort: 3000, memory: '512m', description: 'Test LAN speed from your browser against this server.', source: 'https://github.com/openspeedtest/Docker-Image', volumes: [] }
+  { id: 'openspeedtest', name: 'OpenSpeedTest', category: 'Network', image: 'openspeedtest/latest', port: 8082, containerPort: 3000, memory: '512m', description: 'Test LAN speed from your browser against this server.', source: 'https://github.com/openspeedtest/Docker-Image', volumes: [] },
+  { id: 'ansible-semaphore', name: 'Ansible Semaphore', category: 'Automation', image: 'semaphoreui/semaphore:latest', port: 3000, containerPort: 3000, memory: '1g', description: 'Browser-based Ansible automation, playbooks, inventories, schedules, and access control.', source: 'https://semaphoreui.com/docs/admin-guide/installation/docker', volumes: [['data', '/var/lib/semaphore']], requiresAdminPassword: true, adminUsername: 'admin', environment: [['SEMAPHORE_DB_DIALECT', 'bolt'], ['SEMAPHORE_ADMIN', 'admin'], ['SEMAPHORE_ADMIN_NAME', 'LightNAS Administrator'], ['SEMAPHORE_ADMIN_EMAIL', 'admin@localhost']] }
 ]);
 
 async function command(program, args, timeout = 4000) {
@@ -242,13 +243,22 @@ async function pullDockerImage(image) {
   catch (error) { throw Object.assign(new Error(`Unable to download Docker image ${image}: ${error.message.replace(/^Docker:\s*/, '')}`), { status: error.status || 409 }); }
 }
 
-export async function installCatalogApp(id) {
+export async function installCatalogApp(id, input = {}) {
   if (process.env.LIGHTNAS_DOCKER_ENABLED !== '1') throw Object.assign(new Error('Docker actions are disabled on this host.'), { status: 409 });
   const app = catalog.find(item => item.id === id);
   if (!app) throw Object.assign(new Error('Unknown catalog app.'), { status: 404 });
   const name = `lightnas-app-${app.id}`;
   await pullDockerImage(app.image);
   const args = ['run', '-d', '--name', name, '--label', `lightnas.catalog=${app.id}`, '--restart', 'unless-stopped', '--memory', app.memory, '--pids-limit', '256', '--security-opt', 'no-new-privileges', '-p', `${app.port}:${app.containerPort}`];
+  const environment = [...(app.environment || [])];
+  if (app.requiresAdminPassword) {
+    const adminPassword = String(input.adminPassword || '');
+    if (adminPassword.length < 8 || adminPassword.length > 128) {
+      throw Object.assign(new Error('Create an application administrator password containing 8–128 characters.'), { status: 400 });
+    }
+    environment.push(['SEMAPHORE_ADMIN_PASSWORD', adminPassword]);
+  }
+  for (const [key, value] of environment) args.push('-e', `${key}=${value}`);
   for (const [folder, target] of app.volumes) {
     const hostPath = folder === '@files' ? join(dataRoot, 'files') : join(dataRoot, 'apps', id, folder);
     await mkdir(hostPath, { recursive: true, mode: 0o700 });
