@@ -248,15 +248,11 @@ def container_settings(name: str) -> dict:
     }
 
 
-def container_inventory() -> dict:
-    ok, reason, diagnostics = container_capability()
-    # Inventory existing containers independently of network readiness. A
-    # missing bridge must never make already-created containers disappear from
-    # the LightNAS UI.
+def container_records() -> list[dict]:
     names: list[str] = []
     if available("lxc-ls"):
         try:
-            names = [line.strip() for line in run(["lxc-ls", "-1"], timeout=15, check=False).splitlines() if NAME_RE.fullmatch(line.strip())]
+            names = [line.strip() for line in run(["lxc-ls", "-1"], timeout=5, check=False).splitlines() if NAME_RE.fullmatch(line.strip())]
         except Exception:
             names = []
     if not names:
@@ -267,12 +263,13 @@ def container_inventory() -> dict:
             )
         except OSError:
             names = []
+
     containers = []
     for name in names:
         state = lxc_state(name)
         pid = None
         try:
-            raw_pid = run(["lxc-info", "-n", name, "-pH"], timeout=10)
+            raw_pid = run(["lxc-info", "-n", name, "-pH"], timeout=3, check=False)
             pid = int(raw_pid) if raw_pid.isdigit() else None
         except Exception:
             pass
@@ -282,13 +279,58 @@ def container_inventory() -> dict:
             "memory": memory, "cpus": cpus, "provider": "local-lxc",
             **container_settings(name),
         })
+    return containers
+
+
+def container_summary() -> dict:
+    networks = local_networks()
+    tools = all(available(name) for name in ["lxc-create", "lxc-start", "lxc-stop", "lxc-attach", "lxc-ls"])
+    nested = in_container()
+    nested_enabled = os.environ.get("LIGHTNAS_ALLOW_NESTED_LXC") == "1"
+    reason = None
+    if not tools:
+        reason = "Native LXC tools are not installed."
+    elif nested and not nested_enabled:
+        reason = "LightNAS is inside another container and nested LXC has not been enabled."
+    elif not networks:
+        reason = "LightNAS internal container network is not ready yet."
+    return {
+        "available": tools and (not nested or nested_enabled) and bool(networks),
+        "enabled": tools and (not nested or nested_enabled),
+        "provider": "local-lxc",
+        "reason": reason,
+        "containers": container_records(),
+        "images": [item for item in IMAGES if item.get("nested", True) or not nested],
+        "networks": networks,
+        "networkReady": bool(networks),
+        "inventoryAvailable": Path("/var/lib/lxc").is_dir() or available("lxc-ls"),
+        "storageRoot": "/var/lib/lxc",
+        "diagnostics": {
+            "nested": nested,
+            "nestedEnabled": nested_enabled,
+            "tools": tools,
+            "bridges": networks,
+            "cgroupWritable": True,
+            "mountNamespace": True,
+            "networkNamespace": True,
+            "veth": True,
+            "kvm": {"present": Path("/dev/kvm").exists(), "usable": False, "apiVersion": None, "error": None},
+            "tun": Path("/dev/net/tun").exists(),
+            "errors": [],
+            "fast": True,
+        },
+    }
+
+
+def container_inventory() -> dict:
+    ok, reason, diagnostics = container_capability()
     networks = local_networks()
     return {
         "available": ok,
         "enabled": ok,
         "provider": "local-lxc",
         "reason": reason,
-        "containers": containers,
+        "containers": container_records(),
         "images": [item for item in IMAGES if item.get("nested", True) or not in_container()],
         "networks": networks,
         "networkReady": bool(networks),
@@ -1508,6 +1550,8 @@ def dispatch(request: dict) -> dict:
     data = request.get("data") or {}
     if not isinstance(data, dict):
         raise ValueError("operation data must be an object")
+    if action == "container-summary":
+        return container_summary()
     if action == "container-inventory":
         return container_inventory()
     if action == "runtime-diagnostics":
