@@ -640,7 +640,8 @@ async function api(req, res, url) {
   if (req.method === 'POST' && /^\/api\/catalog\/[a-z0-9-]+\/install$/.test(url.pathname)) {
     if (!requirePermission(res, permissions, 'apps.manage')) return;
     const id = url.pathname.split('/')[3];
-    const installed = await installCatalogApp(id);
+    const input = await bodyJson(req);
+    const installed = await installCatalogApp(id, input);
     store.addActivity('app', `Catalog app ${id} was installed as a Docker container.`);
     await store.save();
     return send(res, 201, installed);
