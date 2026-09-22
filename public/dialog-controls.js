@@ -549,6 +549,8 @@ async function showContainerManager(id) {
     const submit = form.querySelector('button[type="submit"]');
     error.textContent = '';
     submit.disabled = true;
+    submit.textContent = 'Saving…';
+    const progress = openProgressDialog('Saving container settings', `Applying settings for ${item.name || id}…`);
     try {
       const values = Object.fromEntries(new FormData(form));
       const payload = {
@@ -559,7 +561,15 @@ async function showContainerManager(id) {
         dns: values.dns || '', startOnBoot: form.elements.startOnBoot.checked
       };
       if (!Number.isInteger(payload.memoryMiB) || !Number.isInteger(payload.cpus)) throw new Error('Memory and CPU values must be whole numbers.');
-      await dialogApi('/api/containers', { method: 'POST', body: JSON.stringify(payload) });
+      const settingsChanged = payload.memoryMiB !== memoryMiB
+        || payload.cpus !== (Number(item.cpus) || 2)
+        || payload.network !== currentNetwork
+        || payload.ipv4Mode !== (item.ipv4Mode === 'manual' ? 'manual' : 'dhcp')
+        || payload.ipv4Address.trim() !== String(item.ipv4Address || '').trim()
+        || payload.gateway.trim() !== String(item.gateway || '').trim()
+        || payload.dns.trim() !== String(item.dns || '').trim()
+        || payload.startOnBoot !== (item.startOnBoot !== false);
+      if (settingsChanged) await dialogApi('/api/containers', { method: 'POST', body: JSON.stringify(payload) });
       if (form.elements.publishApplication.checked) {
         await dialogApi('/api/containers', { method: 'POST', body: JSON.stringify({
           id, action: 'publish', hostPort: Number(values.hostPort), targetPort: Number(values.targetPort), scheme: values.scheme
@@ -569,9 +579,12 @@ async function showContainerManager(id) {
       }
       dialog.close();
       refreshRuntime();
+      progress.succeed(`${item.name || id} was saved. Its application access is ${form.elements.publishApplication.checked ? `available on LightNAS port ${values.hostPort}` : 'not published'}.`);
     } catch (problem) {
+      progress.fail(problem.message);
       error.textContent = problem.message;
       submit.disabled = false;
+      submit.textContent = 'Save changes';
     }
   });
 

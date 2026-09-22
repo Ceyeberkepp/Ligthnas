@@ -710,8 +710,13 @@ async function api(req, res, url) {
       if (!item) return send(res, 404, { error: 'Container was not found.' });
       if (String(item.status || '').toLowerCase() !== 'running') return send(res, 409, { error: 'Start the container before publishing its application.' });
       const targetHost = item.ipv4 || (item.addresses || []).find(address => !String(address).includes(':'));
-      await localNetworkAction({ action: 'firewall-add', decision: 'allow', protocol: 'tcp', port: Number(input.hostPort), source: '' });
       const publication = await containerPublisher.configure({ ...input, targetHost });
+      try {
+        await localNetworkAction({ action: 'firewall-add', decision: 'allow', protocol: 'tcp', port: publication.hostPort, source: '' });
+      } catch (error) {
+        await containerPublisher.remove(publication.id);
+        throw error;
+      }
       store.addActivity('container', `Container ${item.name} application published on port ${publication.hostPort}.`);
       await store.save();
       return send(res, 200, publication);

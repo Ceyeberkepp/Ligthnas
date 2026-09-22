@@ -44,11 +44,21 @@ export class ContainerPublisher {
       if (existing.record.id === record.id && existing.record.targetHost === record.targetHost && existing.record.targetPort === record.targetPort) return;
       throw inputError(`LightNAS port ${record.hostPort} is already published by ${existing.record.id}.`, 409);
     }
+    const sockets = new Set();
     const server = net.createServer(client => {
       const upstream = net.createConnection({ host: record.targetHost, port: record.targetPort });
-      const close = () => { client.destroy(); upstream.destroy(); };
+      sockets.add(client);
+      sockets.add(upstream);
+      const close = () => {
+        sockets.delete(client);
+        sockets.delete(upstream);
+        client.destroy();
+        upstream.destroy();
+      };
       client.on('error', close);
+      client.on('close', close);
       upstream.on('error', close);
+      upstream.on('close', close);
       client.pipe(upstream).pipe(client);
     });
     await new Promise((resolve, reject) => {
@@ -56,11 +66,15 @@ export class ContainerPublisher {
       server.once('error', fail);
       server.listen(record.hostPort, '0.0.0.0', () => { server.off('error', fail); resolve(); });
     });
-    this.listeners.set(record.hostPort, { server, record });
+    this.listeners.set(record.hostPort, { server, record, sockets });
   }
 
   async configure(input) {
     const record = normalized(input);
+    const current = this.forContainer(record.id);
+    if (current && current.targetHost === record.targetHost && current.hostPort === record.hostPort && current.targetPort === record.targetPort && current.scheme === record.scheme) {
+      return current;
+    }
     await this.remove(record.id, false);
     await this.listen(record);
     this.store.state.containerPublications = [...this.list().filter(item => item.id !== record.id), record];
@@ -73,6 +87,7 @@ export class ContainerPublisher {
     for (const record of records) {
       const listener = this.listeners.get(record.hostPort);
       if (listener) {
+        for (const socket of listener.sockets || []) socket.destroy();
         await new Promise(resolve => listener.server.close(resolve));
         this.listeners.delete(record.hostPort);
       }

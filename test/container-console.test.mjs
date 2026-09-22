@@ -39,12 +39,15 @@ test('container manager exposes real resource and network controls', async () =>
     readFile(new URL('../src/runtimes-next.mjs', import.meta.url), 'utf8'),
     readFile(new URL('../scripts/lightnas-host-agent.py', import.meta.url), 'utf8')
   ]);
-  for (const tab of ['Resources','Network','DNS','Options','Task history','Backups','Replication','Snapshots','Firewall','Permissions']) {
+  for (const tab of ['Resources','Network','DNS','Application access','Options','Task history','Backups','Replication','Snapshots','Firewall','Permissions']) {
     assert.match(dialog, new RegExp(tab));
   }
   assert.match(dialog, /showContainerManager/);
   assert.match(dialog, /ipv4Mode/);
   assert.match(dialog, /startOnBoot/);
+  assert.match(dialog, /settingsChanged/);
+  assert.match(dialog, /Saving container settings/);
+  assert.match(dialog, /action: 'publish'/);
   assert.match(styles, /container-manager-layout/);
   assert.match(runtime, /ipv4Address: input\.ipv4Address/);
   assert.match(runtime, /startOnBoot: input\.startOnBoot !== false/);
