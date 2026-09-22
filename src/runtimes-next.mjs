@@ -306,7 +306,13 @@ export async function createContainer(input) {
       id,
       name: input.name || input.id,
       memoryMiB: Number(input.memoryMiB),
-      cpus: Number(input.cpus)
+      cpus: Number(input.cpus),
+      network: input.network,
+      ipv4Mode: input.ipv4Mode,
+      ipv4Address: input.ipv4Address,
+      gateway: input.gateway,
+      dns: input.dns,
+      startOnBoot: input.startOnBoot !== false
     });
     if (input.action === 'delete') requireDeletionConfirmation(input, id, 'container');
     return await localManageContainer(id, input.action, { deleteFiles: input.deleteFiles === true, confirmation: input.confirmation });
