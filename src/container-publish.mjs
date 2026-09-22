@@ -7,14 +7,17 @@ function inputError(message, status = 400) {
 function normalized(input) {
   const id = String(input.id || input.name || '').trim();
   const targetHost = String(input.targetHost || '').trim();
-  const hostPort = Number(input.hostPort);
   const targetPort = Number(input.targetPort);
   const scheme = input.scheme === 'https' ? 'https' : 'http';
+  const mode = input.mode === 'direct' ? 'direct' : 'proxy';
+  const hostPort = mode === 'proxy' ? Number(input.hostPort) : null;
   if (!/^[A-Za-z][A-Za-z0-9-]{1,39}$/.test(id)) throw inputError('Invalid container ID.');
   if (net.isIP(targetHost) !== 4) throw inputError('The container does not have a usable IPv4 address yet.', 409);
-  if (!Number.isInteger(hostPort) || hostPort < 1024 || hostPort > 65535 || hostPort === 3080) throw inputError('Choose a LightNAS port from 1024–65535 other than 3080.');
   if (!Number.isInteger(targetPort) || targetPort < 1 || targetPort > 65535) throw inputError('Choose a valid container application port.');
-  return { id, targetHost, hostPort, targetPort, scheme };
+  if (mode === 'proxy' && (!Number.isInteger(hostPort) || hostPort < 1024 || hostPort > 65535 || hostPort === 3080)) {
+    throw inputError('Choose a LightNAS port from 1024–65535 other than 3080.');
+  }
+  return { id, mode, targetHost, hostPort, targetPort, scheme };
 }
 
 export class ContainerPublisher {
@@ -39,6 +42,7 @@ export class ContainerPublisher {
   }
 
   async listen(record) {
+    if (record.mode === 'direct') return;
     const existing = this.listeners.get(record.hostPort);
     if (existing) {
       if (existing.record.id === record.id && existing.record.targetHost === record.targetHost && existing.record.targetPort === record.targetPort) return;
@@ -72,9 +76,14 @@ export class ContainerPublisher {
   async configure(input) {
     const record = normalized(input);
     const current = this.forContainer(record.id);
-    if (current && current.targetHost === record.targetHost && current.hostPort === record.hostPort && current.targetPort === record.targetPort && current.scheme === record.scheme) {
-      return current;
-    }
+    if (
+      current
+      && current.mode === record.mode
+      && current.targetHost === record.targetHost
+      && current.hostPort === record.hostPort
+      && current.targetPort === record.targetPort
+      && current.scheme === record.scheme
+    ) return current;
     await this.remove(record.id, false);
     await this.listen(record);
     this.store.state.containerPublications = [...this.list().filter(item => item.id !== record.id), record];
@@ -85,6 +94,7 @@ export class ContainerPublisher {
   async remove(id, save = true) {
     const records = this.list().filter(item => item.id === id);
     for (const record of records) {
+      if (record.mode === 'direct') continue;
       const listener = this.listeners.get(record.hostPort);
       if (listener) {
         for (const socket of listener.sockets || []) socket.destroy();
@@ -99,8 +109,12 @@ export class ContainerPublisher {
   async restore() {
     const records = [...this.list()];
     for (const raw of records) {
-      try { await this.listen(normalized(raw)); }
-      catch (error) { console.error(`Unable to restore container publication ${raw.id || 'unknown'}:`, error.message); }
+      try {
+        const record = normalized(raw);
+        if (record.mode === 'proxy') await this.listen(record);
+      } catch (error) {
+        console.error(`Unable to restore container publication ${raw.id || 'unknown'}:`, error.message);
+      }
     }
   }
 }

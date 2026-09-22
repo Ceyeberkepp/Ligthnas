@@ -42,3 +42,23 @@ test('container publication rejects the management port and invalid targets', as
   await assert.rejects(() => publisher.configure({ id: 'helpdesk', targetHost: '127.0.0.1', hostPort: 3080, targetPort: 443 }), /other than 3080/);
   await assert.rejects(() => publisher.configure({ id: 'helpdesk', targetHost: '', hostPort: 8443, targetPort: 443 }), /usable IPv4/);
 });
+
+
+test('direct container application access persists without opening a LightNAS listener', async () => {
+  const store = { state: { containerPublications: [] }, saves: 0, async save() { this.saves += 1; } };
+  const publisher = new ContainerPublisher(store);
+  const record = await publisher.configure({
+    id: 'faveo',
+    mode: 'direct',
+    targetHost: '10.15.2.129',
+    targetPort: 443,
+    scheme: 'https'
+  });
+  assert.equal(record.mode, 'direct');
+  assert.equal(record.hostPort, null);
+  assert.equal(record.targetHost, '10.15.2.129');
+  assert.equal(store.saves, 1);
+  const inventory = publisher.decorate({ containers: [{ id: 'faveo', status: 'running' }] });
+  assert.equal(inventory.containers[0].publication.mode, 'direct');
+  await publisher.remove('faveo');
+});

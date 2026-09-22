@@ -345,8 +345,14 @@ async function showRuntimeWizard(kind) {
       dialog.close();
       refreshRuntime();
       const selectedImage = images.find(item => item.value === (isContainer ? payload.image : payload.iso))?.label || payload.image || payload.iso || '';
+      const createdApplication = result.application;
+      const createdUrl = createdApplication
+        ? (createdApplication.mode === 'direct'
+          ? `${createdApplication.scheme || 'http'}://${createdApplication.targetHost}${((createdApplication.scheme || 'http') === 'https' && Number(createdApplication.targetPort) === 443) || ((createdApplication.scheme || 'http') === 'http' && Number(createdApplication.targetPort) === 80) ? '' : `:${createdApplication.targetPort}`}/`
+          : `${createdApplication.scheme || 'http'}://${location.hostname}:${createdApplication.hostPort}/`)
+        : '';
       progress.succeed(isContainer
-        ? `${name} was created, ${result.installedImage || selectedImage} was verified and installed, and the container is running.`
+        ? `${name} was created, ${result.installedImage || selectedImage} was verified and installed, and the container is running.${createdUrl ? ` Application access: ${createdUrl}` : ' LightNAS will detect any web application automatically.'}`
         : `${name} was created successfully and is ready to use.`);
     } catch (problem) {
       progress.fail(problem.message);
@@ -427,7 +433,19 @@ async function showContainerManager(id) {
   if (!item) throw new Error('Container is no longer available.');
   const networks = runtime.networks || [];
   const currentNetwork = item.network || networks[0] || '';
-  const publication = item.publication || null;
+  let publication = item.publication || null;
+  if (!publication && String(item.status || '').toLowerCase() === 'running') {
+    const detected = await dialogApi('/api/containers', {
+      method: 'POST',
+      body: JSON.stringify({ id, action: 'auto-publish' })
+    }).catch(() => null);
+    publication = detected?.mode ? detected : detected?.publication || null;
+  }
+  const applicationUrl = publication
+    ? (publication.mode === 'direct'
+      ? `${publication.scheme || 'http'}://${publication.targetHost}${((publication.scheme || 'http') === 'https' && Number(publication.targetPort) === 443) || ((publication.scheme || 'http') === 'http' && Number(publication.targetPort) === 80) ? '' : `:${publication.targetPort}`}/`
+      : `${publication.scheme || 'http'}://${location.hostname}:${publication.hostPort}/`)
+    : '';
   const memoryMiB = Math.max(256, Math.round(Number(item.memory || 0) / 1024 / 1024) || 2048);
   const tasks = (overview.activity || []).filter(entry =>
     JSON.stringify(entry).toLowerCase().includes(id.toLowerCase())
@@ -489,15 +507,23 @@ async function showContainerManager(id) {
           </section>
           <section data-container-panel="application" hidden>
             <h3>Application access</h3>
-            <p class="muted">Publish a web service running inside this private system container through the LightNAS LAN address.</p>
-            <label class="check-line"><input name="publishApplication" type="checkbox" ${publication ? 'checked' : ''}> Make this application accessible from the LightNAS network</label>
-            <div class="form-grid" data-publication-fields>
-              <label>LightNAS port<input name="hostPort" type="number" min="1024" max="65535" value="${Number(publication?.hostPort) || 8443}"></label>
-              <label>Container port<input name="targetPort" type="number" min="1" max="65535" value="${Number(publication?.targetPort) || 443}"></label>
-              <label>Protocol<select name="scheme"><option value="https" ${publication?.scheme !== 'http' ? 'selected' : ''}>HTTPS</option><option value="http" ${publication?.scheme === 'http' ? 'selected' : ''}>HTTP</option></select></label>
-              <label>Container address<input value="${dialogEsc(item.ipv4 || publication?.targetHost || 'Detected automatically when saved')}" readonly></label>
+            <p class="muted">LightNAS automatically discovers HTTP/HTTPS applications running inside this container and makes them reachable from the LAN.</p>
+            <label class="check-line"><input name="publishApplication" type="checkbox" checked disabled> Make this application accessible from the LightNAS network — automatic</label>
+            <div class="manager-summary">
+              <div><span>Container address</span><b>${dialogEsc(publication?.targetHost || item.ipv4 || 'Detecting automatically')}</b></div>
+              <div><span>Access mode</span><b>${publication?.mode === 'direct' ? 'Direct container IP' : publication?.mode === 'proxy' ? 'LightNAS NAT fallback' : 'Automatic detection'}</b></div>
+              <div><span>Detected web service</span><b>${publication ? `${dialogEsc(String(publication.scheme || 'http').toUpperCase())} · port ${dialogEsc(publication.targetPort)}` : 'Not detected yet'}</b></div>
+              <div><span>Open address</span><b>${applicationUrl ? `<a href="${dialogEsc(applicationUrl)}" target="_blank" rel="noopener">${dialogEsc(applicationUrl)}</a>` : 'Available automatically after the app starts'}</b></div>
             </div>
-            <p class="module-note">For TurnKey Faveo use container port <b>443</b>, protocol <b>HTTPS</b>. LightNAS will create and preserve the port publication automatically.</p>
+            <details class="manager-capability">
+              <summary><b>Advanced detection hints</b></summary>
+              <div class="form-grid">
+                <label>Preferred container web port<input name="targetPort" type="number" min="1" max="65535" value="${Number(publication?.targetPort) || ''}" placeholder="Automatic"></label>
+                <label>NAT fallback LightNAS port<input name="hostPort" type="number" min="1024" max="65535" value="${Number(publication?.hostPort) || ''}" placeholder="Automatic"></label>
+              </div>
+              <p class="muted">Normally leave these blank. On a bridged LAN, LightNAS opens the application directly using the container IP. A LightNAS host port is only used when the container is on a private NAT bridge.</p>
+            </details>
+            <p class="module-note">TurnKey appliances such as Faveo are detected automatically. On a bridged network, the application opens directly from the container IP instead of requiring a second LightNAS forwarding port.</p>
           </section>
           <section data-container-panel="options" hidden>
             <h3>Options</h3>
@@ -536,7 +562,6 @@ async function showContainerManager(id) {
   dialog.addEventListener('close', () => dialog.remove(), { once: true });
 
   const mode = dialog.querySelector('[name="ipv4Mode"]');
-  const publishApplication = dialog.querySelector('[name="publishApplication"]');
   const updateNetworkFields = () => {
     const manual = mode.value === 'manual';
     dialog.querySelector('[name="ipv4Address"]').required = manual;
@@ -545,11 +570,6 @@ async function showContainerManager(id) {
   };
   mode.addEventListener('change', updateNetworkFields);
   updateNetworkFields();
-  const updatePublicationFields = () => {
-    dialog.querySelectorAll('[data-publication-fields] input, [data-publication-fields] select').forEach(field => { field.disabled = !publishApplication.checked; });
-  };
-  publishApplication.addEventListener('change', updatePublicationFields);
-  updatePublicationFields();
 
   dialog.querySelector('form').addEventListener('submit', async event => {
     event.preventDefault();
@@ -579,16 +599,20 @@ async function showContainerManager(id) {
         || payload.dns.trim() !== String(item.dns || '').trim()
         || payload.startOnBoot !== (item.startOnBoot !== false);
       if (settingsChanged) await dialogApi('/api/containers', { method: 'POST', body: JSON.stringify(payload) });
-      if (form.elements.publishApplication.checked) {
-        await dialogApi('/api/containers', { method: 'POST', body: JSON.stringify({
-          id, action: 'publish', hostPort: Number(values.hostPort), targetPort: Number(values.targetPort), scheme: values.scheme
-        }) });
-      } else if (publication) {
-        await dialogApi('/api/containers', { method: 'POST', body: JSON.stringify({ id, action: 'unpublish' }) });
-      }
+      const access = await dialogApi('/api/containers', { method: 'POST', body: JSON.stringify({
+        id,
+        action: 'auto-publish',
+        targetPort: Number(values.targetPort) || 0,
+        hostPort: Number(values.hostPort) || 0
+      }) });
       dialog.close();
       refreshRuntime();
-      progress.succeed(`${item.name || id} was saved. Its application access is ${form.elements.publishApplication.checked ? `available on LightNAS port ${values.hostPort}` : 'not published'}.`);
+      const detectedUrl = access?.accessUrl || (access?.mode === 'direct'
+        ? `${access.scheme || 'http'}://${access.targetHost}${((access.scheme || 'http') === 'https' && Number(access.targetPort) === 443) || ((access.scheme || 'http') === 'http' && Number(access.targetPort) === 80) ? '' : `:${access.targetPort}`}/`
+        : access?.mode === 'proxy' ? `${access.scheme || 'http'}://${location.hostname}:${access.hostPort}/` : '');
+      progress.succeed(detectedUrl
+        ? `${item.name || id} was saved. Its application is available at ${detectedUrl}`
+        : `${item.name || id} was saved. LightNAS will detect its web application automatically after the service starts.`);
     } catch (problem) {
       progress.fail(problem.message);
       error.textContent = problem.message;

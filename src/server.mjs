@@ -34,6 +34,7 @@ import {
   normalizeIdentityProvider, publicIdentityProvider, testIdentityProvider
 } from './identity-providers.mjs';
 import { ContainerPublisher } from './container-publish.mjs';
+import { discoverContainerApplication } from './container-app-access.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const publicRoot = join(root, 'public');
@@ -73,6 +74,66 @@ async function containerReadyForPublication(id) {
     await pause(1000);
   }
   throw Object.assign(new Error('The container started but did not receive an IPv4 address. Check its Network settings and try again.'), { status: 409 });
+}
+
+function containerUsesPrivateNat(item) {
+  return /^(?:lightnas0|lxcbr0)$/i.test(String(item?.network || ''));
+}
+
+async function configureProxyFallback(detected, item, requestedHostPort = 0) {
+  const existing = containerPublisher.forContainer(detected.id);
+  const preferred = Number(requestedHostPort)
+    || (existing?.mode === 'proxy' ? Number(existing.hostPort) : 0)
+    || (detected.targetPort >= 1024 && detected.targetPort !== 3080 ? detected.targetPort : (detected.scheme === 'https' ? 8443 : 8080));
+  const candidates = [preferred, ...Array.from({ length: 12 }, (_, index) => preferred + index + 1)]
+    .filter(port => Number.isInteger(port) && port >= 1024 && port <= 65535 && port !== 3080);
+
+  let lastError;
+  for (const hostPort of [...new Set(candidates)]) {
+    try {
+      const publication = await containerPublisher.configure({ ...detected, mode: 'proxy', hostPort });
+      try {
+        await localNetworkAction({ action: 'firewall-add', decision: 'allow', protocol: 'tcp', port: publication.hostPort, source: '' });
+      } catch (error) {
+        await containerPublisher.remove(publication.id);
+        throw error;
+      }
+      return publication;
+    } catch (error) {
+      lastError = error;
+      if (!/already (?:published|in use)/i.test(error.message || '')) throw error;
+    }
+  }
+  throw lastError || Object.assign(new Error('No available LightNAS port could be assigned to this application.'), { status: 409 });
+}
+
+async function automaticContainerApplication(id, { preferredPort = 0, requestedHostPort = 0, attempts = 1 } = {}) {
+  const ready = await containerReadyForPublication(id);
+  let detected = null;
+  const totalAttempts = Math.max(1, Math.min(20, Number(attempts) || 1));
+  for (let attempt = 0; attempt < totalAttempts; attempt += 1) {
+    detected = await discoverContainerApplication({
+      id,
+      targetHost: ready.targetHost,
+      preferredPort,
+      runCommand: localContainerCommand
+    }).catch(() => null);
+    if (detected) break;
+    if (attempt + 1 < totalAttempts) await pause(1000);
+  }
+  if (!detected) return { ...ready, publication: null };
+
+  const previous = containerPublisher.forContainer(id);
+  let publication;
+  if (containerUsesPrivateNat(ready.item)) {
+    publication = await configureProxyFallback(detected, ready.item, requestedHostPort);
+  } else {
+    publication = await containerPublisher.configure(detected);
+    if (previous?.mode === 'proxy' && previous.hostPort) {
+      await localNetworkAction({ action: 'firewall-remove-port', protocol: 'tcp', port: previous.hostPort }).catch(() => null);
+    }
+  }
+  return { ...ready, publication };
 }
 
 export const PERMISSIONS = Object.freeze([
@@ -723,18 +784,52 @@ async function api(req, res, url) {
   if (req.method === 'POST' && url.pathname === '/api/containers') {
     if (!requirePermission(res, permissions, 'containers.manage')) return;
     const input = await bodyJson(req);
-    if (input.action === 'publish') {
-      const { item, targetHost, started } = await containerReadyForPublication(String(input.id || ''));
-      const publication = await containerPublisher.configure({ ...input, targetHost });
-      try {
-        await localNetworkAction({ action: 'firewall-add', decision: 'allow', protocol: 'tcp', port: publication.hostPort, source: '' });
-      } catch (error) {
-        await containerPublisher.remove(publication.id);
-        throw error;
+    if (input.action === 'publish' || input.action === 'auto-publish') {
+      const id = String(input.id || '');
+      const automatic = await automaticContainerApplication(id, {
+        preferredPort: Number(input.targetPort) || 0,
+        requestedHostPort: Number(input.hostPort) || 0,
+        attempts: input.action === 'auto-publish' ? Math.max(1, Math.min(3, Number(input.attempts) || 3)) : 1
+      });
+      const publication = automatic.publication;
+      if (!publication && input.action === 'publish' && Number(input.targetPort)) {
+        // Preserve the advanced manual proxy as a compatibility fallback when
+        // an application cannot answer the automatic HTTP/HTTPS probe.
+        const direct = {
+          id,
+          mode: 'proxy',
+          targetHost: automatic.targetHost,
+          targetPort: Number(input.targetPort),
+          hostPort: Number(input.hostPort),
+          scheme: input.scheme === 'https' ? 'https' : 'http'
+        };
+        const fallback = await containerPublisher.configure(direct);
+        try {
+          await localNetworkAction({ action: 'firewall-add', decision: 'allow', protocol: 'tcp', port: fallback.hostPort, source: '' });
+        } catch (error) {
+          await containerPublisher.remove(fallback.id);
+          throw error;
+        }
+        store.addActivity('container', `Container ${automatic.item.name} application published through LightNAS port ${fallback.hostPort}.`);
+        await store.save();
+        return send(res, 200, fallback);
       }
-      store.addActivity('container', `Container ${item.name}${started ? ' was started and its' : ''} application published on port ${publication.hostPort}.`);
+      if (!publication) {
+        return send(res, 200, {
+          id,
+          publication: null,
+          targetHost: automatic.targetHost,
+          message: 'No HTTP or HTTPS application is listening yet. Direct LAN access will be detected automatically after the application starts.'
+        });
+      }
+      const access = publication.mode === 'direct'
+        ? `${publication.scheme}://${publication.targetHost}${(publication.scheme === 'https' && publication.targetPort === 443) || (publication.scheme === 'http' && publication.targetPort === 80) ? '' : `:${publication.targetPort}`}/`
+        : `${publication.scheme}://${req.headers.host?.split(':')[0] || 'lightnas'}:${publication.hostPort}/`;
+      store.addActivity('container', publication.mode === 'direct'
+        ? `Container ${automatic.item.name} application detected for direct LAN access at ${access}.`
+        : `Container ${automatic.item.name} application published through LightNAS port ${publication.hostPort}.`);
       await store.save();
-      return send(res, 200, publication);
+      return send(res, 200, { ...publication, accessUrl: access });
     }
     if (input.action === 'unpublish') {
       const existing = containerPublisher.forContainer(String(input.id || ''));
@@ -745,10 +840,22 @@ async function api(req, res, url) {
       return send(res, 200, { id: input.id, publication: null });
     }
     const result = await createContainer(input);
-    if (input.action === 'delete') await containerPublisher.remove(String(input.id || input.name || ''));
-    store.addActivity('container', input.action ? `Container ${result.name}: ${input.action}.` : `Container ${result.name} was created.`);
+    const id = String(input.id || input.name || result.id || result.name || '');
+    if (input.action === 'delete') {
+      const existing = containerPublisher.forContainer(id);
+      await containerPublisher.remove(id);
+      if (existing?.mode === 'proxy' && existing.hostPort) {
+        await localNetworkAction({ action: 'firewall-remove-port', protocol: 'tcp', port: existing.hostPort }).catch(() => null);
+      }
+    }
+    let application = null;
+    if (!input.action || input.action === 'start' || input.action === 'reboot') {
+      const attempts = !input.action && String(input.image || '').startsWith('template:') ? 12 : 2;
+      application = await automaticContainerApplication(id, { attempts }).catch(() => null);
+    }
+    store.addActivity('container', input.action ? `Container ${result.name || id}: ${input.action}.` : `Container ${result.name || id} was created.`);
     await store.save();
-    return send(res, input.action ? 200 : 201, result);
+    return send(res, input.action ? 200 : 201, application ? { ...result, application: application.publication } : result);
   }
   if (req.method === 'POST' && /^\/api\/containers\/[A-Za-z][A-Za-z0-9-]{1,39}\/exec$/.test(url.pathname)) {
     if (!requirePermission(res, permissions, 'containers.manage')) return;

@@ -49,8 +49,12 @@ test('container manager exposes real resource and network controls', async () =>
   assert.match(dialog, /settingsChanged/);
   assert.match(dialog, /Saving container settings/);
   assert.match(dialog, /\/sav\|publish\|configur\/i/);
-  assert.match(dialog, /action: 'publish'/);
+  assert.match(dialog, /action: 'auto-publish'/);
+  assert.match(dialog, /Direct container IP/);
+  assert.match(dialog, /Make this application accessible from the LightNAS network — automatic/);
   assert.match(server, /containerReadyForPublication/);
+  assert.match(server, /automaticContainerApplication/);
+  assert.match(server, /discoverContainerApplication/);
   assert.match(server, /localManageContainer\(id, 'start'\)/);
   assert.match(styles, /container-manager-layout/);
   assert.match(runtime, /ipv4Address: input\.ipv4Address/);
