@@ -11,7 +11,7 @@ import { listFiles, createFolder, uploadFile, downloadFile, deleteEntry } from '
 import { thumbnailFor } from './thumbnails.mjs';
 import { catalog, runtimeInventory, installCatalogApp, manageCatalogApp, createContainer, createVm } from './runtimes-next.mjs';
 import { proxmoxConsoleSocket, proxmoxUpdateStorage, proxmoxCleanDisk } from './proxmox.mjs';
-import { localContainerSummary, localContainerConsoleSocket, localContainerCommand, localVmConsoleSocket, localNetworkInventory, localNetworkAction, localApplianceHealth, localApplianceRepair } from './local-host.mjs';
+import { localContainerSummary, localContainerInventory, localManageContainer, localContainerConsoleSocket, localContainerCommand, localVmConsoleSocket, localNetworkInventory, localNetworkAction, localApplianceHealth, localApplianceRepair } from './local-host.mjs';
 import { validateSmtp, sendSmtpTest } from './mailer.mjs';
 import { mediaAvailable, convertMedia } from './media.mjs';
 import { createDataset, updateDataset } from './zfs.mjs';
@@ -55,6 +55,25 @@ store.state.security.identityProviders ||= [];
 const spaceRoot = join(dirname(resolve(process.env.NAS_DATA_FILE || 'data/state.json')), 'files', 'Spaces');
 const spaceName = /^[a-zA-Z0-9][a-zA-Z0-9_-]{1,39}$/;
 const groupName = /^[A-Za-z0-9][A-Za-z0-9 _.-]{1,63}$/;
+const pause = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+
+async function containerReadyForPublication(id) {
+  let started = false;
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    const inventory = await localContainerInventory();
+    const item = (inventory.containers || []).find(entry => String(entry.id || entry.name) === id);
+    if (!item) throw Object.assign(new Error('Container was not found.'), { status: 404 });
+    const running = String(item.status || '').toLowerCase() === 'running';
+    const targetHost = item.ipv4 || (item.addresses || []).find(address => !String(address).includes(':'));
+    if (running && targetHost) return { item, targetHost, started };
+    if (!running && !started) {
+      await localManageContainer(id, 'start');
+      started = true;
+    }
+    await pause(1000);
+  }
+  throw Object.assign(new Error('The container started but did not receive an IPv4 address. Check its Network settings and try again.'), { status: 409 });
+}
 
 export const PERMISSIONS = Object.freeze([
   'files.read', 'files.write', 'media.convert',
@@ -705,11 +724,7 @@ async function api(req, res, url) {
     if (!requirePermission(res, permissions, 'containers.manage')) return;
     const input = await bodyJson(req);
     if (input.action === 'publish') {
-      const inventory = await localContainerInventory();
-      const item = (inventory.containers || []).find(entry => String(entry.id || entry.name) === String(input.id || ''));
-      if (!item) return send(res, 404, { error: 'Container was not found.' });
-      if (String(item.status || '').toLowerCase() !== 'running') return send(res, 409, { error: 'Start the container before publishing its application.' });
-      const targetHost = item.ipv4 || (item.addresses || []).find(address => !String(address).includes(':'));
+      const { item, targetHost, started } = await containerReadyForPublication(String(input.id || ''));
       const publication = await containerPublisher.configure({ ...input, targetHost });
       try {
         await localNetworkAction({ action: 'firewall-add', decision: 'allow', protocol: 'tcp', port: publication.hostPort, source: '' });
@@ -717,7 +732,7 @@ async function api(req, res, url) {
         await containerPublisher.remove(publication.id);
         throw error;
       }
-      store.addActivity('container', `Container ${item.name} application published on port ${publication.hostPort}.`);
+      store.addActivity('container', `Container ${item.name}${started ? ' was started and its' : ''} application published on port ${publication.hostPort}.`);
       await store.save();
       return send(res, 200, publication);
     }

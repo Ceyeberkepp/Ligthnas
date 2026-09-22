@@ -33,11 +33,12 @@ test('container console uses Xterm, keepalives and automatic reconnect', async (
 });
 
 test('container manager exposes real resource and network controls', async () => {
-  const [dialog, styles, runtime, agent] = await Promise.all([
+  const [dialog, styles, runtime, agent, server] = await Promise.all([
     readFile(new URL('../public/dialog-controls.js', import.meta.url), 'utf8'),
     readFile(new URL('../public/styles.css', import.meta.url), 'utf8'),
     readFile(new URL('../src/runtimes-next.mjs', import.meta.url), 'utf8'),
-    readFile(new URL('../scripts/lightnas-host-agent.py', import.meta.url), 'utf8')
+    readFile(new URL('../scripts/lightnas-host-agent.py', import.meta.url), 'utf8'),
+    readFile(new URL('../src/server.mjs', import.meta.url), 'utf8')
   ]);
   for (const tab of ['Resources','Network','DNS','Application access','Options','Task history','Backups','Replication','Snapshots','Firewall','Permissions']) {
     assert.match(dialog, new RegExp(tab));
@@ -48,6 +49,8 @@ test('container manager exposes real resource and network controls', async () =>
   assert.match(dialog, /settingsChanged/);
   assert.match(dialog, /Saving container settings/);
   assert.match(dialog, /action: 'publish'/);
+  assert.match(server, /containerReadyForPublication/);
+  assert.match(server, /localManageContainer\(id, 'start'\)/);
   assert.match(styles, /container-manager-layout/);
   assert.match(runtime, /ipv4Address: input\.ipv4Address/);
   assert.match(runtime, /startOnBoot: input\.startOnBoot !== false/);
