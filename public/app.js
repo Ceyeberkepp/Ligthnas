@@ -300,9 +300,20 @@ function settingsView() {
 
 function adminView() {
   const { appliance } = state.overview;
-  return `${pageHead('Admin Center', `Manage ${escapeHtml(appliance.deviceName)} and its connected services.`)}
+  return `${pageHead('Admin Center', `Manage ${escapeHtml(appliance.deviceName)} as a complete LightNAS appliance.`)}
+    <section class="panel" id="appliance-health-panel">
+      <div data-appliance-health-result>
+        <span class="eyebrow">APPLIANCE HEALTH</span>
+        <h2>LightNAS self-management</h2>
+        <p class="muted">Check storage, container, VM, application and core service readiness, or let LightNAS repair its own managed services.</p>
+      </div>
+      <div class="head-actions">
+        <button class="secondary" type="button" data-appliance-health>Check health</button>
+        <button class="primary" type="button" data-appliance-repair>Repair automatically</button>
+      </div>
+    </section>
     <div class="tool-grid">
-      ${[['users','Users & access','Create or remove local accounts.'],['smtp','Email & SMTP','Configure encrypted outgoing email and send a test.'],['settings','Appliance','Change name, time zone and administrator password.'],['pools','Storage & datasets','Review disks, file spaces and ZFS datasets.'],['apps','Application catalog','Install reviewed open-source applications on an enabled host.'],['monitoring','System health','Check CPU, memory, mounts and recent activity.'],['network','Networking','View interfaces, addresses, gateways and DNS.'],['firewall','Firewall','Inspect the firewall status and available rules.'],['integrations','Integrations','View app and VM runtime connections.']].map(([view,title,description]) => `<article class="panel"><h2>${title}</h2><p class="muted">${description}</p><button class="secondary" data-view-link="${view}">Open ${title}</button></article>`).join('')}
+      ${[['users','Users & access','Create or remove local accounts.'],['smtp','Email & SMTP','Configure encrypted outgoing email and send a test.'],['settings','Appliance','Change name, time zone and administrator password.'],['pools','Storage & datasets','Review disks, file spaces and ZFS datasets.'],['apps','Application catalog','Install reviewed open-source applications on the integrated app runtime.'],['monitoring','System health','Check CPU, memory, mounts and recent activity.'],['network','Networking','Manage interfaces, addresses, gateways and DNS.'],['firewall','Firewall','Manage the LightNAS firewall.'],['integrations','Integrations','Review the built-in container, VM and app engines.']].map(([view,title,description]) => `<article class="panel"><h2>${title}</h2><p class="muted">${description}</p><button class="secondary" data-view-link="${view}">Open ${title}</button></article>`).join('')}
     </div>`;
 }
 
@@ -429,6 +440,29 @@ function render(view) {
 }
 
 function bindViewActions() {
+  const renderHealth = result => {
+    const target = $('[data-appliance-health-result]', $('#content'));
+    if (!target) return;
+    target.innerHTML = '<span class="eyebrow">APPLIANCE HEALTH</span><h2>' +
+      (result.healthy ? 'LightNAS is healthy' : 'LightNAS needs attention') +
+      '</h2><div class="storage-list">' +
+      (result.checks || []).map(item => '<div class="storage-row"><div><h3>' + escapeHtml(item.label) +
+      '</h3><p>' + escapeHtml(item.detail || '') + '</p></div><span class="volume-state ' +
+      (item.healthy ? 'writable' : 'readonly') + '">' + (item.healthy ? 'HEALTHY' : 'NEEDS ATTENTION') +
+      '</span></div>').join('') + '</div>';
+  };
+  $('[data-appliance-health]', $('#content'))?.addEventListener('click', async event => {
+    const button = event.currentTarget; button.disabled = true; button.textContent = 'Checking…';
+    try { const result = await request('/api/appliance/health'); renderHealth(result); toast(result.healthy ? 'LightNAS appliance is healthy.' : 'Some appliance services need attention.'); }
+    catch (error) { toast(error.message); }
+    finally { button.disabled = false; button.textContent = 'Check health'; }
+  });
+  $('[data-appliance-repair]', $('#content'))?.addEventListener('click', async event => {
+    const button = event.currentTarget; button.disabled = true; button.textContent = 'Repairing…';
+    try { const result = await request('/api/appliance/repair', { method: 'POST', body: '{}' }); state.runtimes = null; state.runtimeError = null; renderHealth(result); toast(result.healthy ? 'Automatic appliance repair completed.' : 'Repair completed; some items still need attention.'); }
+    catch (error) { toast(error.message); }
+    finally { button.disabled = false; button.textContent = 'Repair automatically'; }
+  });
   $$('[data-action="create-pool"]', $('#content')).forEach(button => button.addEventListener('click', () => {
     const storage = state.overview.storage;
     if (!storage.disks.length) return toast('No physical disks are exposed to this NAS. Attach data disks to a VM or install on bare metal.');
