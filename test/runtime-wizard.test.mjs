@@ -28,9 +28,11 @@ test('container backend requires credentials and selected root storage', async (
   assert.match(runtime, /4–128 character root password/);
   assert.match(dialogs, /minlength="4"/);
   assert.match(runtime, /resolveStoragePool\(String\(input\.pool/);
+  assert.match(runtime, /image: input\.image/);
   assert.match(agent, /chpasswd/);
   assert.match(agent, /managed_container_storage_root/);
   assert.match(agent, /lightnas\.json/);
+  assert.match(agent, /"imageId": str\(data\.get\("image"\)/);
   assert.match(agent, /def verify_container_installation/);
   assert.match(agent, /etc" \/ "os-release/);
   assert.match(agent, /"verified": True/);
