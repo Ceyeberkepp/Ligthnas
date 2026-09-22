@@ -494,7 +494,7 @@ function bindViewActions() {
     toast('Physical pool creation needs the disk safety agent before it can operate. Existing ZFS datasets can be created below.');
     $('#dataset-form', $('#content'))?.scrollIntoView({ behavior: 'smooth' });
   }));
-  $('[data-action="create-container"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+  $$('[data-action="create-container"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     let containers = state.runtimes?.containers;
     if ((!containers?.networks?.length || !containers?.available || !containers.enabled) && containers?.inventoryAvailable !== false) {
       button.disabled = true;
