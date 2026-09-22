@@ -77,7 +77,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 textarea { min-height: 92px; resize: vertical; }
 .check { display: flex; grid-template-columns: auto 1fr; align-items: center; gap: 10px; font-weight: 500; }
 .check input { width: 17px; height: 17px; accent-color: var(--accent); }
-.primary, .secondary { border: 0; border-radius: 11px; padding: 12px 17px; font-weight: 750; }
+.primary, .secondary { border: 0; border-radius: 11px; padding: 12px 17px; font-weight: 750; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
 .primary { background: var(--accent); color: #05221e; box-shadow: 0 9px 24px rgba(92,225,195,.14); }
 .primary:hover { background: #77ead0; }
 .secondary { background: var(--button); color: var(--text); border: 1px solid var(--line); }
