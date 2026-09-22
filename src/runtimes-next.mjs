@@ -203,13 +203,25 @@ export async function runtimeInventory() {
           .filter(item => item.ifname !== 'docker0' && (item.flags || []).includes('UP'))
           .map(item => item.ifname)
           .filter(name => /^[A-Za-z0-9_.:-]{1,32}$/.test(name || ''));
-        if (bridges.includes('lightnas0')) bridges = ['lightnas0', ...bridges.filter(name => name !== 'lightnas0')];
+        const defaultRoute = await command('ip', ['-j', '-4', 'route', 'show', 'default']);
+        let defaultBridge = '';
+        if (defaultRoute.ok && defaultRoute.output) {
+          try { defaultBridge = String((JSON.parse(defaultRoute.output)[0] || {}).dev || ''); } catch {}
+        }
+        if (defaultBridge && bridges.includes(defaultBridge)) bridges = [defaultBridge, ...bridges.filter(name => name !== defaultBridge)];
+        else if (bridges.includes('virbr0')) bridges = ['virbr0', ...bridges.filter(name => name !== 'virbr0')];
+        else if (bridges.includes('lightnas0')) bridges = ['lightnas0', ...bridges.filter(name => name !== 'lightnas0')];
       } catch {}
     }
+    const bridged = bridges.filter(name => !libvirtNetworks.includes(name)).map(name => ({
+      name,
+      type: 'host-bridge',
+      label: name === bridges[0] ? `${name} · appliance LAN bridge` : `${name} · host bridge`
+    }));
     runtime.virtualization.networkDetails = [
-      { name: 'qemu-user', type: 'qemu-user', label: 'QEMU user NAT (works without a host bridge)' },
-      ...libvirtNetworks.map(name => ({ name, type: 'libvirt-network' })),
-      ...bridges.filter(name => !libvirtNetworks.includes(name)).map(name => ({ name, type: 'host-bridge' }))
+      ...bridged,
+      ...libvirtNetworks.map(name => ({ name, type: 'libvirt-network', label: `${name} · libvirt network` })),
+      { name: 'qemu-user', type: 'qemu-user', label: 'QEMU user NAT fallback' }
     ].filter((item, index, all) => all.findIndex(other => other.name === item.name) === index);
     runtime.virtualization.networks = runtime.virtualization.networkDetails.map(item => item.name);
   }
