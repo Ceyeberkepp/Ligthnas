@@ -61,4 +61,9 @@ test('container console fallback reaches the authenticated host-agent path', asy
   assert.match(agent, /\/bin\/bash --noprofile --norc -i/);
   assert.match(agent, /root@\{name\}:\\\\w# /);
   assert.match(agent, /export HOME=\/root USER=root LOGNAME=root/);
+  assert.match(agent, /LightNAS owns eth0 configuration/);
+  assert.match(agent, /10-lightnas-eth0\\.network/);
+  assert.match(agent, /DHCP=ipv4/);
+  assert.match(agent, /90-lightnas-unmanaged\\.conf/);
+  assert.match(agent, /99-lightnas-network\\.cfg/);
 });
