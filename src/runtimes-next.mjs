@@ -1,5 +1,6 @@
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
+import { randomBytes } from 'node:crypto';
 import { mkdir, readdir, lstat, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { proxmoxInventory, proxmoxCreateVm, proxmoxManageVm, proxmoxUpdateVm } from './proxmox.mjs';
@@ -40,7 +41,7 @@ export const catalog = Object.freeze([
   { id: 'uptime-kuma', name: 'Uptime Kuma', category: 'Monitoring', image: 'louislam/uptime-kuma:2', port: 3001, containerPort: 3001, memory: '1g', description: 'Self-hosted uptime and status monitoring.', source: 'https://github.com/louislam/uptime-kuma', volumes: [['data', '/app/data']] },
   { id: 'heimdall', name: 'Heimdall', category: 'Dashboard', image: 'lscr.io/linuxserver/heimdall:latest', port: 8083, containerPort: 80, memory: '512m', description: 'Personal dashboard for your hosted applications. Configure a password before exposing it publicly.', source: 'https://docs.linuxserver.io/images/docker-heimdall/', volumes: [['config', '/config']] },
   { id: 'openspeedtest', name: 'OpenSpeedTest', category: 'Network', image: 'openspeedtest/latest', port: 8082, containerPort: 3000, memory: '512m', description: 'Test LAN speed from your browser against this server.', source: 'https://github.com/openspeedtest/Docker-Image', volumes: [] },
-  { id: 'ansible-semaphore', name: 'Ansible Semaphore', category: 'Automation', image: 'semaphoreui/semaphore:latest', port: 3000, containerPort: 3000, memory: '1g', description: 'Browser-based Ansible automation, playbooks, inventories, schedules, and access control.', source: 'https://semaphoreui.com/docs/admin-guide/installation/docker', volumes: [['data', '/var/lib/semaphore']], requiresAdminPassword: true, adminUsername: 'admin', environment: [['SEMAPHORE_DB_DIALECT', 'bolt'], ['SEMAPHORE_ADMIN', 'admin'], ['SEMAPHORE_ADMIN_NAME', 'LightNAS Administrator'], ['SEMAPHORE_ADMIN_EMAIL', 'admin@localhost']] }
+  { id: 'ansible-semaphore', name: 'Ansible Semaphore', category: 'Automation', image: 'semaphoreui/semaphore:latest', port: 3000, containerPort: 3000, memory: '1g', description: 'Browser-based Ansible automation, playbooks, inventories, schedules, and access control.', source: 'https://semaphoreui.com/docs/admin-guide/installation/docker', volumes: [['data', '/etc/semaphore']], namedVolumes: true, requiresAdminPassword: true, requiresAccessKeyEncryption: true, adminUsername: 'admin', environment: [['SEMAPHORE_DB_DIALECT', 'sqlite'], ['SEMAPHORE_DB', '/etc/semaphore/semaphore.sqlite'], ['SEMAPHORE_ADMIN', 'admin'], ['SEMAPHORE_ADMIN_NAME', 'LightNAS Administrator'], ['SEMAPHORE_ADMIN_EMAIL', 'admin@localhost']] }
 ]);
 
 async function command(program, args, timeout = 4000) {
@@ -258,8 +259,13 @@ export async function installCatalogApp(id, input = {}) {
     }
     environment.push(['SEMAPHORE_ADMIN_PASSWORD', adminPassword]);
   }
+  if (app.requiresAccessKeyEncryption) environment.push(['SEMAPHORE_ACCESS_KEY_ENCRYPTION', randomBytes(32).toString('base64')]);
   for (const [key, value] of environment) args.push('-e', `${key}=${value}`);
   for (const [folder, target] of app.volumes) {
+    if (app.namedVolumes && folder !== '@files') {
+      args.push('-v', `lightnas-app-${id}-${folder}:${target}`);
+      continue;
+    }
     const hostPath = folder === '@files' ? join(dataRoot, 'files') : join(dataRoot, 'apps', id, folder);
     await mkdir(hostPath, { recursive: true, mode: 0o700 });
     args.push('-v', `${hostPath}:${target}`);
