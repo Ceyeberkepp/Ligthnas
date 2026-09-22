@@ -1,4 +1,4 @@
-const state = { overview: null, view: 'home', folder: '', files: null, runtimes: null, runtimeError: null, spaces: null, users: null, smtp: undefined, media: null, network: null };
+const state = { overview: null, view: 'home', folder: '', files: null, fileError: null, runtimes: null, runtimeError: null, spaces: null, users: null, smtp: undefined, media: null, network: null };
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
 const themeChoices = ['system', 'light', 'dark'];
@@ -261,14 +261,20 @@ function filesView() {
     <nav class="library-tabs" aria-label="File library sections">${tabs}</nav>
     <div class="file-toolbar"><div class="breadcrumbs">${crumbs}</div><div><button class="secondary" data-action="new-folder">+ Folder</button> <label class="primary upload-button">Upload files<input id="file-upload" type="file" multiple hidden></label></div></div>
     <p class="muted">Select a tab to open that library. Previewable items open in the viewer; use its arrows to move through multiple files.</p>
-    <div class="storage-list">${entries === null ? '<div class="empty"><p>Loading files…</p></div>' : entries.length ? entries.map(entry => `<article class="file-row"><button class="file-name" data-open="${escapeHtml(entry.name)}" data-directory="${entry.directory}">${entry.directory ? '▣' : '▤'} ${escapeHtml(entry.name)}</button><span class="muted">${entry.directory ? 'Folder' : bytes(entry.sizeBytes)}</span>${!entry.directory && state.media?.converterAvailable && state.overview.appliance.role === 'administrator' ? `<button class="secondary" data-convert-file="${escapeHtml(entry.name)}">Convert</button>` : ''}<button class="secondary" data-delete-file="${escapeHtml(entry.name)}">Delete</button></article>`).join('') : '<div class="empty"><p>This section is empty. Create a folder or upload files here.</p></div>'}</div>`;
+    <div class="storage-list">${state.fileError ? `<div class="empty error-state"><p><b>Files could not be loaded.</b></p><p>${escapeHtml(state.fileError)}</p><button class="secondary" data-action="refresh-files">Try again</button></div>` : entries === null ? '<div class="empty"><p>Loading files…</p></div>' : entries.length ? entries.map(entry => `<article class="file-row"><button class="file-name" data-open="${escapeHtml(entry.name)}" data-directory="${entry.directory}">${entry.directory ? '▣' : '▤'} ${escapeHtml(entry.name)}</button><span class="muted">${entry.directory ? 'Folder' : bytes(entry.sizeBytes)}</span>${!entry.directory && state.media?.converterAvailable && state.overview.appliance.role === 'administrator' ? `<button class="secondary" data-convert-file="${escapeHtml(entry.name)}">Convert</button>` : ''}<button class="secondary" data-delete-file="${escapeHtml(entry.name)}">Delete</button></article>`).join('') : '<div class="empty"><p>This section is empty. Create a folder or upload files here.</p></div>'}</div>`;
 }
 
 async function loadFiles() {
+  state.fileError = null;
   try {
-    state.files = (await request(`/api/files?path=${encodeURIComponent(state.folder)}`)).entries.filter(entry => entry.supported);
-    if (state.view === 'files') render('files');
-  } catch (error) { toast(error.message); }
+    const result = await request(`/api/files?path=${encodeURIComponent(state.folder)}`);
+    state.files = Array.isArray(result.entries) ? result.entries.filter(entry => entry.supported) : [];
+  } catch (error) {
+    state.files = [];
+    state.fileError = error.message || 'The file service did not return a valid response.';
+    toast(state.fileError);
+  }
+  if (state.view === 'files') render('files');
 }
 
 function capabilitiesView() {
@@ -567,8 +573,8 @@ function bindViewActions() {
   $$('[data-action="new-share"]', $('#content')).forEach(button => button.addEventListener('click', () => $('#share-dialog').showModal()));
   $$('[data-view-link]', $('#content')).forEach(button => button.addEventListener('click', () => { location.hash = button.dataset.viewLink; }));
   $$('[data-action="refresh"]', $('#content')).forEach(button => button.addEventListener('click', async () => { try { state.overview = await request('/api/overview'); render(state.view); toast('Readings updated.'); } catch (error) { toast(error.message); } }));
-  $('[data-action="refresh-files"]', $('#content')).forEach(button => button.addEventListener('click', loadFiles));
-  $('[data-library-tab]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+  $$('[data-action="refresh-files"]', $('#content')).forEach(button => button.addEventListener('click', loadFiles));
+  $$('[data-library-tab]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     const folder = button.dataset.libraryTab || '';
     if (folder) {
       try { await request(`/api/files?path=${encodeURIComponent(folder)}`); }
