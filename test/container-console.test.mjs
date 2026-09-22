@@ -12,6 +12,8 @@ test('console pages use CSP-compatible external scripts', async () => {
     readFile(new URL('../src/runtimes-next.mjs', import.meta.url), 'utf8')
   ]);
   assert.match(containerPage, /src="\/container-console\.js"/);
+  assert.match(containerPage, /id="terminal" tabindex="0" role="application"/);
+  assert.match(containerPage, /id="command-form"[^>]+hidden/);
   assert.doesNotMatch(containerPage, /<script>\s*const/);
   assert.match(vmPage, /src="\/vm-console\.js"/);
   assert.doesNotMatch(vmPage, /<script type="module">\s*import/);
@@ -19,6 +21,11 @@ test('console pages use CSP-compatible external scripts', async () => {
   assert.match(containerScript, /\/api\/containers\/\$\{encodeURIComponent\(id\)\}\/exec/);
   assert.match(containerScript, /setTimeout\(\(\) =>/);
   assert.match(containerScript, /ws\.send\(`\$\{command\}\\r`\)/);
+  assert.match(containerScript, /terminal\.addEventListener\('keydown'/);
+  assert.match(containerScript, /terminal\.addEventListener\('paste'/);
+  assert.match(containerScript, /Ctrl\+C without Shift sends/);
+  assert.match(containerScript, /Connected · click terminal and type/);
+  assert.match(containerScript, /form\.hidden = false/);
   assert.match(containerScript, /normalizeTerminalChunk/);
   assert.match(containerScript, /terminalControlState/);
   assert.match(containerScript, /osc-escape/);
