@@ -921,7 +921,7 @@ async function staticAsset(req, res, url) {
     const content = await readFile(path);
     res.writeHead(200, {
       'Content-Type': mimeTypes[extname(path).toLowerCase()] || 'application/octet-stream',
-      'Cache-Control': ['.js', '.mjs', '.css', '.html'].includes(extname(path).toLowerCase()) ? 'no-cache' : 'public, max-age=300',
+      'Cache-Control': ['.js', '.mjs', '.css', '.html'].includes(extname(path).toLowerCase()) ? 'no-store, max-age=0' : 'public, max-age=300',
       'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': csp
     });
     res.end(content);
