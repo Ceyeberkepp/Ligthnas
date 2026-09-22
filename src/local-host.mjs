@@ -61,6 +61,14 @@ export async function localNetworkAction(input) {
   return await request('network-action', input, 60000);
 }
 
+export async function localApplianceHealth() {
+  return await request('appliance-health', undefined, 60000);
+}
+
+export async function localApplianceRepair() {
+  return await request('appliance-repair', undefined, 15 * 60 * 1000);
+}
+
 export async function localContainerConsoleSocket(id) {
   const name = String(id || '');
   if (!/^[A-Za-z][A-Za-z0-9-]{1,39}$/.test(name)) throw Object.assign(new Error('Invalid system container name.'), { status: 400 });
