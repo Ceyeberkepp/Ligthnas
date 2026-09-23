@@ -19,6 +19,11 @@ See **[docs/PLATFORM-REQUIREMENTS.md](docs/PLATFORM-REQUIREMENTS.md)** for the
 hardware, architecture, image-catalog, resource-budget, upload-performance, and
 installation-performance requirements.
 
+Build enforcement and the current verified-vs-target support matrix are documented in
+**[docs/BUILD-VALIDATION.md](docs/BUILD-VALIDATION.md)**. CI runs the platform
+contract on every pull request so low-resource, upload, and native-architecture
+assumptions cannot silently regress.
+
 ## What works now
 
 - Safe first-run appliance setup
