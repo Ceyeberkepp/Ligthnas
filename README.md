@@ -100,7 +100,7 @@ when installation finishes.
 
 The installer prepares native LXC/liblxc plus QEMU/libvirt. It uses KVM acceleration when available and automatically falls back to QEMU TCG software virtualization when hardware virtualization is unavailable. Docker is never the System Containers backend; it is used only by the App Store and can be disabled with `LIGHTNAS_ENABLE_DOCKER_APPS=0`.
 
-On the **Proxmox node shell** (prompt such as `root@pve:~#`), use the
+On the **node shell** (prompt such as `root@pve:~#`), use the
 host preparation/install helper with the LightNAS CTID. Do not run this helper
 from inside the LightNAS appliance.
 
