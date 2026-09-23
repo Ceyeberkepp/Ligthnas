@@ -172,14 +172,21 @@ if ! pct exec "$ctid" -- bash -lc 'command -v lxc-ls >/dev/null && command -v lx
       qemu-system-x86 qemu-utils libvirt-daemon-system libvirt-clients virtinst ovmf
       dnsmasq-base network-manager iproute2 nftables ufw
     )
+
+    apt_has_candidate() {
+      local candidate
+      candidate="$(apt-cache policy "$1" 2>/dev/null | awk '/Candidate:/{print $2; exit}')"
+      [[ -n "$candidate" && "$candidate" != "(none)" ]]
+    }
+
     for keyring in debian-archive-keyring ubuntu-keyring; do
-      if apt-cache show "$keyring" >/dev/null 2>&1; then
+      if apt_has_candidate "$keyring"; then
         packages+=("$keyring")
       fi
     done
     apt-get install -y "${packages[@]}"
 
-    if ! apt-cache show ubuntu-keyring >/dev/null 2>&1; then
+    if ! apt_has_candidate ubuntu-keyring; then
       install -d -m 0755 /usr/share/keyrings
       if [[ ! -s /usr/share/keyrings/ubuntu-archive-keyring.gpg ]]; then
         curl -fsSL https://archive.ubuntu.com/ubuntu/project/ubuntu-archive-keyring.gpg \

@@ -50,15 +50,20 @@ runtime_packages=(
   dnsmasq-base network-manager
 )
 
-# Archive-signing keyrings are distribution packages. Do not make a Debian
-# LightNAS install fail because an Ubuntu-only keyring is not available in the
-# host repository (or vice versa). Install whichever keyrings the current
-# package sources actually provide.
+# Archive-signing keyrings are distribution packages. apt-cache show can
+# return metadata even when APT has no installable Candidate, so check the
+# policy Candidate explicitly before adding an optional package.
+apt_has_candidate() {
+  local candidate
+  candidate="$(apt-cache policy "$1" 2>/dev/null | awk '/Candidate:/{print $2; exit}')"
+  [[ -n "$candidate" && "$candidate" != "(none)" ]]
+}
+
 for keyring in debian-archive-keyring ubuntu-keyring; do
-  if apt-cache show "$keyring" >/dev/null 2>&1; then
+  if apt_has_candidate "$keyring"; then
     runtime_packages+=("$keyring")
   else
-    echo "      Optional package $keyring is not available from this host's repositories; continuing."
+    echo "      Optional package $keyring has no installable APT candidate; continuing."
   fi
 done
 
@@ -66,9 +71,9 @@ apt-get install -y "${runtime_packages[@]}"
 
 # Debian repositories do not always carry the ubuntu-keyring package, but
 # LightNAS offers Ubuntu system-container images as well as Debian images.
-# Install Ubuntu's official archive keyring directly when the package is not
-# available so debootstrap can still verify Ubuntu releases.
-if ! apt-cache show ubuntu-keyring >/dev/null 2>&1; then
+# Install Ubuntu's official archive keyring directly when the package has no
+# installable Candidate so debootstrap can still verify Ubuntu releases.
+if ! apt_has_candidate ubuntu-keyring; then
   install -d -m 0755 /usr/share/keyrings
   if [[ ! -s /usr/share/keyrings/ubuntu-archive-keyring.gpg ]]; then
     echo "      Installing Ubuntu archive keyring for Ubuntu container images..."
