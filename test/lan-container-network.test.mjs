@@ -45,3 +45,34 @@ test('Proxmox installer preserves net0 settings and only disables its firewall f
   assert.match(installer, /firewall=0/);
   assert.doesNotMatch(installer, /name=lan0/);
 });
+
+
+test('fresh ISO boot acquires wired DHCP before guest networking is provisioned', async () => {
+  const [network, provision, iso] = await Promise.all([
+    readFile(new URL('../scripts/configure-appliance-network.sh', import.meta.url), 'utf8'),
+    readFile(new URL('../scripts/provision-runtimes.sh', import.meta.url), 'utf8'),
+    readFile(new URL('../iso/build.sh', import.meta.url), 'utf8')
+  ]);
+
+  assert.match(network, /discover_wired_uplink\(\)/);
+  assert.match(network, /bootstrap_wired_dhcp\(\)/);
+  assert.match(network, /nmcli device set "\$\{uplink\}" managed yes/);
+  assert.match(network, /nmcli device connect "\$\{uplink\}"/);
+  assert.match(network, /ipv4\.method auto/);
+  assert.match(network, /LIGHTNAS_NETWORK_MODE=pending-uplink/);
+
+  assert.match(provision, /network_mode.*pending-uplink/);
+  assert.match(provision, /waiting for the physical LAN uplink to receive DHCP/);
+
+  assert.match(iso, /lightnas-network-bootstrap\.service/);
+  assert.match(iso, /Requires=lightnas-network-bootstrap\.service/);
+  assert.match(iso, /systemctl disable lxc-net\.service/);
+  assert.doesNotMatch(iso, /systemctl enable lxc-net\.service/);
+});
+
+test('ISO build does not hard-require the Ubuntu keyring package on Debian', async () => {
+  const iso = await readFile(new URL('../iso/build.sh', import.meta.url), 'utf8');
+  const packageList = iso.match(/cat >config\/package-lists\/lightnas\.list\.chroot <<'EOF'([\s\S]*?)\nEOF/)?.[1] || '';
+  assert.doesNotMatch(packageList, /^ubuntu-keyring$/m);
+  assert.match(iso, /ubuntu-archive-keyring\.gpg/);
+});
