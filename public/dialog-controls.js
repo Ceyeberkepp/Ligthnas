@@ -351,8 +351,11 @@ async function showRuntimeWizard(kind) {
           ? `${createdApplication.scheme || 'http'}://${createdApplication.targetHost}${((createdApplication.scheme || 'http') === 'https' && Number(createdApplication.targetPort) === 443) || ((createdApplication.scheme || 'http') === 'http' && Number(createdApplication.targetPort) === 80) ? '' : `:${createdApplication.targetPort}`}/`
           : `${createdApplication.scheme || 'http'}://${location.hostname}:${createdApplication.hostPort}/`)
         : '';
+      const lanStatus = isContainer && result.ipv4
+        ? ` LAN IP: ${result.ipv4}.${result.networkMode === 'direct-lan' ? ' Direct LAN networking is ready.' : ''}`
+        : '';
       progress.succeed(isContainer
-        ? `${name} was created, ${result.installedImage || selectedImage} was verified and installed, and the container is running.${createdUrl ? ` Application access: ${createdUrl}` : ' LightNAS will detect any web application automatically.'}`
+        ? `${name} was created, ${result.installedImage || selectedImage} was verified and installed, and the container is running.${lanStatus}${createdUrl ? ` Application access: ${createdUrl}` : ' LightNAS will detect any web application automatically.'}`
         : `${name} was created successfully and is ready to use.`);
     } catch (problem) {
       progress.fail(problem.message);
