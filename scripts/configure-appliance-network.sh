@@ -93,15 +93,85 @@ if [[ -n "$container_kind" && "$container_kind" != "none" ]]; then
   echo "LightNAS network: nested macvlan is unavailable; using managed NAT fallback."
   exit 0
 fi
-default_dev="$(ip -4 route show default 2>/dev/null | awk 'NR==1 {for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')"
-default_gw="$(ip -4 route show default 2>/dev/null | awk 'NR==1 {for(i=1;i<=NF;i++) if($i=="via"){print $(i+1); exit}}')"
-
 is_virtual_name() {
   [[ "${1:-}" =~ ^(lo|docker[0-9]*|virbr[0-9]*|lightnas[0-9]*|lxcbr[0-9]*|br-[A-Fa-f0-9]+|veth.*|tap.*|tun.*)$ ]]
 }
 
+discover_wired_uplink() {
+  local path name first="" carrier=""
+  for path in /sys/class/net/*; do
+    [[ -e "${path}" ]] || continue
+    name="$(basename "${path}")"
+    is_virtual_name "${name}" && continue
+    [[ -d "${path}/wireless" ]] && continue
+    [[ "$(cat "${path}/type" 2>/dev/null || true)" == "1" ]] || continue
+    [[ -n "${first}" ]] || first="${name}"
+    carrier="$(cat "${path}/carrier" 2>/dev/null || true)"
+    if [[ "${carrier}" == "1" ]]; then
+      printf '%s\n' "${name}"
+      return 0
+    fi
+  done
+  [[ -n "${first}" ]] && printf '%s\n' "${first}"
+}
+
+bootstrap_wired_dhcp() {
+  local uplink profile
+  uplink="$(discover_wired_uplink || true)"
+  [[ -n "${uplink}" ]] || return 1
+
+  echo "LightNAS network: no IPv4 route yet; bringing up ${uplink} with DHCP."
+  ip link set "${uplink}" up >/dev/null 2>&1 || true
+
+  if command -v nmcli >/dev/null 2>&1; then
+    systemctl enable NetworkManager.service >/dev/null 2>&1 || true
+    systemctl start NetworkManager.service >/dev/null 2>&1 || true
+
+    # Debian live/install images can expose the NIC as unmanaged or leave it
+    # without an autoconnect profile. Take ownership and create a deterministic
+    # DHCP profile only when the NIC still has no IPv4 address.
+    nmcli device set "${uplink}" managed yes >/dev/null 2>&1 || true
+    if ! ip -4 addr show dev "${uplink}" scope global 2>/dev/null | grep -q 'inet '; then
+      if ! nmcli device connect "${uplink}" >/dev/null 2>&1; then
+        profile="lightnas-auto-${uplink}"
+        if nmcli -t -f NAME connection show 2>/dev/null | grep -Fxq "${profile}"; then
+          nmcli connection modify "${profile}" connection.interface-name "${uplink}" connection.autoconnect yes ipv4.method auto ipv6.method auto >/dev/null 2>&1 || true
+        else
+          nmcli connection add type ethernet ifname "${uplink}" con-name "${profile}" connection.autoconnect yes ipv4.method auto ipv6.method auto >/dev/null 2>&1 || true
+        fi
+        nmcli connection up "${profile}" >/dev/null 2>&1 || true
+      fi
+    fi
+  elif command -v dhclient >/dev/null 2>&1; then
+    dhclient -1 -v "${uplink}" >/dev/null 2>&1 || true
+  fi
+
+  for _ in {1..40}; do
+    if ip -4 addr show dev "${uplink}" scope global 2>/dev/null | grep -q 'inet ' \
+      && ip -4 route show default dev "${uplink}" 2>/dev/null | grep -q .; then
+      echo "LightNAS network: DHCP is active on ${uplink}."
+      return 0
+    fi
+    sleep 1
+  done
+
+  echo "LightNAS network: ${uplink} is detected but did not receive a DHCP lease/default route." >&2
+  return 1
+}
+
+default_dev="$(ip -4 route show default 2>/dev/null | awk 'NR==1 {for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')"
+default_gw="$(ip -4 route show default 2>/dev/null | awk 'NR==1 {for(i=1;i<=NF;i++) if($i=="via"){print $(i+1); exit}}')"
+
 if [[ -z "${default_dev}" ]]; then
-  echo "LightNAS network: no IPv4 default route is available yet." >&2
+  bootstrap_wired_dhcp || true
+  default_dev="$(ip -4 route show default 2>/dev/null | awk 'NR==1 {for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')"
+  default_gw="$(ip -4 route show default 2>/dev/null | awk 'NR==1 {for(i=1;i<=NF;i++) if($i=="via"){print $(i+1); exit}}')"
+fi
+
+if [[ -z "${default_dev}" ]]; then
+  pending_uplink="$(discover_wired_uplink || true)"
+  printf 'LIGHTNAS_NETWORK_MODE=pending-uplink\nLIGHTNAS_UPLINK=%s\n' "${pending_uplink}" >"${STATE_FILE}"
+  echo "LightNAS network: no LAN DHCP/default route is available; guest networking will wait instead of creating a private fallback bridge." >&2
   exit 0
 fi
 
