@@ -35,6 +35,13 @@ report() { printf '%s: %s\n' "$1" "$2" | tee -a "${status_file}"; }
 : > "${status_file}"
 chmod 0644 "${status_file}"
 
+# A nested LightNAS appliance should work without a separate operator flag.
+# Enable the feature automatically; the privileged host agent still performs
+# cgroup, namespace and veth capability checks before allowing LXC creation.
+if systemd-detect-virt --container >/dev/null 2>&1; then
+  set_flag LIGHTNAS_ALLOW_NESTED_LXC 1
+fi
+
 # Native system containers are built into LightNAS through LXC/liblxc.
 if command -v lxc-create >/dev/null 2>&1 && command -v lxc-start >/dev/null 2>&1; then
   # TrueNAS/Proxmox-style default: when LightNAS has a real LAN bridge,
