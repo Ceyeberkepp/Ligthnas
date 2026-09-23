@@ -14,24 +14,14 @@ const NON_WEB_PORTS = new Set([
   27017
 ]);
 
-const LISTENING_PORT_COMMAND = String.raw`
-if command -v ss >/dev/null 2>&1; then
-  ss -H -lnt 2>/dev/null | awk '{print $4}' | sed -E 's/.*:([0-9]+)$/\\1/'
-elif command -v netstat >/dev/null 2>&1; then
-  netstat -lnt 2>/dev/null | awk 'NR>2 {print $4}' | sed -E 's/.*:([0-9]+)$/\\1/'
-else
-  awk 'NR>1 {split($2,a,":"); print strtonum("0x" a[2])}' /proc/net/tcp 2>/dev/null
-fi
-`;
-
 function inputError(message, status = 400) {
   return Object.assign(new Error(message), { status });
 }
 
-export function parseListeningPorts(output) {
-  return [...new Set(String(output || '')
-    .split(/\s+/)
-    .map(value => Number(value))
+export function parseListeningPorts(value) {
+  const raw = Array.isArray(value) ? value : String(value || '').split(/\s+/);
+  return [...new Set(raw
+    .map(item => Number(item))
     .filter(port => Number.isInteger(port) && port >= 1 && port <= 65535))]
     .sort((a, b) => a - b);
 }
@@ -41,9 +31,10 @@ function urlFor(host, port, scheme) {
   return `${scheme}://${host}${defaultPort ? '' : `:${port}`}/`;
 }
 
-function probeWebPort(host, port, scheme, timeoutMs = 1800) {
+function probeWebPort(host, port, scheme, timeoutMs = 900) {
   return new Promise(resolve => {
     let settled = false;
+    let socket;
     const finish = value => {
       if (settled) return;
       settled = true;
@@ -51,7 +42,7 @@ function probeWebPort(host, port, scheme, timeoutMs = 1800) {
       resolve(value);
     };
     const options = { host, port };
-    const socket = scheme === 'https'
+    socket = scheme === 'https'
       ? tls.connect({ ...options, rejectUnauthorized: false })
       : net.createConnection(options);
     socket.setTimeout(timeoutMs, () => finish(false));
@@ -60,7 +51,7 @@ function probeWebPort(host, port, scheme, timeoutMs = 1800) {
       socket.write(`GET / HTTP/1.0\r\nHost: ${host}\r\nUser-Agent: LightNAS/1.0\r\nConnection: close\r\n\r\n`);
     });
     socket.once('data', chunk => {
-      const text = chunk.toString('latin1', 0, 512);
+      const text = chunk.toString('latin1', 0, 1024);
       finish(/^HTTP\/\d(?:\.\d)?\s+\d{3}\b/i.test(text) || /<html[\s>]/i.test(text));
     });
     socket.once('end', () => finish(false));
@@ -68,27 +59,22 @@ function probeWebPort(host, port, scheme, timeoutMs = 1800) {
 }
 
 function candidatePorts(discovered, preferredPort = 0) {
+  const normalized = parseListeningPorts(discovered);
+  const source = normalized.length ? normalized : WEB_PORT_PRIORITY;
   const priority = preferredPort ? [preferredPort, ...WEB_PORT_PRIORITY] : [...WEB_PORT_PRIORITY];
-  const ordered = [...priority.filter(port => discovered.includes(port)), ...discovered];
+  const ordered = [
+    ...priority.filter(port => source.includes(port)),
+    ...source
+  ];
   return [...new Set(ordered)]
     .filter(port => !NON_WEB_PORTS.has(port))
-    .slice(0, 32);
-}
-
-async function openGuestWebFirewall(runCommand, id, port) {
-  const command = [
-    'set +e',
-    `if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi '^Status: active'; then ufw allow ${port}/tcp comment 'LightNAS web application' >/dev/null 2>&1 || ufw allow ${port}/tcp >/dev/null 2>&1 || true; fi`,
-    `if command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then firewall-cmd --permanent --add-port=${port}/tcp >/dev/null 2>&1 || true; firewall-cmd --reload >/dev/null 2>&1 || true; fi`,
-    'exit 0'
-  ].join('; ');
-  await runCommand(id, command).catch(() => null);
+    .slice(0, 40);
 }
 
 export async function discoverContainerApplication({
   id,
   targetHost,
-  runCommand,
+  listeningPorts = [],
   preferredPort = 0,
   probe = probeWebPort
 }) {
@@ -96,13 +82,8 @@ export async function discoverContainerApplication({
   const host = String(targetHost || '').trim();
   if (!/^[A-Za-z][A-Za-z0-9-]{1,39}$/.test(name)) throw inputError('Invalid container ID.');
   if (net.isIP(host) !== 4) throw inputError('The container does not have a usable IPv4 address yet.', 409);
-  if (typeof runCommand !== 'function') throw inputError('Container application detection is unavailable.', 500);
 
-  const listeners = await runCommand(name, LISTENING_PORT_COMMAND);
-  const discovered = parseListeningPorts(listeners?.output);
-  if (!discovered.length) return null;
-
-  for (const port of candidatePorts(discovered, Number(preferredPort) || 0)) {
+  for (const port of candidatePorts(listeningPorts, Number(preferredPort) || 0)) {
     const schemes = HTTPS_FIRST.has(port) ? ['https', 'http'] : ['http', 'https'];
     for (const scheme of schemes) {
       if (await probe(host, port, scheme)) {
@@ -114,29 +95,9 @@ export async function discoverContainerApplication({
           targetPort: port,
           scheme,
           accessUrl: urlFor(host, port, scheme),
-          detected: true
+          detected: true,
+          managedBy: 'lightnas'
         };
-      }
-    }
-
-    // A guest firewall can hide an otherwise valid web service. Only open
-    // ports that strongly resemble web endpoints; never expose SSH, databases,
-    // mail, SMB, or other infrastructure listeners automatically.
-    if (WEB_PORT_PRIORITY.includes(port)) {
-      await openGuestWebFirewall(runCommand, name, port);
-      for (const scheme of schemes) {
-        if (await probe(host, port, scheme)) {
-          return {
-            id: name,
-            mode: 'direct',
-            targetHost: host,
-            hostPort: null,
-            targetPort: port,
-            scheme,
-            accessUrl: urlFor(host, port, scheme),
-            detected: true
-          };
-        }
       }
     }
   }
