@@ -54,6 +54,29 @@ async function command(program, args, timeout = 4000) {
   }
 }
 
+const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+
+async function pressInstallerBootKey(name) {
+  // Windows installation media shows "Press any key to boot from CD/DVD" for
+  // only a few seconds. Send a harmless Space key while firmware is checking
+  // the selected ISO so a new VM opens directly in its installer.
+  for (const delay of [1200, 1800]) {
+    await wait(delay);
+    await command('virsh', ['-c', 'qemu:///system', 'send-key', name, 'KEY_SPACE'], 10000);
+  }
+}
+
+function queueInstallerBootKey(name) {
+  void pressInstallerBootKey(name).catch(() => {});
+}
+
+function hasInstallerMedia(output) {
+  return String(output || '').split('\n').some(line => {
+    const fields = line.trim().split(/\s+/);
+    return fields[1]?.toLowerCase() === 'cdrom' && fields[3] && fields[3] !== '-';
+  });
+}
+
 
 function parseDomInfo(text) {
   const values = {};
@@ -67,7 +90,10 @@ function parseDomInfo(text) {
 async function localVmDetails(names) {
   const details = [];
   for (const name of names.slice(0, 100)) {
-    const info = await command('virsh', ['-c', 'qemu:///system', 'dominfo', name], 10000);
+    const [info, blockDevices] = await Promise.all([
+      command('virsh', ['-c', 'qemu:///system', 'dominfo', name], 10000),
+      command('virsh', ['-c', 'qemu:///system', 'domblklist', name, '--details'], 10000)
+    ]);
     if (!info.ok) continue;
     const parsed = parseDomInfo(info.output);
     details.push({
@@ -77,7 +103,8 @@ async function localVmDetails(names) {
       status: parsed.state || 'unknown',
       cpus: Number(parsed['cpu(s)']) || 0,
       memory: (Number(String(parsed['max memory'] || '').split(/\s+/)[0]) || 0) * 1024,
-      persistent: parsed.persistent === 'yes'
+      persistent: parsed.persistent === 'yes',
+      installationMedia: blockDevices.ok && hasInstallerMedia(blockDevices.output)
     });
   }
   return details;
@@ -86,13 +113,21 @@ async function localVmDetails(names) {
 async function localManageVm(id, action) {
   const name = String(id || '');
   if (!/^[A-Za-z][A-Za-z0-9-]{1,39}$/.test(name)) throw Object.assign(new Error('Invalid VM name.'), { status: 400 });
-  const allowed = new Set(['start', 'stop', 'shutdown', 'reboot', 'reset', 'delete']);
+  const allowed = new Set(['start', 'stop', 'shutdown', 'reboot', 'reset', 'boot-installer', 'delete']);
   if (!allowed.has(action)) throw Object.assign(new Error('Invalid VM action.'), { status: 400 });
   if (action === 'delete') {
     await command('virsh', ['-c', 'qemu:///system', 'destroy', name], 30000);
     const result = await command('virsh', ['-c', 'qemu:///system', 'undefine', name, '--remove-all-storage', '--nvram'], 120000);
     if (!result.ok) throw Object.assign(new Error(`VM delete failed: ${result.error}`), { status: 409 });
     return { id: name, action, status: 'deleted' };
+  }
+  if (action === 'boot-installer') {
+    const media = await command('virsh', ['-c', 'qemu:///system', 'domblklist', name, '--details'], 10000);
+    if (!media.ok || !hasInstallerMedia(media.output)) throw Object.assign(new Error('No installer ISO is attached to this VM.'), { status: 409 });
+    const reset = await command('virsh', ['-c', 'qemu:///system', 'reset', name], 60000);
+    if (!reset.ok) throw Object.assign(new Error(`VM installer boot failed: ${reset.error}`), { status: 409 });
+    queueInstallerBootKey(name);
+    return { id: name, action, status: 'installer boot requested' };
   }
   const verb = action === 'stop' ? 'destroy' : action;
   const result = await command('virsh', ['-c', 'qemu:///system', verb, name], 60000);
@@ -449,7 +484,7 @@ export async function createVm(input) {
   const args = ['--connect', 'qemu:///system', '--virt-type', virtType, '--name', input.name, '--memory', String(memory), '--vcpus', String(cpus), '--disk', `path=${diskPath},size=${disk},format=qcow2,bus=${diskBus}`, ...diskController, '--network', networkArg, '--graphics', 'vnc,listen=127.0.0.1', '--video', 'virtio', '--noautoconsole', '--wait', '0'];
   if (isoEntry) args.push('--cdrom', isoEntry.path, '--osinfo', 'detect=on,require=off');
   else args.push('--import', '--osinfo', 'generic');
-  args.push('--boot', firmware === 'uefi' ? 'uefi,menu=on' : (isoEntry ? 'cdrom,hd,menu=on' : 'hd,menu=on'));
+  args.push('--boot', firmware === 'uefi' ? (isoEntry ? 'uefi,cdrom,hd,menu=on' : 'uefi,hd,menu=on') : (isoEntry ? 'cdrom,hd,menu=on' : 'hd,menu=on'));
   const response = await exclusive(() => command('virt-install', args, 180000));
   if (!response.ok) {
     // virt-install may define a domain and create its qcow2 before libvirt
@@ -467,5 +502,6 @@ export async function createVm(input) {
     const autostart = await command('virsh', ['-c', 'qemu:///system', 'autostart', input.name], 30000);
     if (!autostart.ok) throw Object.assign(new Error(`VM was created, but autostart could not be enabled: ${autostart.error}`), { status: 409 });
   }
+  if (isoEntry) queueInstallerBootKey(input.name);
   return { id: input.name, name: input.name, provider: virtualization.provider, acceleration: virtualization.acceleration, firmware, diskBus, networkModel, details: response.output || 'VM created and started.' };
 }

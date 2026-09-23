@@ -26,6 +26,21 @@ test('nested VM provisioning disables unsupported libvirt ownership xattrs and c
   assert.match(runtime, /nested-libvirt ownership restriction/);
 });
 
+test('VMs with selected ISO media automatically enter the installer', async () => {
+  const [runtime, enhancements] = await Promise.all([
+    readFile(new URL('../src/runtimes-next.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../public/enhancements.js', import.meta.url), 'utf8')
+  ]);
+  assert.match(runtime, /function queueInstallerBootKey/);
+  assert.match(runtime, /send-key.*KEY_SPACE/s);
+  assert.match(runtime, /uefi,cdrom,hd,menu=on/);
+  assert.match(runtime, /if \(isoEntry\) queueInstallerBootKey\(input\.name\)/);
+  assert.match(runtime, /action === 'boot-installer'/);
+  assert.match(runtime, /No installer ISO is attached/);
+  assert.match(enhancements, /data-vm-action="boot-installer"/);
+  assert.match(enhancements, />Boot installer</);
+});
+
 test('image and ISO transfers use the progress dialog', async () => {
   const templates = await readFile(new URL('../public/templates.js', import.meta.url), 'utf8');
   const storage = await readFile(new URL('../public/storage-manager.js', import.meta.url), 'utf8');
