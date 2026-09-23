@@ -80,10 +80,25 @@ if [[ "$features" != "$current_features" ]]; then
 fi
 config="$(pct config "$ctid")"
 
-# Proxmox owns the outer CT network. LightNAS does not change the host bridge,
-# host firewall flag, or host veth behavior. Networking for nested workloads
-# remains internal to the appliance.
+# Keep the existing LightNAS eth0/net0 connection and IP exactly as-is.
+# Nested LightNAS containers use macvlan children of eth0, which means the
+# outer Proxmox veth must be allowed to carry their additional MAC addresses.
+# Disable only the Proxmox firewall flag on net0; preserve every other net0
+# setting (bridge, IP, gateway, VLAN tag, MTU, MAC, rate, etc.).
 config="$(pct config "$ctid")"
+net0="$(sed -n 's/^net0: //p' <<<"$config" | head -1)"
+if [[ -n "$net0" ]]; then
+  if [[ "$net0" =~ (^|,)firewall=1(,|$) ]]; then
+    net0="$(sed -E 's/(^|,)firewall=1(,|$)/\1firewall=0\2/' <<<"$net0")"
+    echo "Allowing nested container MAC addresses through the existing LightNAS eth0..."
+    pct set "$ctid" -net0 "$net0"
+    config="$(pct config "$ctid")"
+  elif [[ ! "$net0" =~ (^|,)firewall= ]]; then
+    echo "Existing LightNAS eth0 already permits direct nested LAN traffic."
+  fi
+else
+  echo "WARNING: LightNAS net0/eth0 was not found; nested containers may fall back to NAT." >&2
+fi
 
 ensure_host_kvm() {
   if [[ -c /dev/kvm ]]; then return 0; fi
@@ -125,8 +140,8 @@ echo "Starting LXC $ctid..."
 pct start "$ctid"
 wait_for_container
 
-# Do not modify the Proxmox host veth. The hypervisor supplies one normal NIC
-# to LightNAS; nested workload networking is handled inside the appliance.
+# The existing Proxmox net0 appears inside LightNAS as eth0. LightNAS keeps its
+# management address there and uses macvlan children for inner system LXCs.
 guest_installer="$(mktemp)"
 trap 'rm -f "$guest_installer"' EXIT
 curl -fsSL "${RAW_BASE}/install.sh" -o "$guest_installer"
@@ -282,6 +297,7 @@ echo "LightNAS local-runtime installation finished in LXC $ctid."
 echo 'Containers: native LXC/liblxc inside LightNAS.'
 echo 'VMs: QEMU/libvirt inside LightNAS; KVM is used when available and TCG otherwise.'
 echo 'Proxmox host APIs are not used for normal LightNAS compute operations.'
+echo 'Container networking: inner LXCs use the existing LightNAS eth0 as a direct LAN parent when supported.'
 
 echo "Performing strict post-install verification..."
 latest_config="$(pct config "$ctid")"
