@@ -2,6 +2,23 @@
 
 This repository contains the first runnable vertical slice of Lightweight AI NAS OS: a low-dependency Node control plane and responsive browser interface designed to remain practical on constrained hardware.
 
+## Platform design targets
+
+LightNAS is being designed around a **2 GB RAM / 35 GB system-storage minimum**
+and a broad hardware-compatibility goal spanning legacy through current
+hardware. Target architecture families include x86/x86_64, ARM, and RISC-V.
+Current support is not yet complete across every architecture or legacy CPU, so
+the project tracks verified support separately from compatibility targets.
+
+The project also requires architecture-aware ready-to-use OCI/Docker
+applications and major Linux system-container images, faster cached installs,
+and a substantially faster large-ISO workflow with streaming, progress, and
+resumable uploads.
+
+See **[docs/PLATFORM-REQUIREMENTS.md](docs/PLATFORM-REQUIREMENTS.md)** for the
+hardware, architecture, image-catalog, resource-budget, upload-performance, and
+installation-performance requirements.
+
 ## What works now
 
 - Safe first-run appliance setup
