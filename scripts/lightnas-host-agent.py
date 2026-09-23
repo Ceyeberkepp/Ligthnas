@@ -22,6 +22,7 @@ import socketserver
 import subprocess
 import termios
 import threading
+import time
 from pathlib import Path
 
 SOCKET_PATH = Path(os.environ.get("LIGHTNAS_HOST_SOCKET", "/run/lightnas/host-agent.sock"))
@@ -791,7 +792,25 @@ def create_container(data: dict) -> dict:
     storage_root_value = str(data.get("storageRoot") or "").strip()
     requested_network = str(data.get("network") or "").strip()
     networks = local_networks()
-    network = requested_network if requested_network in networks else (networks[0] if networks else "")
+    network_state = lightnas_network_state()
+    nested_direct = network_state.get("LIGHTNAS_NETWORK_MODE") == "nested-macvlan"
+    if nested_direct:
+        # In a nested Proxmox LightNAS appliance, container networking is not
+        # a per-app choice. Every new system container uses the already-working
+        # outer LAN uplink and DHCP, just like creating an LXC directly in
+        # Proxmox. This keeps the appliance management IP untouched.
+        network = str(network_state.get("LIGHTNAS_CONTAINER_PARENT") or network_state.get("LIGHTNAS_UPLINK") or "eth0")
+        data = {
+            **data,
+            "network": network,
+            "ipv4Mode": "dhcp",
+            "ipv4Address": "",
+            "gateway": "",
+            "dns": "",
+            "vlanTag": None,
+        }
+    else:
+        network = requested_network if requested_network in networks else (networks[0] if networks else "")
     try:
         memory = int(data.get("memoryMiB") or 2048)
         cpus = int(data.get("cpus") or 2)
@@ -841,9 +860,8 @@ def create_container(data: dict) -> dict:
     append_unique(config, f"lxc.start.auto = {1 if data.get('startOnBoot', True) else 0}")
     append_unique(config, f"lxc.cgroup2.memory.max = {memory * 1024 * 1024}")
     append_unique(config, f"lxc.cgroup2.cpu.max = {cpus * 100000} 100000")
-    network_state = lightnas_network_state()
     direct_macvlan = (
-        network_state.get("LIGHTNAS_NETWORK_MODE") == "nested-macvlan"
+        nested_direct
         and network == str(network_state.get("LIGHTNAS_CONTAINER_PARENT") or network_state.get("LIGHTNAS_UPLINK") or "eth0")
     )
     append_unique(config, f"lxc.net.0.type = {'macvlan' if direct_macvlan else 'veth'}")
@@ -881,6 +899,37 @@ def create_container(data: dict) -> dict:
         # deleting user data after an image was successfully created.
         raise RuntimeError(f"container {name} was built but could not start; inspect lxc-start -n {name} -F -l DEBUG")
 
+    ipv4 = ""
+    default_route = ""
+    if direct_macvlan:
+        # Do not tell the UI creation succeeded until upstream DHCP has had a
+        # chance to provide a real LAN address and default route.
+        for _attempt in range(30):
+            addresses = [address for address in container_addresses(name) if ":" not in address]
+            ipv4 = next((address for address in addresses if not address.startswith("10.77.0.")), "")
+            if ipv4:
+                try:
+                    route = run(
+                        ["lxc-attach", "-n", name, "--", "ip", "-4", "route", "show", "default"],
+                        timeout=5,
+                        check=False,
+                    ).strip()
+                except Exception:
+                    route = ""
+                if route:
+                    default_route = route
+                    break
+            time.sleep(1)
+        if not ipv4:
+            raise RuntimeError(
+                f"container {name} started but did not receive a LAN DHCP address; "
+                "check the upstream DHCP server and Proxmox bridge MAC filtering"
+            )
+        if not default_route:
+            raise RuntimeError(
+                f"container {name} received {ipv4} but has no IPv4 default route"
+            )
+
     return {
         "id": name,
         "name": name,
@@ -893,6 +942,10 @@ def create_container(data: dict) -> dict:
         "builder": "archive" if template_path else image.get("builder"),
         "storageId": str(data.get("storageId") or ""),
         "diskGiB": disk_gib,
+        "network": network,
+        "ipv4": ipv4 or (container_addresses(name)[0] if container_addresses(name) else ""),
+        "defaultRoute": default_route,
+        "networkMode": "direct-lan" if direct_macvlan else "managed",
     }
 
 
