@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { configureVmBootXml } from '../src/runtimes-next.mjs';
+import { configureVmBootXml, configureVmEditableHardware } from '../src/runtimes-next.mjs';
 
 test('VM and container creation use guided dialogs instead of inline forms', async () => {
   const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
@@ -36,11 +36,17 @@ test('VMs with selected ISO media automatically enter the installer', async () =
   assert.match(runtime, /function queueInstallerBootKey/);
   assert.match(runtime, /send-key.*KEY_SPACE/s);
   assert.match(runtime, /uefi,cdrom,hd,menu=on/);
+  assert.match(runtime, /'--video', 'vga'/);
   assert.match(runtime, /if \(isoEntry\) queueInstallerBootKey\(input\.name\)/);
   assert.match(runtime, /configureVmBootXml/);
   assert.match(runtime, /installationMediaId/);
   assert.match(dialogs, /CD\/DVD drive · installer ISO/);
   assert.match(dialogs, /First boot drive/);
+  assert.match(dialogs, /Display adapter/);
+  assert.match(dialogs, /Standard VGA · recommended for installers/);
+  assert.match(dialogs, /SCSI controller/);
+  assert.match(dialogs, /Network adapter model/);
+  assert.match(dialogs, /Start automatically with LightNAS/);
   assert.match(dialogs, /bootOrder: values\.bootOrder/);
   assert.doesNotMatch(enhancements, /data-vm-action="boot-installer"/);
 
@@ -51,6 +57,11 @@ test('VMs with selected ISO media automatically enter the installer', async () =
   assert.match(updated, /device='cdrom'[\s\S]*boot order='1'/);
   assert.match(updated, /device='disk'[\s\S]*boot order='2'/);
   assert.doesNotMatch(updated, /boot dev=/);
+
+  const hardware = configureVmEditableHardware(`<domain><devices><controller type='scsi' model='virtio-scsi'/><interface type='network'><model type='virtio'/></interface><video><model type='virtio'/></video></devices></domain>`, { displayModel: 'vga', networkModel: 'e1000', scsiController: 'virtio-scsi-single' });
+  assert.match(hardware, /<model type='vga'/);
+  assert.match(hardware, /<model type='e1000'/);
+  assert.match(hardware, /model='virtio-scsi-single'/);
 });
 
 test('image and ISO transfers use the progress dialog', async () => {

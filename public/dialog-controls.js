@@ -45,6 +45,10 @@ function showEditor({ eyebrow, title, description, fields, submitLabel = 'Save c
     if (field.max !== undefined) input.max = String(field.max);
     if (field.step !== undefined) input.step = String(field.step);
     if (field.required) input.required = true;
+    if (field.readonly) {
+      if (input.tagName === 'SELECT') input.disabled = true;
+      else input.readOnly = true;
+    }
     if (field.autocomplete) input.autocomplete = field.autocomplete;
     if (field.options) {
       for (const optionValue of field.options) {
@@ -680,6 +684,7 @@ document.addEventListener('click', async event => {
       { value: '', label: 'No ISO — empty CD-ROM drive' },
       ...(virtualization.isoDetails || []).map(iso => ({ value: iso.id, label: `${iso.name} · ${iso.storageName}` }))
     ];
+    const recommendedDisplay = item.installationMediaId && item.displayModel === 'virtio' ? 'vga' : (item.displayModel || 'vga');
     showEditor({
       eyebrow: 'VIRTUAL MACHINE SETTINGS',
       title: `Edit ${vmEdit.dataset.vmName || id}`,
@@ -688,15 +693,22 @@ document.addEventListener('click', async event => {
         { name: 'name', label: 'VM name', value: item.name || vmEdit.dataset.vmName || id, required: true },
         { name: 'memoryMiB', label: 'Memory (MiB)', type: 'number', value: Math.max(512, Math.round((item.memory || 0) / 1048576) || Number(vmEdit.dataset.vmMemory) || 2048), min: 512, max: 262144, step: 1, required: true },
         { name: 'cpus', label: 'Virtual CPUs', type: 'number', value: item.cpus || vmEdit.dataset.vmCpus || '2', min: 1, max: 128, step: 1, required: true },
+        { name: 'firmwareInfo', label: 'BIOS / firmware', value: item.firmware === 'uefi' ? 'UEFI' : 'SeaBIOS', readonly: true },
+        { name: 'machineInfo', label: 'Machine type', value: item.machineType || 'Default', readonly: true },
+        { name: 'displayModel', label: 'Display adapter', type: 'select', value: recommendedDisplay, options: [{ value: 'vga', label: 'Standard VGA · recommended for installers' }, { value: 'qxl', label: 'QXL display' }, { value: 'virtio', label: 'VirtIO GPU · requires guest drivers' }] },
+        { name: 'scsiController', label: 'SCSI controller', type: 'select', value: item.scsiController || 'virtio-scsi', options: [{ value: 'virtio-scsi', label: 'VirtIO SCSI' }, { value: 'virtio-scsi-single', label: 'VirtIO SCSI single' }, { value: 'lsilogic', label: 'LSI Logic' }] },
+        { name: 'diskInfo', label: 'Virtual disk bus', value: String(item.diskBus || 'scsi').toUpperCase(), readonly: true },
+        { name: 'networkModel', label: 'Network adapter model', type: 'select', value: item.networkModel || 'virtio', options: [{ value: 'virtio', label: 'VirtIO · recommended' }, { value: 'e1000', label: 'Intel E1000' }, { value: 'rtl8139', label: 'Realtek RTL8139' }] },
         { name: 'iso', label: 'CD/DVD drive · installer ISO', type: 'select', value: item.installationMediaId || '', options: isoOptions },
-        { name: 'bootOrder', label: 'First boot drive', type: 'select', value: item.bootOrder || (item.installationMediaId ? 'iso' : 'disk'), options: [{ value: 'iso', label: 'CD/DVD installer ISO' }, { value: 'disk', label: 'Virtual hard disk' }] }
+        { name: 'bootOrder', label: 'First boot drive', type: 'select', value: item.bootOrder || (item.installationMediaId ? 'iso' : 'disk'), options: [{ value: 'iso', label: 'CD/DVD installer ISO' }, { value: 'disk', label: 'Virtual hard disk' }] },
+        { name: 'startOnBoot', label: 'Start automatically with LightNAS', type: 'select', value: String(item.startOnBoot !== false), options: [{ value: 'true', label: 'Enabled' }, { value: 'false', label: 'Disabled' }] }
       ],
       onSubmit: async values => {
         const memoryMiB = Number(values.memoryMiB);
         const cpus = Number(values.cpus);
         if (!Number.isInteger(memoryMiB) || !Number.isInteger(cpus)) throw new Error('Memory and CPU values must be whole numbers.');
         if (values.bootOrder === 'iso' && !values.iso) throw new Error('Select an installer ISO before choosing the CD/DVD drive as the first boot drive.');
-        await dialogApi('/api/vms', { method: 'POST', body: JSON.stringify({ id, vmid: id, action: 'update', name: values.name, memoryMiB, cpus, iso: values.iso || '', bootOrder: values.bootOrder }) });
+        await dialogApi('/api/vms', { method: 'POST', body: JSON.stringify({ id, vmid: id, action: 'update', name: values.name, memoryMiB, cpus, displayModel: values.displayModel, scsiController: values.scsiController, networkModel: values.networkModel, iso: values.iso || '', bootOrder: values.bootOrder, startOnBoot: values.startOnBoot === 'true' }) });
         refreshRuntime();
       }
     });

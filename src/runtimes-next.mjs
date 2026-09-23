@@ -117,6 +117,29 @@ function vmBootOrder(source) {
   return /<boot\s+order=(['"])1\1/i.test(cdrom) ? 'iso' : 'disk';
 }
 
+function vmHardwareDetails(source) {
+  const xml = String(source || '');
+  return {
+    firmware: /<loader\b/i.test(xml) || /firmware=(['"])efi\1/i.test(xml) ? 'uefi' : 'bios',
+    machineType: xml.match(/<type\b[^>]*machine=(['"])([^'"]+)\1/i)?.[2] || 'default',
+    displayModel: xml.match(/<video>[\s\S]*?<model\b[^>]*type=(['"])([^'"]+)\1/i)?.[2] || 'vga',
+    networkModel: xml.match(/<interface\b[\s\S]*?<model\b[^>]*type=(['"])([^'"]+)\1/i)?.[2] || 'virtio',
+    scsiController: xml.match(/<controller\b[^>]*type=(['"])scsi\1[^>]*model=(['"])([^'"]+)\2/i)?.[3] || 'virtio-scsi',
+    diskBus: xml.match(/<disk\b[^>]*device=(['"])disk\1[^>]*>[\s\S]*?<target\b[^>]*bus=(['"])([^'"]+)\2/i)?.[3] || 'scsi'
+  };
+}
+
+export function configureVmEditableHardware(source, settings = {}) {
+  let xml = String(source || '');
+  const displayModel = ['vga', 'qxl', 'virtio'].includes(settings.displayModel) ? settings.displayModel : 'vga';
+  const networkModel = ['virtio', 'e1000', 'rtl8139'].includes(settings.networkModel) ? settings.networkModel : 'virtio';
+  const scsiController = ['virtio-scsi', 'virtio-scsi-single', 'lsilogic'].includes(settings.scsiController) ? settings.scsiController : 'virtio-scsi';
+  xml = xml.replace(/(<video>[\s\S]*?<model\b[^>]*type=)(['"])[^'"]+\2/i, `$1'${displayModel}'`);
+  xml = xml.replace(/(<interface\b[\s\S]*?<model\b[^>]*type=)(['"])[^'"]+\2/i, `$1'${networkModel}'`);
+  xml = xml.replace(/(<controller\b[^>]*type=(['"])scsi\2[^>]*model=)(['"])[^'"]+\3/i, `$1'${scsiController}'`);
+  return xml;
+}
+
 
 function parseDomInfo(text) {
   const values = {};
@@ -147,7 +170,9 @@ async function localVmDetails(names) {
       persistent: parsed.persistent === 'yes',
       installationMedia: blockDevices.ok && hasInstallerMedia(blockDevices.output),
       installationMediaPath: blockDevices.ok ? installerMediaPath(blockDevices.output) : '',
-      bootOrder: domainXml.ok ? vmBootOrder(domainXml.output) : 'disk'
+      bootOrder: domainXml.ok ? vmBootOrder(domainXml.output) : 'disk',
+      ...(domainXml.ok ? vmHardwareDetails(domainXml.output) : {}),
+      startOnBoot: parsed.autostart === 'enable'
     });
   }
   return details;
@@ -206,12 +231,14 @@ async function localUpdateVm(input) {
   ]);
   if (!xmlResult.ok) throw Object.assign(new Error(`Unable to read VM hardware: ${xmlResult.error}`), { status: 409 });
   const currentMedia = installerMediaPath((await command('virsh', ['-c', 'qemu:///system', 'domblklist', target, '--details'], 10000)).output);
-  const mediaChanged = currentMedia !== (isoEntry?.path || '') || configureVmBootXml(xmlResult.output, isoEntry?.path || '', bootOrder) !== xmlResult.output;
-  if (mediaChanged) {
+  const bootXml = configureVmBootXml(xmlResult.output, isoEntry?.path || '', bootOrder);
+  const updatedXml = configureVmEditableHardware(bootXml, input);
+  const hardwareChanged = currentMedia !== (isoEntry?.path || '') || updatedXml !== xmlResult.output;
+  if (hardwareChanged) {
     const directory = await mkdtemp(join(tmpdir(), 'lightnas-vm-'));
     const definition = join(directory, `${target}.xml`);
     try {
-      await writeFile(definition, configureVmBootXml(xmlResult.output, isoEntry?.path || '', bootOrder), { mode: 0o600 });
+      await writeFile(definition, updatedXml, { mode: 0o600 });
       const define = await command('virsh', ['-c', 'qemu:///system', 'define', definition], 30000);
       if (!define.ok) throw Object.assign(new Error(`Unable to update VM boot hardware: ${define.error}`), { status: 409 });
     } finally {
@@ -224,7 +251,10 @@ async function localUpdateVm(input) {
     }
     if (isoEntry && bootOrder === 'iso') queueInstallerBootKey(target);
   }
-  return { id: target, name: target, memoryMiB: memory, cpus, iso: isoId, bootOrder, status: mediaChanged ? 'updated and restarted' : 'updated' };
+  const autostart = input.startOnBoot === false || input.startOnBoot === 'false' ? 'disable' : 'enable';
+  const autostartResult = await command('virsh', ['-c', 'qemu:///system', 'autostart', target, ...(autostart === 'disable' ? ['--disable'] : [])], 30000);
+  if (!autostartResult.ok) throw Object.assign(new Error(`VM settings were saved, but autostart could not be updated: ${autostartResult.error}`), { status: 409 });
+  return { id: target, name: target, memoryMiB: memory, cpus, iso: isoId, bootOrder, status: hardwareChanged ? 'updated and restarted' : 'updated' };
 }
 function requireDeletionConfirmation(input, id, label) {
   if (input?.deleteFiles !== true || String(input?.confirmation || '') !== id) {
@@ -551,7 +581,7 @@ export async function createVm(input) {
       : `network=${input.network},model=${networkModel}`;
   const virtType = virtualization.acceleration === 'kvm' ? 'kvm' : 'qemu';
   const diskController = diskBus === 'scsi' ? ['--controller', 'scsi,model=virtio-scsi'] : [];
-  const args = ['--connect', 'qemu:///system', '--virt-type', virtType, '--name', input.name, '--memory', String(memory), '--vcpus', String(cpus), '--disk', `path=${diskPath},size=${disk},format=qcow2,bus=${diskBus}`, ...diskController, '--network', networkArg, '--graphics', 'vnc,listen=127.0.0.1', '--video', 'virtio', '--noautoconsole', '--wait', '0'];
+  const args = ['--connect', 'qemu:///system', '--virt-type', virtType, '--name', input.name, '--memory', String(memory), '--vcpus', String(cpus), '--disk', `path=${diskPath},size=${disk},format=qcow2,bus=${diskBus}`, ...diskController, '--network', networkArg, '--graphics', 'vnc,listen=127.0.0.1', '--video', 'vga', '--noautoconsole', '--wait', '0'];
   if (isoEntry) args.push('--cdrom', isoEntry.path, '--osinfo', 'detect=on,require=off');
   else args.push('--import', '--osinfo', 'generic');
   args.push('--boot', firmware === 'uefi' ? (isoEntry ? 'uefi,cdrom,hd,menu=on' : 'uefi,hd,menu=on') : (isoEntry ? 'cdrom,hd,menu=on' : 'hd,menu=on'));
