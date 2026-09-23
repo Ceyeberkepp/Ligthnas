@@ -55,6 +55,7 @@ test('container manager exposes real resource and network controls', async () =>
   assert.match(server, /containerReadyForPublication/);
   assert.match(server, /automaticContainerApplication/);
   assert.match(server, /discoverContainerApplication/);
+  assert.match(server, /10\\\.77\\\.0/);
   assert.match(server, /localManageContainer\(id, 'start'\)/);
   assert.match(styles, /container-manager-layout/);
   assert.match(runtime, /ipv4Address: input\.ipv4Address/);
