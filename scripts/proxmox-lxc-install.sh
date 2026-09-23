@@ -10,11 +10,17 @@ ctid="${1:-${LIGHTNAS_CTID:-}}"
 run_local_installer() {
   [[ ${EUID} -eq 0 ]] || { echo 'Run the LightNAS installer as root (or with sudo).' >&2; exit 1; }
   echo 'Proxmox host tools were not detected. Installing LightNAS locally.'
-  local installer
+  local installer status=0
   installer="$(mktemp)"
-  trap 'rm -f "$installer"' EXIT
-  curl -fsSL "${RAW_BASE}/install.sh" -o "$installer"
-  bash "$installer"
+
+  if ! curl -fsSL "${RAW_BASE}/install.sh" -o "$installer"; then
+    rm -f "$installer"
+    return 1
+  fi
+
+  bash "$installer" || status=$?
+  rm -f "$installer"
+  return "$status"
 }
 
 if [[ ! -d /etc/pve ]] || ! command -v pct >/dev/null 2>&1; then
@@ -160,10 +166,27 @@ if ! pct exec "$ctid" -- bash -lc 'command -v lxc-ls >/dev/null && command -v lx
     set -Eeuo pipefail
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
-    apt-get install -y \
-      lxc lxc-templates lxcfs uidmap bridge-utils debootstrap debian-archive-keyring ubuntu-keyring zstd \
-      qemu-system-x86 qemu-utils libvirt-daemon-system libvirt-clients virtinst ovmf \
+
+    packages=(
+      lxc lxc-templates lxcfs uidmap bridge-utils debootstrap zstd
+      qemu-system-x86 qemu-utils libvirt-daemon-system libvirt-clients virtinst ovmf
       dnsmasq-base network-manager iproute2 nftables ufw
+    )
+    for keyring in debian-archive-keyring ubuntu-keyring; do
+      if apt-cache show "$keyring" >/dev/null 2>&1; then
+        packages+=("$keyring")
+      fi
+    done
+    apt-get install -y "${packages[@]}"
+
+    if ! apt-cache show ubuntu-keyring >/dev/null 2>&1; then
+      install -d -m 0755 /usr/share/keyrings
+      if [[ ! -s /usr/share/keyrings/ubuntu-archive-keyring.gpg ]]; then
+        curl -fsSL https://archive.ubuntu.com/ubuntu/project/ubuntu-archive-keyring.gpg \
+          -o /usr/share/keyrings/ubuntu-archive-keyring.gpg
+        chmod 0644 /usr/share/keyrings/ubuntu-archive-keyring.gpg
+      fi
+    fi
   '
 fi
 

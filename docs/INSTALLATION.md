@@ -79,11 +79,17 @@ lxcfs
 uidmap
 bridge-utils
 debootstrap
-debian-archive-keyring
-ubuntu-keyring
 dnsmasq-base
 network-manager
 ```
+
+Archive signing keyrings are installed according to what the host distribution
+actually provides. For example, Debian 12 provides
+`debian-archive-keyring` but may not provide an installable
+`ubuntu-keyring` package. In that case LightNAS downloads Ubuntu's official
+`ubuntu-archive-keyring.gpg` into `/usr/share/keyrings` automatically so
+Ubuntu container images can still be verified by debootstrap. A missing
+cross-distribution keyring package must not abort the LightNAS installation.
 
 LightNAS also installs Node.js 22 when required.
 
