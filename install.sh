@@ -20,7 +20,8 @@ export DEBIAN_FRONTEND=noninteractive
 
 echo "[1/6] Installing system requirements..."
 apt-get update
-apt-get install -y ca-certificates curl git gnupg python3 ffmpeg acl novnc iproute2 nftables ufw zstd
+apt-get install -y ca-certificates curl git gnupg python3 ffmpeg acl novnc iproute2 nftables ufw \
+  tar gzip xz-utils zstd
 
 if ! command -v node >/dev/null 2>&1 || \
    [[ "$(node --version | sed -E 's/^v([0-9]+).*/\1/')" -lt 22 ]]; then
