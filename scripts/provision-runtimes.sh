@@ -55,7 +55,13 @@ if command -v lxc-create >/dev/null 2>&1 && command -v lxc-start >/dev/null 2>&1
       [[ -f "$config" ]] || continue
       link="$(sed -nE 's/^lxc\.net\.[0-9]+\.link\s*=\s*([^[:space:]]+).*/\1/p' "$config" | head -1)"
       type="$(sed -nE 's/^lxc\.net\.[0-9]+\.type\s*=\s*([^[:space:]]+).*/\1/p' "$config" | head -1)"
-      [[ "$link" =~ ^(lightnas0|lxcbr0|virbr0)$ || "$type" != "macvlan" ]] || continue
+      if [[ "$link" =~ ^(lightnas0|lxcbr0|virbr0)$ ]]; then
+        :
+      elif [[ "$link" == "${container_parent}" && "$type" != "macvlan" ]]; then
+        :
+      else
+        continue
+      fi
       name="$(basename "$(dirname "$config")")"
       was_running=0
       [[ "$(lxc-info -n "$name" -sH 2>/dev/null || true)" == "RUNNING" ]] && was_running=1
