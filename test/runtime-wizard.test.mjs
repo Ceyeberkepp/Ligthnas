@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { configureVmBootXml } from '../src/runtimes-next.mjs';
 
 test('VM and container creation use guided dialogs instead of inline forms', async () => {
   const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
@@ -27,18 +28,29 @@ test('nested VM provisioning disables unsupported libvirt ownership xattrs and c
 });
 
 test('VMs with selected ISO media automatically enter the installer', async () => {
-  const [runtime, enhancements] = await Promise.all([
+  const [runtime, enhancements, dialogs] = await Promise.all([
     readFile(new URL('../src/runtimes-next.mjs', import.meta.url), 'utf8'),
-    readFile(new URL('../public/enhancements.js', import.meta.url), 'utf8')
+    readFile(new URL('../public/enhancements.js', import.meta.url), 'utf8'),
+    readFile(new URL('../public/dialog-controls.js', import.meta.url), 'utf8')
   ]);
   assert.match(runtime, /function queueInstallerBootKey/);
   assert.match(runtime, /send-key.*KEY_SPACE/s);
   assert.match(runtime, /uefi,cdrom,hd,menu=on/);
   assert.match(runtime, /if \(isoEntry\) queueInstallerBootKey\(input\.name\)/);
-  assert.match(runtime, /action === 'boot-installer'/);
-  assert.match(runtime, /No installer ISO is attached/);
-  assert.match(enhancements, /data-vm-action="boot-installer"/);
-  assert.match(enhancements, />Boot installer</);
+  assert.match(runtime, /configureVmBootXml/);
+  assert.match(runtime, /installationMediaId/);
+  assert.match(dialogs, /CD\/DVD drive · installer ISO/);
+  assert.match(dialogs, /First boot drive/);
+  assert.match(dialogs, /bootOrder: values\.bootOrder/);
+  assert.doesNotMatch(enhancements, /data-vm-action="boot-installer"/);
+
+  const original = `<domain><os><type machine='pc-q35'>hvm</type><boot dev='hd'/></os><devices><disk type='file' device='disk'><source file='/vm/disk.qcow2'/><target dev='sda' bus='scsi'/></disk></devices></domain>`;
+  const updated = configureVmBootXml(original, '/iso/windows.iso', 'iso');
+  assert.match(updated, /device='cdrom'/);
+  assert.match(updated, /source file='\/iso\/windows\.iso'/);
+  assert.match(updated, /device='cdrom'[\s\S]*boot order='1'/);
+  assert.match(updated, /device='disk'[\s\S]*boot order='2'/);
+  assert.doesNotMatch(updated, /boot dev=/);
 });
 
 test('image and ISO transfers use the progress dialog', async () => {

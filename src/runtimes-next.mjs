@@ -2,8 +2,9 @@ import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomBytes } from 'node:crypto';
 import net from 'node:net';
-import { mkdir, readdir, lstat, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, lstat, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { proxmoxInventory, proxmoxCreateVm, proxmoxManageVm, proxmoxUpdateVm } from './proxmox.mjs';
 import { localContainerInventory, localCreateContainer, localManageContainer, localUpdateContainer } from './local-host.mjs';
 import { listContainerTemplates, resolveContainerTemplate } from './templates.mjs';
@@ -77,6 +78,45 @@ function hasInstallerMedia(output) {
   });
 }
 
+function installerMediaPath(output) {
+  for (const line of String(output || '').split('\n')) {
+    const fields = line.trim().split(/\s+/);
+    if (fields[1]?.toLowerCase() === 'cdrom' && fields[3] && fields[3] !== '-') return fields.slice(3).join(' ');
+  }
+  return '';
+}
+
+export function configureVmBootXml(source, isoPath, bootOrder) {
+  let xml = String(source || '').replace(/<boot\s+dev=(['"])[^'"]+\1\s*\/>\s*/g, '');
+  const cdromPattern = /<disk\b[^>]*device=(['"])cdrom\1[^>]*>[\s\S]*?<\/disk>/i;
+  let cdrom = xml.match(cdromPattern)?.[0] || '';
+  if (!cdrom && isoPath) {
+    const q35 = /<type\b[^>]*machine=(['"])[^'"]*q35[^'"]*\1/i.test(xml);
+    cdrom = `<disk type='file' device='cdrom'><driver name='qemu' type='raw'/><target dev='${q35 ? 'sdb' : 'hda'}' bus='${q35 ? 'sata' : 'ide'}'/><readonly/></disk>`;
+    xml = xml.replace('</devices>', `${cdrom}</devices>`);
+  }
+  const updatedCdrom = cdrom ? (isoPath
+    ? (/<source\b[^>]*\/>/i.test(cdrom)
+      ? cdrom.replace(/<source\b[^>]*\/>/i, `<source file='${String(isoPath).replaceAll('&', '&amp;').replaceAll("'", '&apos;').replaceAll('<', '&lt;')}'/>`)
+      : cdrom.replace(/<target\b/i, `<source file='${String(isoPath).replaceAll('&', '&amp;').replaceAll("'", '&apos;').replaceAll('<', '&lt;')}'/><target`))
+    : cdrom.replace(/\s*<source\b[^>]*\/>/i, '')).replace(/\s*<boot\s+order=(['"])[0-9]+\1\s*\/>/gi, '') : '';
+  if (cdrom) xml = xml.replace(cdromPattern, updatedCdrom);
+
+  const diskPattern = /<disk\b[^>]*device=(['"])disk\1[^>]*>[\s\S]*?<\/disk>/i;
+  const disk = xml.match(diskPattern)?.[0];
+  if (!disk) throw new Error('The VM does not have a bootable virtual disk.');
+  const cleanDisk = disk.replace(/\s*<boot\s+order=(['"])[0-9]+\1\s*\/>/gi, '');
+  const isoFirst = bootOrder === 'iso' && Boolean(isoPath);
+  xml = xml.replace(diskPattern, cleanDisk.replace('</disk>', `<boot order='${isoFirst ? 2 : 1}'/></disk>`));
+  if (isoPath) xml = xml.replace(cdromPattern, updatedCdrom.replace('</disk>', `<boot order='${isoFirst ? 1 : 2}'/></disk>`));
+  return xml;
+}
+
+function vmBootOrder(source) {
+  const cdrom = String(source || '').match(/<disk\b[^>]*device=(['"])cdrom\1[^>]*>[\s\S]*?<\/disk>/i)?.[0] || '';
+  return /<boot\s+order=(['"])1\1/i.test(cdrom) ? 'iso' : 'disk';
+}
+
 
 function parseDomInfo(text) {
   const values = {};
@@ -90,9 +130,10 @@ function parseDomInfo(text) {
 async function localVmDetails(names) {
   const details = [];
   for (const name of names.slice(0, 100)) {
-    const [info, blockDevices] = await Promise.all([
+    const [info, blockDevices, domainXml] = await Promise.all([
       command('virsh', ['-c', 'qemu:///system', 'dominfo', name], 10000),
-      command('virsh', ['-c', 'qemu:///system', 'domblklist', name, '--details'], 10000)
+      command('virsh', ['-c', 'qemu:///system', 'domblklist', name, '--details'], 10000),
+      command('virsh', ['-c', 'qemu:///system', 'dumpxml', name, '--inactive'], 10000)
     ]);
     if (!info.ok) continue;
     const parsed = parseDomInfo(info.output);
@@ -104,7 +145,9 @@ async function localVmDetails(names) {
       cpus: Number(parsed['cpu(s)']) || 0,
       memory: (Number(String(parsed['max memory'] || '').split(/\s+/)[0]) || 0) * 1024,
       persistent: parsed.persistent === 'yes',
-      installationMedia: blockDevices.ok && hasInstallerMedia(blockDevices.output)
+      installationMedia: blockDevices.ok && hasInstallerMedia(blockDevices.output),
+      installationMediaPath: blockDevices.ok ? installerMediaPath(blockDevices.output) : '',
+      bootOrder: domainXml.ok ? vmBootOrder(domainXml.output) : 'disk'
     });
   }
   return details;
@@ -113,21 +156,13 @@ async function localVmDetails(names) {
 async function localManageVm(id, action) {
   const name = String(id || '');
   if (!/^[A-Za-z][A-Za-z0-9-]{1,39}$/.test(name)) throw Object.assign(new Error('Invalid VM name.'), { status: 400 });
-  const allowed = new Set(['start', 'stop', 'shutdown', 'reboot', 'reset', 'boot-installer', 'delete']);
+  const allowed = new Set(['start', 'stop', 'shutdown', 'reboot', 'reset', 'delete']);
   if (!allowed.has(action)) throw Object.assign(new Error('Invalid VM action.'), { status: 400 });
   if (action === 'delete') {
     await command('virsh', ['-c', 'qemu:///system', 'destroy', name], 30000);
     const result = await command('virsh', ['-c', 'qemu:///system', 'undefine', name, '--remove-all-storage', '--nvram'], 120000);
     if (!result.ok) throw Object.assign(new Error(`VM delete failed: ${result.error}`), { status: 409 });
     return { id: name, action, status: 'deleted' };
-  }
-  if (action === 'boot-installer') {
-    const media = await command('virsh', ['-c', 'qemu:///system', 'domblklist', name, '--details'], 10000);
-    if (!media.ok || !hasInstallerMedia(media.output)) throw Object.assign(new Error('No installer ISO is attached to this VM.'), { status: 409 });
-    const reset = await command('virsh', ['-c', 'qemu:///system', 'reset', name], 60000);
-    if (!reset.ok) throw Object.assign(new Error(`VM installer boot failed: ${reset.error}`), { status: 409 });
-    queueInstallerBootKey(name);
-    return { id: name, action, status: 'installer boot requested' };
   }
   const verb = action === 'stop' ? 'destroy' : action;
   const result = await command('virsh', ['-c', 'qemu:///system', verb, name], 60000);
@@ -159,7 +194,37 @@ async function localUpdateVm(input) {
     if (!fallback.ok) throw Object.assign(new Error(`Unable to change VM CPUs: ${fallback.error}`), { status: 409 });
   }
   await command('virsh', ['-c', 'qemu:///system', 'setvcpus', target, String(cpus), '--config'], 30000);
-  return { id: target, name: target, memoryMiB: memory, cpus, status: 'updated' };
+
+  const isoId = String(input.iso || '');
+  const bootOrder = input.bootOrder === 'iso' ? 'iso' : 'disk';
+  const availableIsos = await listContentAcrossPools('iso').catch(() => []);
+  const isoEntry = isoId ? availableIsos.find(item => item.id === isoId) : null;
+  if (isoId && !isoEntry) throw Object.assign(new Error('The selected installer ISO is no longer available.'), { status: 409 });
+  const [xmlResult, stateResult] = await Promise.all([
+    command('virsh', ['-c', 'qemu:///system', 'dumpxml', target, '--inactive'], 10000),
+    command('virsh', ['-c', 'qemu:///system', 'domstate', target], 10000)
+  ]);
+  if (!xmlResult.ok) throw Object.assign(new Error(`Unable to read VM hardware: ${xmlResult.error}`), { status: 409 });
+  const currentMedia = installerMediaPath((await command('virsh', ['-c', 'qemu:///system', 'domblklist', target, '--details'], 10000)).output);
+  const mediaChanged = currentMedia !== (isoEntry?.path || '') || configureVmBootXml(xmlResult.output, isoEntry?.path || '', bootOrder) !== xmlResult.output;
+  if (mediaChanged) {
+    const directory = await mkdtemp(join(tmpdir(), 'lightnas-vm-'));
+    const definition = join(directory, `${target}.xml`);
+    try {
+      await writeFile(definition, configureVmBootXml(xmlResult.output, isoEntry?.path || '', bootOrder), { mode: 0o600 });
+      const define = await command('virsh', ['-c', 'qemu:///system', 'define', definition], 30000);
+      if (!define.ok) throw Object.assign(new Error(`Unable to update VM boot hardware: ${define.error}`), { status: 409 });
+    } finally {
+      await rm(directory, { recursive: true, force: true }).catch(() => {});
+    }
+    if (/running/i.test(stateResult.output || '')) {
+      await command('virsh', ['-c', 'qemu:///system', 'destroy', target], 30000);
+      const start = await command('virsh', ['-c', 'qemu:///system', 'start', target], 60000);
+      if (!start.ok) throw Object.assign(new Error(`VM settings were saved, but it could not restart: ${start.error}`), { status: 409 });
+    }
+    if (isoEntry && bootOrder === 'iso') queueInstallerBootKey(target);
+  }
+  return { id: target, name: target, memoryMiB: memory, cpus, iso: isoId, bootOrder, status: mediaChanged ? 'updated and restarted' : 'updated' };
 }
 function requireDeletionConfirmation(input, id, label) {
   if (input?.deleteFiles !== true || String(input?.confirmation || '') !== id) {
@@ -229,6 +294,11 @@ export async function runtimeInventory() {
   if (runtime.virtualization.available) {
     const names = vmInfo.output ? vmInfo.output.split('\n').filter(Boolean) : [];
     runtime.virtualization.machineDetails = await localVmDetails(names);
+    runtime.virtualization.machineDetails = runtime.virtualization.machineDetails.map(item => {
+      const media = storageIsos.find(iso => iso.path === item.installationMediaPath);
+      const { installationMediaPath: _privatePath, ...visible } = item;
+      return { ...visible, installationMediaId: media?.id || '', installationMediaName: media?.name || '' };
+    });
     runtime.virtualization.machines = runtime.virtualization.machineDetails.map(item => `${item.name} · ${item.status}`);
     const libvirtNetworks = vmNetworks.ok && vmNetworks.output ? vmNetworks.output.split('\n').filter(Boolean) : [];
     let bridges = [];

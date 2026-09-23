@@ -379,7 +379,7 @@ async function enhanceRuntimeControls() {
         actions.className = 'runtime-actions';
         const running = /running/i.test(String(item.status || ''));
         const memoryMiB = Math.max(512, Math.round((item.memory || 0) / 1048576) || 2048);
-        actions.innerHTML = `${running ? `<button class="primary" data-vm-console="${escapeHtml(id)}" data-vm-name="${escapeHtml(item.name)}">noVNC Console</button>${item.installationMedia ? `<button class="secondary" data-vm-action="boot-installer" data-vm-id="${escapeHtml(id)}">Boot installer</button>` : ''}<button class="secondary" data-vm-action="shutdown" data-vm-id="${escapeHtml(id)}">Shutdown</button><button class="secondary" data-vm-action="reboot" data-vm-id="${escapeHtml(id)}">Reboot</button><button class="secondary" data-vm-action="stop" data-vm-id="${escapeHtml(id)}">Stop</button>` : `<button class="primary" data-vm-action="start" data-vm-id="${escapeHtml(id)}">Start</button>`}
+        actions.innerHTML = `${running ? `<button class="primary" data-vm-console="${escapeHtml(id)}" data-vm-name="${escapeHtml(item.name)}">noVNC Console</button><button class="secondary" data-vm-action="shutdown" data-vm-id="${escapeHtml(id)}">Shutdown</button><button class="secondary" data-vm-action="reboot" data-vm-id="${escapeHtml(id)}">Reboot</button><button class="secondary" data-vm-action="stop" data-vm-id="${escapeHtml(id)}">Stop</button>` : `<button class="primary" data-vm-action="start" data-vm-id="${escapeHtml(id)}">Start</button>`}
           <button class="secondary" data-vm-edit="${escapeHtml(id)}" data-vm-name="${escapeHtml(item.name)}" data-vm-memory="${memoryMiB}" data-vm-cpus="${item.cpus || 2}">Edit</button>
           <button class="secondary" data-vm-action="reset" data-vm-id="${escapeHtml(id)}">Reset</button>
           <button class="secondary danger-button" data-vm-action="delete" data-vm-id="${escapeHtml(id)}">Delete</button>`;
@@ -568,20 +568,6 @@ document.addEventListener('click', async event => {
   const vmConsole = event.target.closest('[data-vm-console]');
   if (vmConsole) {
     window.open(`/vm-console.html?id=${encodeURIComponent(vmConsole.dataset.vmConsole)}&name=${encodeURIComponent(vmConsole.dataset.vmName || '')}&v=${Date.now()}`, '_blank', 'noopener,width=1280,height=820');
-    return;
-  }
-  const vmEdit = event.target.closest('[data-vm-edit]');
-  if (vmEdit) {
-    const id = vmEdit.dataset.vmEdit;
-    const name = prompt('VM name', vmEdit.dataset.vmName || id);
-    if (!name) return;
-    const memoryMiB = Number(prompt('Memory (MiB)', vmEdit.dataset.vmMemory || '2048'));
-    const cpus = Number(prompt('Virtual CPUs', vmEdit.dataset.vmCpus || '2'));
-    if (!Number.isInteger(memoryMiB) || !Number.isInteger(cpus)) return;
-    try {
-      await apiRequest('/api/vms', { method: 'POST', body: JSON.stringify({ id, action: 'update', name, memoryMiB, cpus }) });
-      document.querySelector('#content [data-action="refresh-runtime"]')?.click();
-    } catch (error) { alert(error.message); }
     return;
   }
   const vmAction = event.target.closest('[data-vm-action]');

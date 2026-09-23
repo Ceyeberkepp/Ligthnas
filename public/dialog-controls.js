@@ -666,20 +666,37 @@ document.addEventListener('click', async event => {
     event.preventDefault();
     event.stopImmediatePropagation();
     const id = vmEdit.dataset.vmEdit;
+    let inventory;
+    try {
+      inventory = await dialogApi('/api/runtimes');
+      window.LightNASRuntimeInventory = inventory;
+    } catch (problem) {
+      alert(problem.message);
+      return;
+    }
+    const virtualization = inventory.virtualization || {};
+    const item = (virtualization.machineDetails || []).find(candidate => String(candidate.id || candidate.vmid || candidate.name) === String(id)) || {};
+    const isoOptions = [
+      { value: '', label: 'No ISO — empty CD-ROM drive' },
+      ...(virtualization.isoDetails || []).map(iso => ({ value: iso.id, label: `${iso.name} · ${iso.storageName}` }))
+    ];
     showEditor({
       eyebrow: 'VIRTUAL MACHINE SETTINGS',
       title: `Edit ${vmEdit.dataset.vmName || id}`,
-      description: 'Change the native KVM/libvirt VM name, assigned memory, or vCPU count. A running VM must be shut down before rename.',
+      description: 'Manage VM hardware, installation media, and boot priority. Changing the ISO or boot drive automatically restarts a running VM so noVNC opens the selected boot media.',
       fields: [
-        { name: 'name', label: 'VM name', value: vmEdit.dataset.vmName || id, required: true },
-        { name: 'memoryMiB', label: 'Memory (MiB)', type: 'number', value: vmEdit.dataset.vmMemory || '2048', min: 512, max: 262144, step: 1, required: true },
-        { name: 'cpus', label: 'Virtual CPUs', type: 'number', value: vmEdit.dataset.vmCpus || '2', min: 1, max: 128, step: 1, required: true }
+        { name: 'name', label: 'VM name', value: item.name || vmEdit.dataset.vmName || id, required: true },
+        { name: 'memoryMiB', label: 'Memory (MiB)', type: 'number', value: Math.max(512, Math.round((item.memory || 0) / 1048576) || Number(vmEdit.dataset.vmMemory) || 2048), min: 512, max: 262144, step: 1, required: true },
+        { name: 'cpus', label: 'Virtual CPUs', type: 'number', value: item.cpus || vmEdit.dataset.vmCpus || '2', min: 1, max: 128, step: 1, required: true },
+        { name: 'iso', label: 'CD/DVD drive · installer ISO', type: 'select', value: item.installationMediaId || '', options: isoOptions },
+        { name: 'bootOrder', label: 'First boot drive', type: 'select', value: item.bootOrder || (item.installationMediaId ? 'iso' : 'disk'), options: [{ value: 'iso', label: 'CD/DVD installer ISO' }, { value: 'disk', label: 'Virtual hard disk' }] }
       ],
       onSubmit: async values => {
         const memoryMiB = Number(values.memoryMiB);
         const cpus = Number(values.cpus);
         if (!Number.isInteger(memoryMiB) || !Number.isInteger(cpus)) throw new Error('Memory and CPU values must be whole numbers.');
-        await dialogApi('/api/vms', { method: 'POST', body: JSON.stringify({ id, action: 'update', name: values.name, memoryMiB, cpus }) });
+        if (values.bootOrder === 'iso' && !values.iso) throw new Error('Select an installer ISO before choosing the CD/DVD drive as the first boot drive.');
+        await dialogApi('/api/vms', { method: 'POST', body: JSON.stringify({ id, vmid: id, action: 'update', name: values.name, memoryMiB, cpus, iso: values.iso || '', bootOrder: values.bootOrder }) });
         refreshRuntime();
       }
     });
