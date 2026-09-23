@@ -606,10 +606,20 @@ def bootstrap_archive_container(name: str, archive_value: str, storage_root_valu
             cleaned = entry.lstrip("./")
             if entry.startswith("/") or ".." in Path(cleaned).parts:
                 raise ValueError("template archive contains an unsafe path")
+        # Container template archives often contain character/block device
+        # nodes under /dev. When LightNAS itself is running inside an
+        # unprivileged Proxmox LXC, recreating those nodes with mknod is
+        # intentionally blocked by the outer security boundary. They are not
+        # needed in the stored rootfs: LXC supplies the runtime /dev mount when
+        # the inner container starts. Skip archived /dev contents so template
+        # installation works out of the box in both nested and bare-metal
+        # LightNAS installations.
         run([
             "tar", "--numeric-owner", "--xattrs", "--xattrs-include=*",
+            "--exclude=./dev/*", "--exclude=dev/*",
             "-xaf", str(archive), "-C", str(rootfs)
         ], timeout=1800)
+        (rootfs / "dev").mkdir(mode=0o755, exist_ok=True)
     except Exception:
         cleanup_failed_container(name, rootfs)
         raise
