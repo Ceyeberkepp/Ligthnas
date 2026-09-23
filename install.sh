@@ -37,16 +37,23 @@ else
   echo "[2/6] Node.js $(node --version) is already installed."
 fi
 
-# LightNAS owns its compute stack locally. On bare metal or a VM this installs
-# the same open-source building blocks used by virtualization appliances:
-# LXC/liblxc for system containers and QEMU/KVM + libvirt for virtual machines.
-# Inside another container we do not assume nested virtualization is permitted.
+# System containers are a built-in LightNAS feature on every supported host.
+# Install the LXC and bridge stack unconditionally so a new installation is
+# ready to create containers with real LAN addresses without an extra setup
+# flag. If LightNAS itself is nested, the host-agent will detect whether the
+# outer environment permits nested namespaces/bridging and use NAT only as a
+# compatibility fallback.
+echo "      Installing native system-container engine and network bridge tools..."
+apt-get install -y \
+  lxc lxc-templates lxcfs uidmap bridge-utils debootstrap debian-archive-keyring ubuntu-keyring \
+  dnsmasq-base network-manager
+
+# VM tooling is also installed on normal hosts. Nested appliances may opt in
+# when their outer hypervisor exposes the required virtualization features.
 if ! systemd-detect-virt --container >/dev/null 2>&1 || [[ "${LIGHTNAS_ENABLE_NESTED_RUNTIMES:-0}" == "1" ]]; then
-  echo "      Installing native system-container and VM engines..."
+  echo "      Installing native VM engine..."
   apt-get install -y \
-    lxc lxc-templates lxcfs uidmap bridge-utils debootstrap debian-archive-keyring ubuntu-keyring \
-    qemu-system-x86 qemu-utils libvirt-daemon-system libvirt-clients virtinst ovmf \
-    dnsmasq-base network-manager
+    qemu-system-x86 qemu-utils libvirt-daemon-system libvirt-clients virtinst ovmf
 fi
 
 echo "[3/6] Installing LightNAS..."
