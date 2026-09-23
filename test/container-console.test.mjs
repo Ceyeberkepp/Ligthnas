@@ -85,10 +85,19 @@ test('container console reaches the authenticated host-agent PTY', async () => {
 });
 
 test('VM console connects before accepting the browser and remains open while idle', async () => {
-  const agent = await readFile(new URL('../scripts/lightnas-host-agent.py', import.meta.url), 'utf8');
+  const [agent, local, server, viewer] = await Promise.all([
+    readFile(new URL('../scripts/lightnas-host-agent.py', import.meta.url), 'utf8'),
+    readFile(new URL('../src/local-host.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../src/server.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../public/vm-console.js', import.meta.url), 'utf8')
+  ]);
   assert.match(agent, /def open_vm_console/);
   assert.match(agent, /socket\.create_connection\(\(host, port\), timeout=2\)/);
   assert.match(agent, /backend\.settimeout\(None\)/);
   assert.match(agent, /backend = open_vm_console[\s\S]+?\{"ok":true,"data":\{"mode":"raw-vnc"\}\}/);
   assert.match(agent, /VM display is not ready/);
+  assert.match(local, /socket\.pause\(\)/);
+  assert.match(server, /backend\.resume\(\)/);
+  assert.match(viewer, /rfb\.resizeSession = false/);
+  assert.match(viewer, /setTimeout\(redraw, 500\)/);
 });

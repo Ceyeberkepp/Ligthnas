@@ -99,6 +99,10 @@ export async function localContainerConsoleSocket(id) {
       settled = true;
       socket.off('data', onData);
       socket.setTimeout(0);
+      // The host agent switches this same stream from its JSON handshake to
+      // raw RFB bytes. Pause before handing it to the WebSocket bridge so the
+      // VNC banner or first framebuffer cannot be emitted with no listener.
+      socket.pause();
       if (remaining.length) socket.unshift(remaining);
       resolve(socket);
     };

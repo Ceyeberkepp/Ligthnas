@@ -18,13 +18,29 @@
     const socketUrl = `${protocol}//${location.host}/api/console/vm/${encodeURIComponent(id)}`;
     const rfb = new RFB(screen, socketUrl, { shared: true });
     rfb.scaleViewport = true;
-    rfb.resizeSession = true;
+    // Firmware and OS installers choose their own VESA/GOP resolution. Asking
+    // QEMU to resize during early UEFI boot can leave a valid framebuffer
+    // undisplayed even though the RFB session is connected.
+    rfb.resizeSession = false;
+    rfb.clipViewport = false;
     rfb.viewOnly = false;
     rfb.background = '#000';
+
+    const redraw = () => {
+      // Toggling scaling makes noVNC recompute the canvas after popup sizing,
+      // including when the initial 1280x800 frame arrived during connection.
+      rfb.scaleViewport = false;
+      requestAnimationFrame(() => {
+        rfb.scaleViewport = true;
+        rfb.focus();
+      });
+    };
 
     rfb.addEventListener('connect', () => {
       status.textContent = 'Connected';
       status.classList.remove('error');
+      redraw();
+      setTimeout(redraw, 500);
     });
     rfb.addEventListener('disconnect', event => {
       status.textContent = event.detail.clean ? 'Console closed' : 'Disconnected';
@@ -39,5 +55,7 @@
     document.querySelector('#fullscreen').addEventListener('click', async () => {
       if (!document.fullscreenElement) await document.documentElement.requestFullscreen();
       else await document.exitFullscreen();
+      redraw();
     });
+    addEventListener('resize', redraw);
     addEventListener('beforeunload', () => rfb.disconnect());

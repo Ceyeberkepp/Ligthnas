@@ -1185,6 +1185,9 @@ function bridgeWebSocketToSocket(ws, backend) {
   ws.on('message', data => { if (!backend.destroyed) backend.write(Buffer.from(data)); });
   ws.on('close', close);
   ws.on('error', close);
+  // localVmConsoleSocket intentionally pauses during the JSON-to-RFB handoff.
+  // Resume only after both bridge directions are installed.
+  backend.resume();
 }
 
 function bridgeWebSocketToProcess(ws, process) {
