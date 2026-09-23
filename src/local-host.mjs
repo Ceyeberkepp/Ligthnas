@@ -57,6 +57,10 @@ export async function localUpdateContainer(input) {
   return await request('container-update', input, 60000);
 }
 
+export async function localContainerWebListeners(id) {
+  return await request('container-web-listeners', { id }, 10000);
+}
+
 export async function localNetworkInventory() {
   return await request('network-inventory');
 }
