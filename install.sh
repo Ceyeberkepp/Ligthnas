@@ -45,9 +45,24 @@ fi
 # outer environment permits nested namespaces/bridging and use NAT only as a
 # compatibility fallback.
 echo "      Installing native system-container engine and network bridge tools..."
-apt-get install -y \
-  lxc lxc-templates lxcfs uidmap bridge-utils debootstrap debian-archive-keyring ubuntu-keyring \
+runtime_packages=(
+  lxc lxc-templates lxcfs uidmap bridge-utils debootstrap
   dnsmasq-base network-manager
+)
+
+# Archive-signing keyrings are distribution packages. Do not make a Debian
+# LightNAS install fail because an Ubuntu-only keyring is not available in the
+# host repository (or vice versa). Install whichever keyrings the current
+# package sources actually provide.
+for keyring in debian-archive-keyring ubuntu-keyring; do
+  if apt-cache show "$keyring" >/dev/null 2>&1; then
+    runtime_packages+=("$keyring")
+  else
+    echo "      Optional package $keyring is not available from this host's repositories; continuing."
+  fi
+done
+
+apt-get install -y "${runtime_packages[@]}"
 
 # VM tooling is also installed on normal hosts. Nested appliances may opt in
 # when their outer hypervisor exposes the required virtualization features.
