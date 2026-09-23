@@ -22,6 +22,7 @@ import socketserver
 import subprocess
 import termios
 import threading
+import time
 from pathlib import Path
 
 SOCKET_PATH = Path(os.environ.get("LIGHTNAS_HOST_SOCKET", "/run/lightnas/host-agent.sock"))
