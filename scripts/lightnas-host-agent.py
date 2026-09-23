@@ -213,6 +213,42 @@ def container_addresses(name: str) -> list[str]:
     return addresses
 
 
+def container_listening_ports(name: str) -> dict:
+    """Read TCP listeners from the container network namespace without
+    executing commands or changing anything inside the guest."""
+    if not NAME_RE.fullmatch(name):
+        raise ValueError("invalid container name")
+    if lxc_state(name) != "running":
+        return {"id": name, "ports": []}
+    try:
+        raw_pid = run(["lxc-info", "-n", name, "-pH"], timeout=5, check=False).strip()
+        pid = int(raw_pid)
+    except (TypeError, ValueError, OSError):
+        return {"id": name, "ports": []}
+
+    ports = set()
+    for table in ("tcp", "tcp6"):
+        path = Path(f"/proc/{pid}/net/{table}")
+        try:
+            rows = path.read_text(encoding="utf-8").splitlines()[1:]
+        except OSError:
+            continue
+        for row in rows:
+            fields = row.split()
+            if len(fields) < 4 or fields[3] != "0A":
+                continue
+            local = fields[1]
+            if ":" not in local:
+                continue
+            try:
+                port = int(local.rsplit(":", 1)[1], 16)
+            except ValueError:
+                continue
+            if 1 <= port <= 65535:
+                ports.add(port)
+    return {"id": name, "ports": sorted(ports)}
+
+
 def container_settings(name: str) -> dict:
     config = Path("/var/lib/lxc") / name / "config"
     try:
@@ -1617,6 +1653,8 @@ def dispatch(request: dict) -> dict:
         return update_container(data)
     if action == "container-exec":
         return execute_container_command(data)
+    if action == "container-web-listeners":
+        return container_listening_ports(str(data.get("id") or data.get("name") or ""))
     if action == "network-inventory":
         return network_inventory()
     if action == "network-action":
