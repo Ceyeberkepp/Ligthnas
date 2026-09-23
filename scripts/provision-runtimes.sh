@@ -37,6 +37,32 @@ chmod 0644 "${status_file}"
 
 # Native system containers are built into LightNAS through LXC/liblxc.
 if command -v lxc-create >/dev/null 2>&1 && command -v lxc-start >/dev/null 2>&1; then
+  # TrueNAS/Proxmox-style default: when LightNAS has a real LAN bridge,
+  # every system container attaches directly to it and receives its own LAN IP.
+  # Upgrade older installations automatically from the private 10.77.0.0/24
+  # bridge without requiring per-container changes.
+  if [[ "${lan_bridge_ready}" == "1" ]]; then
+    for config in /var/lib/lxc/*/config; do
+      [[ -f "$config" ]] || continue
+      link="$(sed -nE 's/^lxc\.net\.[0-9]+\.link\s*=\s*([^[:space:]]+).*/\1/p' "$config" | head -1)"
+      [[ "$link" =~ ^(lightnas0|lxcbr0)$ ]] || continue
+      name="$(basename "$(dirname "$config")")"
+      was_running=0
+      [[ "$(lxc-info -n "$name" -sH 2>/dev/null || true)" == "RUNNING" ]] && was_running=1
+      [[ "$was_running" == "1" ]] && lxc-stop -n "$name" -t 30 >/dev/null 2>&1 || true
+      sed -Ei "s#^(lxc\.net\.[0-9]+\.link\s*=\s*)(lightnas0|lxcbr0)\s*$#\1${lan_bridge}#" "$config"
+      [[ "$was_running" == "1" ]] && lxc-start -n "$name" -d >/dev/null 2>&1 || true
+    done
+
+    # The private NAT bridge is no longer needed after migration. Disable both
+    # implementations used by older LightNAS releases.
+    systemctl disable --now lightnas-container-network.service >/dev/null 2>&1 || true
+    systemctl disable --now lxc-net.service >/dev/null 2>&1 || true
+    if ip link show lightnas0 >/dev/null 2>&1; then
+      ip link set lightnas0 down >/dev/null 2>&1 || true
+      ip link delete lightnas0 type bridge >/dev/null 2>&1 || true
+    fi
+  fi
   # Use the standard lxc-net helper as the owner of the LightNAS container
   # bridge. This works even when the outer LXC's eth0 is intentionally
   # unmanaged by NetworkManager. lxc-net supplies the bridge, DHCP/DNS and
@@ -170,9 +196,11 @@ EOF
 
   if systemd-detect-virt --container >/dev/null 2>&1 && [[ "${LIGHTNAS_ALLOW_NESTED_LXC:-0}" != "1" ]]; then
     report Containers 'native LXC installed, but this appliance is itself in a container and nested LXC was not enabled'
+  elif [[ "${lan_bridge_ready}" == "1" ]]; then
+    report Containers "native LXC/liblxc ready on ${lan_bridge}; containers receive real LAN addresses"
   elif ip link show lightnas0 2>/dev/null | grep -q 'UP' \
     && ip -4 address show dev lightnas0 2>/dev/null | grep -q '10\.77\.0\.1/24'; then
-    report Containers 'native LXC/liblxc ready on lightnas0 (10.77.0.0/24 NAT)'
+    report Containers 'native LXC/liblxc ready on lightnas0 (10.77.0.0/24 NAT fallback)'
   else
     report Containers 'native LXC/liblxc installed, but the LightNAS container bridge is not active'
   fi
