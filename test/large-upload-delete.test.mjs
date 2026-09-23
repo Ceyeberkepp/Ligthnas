@@ -10,7 +10,7 @@ test('large ISO uploads are chunked and limited to 50 GiB', async () => {
   assert.match(storage, /50 \* 1024 \*\* 3/);
   assert.match(storage, /parseContentRange/);
   assert.match(storage, /x-lightnas-upload-id/);
-  assert.match(ui, /16\*1024\*\*2/);
+  assert.match(ui, /\(type==='iso'\?64:32\)\*1024\*\*2/);
   assert.match(ui, /Content-Range/);
   assert.match(ui, /progress\?\.update/);
 });

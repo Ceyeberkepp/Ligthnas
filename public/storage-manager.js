@@ -142,7 +142,7 @@ async function renderManageStorage(poolId,activeType=null) {
       <div class="head-actions">${fileTypes.map(type=>`<button type="button" class="${type===selectedType?'primary':'secondary'}" data-storage-content-tab="${sEsc(type)}" data-storage-id="${sEsc(pool.id)}">${sEsc((data.contentTypes||[]).find(item=>item.id===type)?.label||type)}</button>`).join('')}</div>
 ${selectedType==='vztmpl'? `<div class="head-actions"><button class="primary" type="button" data-template-browse data-template-storage="${sEsc(pool.id)}">Browse templates</button><button class="secondary" type="button" data-template-upload data-template-storage="${sEsc(pool.id)}">Upload template</button><button class="secondary" type="button" data-template-url data-template-storage="${sEsc(pool.id)}">Import URL</button></div><p class="muted">Choose a template from the upstream catalog, upload an archive from your computer, or import a public URL into this storage.</p>` : ''}
       <form data-storage-upload-form data-storage-id="${sEsc(pool.id)}" data-storage-type="${sEsc(selectedType)}">
-        ${selectedType==='iso'?'<p class="module-note">ISO uploads up to 50 GiB are sent in proxy-friendly 16 MiB chunks. Keep this browser tab open until the completion message appears.</p>':''}
+        ${selectedType==='iso'?'<p class="module-note">ISO uploads up to 50 GiB stream directly to storage in resumable chunks. Large ISO files use a larger transfer window to reduce round-trip overhead.</p>':''}
         <label>Upload ${sEsc((data.contentTypes||[]).find(item=>item.id===selectedType)?.label||selectedType)}<input name="file" type="file" required ${selectedType==='iso'?'accept=".iso"':selectedType==='vztmpl'?'accept=".tar.zst,.tar.xz,.tar.gz,.tgz"':''}></label>
         <button class="secondary" type="submit">Upload</button>
       </form>
@@ -211,8 +211,11 @@ document.addEventListener('submit',async event=>{
     try{
       const maximum=50*1024**3;
       if(file.size>maximum) throw new Error('ISO and storage image uploads are limited to 50 GiB.');
-      const chunkSize=16*1024**2;
+      // Blob.slice() is lazy, so a larger chunk reduces HTTP round trips
+      // without buffering the whole ISO in browser or server memory.
+      const chunkSize=(type==='iso'?64:32)*1024**2;
       const uploadId=crypto.randomUUID();
+      const startedAt=performance.now();
       let offset=0;
       while(offset<file.size){
         const end=Math.min(file.size,offset+chunkSize);
@@ -228,8 +231,13 @@ document.addEventListener('submit',async event=>{
         });
         offset=end;
         const percent=Math.round((offset/file.size)*100);
-        error.textContent=`Uploading ${file.name}… ${percent}%`;
-        progress?.update(percent,`${sBytes(offset)} of ${sBytes(file.size)} uploaded`);
+        const elapsed=Math.max(0.001,(performance.now()-startedAt)/1000);
+        const rate=offset/elapsed;
+        const remaining=Math.max(0,file.size-offset);
+        const eta=rate>0?Math.ceil(remaining/rate):0;
+        const transfer=`${sBytes(rate)}/s${eta? ` · about ${eta}s remaining`:''}`;
+        error.textContent=`Uploading ${file.name}… ${percent}% · ${transfer}`;
+        progress?.update(percent,`${sBytes(offset)} of ${sBytes(file.size)} · ${transfer}`);
       }
       error.textContent='';await renderManageStorage(id,type);
       progress?.succeed(`${file.name} uploaded successfully and is ready to use.`);

@@ -4,7 +4,7 @@ import { pipeline } from 'node:stream/promises';
 import { Transform } from 'node:stream';
 
 const root = join(dirname(process.env.NAS_DATA_FILE || 'data/state.json'), 'files');
-const MAX_UPLOAD = 1024 * 1024 * 1024;
+const MAX_UPLOAD = Number(process.env.LIGHTNAS_FILE_UPLOAD_MAX_BYTES || 50 * 1024 ** 3);
 const ATTACHED_ROOT = 'Attached storage';
 
 function parts(relative) {
@@ -121,7 +121,7 @@ export async function uploadFile(relative, req) {
   try {
     await pipeline(req, new Transform({ transform(chunk, encoding, callback) {
       size += chunk.length;
-      callback(size > MAX_UPLOAD ? Object.assign(new Error('File exceeds the 1 GB upload limit.'), { status: 413 }) : null, chunk);
+      callback(size > MAX_UPLOAD ? Object.assign(new Error('File exceeds the configured upload limit.'), { status: 413 }) : null, chunk);
     } }), file.createWriteStream());
   } catch (error) {
     await unlink(path).catch(() => {});
