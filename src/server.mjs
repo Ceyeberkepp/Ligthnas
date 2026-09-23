@@ -77,7 +77,10 @@ async function containerReadyForPublication(id) {
 }
 
 function containerUsesPrivateNat(item) {
-  return /^(?:lightnas0|lxcbr0)$/i.test(String(item?.network || ''));
+  const network = String(item?.network || '');
+  const ipv4 = String(item?.ipv4 || (item?.addresses || []).find(address => !String(address).includes(':')) || '');
+  return /^(?:lightnas0|lxcbr0)$/i.test(network)
+    || /^10\.77\.0\.(?:\d{1,3})$/.test(ipv4);
 }
 
 async function configureProxyFallback(detected, item, requestedHostPort = 0) {
