@@ -64,6 +64,20 @@ done
 
 apt-get install -y "${runtime_packages[@]}"
 
+# Debian repositories do not always carry the ubuntu-keyring package, but
+# LightNAS offers Ubuntu system-container images as well as Debian images.
+# Install Ubuntu's official archive keyring directly when the package is not
+# available so debootstrap can still verify Ubuntu releases.
+if ! apt-cache show ubuntu-keyring >/dev/null 2>&1; then
+  install -d -m 0755 /usr/share/keyrings
+  if [[ ! -s /usr/share/keyrings/ubuntu-archive-keyring.gpg ]]; then
+    echo "      Installing Ubuntu archive keyring for Ubuntu container images..."
+    curl -fsSL https://archive.ubuntu.com/ubuntu/project/ubuntu-archive-keyring.gpg \
+      -o /usr/share/keyrings/ubuntu-archive-keyring.gpg
+    chmod 0644 /usr/share/keyrings/ubuntu-archive-keyring.gpg
+  fi
+fi
+
 # VM tooling is also installed on normal hosts. Nested appliances may opt in
 # when their outer hypervisor exposes the required virtualization features.
 if ! systemd-detect-virt --container >/dev/null 2>&1 || [[ "${LIGHTNAS_ENABLE_NESTED_RUNTIMES:-0}" == "1" ]]; then
