@@ -237,7 +237,7 @@ async function localUpdateVm(input) {
   const bootOrder = input.bootOrder === 'iso' ? 'iso' : 'disk';
   const availableIsos = await listContentAcrossPools('iso').catch(() => []);
   const isoEntry = isoId ? availableIsos.find(item => item.id === isoId) : null;
-  if (isoId && !isoEntry) throw Object.assign(new Error('The selected installer ISO is no longer available.'), { status: 409 });
+  if (isoId && !isoEntry) throw Object.assign(new Error('The selected installer ISO is incomplete or no longer available. Upload it again and wait for the transfer to finish.'), { status: 409 });
   const [xmlResult, stateResult] = await Promise.all([
     command('virsh', ['-c', 'qemu:///system', 'dumpxml', target, '--inactive'], 10000),
     command('virsh', ['-c', 'qemu:///system', 'domstate', target], 10000)
@@ -593,7 +593,7 @@ export async function createVm(input) {
   await mkdir(diskDirectory, { recursive: true });
   const diskPath = join(diskDirectory, `${input.name}.qcow2`);
   const isoEntry = iso ? (await listContentAcrossPools('iso')).find(item => item.id === iso) : null;
-  if (iso && !isoEntry) throw Object.assign(new Error('Selected installer ISO is no longer available.'), { status: 409 });
+  if (iso && !isoEntry) throw Object.assign(new Error('Selected installer ISO is incomplete or no longer available. Upload it again and wait for the transfer to finish.'), { status: 409 });
 
   const networkDetail = virtualization.networkDetails?.find(item => item.name === input.network);
   const firmware = ['bios', 'uefi'].includes(input.firmware) ? input.firmware : 'bios';

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { visibleStorageContentName } from '../src/storage-pools.mjs';
 
 test('large ISO uploads are chunked and limited to 50 GiB', async () => {
   const [storage, ui] = await Promise.all([
@@ -13,6 +14,13 @@ test('large ISO uploads are chunked and limited to 50 GiB', async () => {
   assert.match(ui, /\(type==='iso'\?64:32\)\*1024\*\*2/);
   assert.match(ui, /Content-Range/);
   assert.match(ui, /progress\?\.update/);
+});
+
+test('incomplete storage uploads never appear as usable ISO media', () => {
+  assert.equal(visibleStorageContentName('Windows.iso', 'iso'), true);
+  assert.equal(visibleStorageContentName('.Windows.iso.12345678.part', 'iso'), false);
+  assert.equal(visibleStorageContentName('Windows.iso.part-123', 'iso'), false);
+  assert.equal(visibleStorageContentName('Windows.img', 'iso'), false);
 });
 
 test('runtime deletion requires exact ID and delete-all-files selection', async () => {

@@ -35,6 +35,16 @@ const extensions = {
   files: null
 };
 
+export function visibleStorageContentName(name, type) {
+  const value = String(name || '');
+  // Uploads are written to hidden .part files and atomically renamed only
+  // after the final byte arrives. A browser/server interruption can leave a
+  // staging file behind; it must never appear as usable VM media.
+  if (!value || value.startsWith('.') || /(?:\.part|\.tmp)(?:-|$)/i.test(value)) return false;
+  const allowed = extensions[type];
+  return !allowed || allowed.some(suffix => value.toLowerCase().endsWith(suffix));
+}
+
 function normalizeContent(value, fallback = []) {
   const input = Array.isArray(value) ? value : fallback;
   return [...new Set(input.map(String).filter(item => CONTENT_BY_ID.has(item)))];
@@ -260,6 +270,7 @@ export async function listStorageContent(poolId, type) {
   try {
     const entries = [];
     for (const name of await readdir(directory)) {
+      if (!visibleStorageContentName(name, type)) continue;
       try {
         const info = await stat(join(directory, name));
         if (info.isFile()) entries.push({ name, sizeBytes: info.size, modifiedAt: info.mtime.toISOString() });
