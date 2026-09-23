@@ -83,3 +83,12 @@ test('container console reaches the authenticated host-agent PTY', async () => {
   assert.match(agent, /root@\{name\}:\\\\w# /);
   assert.match(agent, /export HOME=\/root USER=root LOGNAME=root/);
 });
+
+test('VM console connects before accepting the browser and remains open while idle', async () => {
+  const agent = await readFile(new URL('../scripts/lightnas-host-agent.py', import.meta.url), 'utf8');
+  assert.match(agent, /def open_vm_console/);
+  assert.match(agent, /socket\.create_connection\(\(host, port\), timeout=2\)/);
+  assert.match(agent, /backend\.settimeout\(None\)/);
+  assert.match(agent, /backend = open_vm_console[\s\S]+?\{"ok":true,"data":\{"mode":"raw-vnc"\}\}/);
+  assert.match(agent, /VM display is not ready/);
+});

@@ -1475,10 +1475,28 @@ def vm_console_target(name: str) -> tuple[str, int]:
     return host, port
 
 
-def stream_vm_console(connection, data: dict) -> None:
+def open_vm_console(data: dict):
     name = str(data.get("id") or data.get("name") or "")
     host, port = vm_console_target(name)
-    backend = socket.create_connection((host, port), timeout=10)
+    # A newly-started domain may be reported as running just before QEMU's VNC
+    # listener is ready. Retry that short race instead of accepting the browser
+    # session and immediately closing it.
+    last_error = None
+    for _attempt in range(20):
+        try:
+            backend = socket.create_connection((host, port), timeout=2)
+            # create_connection leaves the connect timeout on the socket. A
+            # quiet framebuffer can legitimately send no data for much longer
+            # than that; retaining the timeout made every idle console close.
+            backend.settimeout(None)
+            return backend
+        except OSError as exc:
+            last_error = exc
+            time.sleep(0.25)
+    raise RuntimeError(f"VM display is not ready on {host}:{port}: {last_error}")
+
+
+def stream_vm_console(connection, backend) -> None:
 
     def input_loop():
         try:
@@ -1760,9 +1778,13 @@ class Handler(socketserver.StreamRequestHandler):
                 stream_container(self.connection, request.get("data") or {})
                 return
             if request.get("action") == "vm-console":
+                # Establish the QEMU connection before reporting success. This
+                # keeps connection failures in the JSON handshake instead of
+                # turning them into a misleading clean WebSocket close.
+                backend = open_vm_console(request.get("data") or {})
                 self.wfile.write(b'{"ok":true,"data":{"mode":"raw-vnc"}}\n')
                 self.wfile.flush()
-                stream_vm_console(self.connection, request.get("data") or {})
+                stream_vm_console(self.connection, backend)
                 return
             data = dispatch(request)
             self.wfile.write((json.dumps({"ok": True, "data": data}, separators=(",", ":")) + "\n").encode())
