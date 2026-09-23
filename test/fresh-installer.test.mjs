@@ -30,6 +30,15 @@ test('Proxmox local fallback cleans up without an EXIT trap on a local variable'
 test('Proxmox repair path uses distro-aware keyring installation', async () => {
   const helper = await readFile(new URL('../scripts/proxmox-lxc-install.sh', import.meta.url), 'utf8');
   assert.match(helper, /for keyring in debian-archive-keyring ubuntu-keyring/);
+  assert.match(helper, /apt-cache policy "\\$1"/);
   assert.match(helper, /packages\+=\("\$keyring"\)/);
   assert.match(helper, /archive\.ubuntu\.com\/ubuntu\/project\/ubuntu-archive-keyring\.gpg/);
+});
+
+
+test('optional keyrings require a non-none APT Candidate', async () => {
+  const installer = await readFile(new URL('../install.sh', import.meta.url), 'utf8');
+  assert.match(installer, /candidate=.*apt-cache policy/);
+  assert.match(installer, /candidate.*!= "\(none\)"/);
+  assert.doesNotMatch(installer, /apt-cache show "\$keyring"/);
 });
