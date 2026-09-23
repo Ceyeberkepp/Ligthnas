@@ -434,12 +434,13 @@ async function showContainerManager(id) {
   const networks = runtime.networks || [];
   const currentNetwork = item.network || networks[0] || '';
   let publication = item.publication || null;
-  if (!publication && String(item.status || '').toLowerCase() === 'running') {
+  const privateNatAddress = /^10\.77\.0\.(?:\d{1,3})$/.test(String(item.ipv4 || publication?.targetHost || ''));
+  if (String(item.status || '').toLowerCase() === 'running' && (!publication || (privateNatAddress && publication.mode !== 'proxy'))) {
     const detected = await dialogApi('/api/containers', {
       method: 'POST',
       body: JSON.stringify({ id, action: 'auto-publish' })
     }).catch(() => null);
-    publication = detected?.mode ? detected : detected?.publication || null;
+    publication = detected?.mode ? detected : detected?.publication || publication;
   }
   const applicationUrl = publication
     ? (publication.mode === 'direct'
@@ -510,7 +511,7 @@ async function showContainerManager(id) {
             <p class="muted">LightNAS automatically discovers HTTP/HTTPS applications running inside this container and makes them reachable from the LAN.</p>
             <label class="check-line"><input name="publishApplication" type="checkbox" checked disabled> Make this application accessible from the LightNAS network — automatic</label>
             <div class="manager-summary">
-              <div><span>Container address</span><b>${dialogEsc(publication?.targetHost || item.ipv4 || 'Detecting automatically')}</b></div>
+              <div><span>${privateNatAddress ? 'Internal container address' : 'Container address'}</span><b>${dialogEsc(publication?.targetHost || item.ipv4 || 'Detecting automatically')}</b></div>
               <div><span>Access mode</span><b>${publication?.mode === 'direct' ? 'Direct container IP' : publication?.mode === 'proxy' ? 'LightNAS NAT fallback' : 'Automatic detection'}</b></div>
               <div><span>Detected web service</span><b>${publication ? `${dialogEsc(String(publication.scheme || 'http').toUpperCase())} · port ${dialogEsc(publication.targetPort)}` : 'Not detected yet'}</b></div>
               <div><span>Open address</span><b>${applicationUrl ? `<a href="${dialogEsc(applicationUrl)}" target="_blank" rel="noopener">${dialogEsc(applicationUrl)}</a>` : 'Available automatically after the app starts'}</b></div>

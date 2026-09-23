@@ -342,12 +342,13 @@ async function enhanceRuntimeControls() {
         actions.className = 'runtime-actions';
         const running = String(item.status || '').toLowerCase() === 'running';
         let publication = item.publication;
-        if (running && !publication) {
+        const privateNatAddress = /^10\.77\.0\.(?:\d{1,3})$/.test(String(item.ipv4 || publication?.targetHost || ''));
+        if (running && (!publication || (privateNatAddress && publication.mode !== 'proxy'))) {
           const detected = await apiRequest('/api/containers', {
             method: 'POST',
             body: JSON.stringify({ id, action: 'auto-publish', attempts: 1 })
           }).catch(() => null);
-          publication = detected?.mode ? detected : detected?.publication || null;
+          publication = detected?.mode ? detected : detected?.publication || publication;
         }
         const applicationUrl = publication
           ? (publication.mode === 'direct'
