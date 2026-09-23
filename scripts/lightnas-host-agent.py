@@ -14,6 +14,7 @@ import ipaddress
 import grp
 import json
 import os
+import platform
 import pty
 import re
 import shutil
@@ -39,7 +40,7 @@ IMAGES = [
     # Alpine's legacy LXC template refuses user-namespace builds. Keep it
     # available on bare metal while nested LightNAS exposes only builders that
     # do not depend on images.linuxcontainers.org/index-user.
-    {"id": "alpine-3.21", "label": "Alpine Linux 3.21", "dist": "alpine", "release": "3.21", "builder": "template", "template": "alpine", "arch": "x86_64", "nested": False},
+    {"id": "alpine-3.21", "label": "Alpine Linux 3.21", "dist": "alpine", "release": "3.21", "builder": "template", "template": "alpine", "nested": False},
 ]
 IMAGE_BY_ID = {item["id"]: item for item in IMAGES}
 
@@ -51,6 +52,37 @@ def run(args: list[str], timeout: int = 30, check: bool = True) -> str:
 
 def available(program: str) -> bool:
     return shutil.which(program) is not None
+
+
+def native_debian_arch() -> str:
+    """Return the native Debian architecture used for system-container builds."""
+    if available("dpkg"):
+        try:
+            value = run(["dpkg", "--print-architecture"], timeout=5).strip()
+            if value:
+                return value
+        except Exception:
+            pass
+    machine = platform.machine().lower()
+    mapping = {
+        "x86_64": "amd64", "amd64": "amd64",
+        "i386": "i386", "i486": "i386", "i586": "i386", "i686": "i386", "x86": "i386",
+        "aarch64": "arm64", "arm64": "arm64",
+        "armv7l": "armhf", "armv7": "armhf", "armhf": "armhf",
+        "riscv64": "riscv64",
+    }
+    value = mapping.get(machine)
+    if not value:
+        raise RuntimeError(f"unsupported native architecture for LightNAS system containers: {machine or 'unknown'}")
+    return value
+
+
+def debootstrap_mirror(image: dict, architecture: str) -> str:
+    # Ubuntu publishes non-x86 ports from ports.ubuntu.com rather than the
+    # ordinary archive host. Debian's deb.debian.org mirror is multi-arch.
+    if str(image.get("dist") or "").lower() == "ubuntu" and architecture not in {"amd64", "i386"}:
+        return "https://ports.ubuntu.com/ubuntu-ports"
+    return str(image["mirror"])
 
 
 def in_container() -> bool:
@@ -499,9 +531,10 @@ def bootstrap_deb_container(name: str, image: dict, storage_root_value: str) -> 
         "systemd-sysv", "iproute2",
         "iputils-ping", "ca-certificates", "netbase", "procps"
     ])
+    architecture = native_debian_arch()
     args = [
-        "debootstrap", "--variant=minbase", "--arch=amd64",
-        f"--include={include}", image["release"], str(rootfs), image["mirror"],
+        "debootstrap", "--variant=minbase", f"--arch={architecture}",
+        f"--include={include}", image["release"], str(rootfs), debootstrap_mirror(image, architecture),
     ]
     try:
         run(args, timeout=1800)
@@ -538,8 +571,7 @@ def bootstrap_deb_container(name: str, image: dict, storage_root_value: str) -> 
         "# LightNAS locally bootstrapped LXC system container\n"
         "lxc.include = /usr/share/lxc/config/common.conf\n"
         f"lxc.rootfs.path = dir:{rootfs}\n"
-        f"lxc.uts.name = {name}\n"
-        "lxc.arch = x86_64\n",
+        f"lxc.uts.name = {name}\n",
         encoding="utf-8",
     )
     return config
@@ -550,8 +582,9 @@ def bootstrap_template_container(name: str, image: dict, storage_root_value: str
     script = Path("/usr/share/lxc/templates") / f"lxc-{template}"
     if not script.exists():
         raise RuntimeError(f"local LXC template {template} is not installed")
-    arch = str(image.get("arch") or "amd64")
-    args = ["lxc-create", "-n", name, "-t", template, "--", "-r", image["release"], "-a", arch]
+    args = ["lxc-create", "-n", name, "-t", template, "--", "-r", image["release"]]
+    if image.get("arch"):
+        args += ["-a", str(image["arch"])]
     try:
         run(args, timeout=1800)
         config = Path("/var/lib/lxc") / name / "config"
