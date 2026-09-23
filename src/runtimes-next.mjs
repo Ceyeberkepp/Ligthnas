@@ -138,7 +138,16 @@ export function configureVmEditableHardware(source, settings = {}) {
   const displayModel = ['vga', 'qxl', 'virtio'].includes(settings.displayModel) ? settings.displayModel : 'vga';
   const networkModel = ['virtio', 'e1000', 'rtl8139'].includes(settings.networkModel) ? settings.networkModel : 'virtio';
   const scsiController = ['virtio-scsi', 'virtio-scsi-single', 'lsilogic'].includes(settings.scsiController) ? settings.scsiController : 'virtio-scsi';
-  xml = xml.replace(/(<video>[\s\S]*?<model\b[^>]*type=)(['"])[^'"]+\2/i, `$1'${displayModel}'`);
+  // Video model attributes are not interchangeable. In particular, libvirt
+  // rejects qxl's `ram` attribute after changing only type='qxl' to
+  // type='vga'. Replace the complete model element so switching adapters in
+  // the editor always produces a definition accepted by libvirt.
+  const videoModel = displayModel === 'qxl'
+    ? `<model type='qxl' ram='65536' vram='65536' vgamem='16384' heads='1' primary='yes'/>`
+    : displayModel === 'virtio'
+      ? `<model type='virtio' heads='1' primary='yes'/>`
+      : `<model type='vga' vram='16384' heads='1' primary='yes'/>`;
+  xml = xml.replace(/(<video>\s*)<model\b[^>]*(?:\/>|>[\s\S]*?<\/model>)/i, `$1${videoModel}`);
   xml = xml.replace(/(<interface\b[\s\S]*?<model\b[^>]*type=)(['"])[^'"]+\2/i, `$1'${networkModel}'`);
   xml = xml.replace(/(<controller\b[^>]*type=(['"])scsi\2[^>]*model=)(['"])[^'"]+\3/i, `$1'${scsiController}'`);
   return xml;

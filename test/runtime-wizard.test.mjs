@@ -61,8 +61,9 @@ test('VMs with selected ISO media automatically enter the installer', async () =
   assert.match(updated, /device='disk'[\s\S]*boot order='2'/);
   assert.doesNotMatch(updated, /boot dev=/);
 
-  const hardware = configureVmEditableHardware(`<domain><devices><controller type='scsi' model='virtio-scsi'/><interface type='network'><model type='virtio'/></interface><video><model type='virtio'/></video></devices></domain>`, { displayModel: 'vga', networkModel: 'e1000', scsiController: 'virtio-scsi-single' });
+  const hardware = configureVmEditableHardware(`<domain><devices><controller type='scsi' model='virtio-scsi'/><interface type='network'><model type='virtio'/></interface><video><model type='qxl' ram='65536' vram='65536' vgamem='16384' heads='1' primary='yes'/></video></devices></domain>`, { displayModel: 'vga', networkModel: 'e1000', scsiController: 'virtio-scsi-single' });
   assert.match(hardware, /<model type='vga'/);
+  assert.doesNotMatch(hardware, /<model type='vga'[^>]*\bram=/);
   assert.match(hardware, /<model type='e1000'/);
   assert.match(hardware, /model='virtio-scsi-single'/);
 });
