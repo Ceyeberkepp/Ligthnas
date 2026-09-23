@@ -28,6 +28,18 @@ mkdir -p "$(dirname "${status_file}")" "$(dirname "${runtime_env}")"
 if [[ ! -e "$runtime_env" ]]; then install -m 0600 /dev/null "$runtime_env"; fi
 chmod 0600 "$runtime_env"
 
+# If first boot has not obtained an upstream LAN lease yet, do not create a
+# misleading private 10.77.0.0/24 network. Leave guest networking pending and
+# let the appliance LAN bootstrap be retried once a real uplink is available.
+if [[ "${network_mode}" == "pending-uplink" ]]; then
+  systemctl disable --now lxc-net.service >/dev/null 2>&1 || true
+  systemctl disable --now lightnas-container-network.service >/dev/null 2>&1 || true
+  if ip link show lightnas0 >/dev/null 2>&1; then
+    ip link set lightnas0 down >/dev/null 2>&1 || true
+    ip link delete lightnas0 type bridge >/dev/null 2>&1 || true
+  fi
+fi
+
 set_flag() {
   local key="$1" value="$2"
   sed -i "/^${key}=/d" "$runtime_env"
@@ -107,7 +119,7 @@ if command -v lxc-create >/dev/null 2>&1 && command -v lxc-start >/dev/null 2>&1
   # bridge. This works even when the outer LXC's eth0 is intentionally
   # unmanaged by NetworkManager. lxc-net supplies the bridge, DHCP/DNS and
   # outbound NAT through the host's current default route.
-  if [[ "${network_mode}" != "lxc-nat" && "${network_mode}" != "nested-macvlan" && "${lan_bridge_ready}" != "1" ]] && systemctl list-unit-files lxc-net.service --no-legend 2>/dev/null | grep -q '^lxc-net.service'; then
+  if [[ "${network_mode}" != "lxc-nat" && "${network_mode}" != "nested-macvlan" && "${network_mode}" != "pending-uplink" && "${lan_bridge_ready}" != "1" ]] && systemctl list-unit-files lxc-net.service --no-legend 2>/dev/null | grep -q '^lxc-net.service'; then
     systemctl stop lxc-net.service >/dev/null 2>&1 || true
 
     # Older LightNAS builds created a NetworkManager profile with this name.
@@ -155,7 +167,7 @@ if command -v lxc-create >/dev/null 2>&1 && command -v lxc-start >/dev/null 2>&1
   # network namespaces/veth are available. Install a small LightNAS-owned
   # bridge service as a fallback so system-container creation does not depend
   # on that distro helper.
-  if [[ ${EUID} -eq 0 ]] && { [[ "${network_mode}" == "lxc-nat" ]] || { [[ "${network_mode}" != "nested-macvlan" && "${lan_bridge_ready}" != "1" ]] && ! (ip link show lightnas0 2>/dev/null | grep -q 'UP' \
+  if [[ ${EUID} -eq 0 ]] && { [[ "${network_mode}" == "lxc-nat" ]] || { [[ "${network_mode}" != "nested-macvlan" && "${network_mode}" != "pending-uplink" && "${lan_bridge_ready}" != "1" ]] && ! (ip link show lightnas0 2>/dev/null | grep -q 'UP' \
     && ip -4 address show dev lightnas0 2>/dev/null | grep -q '10\.77\.0\.1/24'); }; }; then
     install -d -m 0755 /usr/local/libexec /run/lightnas
     cat >/usr/local/libexec/lightnas-container-network <<'EOF'
@@ -240,6 +252,8 @@ EOF
     report Containers "native LXC/liblxc ready on ${container_parent} macvlan; containers receive real LAN addresses"
   elif [[ "${lan_bridge_ready}" == "1" ]]; then
     report Containers "native LXC/liblxc ready on ${lan_bridge}; containers receive real LAN addresses"
+  elif [[ "${network_mode}" == "pending-uplink" ]]; then
+    report Containers 'native LXC/liblxc installed; waiting for the physical LAN uplink to receive DHCP before guest networking starts'
   elif ip link show lightnas0 2>/dev/null | grep -q 'UP' \
     && ip -4 address show dev lightnas0 2>/dev/null | grep -q '10\.77\.0\.1/24'; then
     report Containers 'native LXC/liblxc ready on lightnas0 (10.77.0.0/24 NAT fallback)'
