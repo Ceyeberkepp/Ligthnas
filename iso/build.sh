@@ -82,7 +82,6 @@ uidmap
 bridge-utils
 debootstrap
 debian-archive-keyring
-ubuntu-keyring
 zstd
 
 qemu-system-x86
@@ -125,13 +124,37 @@ cp \
   config/binary_debian-installer/preseed.cfg
 
 #
+# First-boot host network bootstrap.
+#
+# Do not rely on network-online.target alone: a fresh Debian live/install image
+# can reach that target with a detected Ethernet NIC but no active DHCP
+# connection profile. LightNAS explicitly acquires the host LAN before guest
+# runtime initialization.
+#
+cat >config/includes.chroot/etc/systemd/system/lightnas-network-bootstrap.service <<'EOF'
+[Unit]
+Description=Bring up the LightNAS appliance LAN
+Wants=NetworkManager.service
+After=NetworkManager.service
+Before=lightnas-runtime-init.service lightnas-host-agent.service lightnas.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/lightnas/scripts/configure-appliance-network.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+#
 # Runtime initialization service
 #
 cat >config/includes.chroot/etc/systemd/system/lightnas-runtime-init.service <<'EOF'
 [Unit]
 Description=Initialize LightNAS native runtime engines
-Wants=network-online.target
-After=network-online.target
+Requires=lightnas-network-bootstrap.service
+After=lightnas-network-bootstrap.service
 Before=lightnas-host-agent.service lightnas.service
 
 [Service]
@@ -203,6 +226,9 @@ ReadWritePaths=/var/lib/lightnas
 WantedBy=multi-user.target
 EOF
 
+ln -s ../lightnas-network-bootstrap.service \
+  config/includes.chroot/etc/systemd/system/multi-user.target.wants/lightnas-network-bootstrap.service
+
 ln -s ../lightnas-runtime-init.service \
   config/includes.chroot/etc/systemd/system/multi-user.target.wants/lightnas-runtime-init.service
 
@@ -241,6 +267,17 @@ printf '%s\n' \
 
 apt-get update
 apt-get install -y nodejs
+
+# Debian images do not need the ubuntu-keyring package to build LightNAS, but
+# debootstrap must still be able to verify Ubuntu system-container releases.
+ubuntu_candidate="$(apt-cache policy ubuntu-keyring 2>/dev/null | awk '/Candidate:/{print $2; exit}')"
+if [[ -n "$ubuntu_candidate" && "$ubuntu_candidate" != "(none)" ]]; then
+  apt-get install -y ubuntu-keyring
+else
+  curl -fsSL https://archive.ubuntu.com/ubuntu/project/ubuntu-archive-keyring.gpg \
+    -o /usr/share/keyrings/ubuntu-archive-keyring.gpg
+  chmod 0644 /usr/share/keyrings/ubuntu-archive-keyring.gpg
+fi
 
 #
 # LightNAS service account
@@ -365,7 +402,9 @@ systemctl enable NetworkManager.service >/dev/null 2>&1 || true
 #
 # Native system containers.
 #
-systemctl enable lxc-net.service >/dev/null 2>&1 || true
+# Do not start the private 10.77 bridge preemptively. Runtime provisioning
+# enables it only for an explicit compatibility/NAT mode after host LAN setup.
+systemctl disable lxc-net.service >/dev/null 2>&1 || true
 
 #
 # Native VM runtime.
