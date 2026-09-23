@@ -1,0 +1,43 @@
+{
+  "minimum": {
+    "ramMiB": 2048,
+    "systemStorageGiB": 35
+  },
+  "architectures": {
+    "amd64": {
+      "controlPlane": "supported",
+      "systemContainers": "supported",
+      "bootArtifact": "iso"
+    },
+    "i386": {
+      "controlPlane": "target",
+      "systemContainers": "target",
+      "bootArtifact": "target"
+    },
+    "arm64": {
+      "controlPlane": "target",
+      "systemContainers": "target",
+      "bootArtifact": "target"
+    },
+    "armhf": {
+      "controlPlane": "target",
+      "systemContainers": "target",
+      "bootArtifact": "target"
+    },
+    "riscv64": {
+      "controlPlane": "target",
+      "systemContainers": "target",
+      "bootArtifact": "target"
+    }
+  },
+  "upload": {
+    "genericFileDefaultMaxGiB": 50,
+    "storageImageDefaultMaxGiB": 50,
+    "isoChunkMiB": 64
+  },
+  "notes": [
+    "Only amd64 is currently release-qualified as a complete LightNAS control-plane build.",
+    "Other architectures are required targets and must not be marked supported until install and boot validation exists.",
+    "Native system-container creation must not hard-code amd64 or x86_64."
+  ]
+}
