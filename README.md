@@ -83,6 +83,10 @@ Do not expose this development milestone directly to the public internet.
 
 ## One-command Debian/Ubuntu installation
 
+For the complete installation procedure, Proxmox LXC requirements, direct-LAN
+container networking, imported-template behavior, validation commands, upgrades,
+and troubleshooting, see **[docs/INSTALLATION.md](docs/INSTALLATION.md)**.
+
 Run as `root` on the NAS host or test LXC:
 
 ```bash
@@ -96,14 +100,38 @@ when installation finishes.
 
 The installer prepares native LXC/liblxc plus QEMU/libvirt. It uses KVM acceleration when available and automatically falls back to QEMU TCG software virtualization when hardware virtualization is unavailable. Docker is never the System Containers backend; it is used only by the App Store and can be disabled with `LIGHTNAS_ENABLE_DOCKER_APPS=0`.
 
-On the **Proxmox node shell** (prompt such as `root@pve:~#`), with the existing LXC 170, you can use the host preparation and install helper instead. Do not run this helper at the `root@nasos:~#` prompt: `nasos` is inside the LXC and cannot change its own Proxmox configuration:
+On the **Proxmox node shell** (prompt such as `root@pve:~#`), use the
+host preparation/install helper with the LightNAS CTID. Do not run this helper
+from inside the LightNAS appliance.
+
+Example for CTID `117`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Ceyeberkepp/Ligthnas/main/scripts/proxmox-lxc-install.sh -o /root/proxmox-lxc-install.sh
-bash /root/proxmox-lxc-install.sh 170
+curl -fsSL https://raw.githubusercontent.com/Ceyeberkepp/Ligthnas/main/scripts/proxmox-lxc-install.sh \
+  -o /root/lightnas-proxmox-install.sh
+chmod +x /root/lightnas-proxmox-install.sh
+bash /root/lightnas-proxmox-install.sh 117
 ```
 
-To update the web service only from inside the appliance, run the normal `install.sh` command above. The Proxmox helper preserves the NAS account and data, grants nested runtime capabilities, passes `/dev/kvm` when possible, and then installs the same local LightNAS engines used on bare metal. No Proxmox API token is required for normal LightNAS VM/container operations. Check `/var/lib/lightnas/runtime-status.txt` for capability results.
+Replace `117` with the actual LightNAS CTID.
+
+The helper preserves the existing LightNAS management `eth0` configuration,
+enables the nested runtime capabilities, passes supported devices such as
+`/dev/kvm`, and installs the same local LightNAS engines used on bare metal.
+On supported nested Proxmox installs, new LightNAS system containers use the
+existing LAN uplink through macvlan, receive normal upstream DHCP addresses,
+and are reachable directly at those LAN IPs. The private `10.77.0.0/24`
+network is a compatibility fallback, not the normal direct-LAN path.
+
+Imported LXC templates are unpacked with nested-LXC-safe handling: archived
+`/dev/*` device nodes are skipped because LXC supplies the runtime `/dev`.
+The main installer also installs the required `tar`, `gzip`, `xz-utils`,
+and `zstd` tools automatically.
+
+To update the web service from inside the appliance, rerun the normal
+`install.sh` command above. No Proxmox API token is required for normal
+LightNAS VM/container operations. Check
+`/var/lib/lightnas/runtime-status.txt` for capability results.
 
 To update an existing Git-based installation, run `install.sh` again. It performs a fast-forward-only source update and preserves state under `/var/lib/lightnas`.
 
