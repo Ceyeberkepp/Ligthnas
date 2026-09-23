@@ -90,6 +90,12 @@ function installerMediaPath(output) {
   return '';
 }
 
+function isWindowsInstaller(entry) {
+  const text = `${entry?.name || ''} ${entry?.id || ''} ${entry?.path || ''}`.toLowerCase();
+  return /(?:^|[^a-z])(windows|win(?:dows)?[-_. ]?(?:10|11)|win[-_. ]?(?:10|11)|server[-_. ]?20\d\d)(?:[^a-z]|$)/i.test(text)
+    || /(?:win11|win10|windows11|windows10|windows[_ -]?server)/i.test(text);
+}
+
 export function configureVmBootXml(source, isoPath, bootOrder) {
   let xml = String(source || '').replace(/<boot\s+dev=(['"])[^'"]+\1\s*\/>\s*/g, '');
   const cdromPattern = /<disk\b[^>]*device=(['"])cdrom\1[^>]*>[\s\S]*?<\/disk>/i;
@@ -138,6 +144,7 @@ export function configureVmEditableHardware(source, settings = {}) {
   const displayModel = ['vga', 'qxl', 'virtio'].includes(settings.displayModel) ? settings.displayModel : 'vga';
   const networkModel = ['virtio', 'e1000', 'rtl8139'].includes(settings.networkModel) ? settings.networkModel : 'virtio';
   const scsiController = ['virtio-scsi', 'virtio-scsi-single', 'lsilogic'].includes(settings.scsiController) ? settings.scsiController : 'virtio-scsi';
+  const diskBus = ['scsi', 'virtio', 'sata'].includes(settings.diskBus) ? settings.diskBus : null;
   // Video model attributes are not interchangeable. In particular, libvirt
   // rejects qxl's `ram` attribute after changing only type='qxl' to
   // type='vga'. Replace the complete model element so switching adapters in
@@ -150,6 +157,23 @@ export function configureVmEditableHardware(source, settings = {}) {
   xml = xml.replace(/(<video>\s*)<model\b[^>]*(?:\/>|>[\s\S]*?<\/model>)/i, `$1${videoModel}`);
   xml = xml.replace(/(<interface\b[\s\S]*?<model\b[^>]*type=)(['"])[^'"]+\2/i, `$1'${networkModel}'`);
   xml = xml.replace(/(<controller\b[^>]*type=(['"])scsi\2[^>]*model=)(['"])[^'"]+\3/i, `$1'${scsiController}'`);
+
+  // Switching the disk bus does not move or recreate the qcow2 file; it only
+  // changes how QEMU presents that same disk to the guest. Windows installation
+  // media has an inbox AHCI/SATA driver but not the VirtIO storage driver, so
+  // this is also the safe in-place recovery path for an existing Windows VM
+  // that reaches Setup with an empty disk list.
+  if (diskBus) {
+    const diskPattern = /<disk\b[^>]*device=(['"])disk\1[^>]*>[\s\S]*?<\/disk>/i;
+    const disk = xml.match(diskPattern)?.[0] || '';
+    if (disk) {
+      const targetDevice = diskBus === 'virtio' ? 'vda' : 'sda';
+      const updatedDisk = /<target\b[^>]*\/>/i.test(disk)
+        ? disk.replace(/<target\b[^>]*\/>/i, `<target dev='${targetDevice}' bus='${diskBus}'/>`)
+        : disk.replace('</disk>', `<target dev='${targetDevice}' bus='${diskBus}'/></disk>`);
+      xml = xml.replace(diskPattern, updatedDisk);
+    }
+  }
   return xml;
 }
 
@@ -596,9 +620,17 @@ export async function createVm(input) {
   if (iso && !isoEntry) throw Object.assign(new Error('Selected installer ISO is incomplete or no longer available. Upload it again and wait for the transfer to finish.'), { status: 409 });
 
   const networkDetail = virtualization.networkDetails?.find(item => item.name === input.network);
-  const firmware = ['bios', 'uefi'].includes(input.firmware) ? input.firmware : 'bios';
-  const diskBus = ['scsi', 'virtio', 'sata'].includes(input.diskBus) ? input.diskBus : 'scsi';
-  const networkModel = ['virtio', 'e1000', 'rtl8139'].includes(input.networkModel) ? input.networkModel : 'virtio';
+  const windowsInstaller = isWindowsInstaller(isoEntry);
+  const firmware = windowsInstaller
+    ? 'uefi'
+    : (['bios', 'uefi'].includes(input.firmware) ? input.firmware : 'bios');
+  const requestedDiskBus = ['scsi', 'virtio', 'sata'].includes(input.diskBus) ? input.diskBus : 'scsi';
+  const requestedNetworkModel = ['virtio', 'e1000', 'rtl8139'].includes(input.networkModel) ? input.networkModel : 'virtio';
+  // Windows Setup must work without a separate VirtIO driver ISO. Present the
+  // install disk through AHCI/SATA and a broadly supported Intel NIC. Linux
+  // guests retain the faster VirtIO defaults.
+  const diskBus = windowsInstaller ? 'sata' : requestedDiskBus;
+  const networkModel = windowsInstaller ? 'e1000' : requestedNetworkModel;
   const networkArg = networkDetail?.type === 'qemu-user'
     ? `user,model=${networkModel}`
     : networkDetail?.type === 'host-bridge'
@@ -628,5 +660,5 @@ export async function createVm(input) {
     if (!autostart.ok) throw Object.assign(new Error(`VM was created, but autostart could not be enabled: ${autostart.error}`), { status: 409 });
   }
   if (isoEntry) queueInstallerBootKey(input.name);
-  return { id: input.name, name: input.name, provider: virtualization.provider, acceleration: virtualization.acceleration, firmware, diskBus, networkModel, details: response.output || 'VM created and started.' };
+  return { id: input.name, name: input.name, provider: virtualization.provider, acceleration: virtualization.acceleration, firmware, diskBus, networkModel, guestProfile: windowsInstaller ? 'windows' : 'generic', details: response.output || 'VM created and started.' };
 }

@@ -327,9 +327,13 @@ export async function proxmoxUpdateContainer(input) {
 }
 
 export async function proxmoxCreateVm(input, inventory) {
-  const firmware = ['bios', 'uefi'].includes(input.firmware) ? input.firmware : 'bios';
-  const diskBus = ['scsi', 'virtio', 'sata'].includes(input.diskBus) ? input.diskBus : 'scsi';
-  const networkModel = ['virtio', 'e1000', 'rtl8139'].includes(input.networkModel) ? input.networkModel : 'virtio';
+  const installerText = String(input.iso || '').toLowerCase();
+  const windowsInstaller = /(?:windows|win[-_. ]?(?:10|11)|win10|win11|windows10|windows11|windows[_ -]?server)/i.test(installerText);
+  const firmware = windowsInstaller ? 'uefi' : (['bios', 'uefi'].includes(input.firmware) ? input.firmware : 'bios');
+  const requestedDiskBus = ['scsi', 'virtio', 'sata'].includes(input.diskBus) ? input.diskBus : 'scsi';
+  const requestedNetworkModel = ['virtio', 'e1000', 'rtl8139'].includes(input.networkModel) ? input.networkModel : 'virtio';
+  const diskBus = windowsInstaller ? 'sata' : requestedDiskBus;
+  const networkModel = windowsInstaller ? 'e1000' : requestedNetworkModel;
   const startOnBoot = input.startOnBoot !== false && input.startOnBoot !== 'false';
   const bridge = hostBridgeConfig();
   if (bridge) {
@@ -354,7 +358,7 @@ export async function proxmoxCreateVm(input, inventory) {
     scsihw: 'virtio-scsi-pci',
     [diskBus === 'scsi' ? 'scsi0' : diskBus === 'virtio' ? 'virtio0' : 'sata0']: `${input.pool}:${input.diskGiB}`,
     ...(input.iso ? { ide2: `${input.iso},media=cdrom`, boot: `order=ide2;${diskBus === 'scsi' ? 'scsi0' : diskBus === 'virtio' ? 'virtio0' : 'sata0'}` } : { boot: `order=${diskBus === 'scsi' ? 'scsi0' : diskBus === 'virtio' ? 'virtio0' : 'sata0'}` }),
-    net0: `${networkModel},bridge=${input.network}`, onboot: startOnBoot ? '1' : '0', ostype: 'l26'
+    net0: `${networkModel},bridge=${input.network}`, onboot: startOnBoot ? '1' : '0', ostype: windowsInstaller ? 'win11' : 'l26'
   });
   if (typeof task !== 'string' || !task.startsWith('UPID:')) throw operationError('Proxmox did not return a VM creation task ID.');
 
