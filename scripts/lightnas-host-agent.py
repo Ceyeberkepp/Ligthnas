@@ -680,8 +680,7 @@ def bootstrap_archive_container(name: str, archive_value: str, storage_root_valu
         "# LightNAS imported system-container template\n"
         "lxc.include = /usr/share/lxc/config/common.conf\n"
         f"lxc.rootfs.path = dir:{rootfs}\n"
-        f"lxc.uts.name = {name}\n"
-        "lxc.arch = x86_64\n",
+        f"lxc.uts.name = {name}\n",
         encoding="utf-8",
     )
     return config
