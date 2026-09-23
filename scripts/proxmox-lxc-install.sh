@@ -10,11 +10,17 @@ ctid="${1:-${LIGHTNAS_CTID:-}}"
 run_local_installer() {
   [[ ${EUID} -eq 0 ]] || { echo 'Run the LightNAS installer as root (or with sudo).' >&2; exit 1; }
   echo 'Proxmox host tools were not detected. Installing LightNAS locally.'
-  local installer
+  local installer status=0
   installer="$(mktemp)"
-  trap 'rm -f "$installer"' EXIT
-  curl -fsSL "${RAW_BASE}/install.sh" -o "$installer"
-  bash "$installer"
+
+  if ! curl -fsSL "${RAW_BASE}/install.sh" -o "$installer"; then
+    rm -f "$installer"
+    return 1
+  fi
+
+  bash "$installer" || status=$?
+  rm -f "$installer"
+  return "$status"
 }
 
 if [[ ! -d /etc/pve ]] || ! command -v pct >/dev/null 2>&1; then
