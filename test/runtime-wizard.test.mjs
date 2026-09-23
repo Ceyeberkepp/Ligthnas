@@ -34,7 +34,10 @@ test('VMs with selected ISO media automatically enter the installer', async () =
     readFile(new URL('../public/dialog-controls.js', import.meta.url), 'utf8')
   ]);
   assert.match(runtime, /function queueInstallerBootKey/);
-  assert.match(runtime, /send-key.*KEY_SPACE/s);
+  assert.match(runtime, /send-key.*--holdtime.*KEY_SPACE/s);
+  assert.match(runtime, /complete boot window/);
+  assert.match(runtime, /if \(!hardwareChanged && \/running\/i\.test/);
+  assert.match(runtime, /'reset', target/);
   assert.match(runtime, /uefi,cdrom,hd,menu=on/);
   assert.match(runtime, /'--video', 'vga'/);
   assert.match(runtime, /if \(isoEntry\) queueInstallerBootKey\(input\.name\)/);

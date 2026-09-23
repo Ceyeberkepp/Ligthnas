@@ -59,11 +59,15 @@ const wait = milliseconds => new Promise(resolve => setTimeout(resolve, millisec
 
 async function pressInstallerBootKey(name) {
   // Windows installation media shows "Press any key to boot from CD/DVD" for
-  // only a few seconds. Send a harmless Space key while firmware is checking
-  // the selected ISO so a new VM opens directly in its installer.
-  for (const delay of [1200, 1800]) {
+  // only a few seconds. Nested LightNAS installations may use QEMU software
+  // emulation, where firmware can take considerably longer to reach that
+  // prompt. Keep sending a harmless Space key across the complete boot window
+  // so opening noVNC never depends on the operator winning that short race.
+  for (const delay of [1000, 1500, 2000, 2500, 3000, 3500, 4000, 5000, 6000, 7000, 8000, 9000, 10000]) {
     await wait(delay);
-    await command('virsh', ['-c', 'qemu:///system', 'send-key', name, 'KEY_SPACE'], 10000);
+    const state = await command('virsh', ['-c', 'qemu:///system', 'domstate', name], 10000);
+    if (!state.ok || !/running/i.test(state.output)) return;
+    await command('virsh', ['-c', 'qemu:///system', 'send-key', name, '--holdtime', '80', 'KEY_SPACE'], 10000);
   }
 }
 
@@ -249,7 +253,19 @@ async function localUpdateVm(input) {
       const start = await command('virsh', ['-c', 'qemu:///system', 'start', target], 60000);
       if (!start.ok) throw Object.assign(new Error(`VM settings were saved, but it could not restart: ${start.error}`), { status: 409 });
     }
-    if (isoEntry && bootOrder === 'iso') queueInstallerBootKey(target);
+  }
+  // Saving ISO-first is also the supported recovery path when a slow guest
+  // previously missed the optical-media boot prompt. Restart even when the
+  // selected hardware is unchanged, then cover the whole firmware boot window.
+  if (isoEntry && bootOrder === 'iso') {
+    if (!hardwareChanged && /running/i.test(stateResult.output || '')) {
+      const reset = await command('virsh', ['-c', 'qemu:///system', 'reset', target], 30000);
+      if (!reset.ok) throw Object.assign(new Error(`VM settings were saved, but installer boot could not restart: ${reset.error}`), { status: 409 });
+    } else if (!/running/i.test(stateResult.output || '')) {
+      const start = await command('virsh', ['-c', 'qemu:///system', 'start', target], 60000);
+      if (!start.ok && !/already active/i.test(start.error || '')) throw Object.assign(new Error(`VM settings were saved, but it could not start: ${start.error}`), { status: 409 });
+    }
+    queueInstallerBootKey(target);
   }
   const autostart = input.startOnBoot === false || input.startOnBoot === 'false' ? 'disable' : 'enable';
   const autostartResult = await command('virsh', ['-c', 'qemu:///system', 'autostart', target, ...(autostart === 'disable' ? ['--disable'] : [])], 30000);
