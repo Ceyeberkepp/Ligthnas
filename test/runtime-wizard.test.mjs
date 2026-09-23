@@ -14,6 +14,18 @@ test('VM and container creation use guided dialogs instead of inline forms', asy
   assert.match(dialogs, /LightNASProgress/);
 });
 
+test('nested VM provisioning disables unsupported libvirt ownership xattrs and cleans failed domains', async () => {
+  const [provision, runtime] = await Promise.all([
+    readFile(new URL('../scripts/provision-runtimes.sh', import.meta.url), 'utf8'),
+    readFile(new URL('../src/runtimes-next.mjs', import.meta.url), 'utf8')
+  ]);
+  assert.match(provision, /remember_owner = 0/);
+  assert.match(provision, /trusted\.libvirt\.security\.dac/);
+  assert.match(runtime, /undefine.*--nvram/s);
+  assert.match(runtime, /rm\(diskDirectory, \{ recursive: true, force: true \}\)/);
+  assert.match(runtime, /nested-libvirt ownership restriction/);
+});
+
 test('image and ISO transfers use the progress dialog', async () => {
   const templates = await readFile(new URL('../public/templates.js', import.meta.url), 'utf8');
   const storage = await readFile(new URL('../public/storage-manager.js', import.meta.url), 'utf8');

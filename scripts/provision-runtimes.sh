@@ -302,6 +302,19 @@ elif [[ "$(uname -m)" != 'x86_64' ]]; then
   report VMs 'automatic x86 VM provisioning currently supports x86_64 LightNAS hosts only'
 else
   if apt-get install -y qemu-system-x86 qemu-utils libvirt-daemon-system libvirt-clients virtinst; then
+    # Unprivileged outer LXC containers cannot write the trusted.* xattrs that
+    # libvirt normally uses to remember file ownership. Disable only that
+    # ownership-memory feature in nested appliance mode; libvirt still applies
+    # normal runtime DAC ownership while avoiding the
+    # trusted.libvirt.security.dac "Operation not permitted" failure.
+    if systemd-detect-virt --container >/dev/null 2>&1; then
+      install -d -m 0755 /etc/libvirt
+      touch /etc/libvirt/qemu.conf
+      sed -Ei '/^[[:space:]]*#?[[:space:]]*remember_owner[[:space:]]*=/d' /etc/libvirt/qemu.conf
+      printf '\n# LightNAS nested-LXC compatibility\nremember_owner = 0\n' >>/etc/libvirt/qemu.conf
+      systemctl try-restart virtqemud.service >/dev/null 2>&1 || true
+      systemctl try-restart libvirtd.service >/dev/null 2>&1 || true
+    fi
     if systemctl list-unit-files libvirtd.socket --no-legend 2>/dev/null | grep -q '^libvirtd.socket'; then
       systemctl enable --now libvirtd.socket >/dev/null 2>&1 || true
     elif systemctl list-unit-files virtqemud.socket --no-legend 2>/dev/null | grep -q '^virtqemud.socket'; then

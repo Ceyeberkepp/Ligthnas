@@ -2,7 +2,7 @@ import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomBytes } from 'node:crypto';
 import net from 'node:net';
-import { mkdir, readdir, lstat, readFile } from 'node:fs/promises';
+import { mkdir, readdir, lstat, readFile, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { proxmoxInventory, proxmoxCreateVm, proxmoxManageVm, proxmoxUpdateVm } from './proxmox.mjs';
 import { localContainerInventory, localCreateContainer, localManageContainer, localUpdateContainer } from './local-host.mjs';
@@ -451,7 +451,18 @@ export async function createVm(input) {
   else args.push('--import', '--osinfo', 'generic');
   args.push('--boot', firmware === 'uefi' ? 'uefi,menu=on' : (isoEntry ? 'cdrom,hd,menu=on' : 'hd,menu=on'));
   const response = await exclusive(() => command('virt-install', args, 180000));
-  if (!response.ok) throw Object.assign(new Error(`VM creation failed: ${response.error}`), { status: 409 });
+  if (!response.ok) {
+    // virt-install may define a domain and create its qcow2 before libvirt
+    // reports a startup failure. Remove only the domain/path created by this
+    // request so the same VM name can be retried after the cause is repaired.
+    await command('virsh', ['-c', 'qemu:///system', 'destroy', input.name], 30000).catch(() => {});
+    await command('virsh', ['-c', 'qemu:///system', 'undefine', input.name, '--nvram'], 30000).catch(() => {});
+    await rm(diskDirectory, { recursive: true, force: true }).catch(() => {});
+    const nestedHint = /trusted\.libvirt\.security\.dac|Operation not permitted/i.test(response.error || '')
+      ? ' LightNAS detected a nested-libvirt ownership restriction; rerun the one-click installer to apply the automatic compatibility setting.'
+      : '';
+    throw Object.assign(new Error(`VM creation failed: ${response.error}${nestedHint}`), { status: 409 });
+  }
   if (input.startOnBoot !== false && input.startOnBoot !== 'false') {
     const autostart = await command('virsh', ['-c', 'qemu:///system', 'autostart', input.name], 30000);
     if (!autostart.ok) throw Object.assign(new Error(`VM was created, but autostart could not be enabled: ${autostart.error}`), { status: 409 });
