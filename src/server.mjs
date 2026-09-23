@@ -11,7 +11,7 @@ import { listFiles, createFolder, uploadFile, downloadFile, deleteEntry } from '
 import { thumbnailFor } from './thumbnails.mjs';
 import { catalog, runtimeInventory, installCatalogApp, manageCatalogApp, createContainer, createVm } from './runtimes-next.mjs';
 import { proxmoxConsoleSocket, proxmoxUpdateStorage, proxmoxCleanDisk } from './proxmox.mjs';
-import { localContainerSummary, localContainerInventory, localManageContainer, localContainerConsoleSocket, localContainerCommand, localVmConsoleSocket, localNetworkInventory, localNetworkAction, localApplianceHealth, localApplianceRepair } from './local-host.mjs';
+import { localContainerSummary, localContainerInventory, localManageContainer, localContainerConsoleSocket, localContainerCommand, localContainerWebListeners, localVmConsoleSocket, localNetworkInventory, localNetworkAction, localApplianceHealth, localApplianceRepair } from './local-host.mjs';
 import { validateSmtp, sendSmtpTest } from './mailer.mjs';
 import { mediaAvailable, convertMedia } from './media.mjs';
 import { createDataset, updateDataset } from './zfs.mjs';
@@ -115,11 +115,12 @@ async function automaticContainerApplication(id, { preferredPort = 0, requestedH
   let detected = null;
   const totalAttempts = Math.max(1, Math.min(20, Number(attempts) || 1));
   for (let attempt = 0; attempt < totalAttempts; attempt += 1) {
+    const listeners = await localContainerWebListeners(id).catch(() => ({ ports: [] }));
     detected = await discoverContainerApplication({
       id,
       targetHost: ready.targetHost,
-      preferredPort,
-      runCommand: localContainerCommand
+      listeningPorts: listeners?.ports || [],
+      preferredPort
     }).catch(() => null);
     if (detected) break;
     if (attempt + 1 < totalAttempts) await pause(1000);
