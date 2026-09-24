@@ -75,7 +75,10 @@ async function showConsole() {
   state.overview = await request('/api/overview');
   const { appliance } = state.overview;
   $('#mini-name').textContent = appliance.deviceName;
-  $('#avatar').textContent = appliance.username[0].toUpperCase();
+  const avatar = $('#avatar');
+  avatar.textContent = appliance.avatar ? '' : appliance.username[0].toUpperCase();
+  avatar.style.backgroundImage = appliance.avatar ? `url("/api/profile/avatar?v=${Date.now()}")` : '';
+  avatar.classList.toggle('has-photo', Boolean(appliance.avatar));
   $$('[data-view]').forEach(link => link.classList.toggle('hidden', appliance.role !== 'administrator' && !['home', 'files', 'media'].includes(link.dataset.view)));
   $$('.nav-group').forEach(group => group.classList.toggle('hidden', !group.querySelector('[data-view]:not(.hidden)')));
   render(location.hash.slice(1) || 'home');
@@ -811,6 +814,33 @@ $('#menu').addEventListener('click', () => {
 });
 addEventListener('resize', applySidebarPreference);
 $('#theme-toggle').addEventListener('click', () => { theme = themeChoices[(themeChoices.indexOf(theme) + 1) % themeChoices.length]; localStorage.setItem('lightnas-theme', theme); applyTheme(); toast(`Appearance: ${theme}`); });
+$('#avatar').addEventListener('click', () => {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/jpeg,image/png,image/webp';
+  input.addEventListener('change', async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) return toast('Profile picture must be 8 MiB or smaller.');
+    try {
+      const response = await fetch('/api/profile/avatar', {
+        method: 'PUT',
+        headers: { 'Content-Type': file.type, 'X-LightNAS-Request': '1' },
+        body: file
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || 'Unable to upload profile picture.');
+      state.overview = await request('/api/overview');
+      const appliance = state.overview.appliance;
+      const avatar = $('#avatar');
+      avatar.textContent = '';
+      avatar.style.backgroundImage = `url("/api/profile/avatar?v=${Date.now()}")`;
+      avatar.classList.add('has-photo');
+      toast('Profile picture updated.');
+    } catch (error) { toast(error.message); }
+  }, { once: true });
+  input.click();
+});
 $('#mobile-more').addEventListener('click', () => $('.sidebar').classList.add('open'));
 $$('[data-view]').forEach(link => link.addEventListener('click', () => $('.sidebar').classList.remove('open')));
 $$('.close-dialog').forEach(button => button.addEventListener('click', () => $('#share-dialog').close()));
