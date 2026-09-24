@@ -92,6 +92,46 @@ async function directoryEntries(path) {
   }));
 }
 
+async function recursiveFileEntries(path, prefix = '', output = [], limits = { count: 0, max: 10000 }) {
+  if (limits.count >= limits.max) return output;
+  let names = [];
+  try { names = await readdir(path); } catch { return output; }
+  for (const name of names) {
+    if (limits.count >= limits.max) break;
+    const absolute = join(path, name);
+    let info;
+    try { info = await lstat(absolute); } catch { continue; }
+    if (info.isSymbolicLink()) continue;
+    const relativePath = [prefix, name].filter(Boolean).join('/');
+    if (info.isDirectory()) {
+      await recursiveFileEntries(absolute, relativePath, output, limits);
+      continue;
+    }
+    if (!info.isFile()) continue;
+    output.push({
+      name,
+      path: relativePath,
+      folder: prefix,
+      directory: false,
+      sizeBytes: info.size,
+      modifiedAt: info.mtime.toISOString(),
+      supported: true
+    });
+    limits.count += 1;
+  }
+  return output;
+}
+
+export async function listAllFiles() {
+  await mkdir(root, { recursive: true, mode: 0o700 });
+  const entries = await recursiveFileEntries(root);
+  return {
+    entries: entries.sort((a, b) => new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime() || a.path.localeCompare(b.path)),
+    truncated: entries.length >= 10000,
+    limit: 10000
+  };
+}
+
 export async function listFiles(relative = '') {
   const segments = parts(relative);
   const volumes = await attachedVolumes();
