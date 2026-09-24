@@ -18,11 +18,7 @@ const permissionNames = {
   'network.manage':'Manage interfaces, bridges & VLANs',
   'firewall.manage':'Manage firewall',
   'monitoring.view':'View monitoring',
-  'system.view':'View system information',
-  'users.manage':'Manage user accounts',
-  'groups.manage':'Manage groups & policy',
-  'security.manage':'Manage tokens / identity / security',
-  'shell.access':'Node shell access (owner policy only)'
+  'system.view':'View system information'
 };
 
 async function api(path, options = {}) {
@@ -91,8 +87,9 @@ async function renderGroups() {
       <div class="form-error" role="alert"></div>
       <div class="dialog-actions"><button class="secondary" type="button" data-close-group>Cancel</button><button class="primary" type="submit">Create group</button></div>
     </form></dialog>`;
-  q('.page-head', content)?.insertAdjacentElement('afterend', section);
-
+  const root = q('[data-permissions-root]', content);
+  if (root) root.replaceWith(section);
+  else q('.page-head', content)?.insertAdjacentElement('afterend', section);
 }
 
 async function renderTotp() {
