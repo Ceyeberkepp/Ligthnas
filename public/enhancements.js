@@ -93,14 +93,14 @@ function ensureFolderDialog() {
 
 function previewItems() {
   return [...document.querySelectorAll('#content .file-name[data-directory="false"]')]
-    .map(button => button.dataset.open || '')
-    .filter(name => name && previewKind(name));
+    .map(button => ({ name: button.dataset.open || '', path: button.dataset.path || joinPath(currentFolder(), button.dataset.open || '') }))
+    .filter(item => item.name && item.path && previewKind(item.name));
 }
 
 function updateViewerNavigation(dialog, name) {
   const items = previewItems();
-  const index = items.indexOf(name);
-  dialog.dataset.currentName = name;
+  const index = items.findIndex(item => item.path === name || item.name === name);
+  dialog.dataset.currentName = index >= 0 ? items[index].path : name;
   const previous = dialog.querySelector('[data-viewer-previous]');
   const next = dialog.querySelector('[data-viewer-next]');
   const multiple = items.length > 1;
@@ -115,9 +115,9 @@ async function navigatePreview(offset) {
   const dialog = document.querySelector('#lightnas-viewer');
   if (!dialog?.open) return;
   const items = previewItems();
-  const current = items.indexOf(dialog.dataset.currentName || '');
+  const current = items.findIndex(item => item.path === (dialog.dataset.currentName || ''));
   const target = items[current + offset];
-  if (target) await openPreview(target);
+  if (target) await openPreview(target.name, target.path);
 }
 
 function ensureViewer() {
@@ -159,10 +159,10 @@ function previewKind(name) {
   return Object.entries(previewExtensions).find(([, list]) => list.has(extension))?.[0] || null;
 }
 
-async function openPreview(name) {
+async function openPreview(name, explicitPath = '') {
   const kind = previewKind(name);
   if (!kind) return false;
-  const path = joinPath(currentFolder(), name);
+  const path = explicitPath || joinPath(currentFolder(), name);
   const extension = name.toLowerCase().split('.').pop();
   const raw = ['raw','dng','cr2','cr3','nef','nrw','arw','srf','sr2','raf','orf','rw2','pef','srw','x3f'].includes(extension);
   const dialog = ensureViewer();
@@ -210,7 +210,7 @@ async function openPreview(name) {
     anchor.download = name;
     anchor.click();
   };
-  updateViewerNavigation(dialog, name);
+  updateViewerNavigation(dialog, path);
   if (!dialog.open) dialog.showModal();
   return true;
 }
@@ -420,7 +420,7 @@ function enhanceFileThumbnails() {
     const name = button.dataset.open || '';
     const kind = previewKind(name);
     if (!['image', 'video'].includes(kind)) continue;
-    const path = joinPath(folder, name);
+    const path = button.dataset.path || joinPath(folder, name);
     const media = document.createElement('img');
     media.className = 'file-thumb';
     media.loading = 'lazy';
@@ -497,7 +497,7 @@ document.addEventListener('click', async event => {
   const fileButton = event.target.closest('#content .file-name[data-directory="false"]');
   if (fileButton && previewKind(fileButton.dataset.open || '')) {
     event.preventDefault(); event.stopImmediatePropagation();
-    try { await openPreview(fileButton.dataset.open); } catch (problem) { alert(problem.message); }
+    try { await openPreview(fileButton.dataset.open, fileButton.dataset.path || ''); } catch (problem) { alert(problem.message); }
     return;
   }
 
