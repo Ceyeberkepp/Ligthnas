@@ -12,10 +12,16 @@ BUILD_DIR="${LIGHTNAS_ISO_BUILD_DIR:-${REPO_ROOT}/.iso-build}"
   exit 1
 }
 
-command -v lb >/dev/null || {
-  echo 'Install live-build, debootstrap, xorriso, and squashfs-tools first.' >&2
-  exit 1
-}
+BUILD_PACKAGES=(live-build debootstrap xorriso squashfs-tools rsync dosfstools mtools isolinux syslinux-common grub-pc-bin grub-efi-amd64-bin librsvg2-bin)
+missing_build_tools=0
+for tool in lb debootstrap xorriso unsquashfs rsvg-convert; do
+  command -v "$tool" >/dev/null 2>&1 || missing_build_tools=1
+done
+if [[ "$missing_build_tools" -eq 1 ]]; then
+  echo '=== Installing LightNAS ISO build dependencies ==='
+  apt-get update
+  DEBIAN_FRONTEND=noninteractive apt-get install -y "${BUILD_PACKAGES[@]}"
+fi
 
 [[ ! -e "${BUILD_DIR}" ]] || {
   echo "Build directory already exists: ${BUILD_DIR}" >&2
@@ -32,11 +38,55 @@ lb config \
   --distribution trixie \
   --architectures amd64 \
   --binary-image iso-hybrid \
+  --bootloaders 'syslinux,grub-efi' \
   --debian-installer live \
+  --debian-installer-gui true \
+  --firmware-binary true \
+  --firmware-chroot true \
+  --uefi-secure-boot auto \
+  --iso-application 'LightNAS' \
+  --iso-preparer 'LightNAS ISO Builder' \
+  --iso-publisher 'Cyverax LLC' \
+  --iso-volume 'LIGHTNAS' \
+  --bootappend-live 'boot=live components quiet splash hostname=lightnas' \
   --archive-areas 'main contrib non-free-firmware' \
   --security false \
   --linux-packages linux-image \
   --linux-flavours amd64
+
+# Start from the version-matched live-build bootloader templates, then brand
+# their splash/menu text. This keeps BIOS and UEFI boot logic owned by
+# live-build instead of replacing it with a fragile custom bootloader.
+if [[ -d /usr/share/live/build/bootloaders ]]; then
+  rm -rf config/bootloaders
+  cp -a /usr/share/live/build/bootloaders config/bootloaders
+
+  cat >"${BUILD_DIR}/lightnas-splash.svg" <<'SVG'
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480">
+  <rect width="640" height="480" fill="#08111f"/>
+  <rect x="214" y="118" width="34" height="104" rx="11" fill="#54df9b"/>
+  <rect x="272" y="88" width="34" height="134" rx="11" fill="#5ce1c3"/>
+  <rect x="330" y="132" width="34" height="90" rx="11" fill="#7ab8ff"/>
+  <text x="320" y="292" text-anchor="middle" font-family="DejaVu Sans, sans-serif" font-size="54" font-weight="700" fill="#f4fbff">LightNAS</text>
+  <text x="320" y="333" text-anchor="middle" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#9db2c3">Storage · Apps · Containers · Virtual Machines</text>
+  <text x="320" y="393" text-anchor="middle" font-family="DejaVu Sans, sans-serif" font-size="15" fill="#5ce1c3">Graphical installer · BIOS + UEFI</text>
+</svg>
+SVG
+  rsvg-convert -w 640 -h 480 "${BUILD_DIR}/lightnas-splash.svg" >"${BUILD_DIR}/lightnas-splash.png"
+
+  while IFS= read -r -d '' splash; do
+    cp "${BUILD_DIR}/lightnas-splash.png" "${splash}"
+  done < <(find config/bootloaders -type f -name 'splash.png' -print0)
+
+  while IFS= read -r -d '' menu; do
+    sed -i \
+      -e 's/Debian GNU\/Linux/LightNAS/g' \
+      -e 's/Debian Live/LightNAS Live\/Recovery/g' \
+      -e 's/Graphical Debian Installer/Install LightNAS (Graphical)/g' \
+      -e 's/Debian Installer/Install LightNAS (Text fallback)/g' \
+      "$menu"
+  done < <(find config/bootloaders -type f \( -name '*.cfg' -o -name '*.conf' \) -print0)
+fi
 
 mkdir -p \
   config/package-lists \
@@ -74,6 +124,17 @@ iproute2
 nftables
 ufw
 smartmontools
+xserver-xorg
+xserver-xorg-video-all
+xserver-xorg-input-all
+lightdm
+openbox
+chromium
+dbus-x11
+x11-xserver-utils
+fonts-dejavu-core
+plymouth
+plymouth-themes
 
 lxc
 lxc-templates
@@ -297,6 +358,64 @@ for group in libvirt kvm; do
 done
 
 #
+# Lightweight local LightNAS graphical console.
+#
+# This is intentionally a kiosk rather than a general-purpose desktop. The
+# browser talks to the exact same local control plane exposed on port 3080.
+# Headless systems still retain the normal web UI and text consoles.
+#
+if ! id lightnas-ui >/dev/null 2>&1; then
+  useradd --create-home --home-dir /var/lib/lightnas-ui --shell /bin/bash lightnas-ui
+fi
+install -d -o lightnas-ui -g lightnas-ui -m 0700 /var/lib/lightnas-ui/.config/openbox
+
+cat >/usr/local/bin/lightnas-kiosk <<'KIOSK'
+#!/bin/bash
+set -u
+xset -dpms >/dev/null 2>&1 || true
+xset s off >/dev/null 2>&1 || true
+xset s noblank >/dev/null 2>&1 || true
+for _ in $(seq 1 90); do
+  curl -fsS http://127.0.0.1:3080/api/status >/dev/null 2>&1 && break
+  sleep 1
+done
+exec chromium \
+  --ozone-platform=x11 \
+  --kiosk \
+  --no-first-run \
+  --no-default-browser-check \
+  --disable-session-crashed-bubble \
+  --disable-features=TranslateUI \
+  http://127.0.0.1:3080/
+KIOSK
+chmod 0755 /usr/local/bin/lightnas-kiosk
+
+cat >/var/lib/lightnas-ui/.config/openbox/autostart <<'AUTOSTART'
+/usr/local/bin/lightnas-kiosk &
+AUTOSTART
+chown lightnas-ui:lightnas-ui /var/lib/lightnas-ui/.config/openbox/autostart
+
+install -d -m 0755 /etc/lightdm/lightdm.conf.d
+cat >/etc/lightdm/lightdm.conf.d/50-lightnas.conf <<'LIGHTDM'
+[Seat:*]
+autologin-user=lightnas-ui
+autologin-user-timeout=0
+user-session=openbox
+greeter-hide-users=true
+LIGHTDM
+
+cat >/etc/issue <<'ISSUE'
+LightNAS
+Private cloud storage appliance · based on Debian GNU/Linux 13
+Web control center: http://<this-system-IP>:3080
+
+ISSUE
+cp /etc/issue /etc/issue.net
+
+systemctl enable lightdm.service >/dev/null 2>&1 || true
+systemctl set-default graphical.target >/dev/null 2>&1 || true
+
+#
 # LightNAS data locations
 #
 install -d \
@@ -466,6 +585,19 @@ ISO="$(find . -maxdepth 1 -name '*.iso' -type f -print -quit)"
   echo 'Build did not produce an ISO.' >&2
   exit 1
 }
+
+echo
+echo "=== Verifying LightNAS BIOS + UEFI boot entries ==="
+ELTORITO_REPORT="$(xorriso -indev "${ISO}" -report_el_torito plain 2>/dev/null || true)"
+if ! grep -qi 'BIOS' <<<"${ELTORITO_REPORT}"; then
+  echo 'ERROR: generated ISO does not advertise a BIOS El Torito boot image.' >&2
+  exit 1
+fi
+if ! grep -Eqi 'UEFI|EFI' <<<"${ELTORITO_REPORT}"; then
+  echo 'ERROR: generated ISO does not advertise a UEFI boot image.' >&2
+  exit 1
+fi
+echo 'BIOS and UEFI boot entries confirmed.'
 
 #
 # Copy final artifact.
