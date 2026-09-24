@@ -1527,6 +1527,60 @@ def stream_vm_console(connection, backend) -> None:
         backend.close()
         feeder.join(timeout=1)
 
+def stream_node_shell(connection) -> None:
+    """Open an interactive root shell on the LightNAS node for the web console."""
+    master, slave = pty.openpty()
+    env = os.environ.copy()
+    env.update({"TERM": "xterm-256color", "HOME": "/root", "USER": "root", "LOGNAME": "root"})
+
+    def child_setup():
+        os.setsid()
+        fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
+
+    shell = "/bin/bash" if Path("/bin/bash").exists() else "/bin/sh"
+    args = [shell, "--noprofile", "--norc", "-i"] if shell.endswith("bash") else [shell, "-i"]
+    process = subprocess.Popen(
+        args,
+        cwd="/root" if Path("/root").is_dir() else "/",
+        stdin=slave,
+        stdout=slave,
+        stderr=slave,
+        close_fds=True,
+        env=env,
+        preexec_fn=child_setup,
+    )
+    os.close(slave)
+
+    def input_loop():
+        try:
+            while process.poll() is None:
+                chunk = connection.recv(65536)
+                if not chunk:
+                    break
+                os.write(master, chunk)
+        except OSError:
+            pass
+
+    feeder = threading.Thread(target=input_loop, daemon=True)
+    feeder.start()
+    try:
+        while process.poll() is None:
+            chunk = os.read(master, 65536)
+            if not chunk:
+                break
+            connection.sendall(chunk)
+    except OSError:
+        pass
+    finally:
+        try:
+            os.close(master)
+        except OSError:
+            pass
+        if process.poll() is None:
+            process.terminate()
+        feeder.join(timeout=1)
+
+
 def stream_container(connection, data: dict) -> None:
     name = str(data.get("id") or data.get("name") or "")
     if not NAME_RE.fullmatch(name):
@@ -1772,6 +1826,11 @@ class Handler(socketserver.StreamRequestHandler):
             request = json.loads(raw.decode("utf-8"))
             if not isinstance(request, dict):
                 raise ValueError("request must be an object")
+            if request.get("action") == "node-console":
+                self.wfile.write(b'{"ok":true,"data":{"mode":"pty","privileged":true}}\n')
+                self.wfile.flush()
+                stream_node_shell(self.connection)
+                return
             if request.get("action") == "container-console":
                 self.wfile.write(b'{"ok":true,"data":{"mode":"pty"}}\n')
                 self.wfile.flush()
