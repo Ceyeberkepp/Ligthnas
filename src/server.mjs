@@ -1,6 +1,6 @@
 import http from 'node:http';
 import { spawn } from 'node:child_process';
-import { readFile, mkdir, rmdir } from 'node:fs/promises';
+import { readFile, mkdir, rmdir, writeFile, rm } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import { basename, dirname, extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -55,6 +55,7 @@ store.state.security.apiTokens ||= [];
 store.state.security.webhooks ||= [];
 store.state.security.identityProviders ||= [];
 const spaceRoot = join(dirname(resolve(process.env.NAS_DATA_FILE || 'data/state.json')), 'files', 'Spaces');
+const profileRoot = join(dirname(resolve(process.env.NAS_DATA_FILE || 'data/state.json')), 'profiles');
 const spaceName = /^[a-zA-Z0-9][a-zA-Z0-9_-]{1,39}$/;
 const groupName = /^[A-Za-z0-9][A-Za-z0-9 _.-]{1,63}$/;
 const pause = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
@@ -201,6 +202,21 @@ async function bodyJson(req) {
   } catch {
     throw Object.assign(new Error('Invalid JSON.'), { status: 400 });
   }
+}
+
+async function bodyBuffer(req, maxBytes) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > maxBytes) throw Object.assign(new Error('Uploaded profile image is too large.'), { status: 413 });
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
+}
+
+function avatarPath(username, extension) {
+  return join(profileRoot, `${username}.${extension}`);
 }
 
 function cookies(req) {
@@ -366,6 +382,43 @@ async function api(req, res, url) {
   const context = requireSession(req, res);
   if (!context) return;
   const { username, account, isAdmin, permissions } = context;
+
+  if (req.method === 'GET' && url.pathname === '/api/profile/avatar') {
+    if (context.apiToken || !account.avatarExt) return send(res, 404, { error: 'No profile picture is configured.' });
+    const path = avatarPath(username, account.avatarExt);
+    const type = account.avatarExt === 'png' ? 'image/png' : account.avatarExt === 'webp' ? 'image/webp' : 'image/jpeg';
+    try {
+      const data = await readFile(path);
+      res.writeHead(200, { 'Content-Type': type, 'Content-Length': data.length, 'Cache-Control': 'private, max-age=300', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': csp });
+      return res.end(data);
+    } catch (error) {
+      if (error.code === 'ENOENT') return send(res, 404, { error: 'Profile picture is unavailable.' });
+      throw error;
+    }
+  }
+  if (req.method === 'PUT' && url.pathname === '/api/profile/avatar') {
+    if (context.apiToken) return send(res, 403, { error: 'Profile pictures require an interactive user session.' });
+    const type = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+    const extension = ({ 'image/jpeg':'jpg', 'image/png':'png', 'image/webp':'webp' })[type];
+    if (!extension) return send(res, 415, { error: 'Use a JPEG, PNG, or WebP profile picture.' });
+    const data = await bodyBuffer(req, 8 * 1024 * 1024);
+    if (!data.length) return send(res, 400, { error: 'Choose a profile picture.' });
+    await mkdir(profileRoot, { recursive: true, mode: 0o700 });
+    for (const old of ['jpg', 'png', 'webp']) {
+      if (old !== extension) await rm(avatarPath(username, old), { force: true }).catch(() => {});
+    }
+    await writeFile(avatarPath(username, extension), data, { mode: 0o600 });
+    account.avatarExt = extension;
+    await store.save();
+    return send(res, 200, { ok: true, avatar: true });
+  }
+  if (req.method === 'DELETE' && url.pathname === '/api/profile/avatar') {
+    if (context.apiToken) return send(res, 403, { error: 'Profile pictures require an interactive user session.' });
+    for (const old of ['jpg', 'png', 'webp']) await rm(avatarPath(username, old), { force: true }).catch(() => {});
+    delete account.avatarExt;
+    await store.save();
+    return send(res, 200, { ok: true, avatar: false });
+  }
 
   if (req.method === 'GET' && url.pathname === '/api/security/totp') {
     if (context.apiToken) return send(res, 403, { error: 'TOTP settings require an interactive local account session.' });
@@ -913,7 +966,7 @@ async function api(req, res, url) {
     storage.usableStorage = storagePools.visibleSummary || storage.usableStorage;
     storage.poolSummary = storagePools.summary;
     return send(res, 200, {
-      appliance: { deviceName: store.state.config.deviceName, username, role: isAdmin ? 'administrator' : context.apiToken ? 'api' : 'user', permissions, timezone: store.state.config.timezone },
+      appliance: { deviceName: store.state.config.deviceName, username, role: isAdmin ? 'administrator' : context.apiToken ? 'api' : 'user', permissions, timezone: store.state.config.timezone, avatar: Boolean(account.avatarExt) },
       system, filesystems, storage, host: runtimes?.virtualization?.host || null,
       shares: store.state.shares, activity: store.state.activity.slice(0, 8)
     });
