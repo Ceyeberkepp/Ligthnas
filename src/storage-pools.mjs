@@ -181,6 +181,7 @@ export async function listStoragePools() {
   return {
     pools,
     availableSources,
+    detectedDisks: inventory.disks || [],
     summary,
     visibleSummary: inventory.usableStorage || summary,
     contentTypes: STORAGE_CONTENT
