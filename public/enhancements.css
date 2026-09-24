@@ -224,3 +224,21 @@
   .admin-overview-grid { grid-template-columns:1fr; }
   .admin-service-links { align-items:flex-start; flex-direction:column; }
 }
+
+
+/* Files upload controls + App Store browsing */
+.file-location { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.file-name small { display:block; margin-top:4px; color:var(--muted); font-size:10px; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.upload-button.secondary { display:inline-flex; align-items:center; justify-content:center; cursor:pointer; }
+.app-catalog-toolbar { display:grid; grid-template-columns:minmax(0,1fr) minmax(300px,.8fr); gap:20px; align-items:end; margin-bottom:16px; }
+.app-catalog-toolbar h2 { margin:6px 0; font-size:22px; }
+.app-filter-controls { display:grid; grid-template-columns:minmax(180px,1fr) minmax(150px,.65fr); gap:10px; }
+.app-filter-controls label { margin:0; }
+.app-card[hidden] { display:none !important; }
+.app-card .app-source { font-size:10px; overflow-wrap:anywhere; }
+.detected-disk-card { min-height:150px; }
+
+@media (max-width:800px) {
+  .app-catalog-toolbar { grid-template-columns:1fr; }
+  .app-filter-controls { grid-template-columns:1fr; }
+}
