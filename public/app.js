@@ -1,4 +1,4 @@
-const state = { overview: null, view: 'home', folder: '', files: null, fileError: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, smtp: undefined, media: null, network: null };
+const state = { overview: null, view: 'home', folder: '', files: null, fileError: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, smtp: undefined, media: null, network: null, fileView: localStorage.getItem('lightnas-file-view') === 'grid' ? 'grid' : 'list' };
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
 const themeChoices = ['system', 'light', 'dark'];
@@ -273,11 +273,38 @@ function filesView() {
   const crumbs = [`<button class="panel-link" data-folder="">Files & media</button>`, ...segments.map((segment, index) => `<span> / </span><button class="panel-link" data-folder="${escapeHtml(segments.slice(0, index + 1).join('/'))}">${escapeHtml(segment)}</button>`)].join('');
   const entries = state.files;
   const tabs = librarySections.map(([folder, label]) => `<button type="button" class="library-tab ${section === folder ? 'active' : ''}" data-library-tab="${escapeHtml(folder)}" aria-pressed="${section === folder}">${escapeHtml(label)}</button>`).join('');
-  return `${pageHead('Files & media', 'Browse documents, photos, audio, video, and other files in one library.', '<button class="secondary" data-action="refresh-files">Refresh</button>')}
+  const item = entry => state.fileView === 'grid'
+    ? `<article class="file-card">
+        <button class="file-name file-card-open" data-open="${escapeHtml(entry.name)}" data-directory="${entry.directory}">
+          <span class="file-card-visual">${entry.directory ? '<span class="folder-glyph">▣</span>' : '<span class="file-glyph">▤</span>'}</span>
+          <span class="file-card-title">${escapeHtml(entry.name)}</span>
+        </button>
+        <span class="muted">${entry.directory ? 'Folder' : bytes(entry.sizeBytes)}</span>
+        <div class="file-card-actions">
+          ${entry.directory ? `<button class="secondary" data-download-folder="${escapeHtml(entry.name)}">Download folder</button>` : ''}
+          ${!entry.directory && state.media?.converterAvailable && state.overview.appliance.role === 'administrator' ? `<button class="secondary" data-convert-file="${escapeHtml(entry.name)}">Convert</button>` : ''}
+          <button class="secondary" data-delete-file="${escapeHtml(entry.name)}">Delete</button>
+        </div>
+      </article>`
+    : `<article class="file-row">
+        <button class="file-name" data-open="${escapeHtml(entry.name)}" data-directory="${entry.directory}">${entry.directory ? '▣' : '▤'} ${escapeHtml(entry.name)}</button>
+        <span class="muted">${entry.directory ? 'Folder' : bytes(entry.sizeBytes)}</span>
+        ${entry.directory ? `<button class="secondary" data-download-folder="${escapeHtml(entry.name)}">Download</button>` : ''}
+        ${!entry.directory && state.media?.converterAvailable && state.overview.appliance.role === 'administrator' ? `<button class="secondary" data-convert-file="${escapeHtml(entry.name)}">Convert</button>` : ''}
+        <button class="secondary" data-delete-file="${escapeHtml(entry.name)}">Delete</button>
+      </article>`;
+  return `${pageHead('Files & media', 'Browse documents, photos, audio, video, RAW images, and other files in one library.', '<button class="secondary" data-action="refresh-files">Refresh</button>')}
     <nav class="library-tabs" aria-label="File library sections">${tabs}</nav>
-    <div class="file-toolbar"><div class="breadcrumbs">${crumbs}</div><div><button class="secondary" data-action="new-folder">+ Folder</button> <label class="primary upload-button">Upload<input id="file-upload" type="file" multiple hidden></label></div></div>
-    <p class="muted">Select a tab to open that library. Previewable items open in the viewer; use its arrows to move through multiple files.</p>
-    <div class="storage-list">${state.fileError ? `<div class="empty error-state"><p><b>Files could not be loaded.</b></p><p>${escapeHtml(state.fileError)}</p><button class="secondary" data-action="refresh-files">Try again</button></div>` : entries === null ? '<div class="empty"><p>Loading files…</p></div>' : entries.length ? entries.map(entry => `<article class="file-row"><button class="file-name" data-open="${escapeHtml(entry.name)}" data-directory="${entry.directory}">${entry.directory ? '▣' : '▤'} ${escapeHtml(entry.name)}</button><span class="muted">${entry.directory ? 'Folder' : bytes(entry.sizeBytes)}</span>${!entry.directory && state.media?.converterAvailable && state.overview.appliance.role === 'administrator' ? `<button class="secondary" data-convert-file="${escapeHtml(entry.name)}">Convert</button>` : ''}<button class="secondary" data-delete-file="${escapeHtml(entry.name)}">Delete</button></article>`).join('') : '<div class="empty"><p>This section is empty. Create a folder or upload files here.</p></div>'}</div>`;
+    <div class="file-toolbar"><div class="breadcrumbs">${crumbs}</div><div class="file-toolbar-actions">
+      <div class="view-toggle" role="group" aria-label="File view">
+        <button class="secondary ${state.fileView === 'list' ? 'active' : ''}" type="button" data-file-view="list" aria-pressed="${state.fileView === 'list'}">☷ List</button>
+        <button class="secondary ${state.fileView === 'grid' ? 'active' : ''}" type="button" data-file-view="grid" aria-pressed="${state.fileView === 'grid'}">▦ Grid</button>
+      </div>
+      <button class="secondary" data-action="new-folder">+ Folder</button>
+      <label class="primary upload-button">Upload<input id="file-upload" type="file" multiple hidden></label>
+    </div></div>
+    <p class="muted">Uploads stream directly to storage with no LightNAS file-size ceiling. RAW photos and broad video formats can be previewed in the browser.</p>
+    <div class="${state.fileView === 'grid' ? 'file-browser-grid' : 'storage-list'}">${state.fileError ? `<div class="empty error-state"><p><b>Files could not be loaded.</b></p><p>${escapeHtml(state.fileError)}</p><button class="secondary" data-action="refresh-files">Try again</button></div>` : entries === null ? '<div class="empty"><p>Loading files…</p></div>' : entries.length ? entries.map(item).join('') : '<div class="empty"><p>This section is empty. Create a folder or upload files here.</p></div>'}</div>`;
 }
 
 async function loadFiles() {
@@ -675,7 +702,21 @@ function bindViewActions() {
     button.textContent = 'Refreshing…';
     await loadFiles();
   }));
-  $$('[data-library-tab]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+  $('[data-file-view]', $('#content')).forEach(button => button.addEventListener('click', () => {
+    state.fileView = button.dataset.fileView === 'grid' ? 'grid' : 'list';
+    localStorage.setItem('lightnas-file-view', state.fileView);
+    render('files');
+  }));
+  $('[data-download-folder]', $('#content')).forEach(button => button.addEventListener('click', () => {
+    const path = [state.folder, button.dataset.downloadFolder].filter(Boolean).join('/');
+    const link = document.createElement('a');
+    link.href = `/api/files/archive?path=${encodeURIComponent(path)}`;
+    link.download = `${button.dataset.downloadFolder}.tar.gz`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+  }));
+  $('[data-library-tab]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     const folder = button.dataset.libraryTab || '';
     if (folder) {
       try { await request(`/api/files?path=${encodeURIComponent(folder)}`); }
