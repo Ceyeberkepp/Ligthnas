@@ -89,6 +89,44 @@ async function directoryEntries(path) {
   }));
 }
 
+async function recursiveFileEntries(path, prefix = '', output = [], state = { count: 0, limit: 10000 }) {
+  if (state.count >= state.limit) return output;
+  let names = [];
+  try { names = await readdir(path); } catch { return output; }
+
+  for (const name of names) {
+    if (state.count >= state.limit) break;
+    const absolute = join(path, name);
+    let info;
+    try { info = await lstat(absolute); } catch { continue; }
+    if (info.isSymbolicLink()) continue;
+    const relativePath = [prefix, name].filter(Boolean).join('/');
+    if (info.isDirectory()) {
+      await recursiveFileEntries(absolute, relativePath, output, state);
+      continue;
+    }
+    if (!info.isFile()) continue;
+    output.push({
+      name,
+      path: relativePath,
+      folder: prefix,
+      directory: false,
+      sizeBytes: info.size,
+      modifiedAt: info.mtime.toISOString(),
+      supported: true
+    });
+    state.count += 1;
+  }
+  return output;
+}
+
+export async function listAllFiles() {
+  await mkdir(root, { recursive: true, mode: 0o700 });
+  const entries = await recursiveFileEntries(root);
+  entries.sort((a, b) => new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime() || a.path.localeCompare(b.path));
+  return { entries, truncated: entries.length >= 10000, limit: 10000 };
+}
+
 export async function listFiles(relative = '') {
   const segments = parts(relative);
   const volumes = await attachedVolumes();
