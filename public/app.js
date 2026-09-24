@@ -368,22 +368,56 @@ function settingsView() {
 
 function adminView() {
   const { appliance } = state.overview;
-  return `${pageHead('Admin Center', `Manage ${escapeHtml(appliance.deviceName)} as a complete LightNAS appliance.`)}
+  const userCount = state.users?.length ?? '—';
+  const networkName = state.network?.control?.currentUplink?.name || state.network?.routes?.find(item => item.destination === 'default')?.device || '—';
+  return `${pageHead('Admin Center', `Operate ${escapeHtml(appliance.deviceName)} from one focused administration workspace.`)}
+    <section class="admin-overview-grid">
+      <article class="admin-overview-card accent-card">
+        <span class="eyebrow">APPLIANCE</span>
+        <h2>${escapeHtml(appliance.deviceName)}</h2>
+        <p>Owner: ${escapeHtml(appliance.username)} · ${escapeHtml(appliance.timezone || 'UTC')}</p>
+        <div class="head-actions"><button class="secondary" data-view-link="settings">Settings</button><button class="secondary" data-view-link="shell">Node shell</button></div>
+      </article>
+      <article class="admin-overview-card">
+        <span class="eyebrow">ACCESS</span>
+        <h2>${userCount} local users</h2>
+        <p>Users, groups, inherited scopes, authentication and identity policy.</p>
+        <div class="head-actions"><button class="secondary" data-view-link="permissions">Permissions</button><button class="secondary" data-view-link="users">Users</button></div>
+      </article>
+      <article class="admin-overview-card">
+        <span class="eyebrow">NETWORK</span>
+        <h2>${escapeHtml(networkName)}</h2>
+        <p>Interfaces, bridges, VLANs, bonds, routes, DNS and host firewall.</p>
+        <div class="head-actions"><button class="secondary" data-view-link="network">Networking</button><button class="secondary" data-view-link="firewall">Firewall</button></div>
+      </article>
+      <article class="admin-overview-card">
+        <span class="eyebrow">OPERATIONS</span>
+        <h2>Health & monitoring</h2>
+        <p>Live system pressure, appliance diagnostics and managed-service repair.</p>
+        <div class="head-actions"><button class="secondary" data-view-link="monitoring">Monitoring</button><button class="secondary" data-view-link="capabilities">Diagnostics</button></div>
+      </article>
+    </section>
+
     <section class="panel" id="appliance-health-panel">
-      <div data-appliance-health-result>
-        <span class="eyebrow">APPLIANCE HEALTH</span>
-        <h2>LightNAS self-management</h2>
-        <p class="muted">Check storage, container, VM, application and core service readiness, or let LightNAS repair its own managed services.</p>
-      </div>
-      <div class="head-actions">
-        <button class="secondary" type="button" data-appliance-health>Check health</button>
-        <button class="primary" type="button" data-appliance-repair>Repair automatically</button>
+      <div class="admin-section-head">
+        <div data-appliance-health-result>
+          <span class="eyebrow">APPLIANCE HEALTH</span>
+          <h2>Self-management</h2>
+          <p class="muted">Validate storage, networking, containers, VMs, application runtime and core LightNAS services.</p>
+        </div>
+        <div class="head-actions">
+          <button class="secondary" type="button" data-appliance-health>Check health</button>
+          <button class="primary" type="button" data-appliance-repair>Repair managed services</button>
+        </div>
       </div>
     </section>
-    <div class="tool-grid">
-      ${[['users','Users & access','Create or remove local accounts.'],['smtp','Email & SMTP','Configure encrypted outgoing email and send a test.'],['settings','Appliance','Change name, time zone and administrator password.'],['pools','Storage & datasets','Review disks, file spaces and ZFS datasets.'],['apps','Application catalog','Install reviewed open-source applications on the integrated app runtime.'],['monitoring','System health','Check CPU, memory, mounts and recent activity.'],['network','Networking','Manage interfaces, addresses, gateways and DNS.'],['firewall','Firewall','Manage the LightNAS firewall.'],['integrations','Integrations','Review the built-in container, VM and app engines.']].map(([view,title,description]) => `<article class="panel"><h2>${title}</h2><p class="muted">${description}</p><button class="secondary" data-view-link="${view}">Open ${title}</button></article>`).join('')}
-    </div>`;
+
+    <section class="panel admin-service-links">
+      <div><span class="eyebrow">SERVICES</span><h2>Notifications & integrations</h2><p class="muted">Configure SMTP, identity providers, API automation and external integrations without duplicating the full navigation tree.</p></div>
+      <div class="head-actions"><button class="secondary" data-view-link="smtp">SMTP</button><button class="secondary" data-view-link="integrations">Integrations</button></div>
+    </section>`;
 }
+
 
 function moduleView(view) {
   if (view === 'apps') {
