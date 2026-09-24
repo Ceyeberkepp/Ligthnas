@@ -1183,10 +1183,7 @@ def network_inventory() -> dict:
         name = item["name"]
         if internal_device(name):
             continue
-        if bridge_mode and name == bridge_port:
-            # The physical NIC is now only a port of the appliance LAN bridge.
-            continue
-        devices.append(item)
+        devices.append({**item, **({"bridgePortOf": bridge_name} if bridge_mode and name == bridge_port else {})})
 
     connections = []
     for item in raw_connections:
@@ -1194,8 +1191,8 @@ def network_inventory() -> dict:
         device = item.get("device") or ""
         if internal_device(device) or internal_device(name):
             continue
-        if bridge_mode and (device == bridge_port or name == f"{bridge_name}-uplink"):
-            continue
+        # Keep the appliance bridge slave visible so the Networking page can
+        # present physical-port membership like Proxmox does.
         # Hide stale auto-generated wired profiles with no active device.
         if not device and item["type"] in {"802-3-ethernet", "ethernet"}:
             continue
@@ -1398,6 +1395,64 @@ def network_action(data: dict) -> dict:
             raise ValueError("invalid network device")
         run(["nmcli", "device", "disconnect", device], timeout=30)
         return {"action": action, "device": device}
+    if action == "bond-create":
+        name = str(data.get("name") or "")
+        mode = str(data.get("mode") or "active-backup")
+        members = [str(item) for item in (data.get("members") or [])]
+        allowed_modes = {"active-backup", "802.3ad", "balance-xor", "balance-rr"}
+        if not IFACE_RE.fullmatch(name) or mode not in allowed_modes:
+            raise ValueError("invalid bond settings")
+        if len(members) < 1 or len(set(members)) != len(members) or any(not IFACE_RE.fullmatch(item) for item in members):
+            raise ValueError("select one or more valid bond member interfaces")
+        # Create the profiles without bringing them up. This mirrors the safe
+        # Proxmox workflow: configuration can be reviewed before the operator
+        # activates a change that may affect management connectivity.
+        run(["nmcli", "connection", "add", "type", "bond", "ifname", name, "con-name", name, "bond.options", f"mode={mode}"], timeout=30)
+        created = []
+        try:
+            for member in members:
+                profile = f"{name}-{member}"
+                run(["nmcli", "connection", "add", "type", "ethernet", "ifname", member, "con-name", profile, "master", name, "slave-type", "bond"], timeout=30)
+                created.append(profile)
+        except Exception:
+            for profile in created:
+                run(["nmcli", "connection", "delete", profile], timeout=20, check=False)
+            run(["nmcli", "connection", "delete", name], timeout=20, check=False)
+            raise
+        return {"action": action, "name": name, "mode": mode, "members": members, "activated": False}
+    if action == "route-create":
+        name = str(data.get("connection") or "")
+        destination = str(data.get("destination") or "").strip()
+        gateway = str(data.get("gateway") or "").strip()
+        try:
+            metric = int(data.get("metric") or 100)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("invalid route metric") from exc
+        if not CONNECTION_RE.fullmatch(name) or not (0 <= metric <= 65535):
+            raise ValueError("invalid route settings")
+        if destination == "default":
+            destination = "0.0.0.0/0"
+        if not CIDR_RE.fullmatch(destination):
+            raise ValueError("route destination must be an IPv4 network in CIDR form or default")
+        if not re.fullmatch(r"(?:\d{1,3}\.){3}\d{1,3}", gateway):
+            raise ValueError("route gateway must be an IPv4 address")
+        octets = [int(part) for part in gateway.split(".")]
+        if any(part > 255 for part in octets):
+            raise ValueError("route gateway must be an IPv4 address")
+        route = f"{destination} {gateway} {metric}"
+        run(["nmcli", "connection", "modify", name, "+ipv4.routes", route], timeout=30)
+        if bool(data.get("activate")):
+            run(["nmcli", "connection", "up", name], timeout=45)
+        return {"action": action, "connection": name, "destination": destination, "gateway": gateway, "metric": metric, "activated": bool(data.get("activate"))}
+    if action == "route-delete":
+        name = str(data.get("connection") or "")
+        route = str(data.get("route") or "").strip()
+        if not CONNECTION_RE.fullmatch(name) or not route or len(route) > 256 or any(ch in route for ch in "\r\n\x00"):
+            raise ValueError("invalid route removal request")
+        run(["nmcli", "connection", "modify", name, "-ipv4.routes", route], timeout=30)
+        if bool(data.get("activate")):
+            run(["nmcli", "connection", "up", name], timeout=45)
+        return {"action": action, "connection": name, "route": route, "activated": bool(data.get("activate"))}
     if action == "connection-delete":
         name = str(data.get("name") or "")
         if not CONNECTION_RE.fullmatch(name):
