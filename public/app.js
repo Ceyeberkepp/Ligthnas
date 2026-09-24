@@ -872,7 +872,7 @@ function bindViewActions() {
   const filterApps = () => {
     const search = ($('#app-search', $('#content'))?.value || '').trim().toLowerCase();
     const category = $('#app-category', $('#content'))?.value || '';
-    $('[data-app-card]', $('#content')).forEach(card => {
+    $$('[data-app-card]', $('#content')).forEach(card => {
       const matchesText = !search || String(card.dataset.search || '').includes(search);
       const matchesCategory = !category || card.dataset.category === category;
       card.hidden = !(matchesText && matchesCategory);
@@ -880,10 +880,10 @@ function bindViewActions() {
   };
   $('#app-search', $('#content'))?.addEventListener('input', filterApps);
   $('#app-category', $('#content'))?.addEventListener('change', filterApps);
-  $('[data-action="new-share"]', $('#content')).forEach(button => button.addEventListener('click', () => $('#share-dialog').showModal()));
+  $$('[data-action="new-share"]', $('#content')).forEach(button => button.addEventListener('click', () => $('#share-dialog').showModal()));
   $$('[data-view-link]', $('#content')).forEach(button => button.addEventListener('click', () => { location.hash = button.dataset.viewLink; }));
   $$('[data-action="refresh"]', $('#content')).forEach(button => button.addEventListener('click', async () => { try { state.overview = await request('/api/overview'); render(state.view); toast('Readings updated.'); } catch (error) { toast(error.message); } }));
-  $('[data-action="refresh-files"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+  $$('[data-action="refresh-files"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     const original = button.textContent;
     button.disabled = true;
     button.textContent = 'Refreshing…';
@@ -896,12 +896,12 @@ function bindViewActions() {
       button.textContent = original;
     }
   }));
-  $('[data-file-view]', $('#content')).forEach(button => button.addEventListener('click', () => {
+  $$('[data-file-view]', $('#content')).forEach(button => button.addEventListener('click', () => {
     state.fileView = button.dataset.fileView === 'grid' ? 'grid' : 'list';
     localStorage.setItem('lightnas-file-view', state.fileView);
     render('files');
   }));
-  $('[data-download-folder]', $('#content')).forEach(button => button.addEventListener('click', () => {
+  $$('[data-download-folder]', $('#content')).forEach(button => button.addEventListener('click', () => {
     const path = button.dataset.downloadFolder || '';
     const link = document.createElement('a');
     link.href = `/api/files/archive?path=${encodeURIComponent(path)}`;
@@ -910,7 +910,7 @@ function bindViewActions() {
     link.click();
     link.remove();
   }));
-  $('[data-library-tab]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+  $$('[data-library-tab]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     const folder = button.dataset.libraryTab || '';
     if (folder && folder !== 'Attached storage') {
       try { await request(`/api/files?path=${encodeURIComponent(folder)}`); }
@@ -923,13 +923,13 @@ function bindViewActions() {
     state.files = null;
     render('files');
   }));
-  $('[data-folder]', $('#content')).forEach(button => button.addEventListener('click', () => { state.folder = button.dataset.folder; state.files = null; render('files'); }));
-  $('[data-open]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+  $$('[data-folder]', $('#content')).forEach(button => button.addEventListener('click', () => { state.folder = button.dataset.folder; state.files = null; render('files'); }));
+  $$('[data-open]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     const path = button.dataset.path || [state.folder, button.dataset.open].filter(Boolean).join('/');
     if (button.dataset.directory === 'true') { state.folder = path; state.files = null; render('files'); return; }
     try { const response = await fetch(`/api/files/download?path=${encodeURIComponent(path)}`); if (!response.ok) throw new Error((await response.json()).error); const object = URL.createObjectURL(await response.blob()); const link = document.createElement('a'); link.href = object; link.download = button.dataset.open; link.click(); setTimeout(() => URL.revokeObjectURL(object), 60000); } catch (error) { toast(error.message); }
   }));
-  $('[data-action="new-folder"]', $('#content')).forEach(button => button.addEventListener('click', async () => { const name = prompt('New folder name'); if (name === null) return; try { await request(`/api/files?path=${encodeURIComponent([state.folder, name].filter(Boolean).join('/'))}`, { method: 'POST', body: '{}' }); await loadFiles(); toast('Folder created.'); } catch (error) { toast(error.message); } }));
+  $$('[data-action="new-folder"]', $('#content')).forEach(button => button.addEventListener('click', async () => { const name = prompt('New folder name'); if (name === null) return; try { await request(`/api/files?path=${encodeURIComponent([state.folder, name].filter(Boolean).join('/'))}`, { method: 'POST', body: '{}' }); await loadFiles(); toast('Folder created.'); } catch (error) { toast(error.message); } }));
   $('#file-upload', content)?.addEventListener('change', async event => {
     const files = [...event.target.files];
     event.target.value = '';
@@ -940,7 +940,7 @@ function bindViewActions() {
     event.target.value = '';
     await uploadFilesWithProgress(files, true);
   });
-  $('[data-delete-file]', content).forEach(button => button.addEventListener('click', async () => {
+  $$('[data-delete-file]', content).forEach(button => button.addEventListener('click', async () => {
     if (!confirm(`Delete ${button.dataset.deleteFile}? Folders must be empty.`)) return;
     const path = button.dataset.path || [state.folder, button.dataset.deleteFile].filter(Boolean).join('/');
     try { await request(`/api/files?path=${encodeURIComponent(path)}`, { method: 'DELETE' }); await loadFiles(); toast('Deleted.'); } catch (error) { toast(error.message); }
