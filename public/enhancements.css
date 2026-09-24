@@ -207,3 +207,20 @@
   .network-status-strip { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .network-secondary-grid { grid-template-columns:1fr; }
 }
+
+
+/* Focused Admin Center */
+.admin-overview-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; margin:0 0 18px; }
+.admin-overview-card { min-width:0; padding:19px; border:1px solid var(--line); border-radius:14px; background:var(--panel); }
+.admin-overview-card.accent-card { background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 8%,var(--panel)),var(--panel)); }
+.admin-overview-card h2 { margin:6px 0 7px; font-size:20px; }
+.admin-overview-card p { color:var(--muted); line-height:1.45; min-height:40px; }
+.admin-service-links { margin-top:16px; display:flex; align-items:center; justify-content:space-between; gap:20px; }
+.permission-intro { margin-bottom:16px; }
+.node-shell-launch { max-width:820px; }
+.security-member { display:flex; align-items:center; gap:8px; margin:7px 0; padding:8px 10px; border:1px solid var(--line); border-radius:9px; background:var(--panel-2); }
+
+@media (max-width:760px) {
+  .admin-overview-grid { grid-template-columns:1fr; }
+  .admin-service-links { align-items:flex-start; flex-direction:column; }
+}
