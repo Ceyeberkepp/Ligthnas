@@ -3,15 +3,17 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { visibleStorageContentName } from '../src/storage-pools.mjs';
 
-test('large ISO uploads are chunked and limited to 50 GiB', async () => {
+test('large ISO uploads are chunked and unlimited by default', async () => {
   const [storage, ui] = await Promise.all([
     readFile(new URL('../src/storage-pools.mjs', import.meta.url), 'utf8'),
     readFile(new URL('../public/storage-manager.js', import.meta.url), 'utf8')
   ]);
-  assert.match(storage, /50 \* 1024 \*\* 3/);
+  assert.match(storage, /LIGHTNAS_STORAGE_UPLOAD_MAX_BYTES \|\| 0/);
+  assert.match(storage, /MAX_UPLOAD_BYTES > 0/);
   assert.match(storage, /parseContentRange/);
   assert.match(storage, /x-lightnas-upload-id/);
   assert.match(ui, /\(type==='iso'\?64:32\)\*1024\*\*2/);
+  assert.doesNotMatch(ui, /limited to 50 GiB/);
   assert.match(ui, /Content-Range/);
   assert.match(ui, /progress\?\.update/);
 });
