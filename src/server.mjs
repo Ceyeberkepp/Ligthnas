@@ -8,7 +8,7 @@ import { WebSocketServer } from 'ws';
 import { JsonStore } from './store.mjs';
 import { getFilesystems, getStorageInventory, getSystemSnapshot } from './system.mjs';
 import { hashPassword, Sessions, verifyPassword } from './auth.mjs';
-import { listFiles, createFolder, uploadFile, downloadFile, downloadEntry, deleteEntry } from './files.mjs';
+import { listFiles, listAllFiles, createFolder, uploadFile, downloadFile, downloadEntry, deleteEntry } from './files.mjs';
 import { thumbnailFor } from './thumbnails.mjs';
 import { catalog, runtimeInventory, installCatalogApp, manageCatalogApp, createContainer, createVm } from './runtimes-next.mjs';
 import { proxmoxConsoleSocket, proxmoxUpdateStorage, proxmoxCleanDisk } from './proxmox.mjs';
@@ -1126,7 +1126,11 @@ async function api(req, res, url) {
     const path = url.searchParams.get('path') || '';
     if (req.method === 'GET') {
       if (!requirePermission(res, permissions, 'files.read')) return;
-      return send(res, 200, { path, entries: await listFiles(path) });
+      if (!path && url.searchParams.get('all') === '1') {
+        const all = await listAllFiles();
+        return send(res, 200, { path: '', ...all });
+      }
+      return send(res, 200, { path, entries: await listFiles(path), truncated: false });
     }
     if (req.method === 'DELETE') {
       if (!requireAnyPermission(res, permissions, ['files.delete', 'files.write'])) return;
