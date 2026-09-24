@@ -131,27 +131,37 @@ function homeView() {
 
 function storageView() {
   const { filesystems } = state.overview;
-  return `${pageHead('Storage', 'LightNAS storage pools, capacity and content libraries.', '<button class="primary" data-view-link="pools">Manage storage</button>')}
+  return `${pageHead('Storage', 'Configure storage targets and manage the content stored on each one.')}
     <div id="storage-manager"></div>
-    <h2>LightNAS storage spaces</h2>
-    <div class="storage-list">${state.spaces?.map(space => `<article class="storage-row"><div><h3>${escapeHtml(space.label)}</h3><p>Spaces/${escapeHtml(space.name)}</p></div><button class="secondary" data-open-space="${escapeHtml(space.name)}">Open</button></article>`).join('') || '<div class="empty"><p>No file spaces yet.</p></div>'}</div>
     <details class="panel"><summary><b>Advanced mounted filesystems</b></summary>
+      <p class="muted">Read-only host inventory for troubleshooting. Create disk pools and datasets from Pools & datasets.</p>
       <div class="storage-list">${filesystems.map(fs => `<article class="storage-row"><div><h3>${escapeHtml(fs.mountPoint)}</h3><p>${escapeHtml(fs.device)} · ${escapeHtml(fs.type)}${fs.readOnly ? ' · Read only' : ''}</p></div><div><div class="track"><span style="width:${fs.usedPercent}%"></span></div><p>${fs.usedPercent}% used</p></div><div class="storage-size"><b>${bytes(fs.usedBytes)}</b><br>of ${bytes(fs.totalBytes)}</div></article>`).join('') || '<div class="empty"><p>No readable mounted filesystems.</p></div>'}</div>
     </details>`;
 }
 
 function poolsView() {
-  return `${pageHead('Storage pools', 'Create and manage LightNAS storage from local space and attached virtual volumes.')}
-    <div id="storage-manager"></div>
-    <div id="container-template-library"></div>
-    <h2>Storage spaces</h2>
-    <p class="muted">Storage spaces are folders managed by LightNAS. VM ISO images, container templates, VM disks and backups are managed inside the storage pools above.</p>
-    <form id="space-form" class="panel creation-form">
-      <label>Folder name<input name="name" pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{1,39}" required placeholder="archive"></label>
-      <label>Display label<input name="label" maxlength="80" required placeholder="Team archive"></label>
-      <button class="primary" type="submit">Create storage space</button><div class="form-error" role="alert"></div>
-    </form>
-    <div class="storage-list">${state.spaces?.map(space => `<article class="storage-row"><div><h3>${escapeHtml(space.label)}</h3><p>Spaces/${escapeHtml(space.name)}</p></div><button class="secondary" data-edit-space="${escapeHtml(space.name)}">Edit label</button><button class="secondary" data-open-space="${escapeHtml(space.name)}">Open files</button></article>`).join('') || '<div class="empty"><p>No storage spaces created yet.</p></div>'}</div>`;
+  const storage = state.overview.storage || {};
+  const zfs = storage.zfs || { available: false, canManageDatasets: false, pools: [], datasets: [] };
+  const disks = storage.disks || [];
+  const poolOptions = [...(zfs.pools || []), ...(zfs.datasets || []).filter(item => !(zfs.pools || []).some(pool => pool.name === item.name))];
+  return `${pageHead('Pools & datasets', 'Create and manage physical storage pools and their datasets. Content libraries are configured separately under Storage.', '<button class="secondary" data-view-link="storage">Open Storage</button>')}
+    <section class="pool-summary-grid">
+      <article class="panel pool-summary"><span class="eyebrow">PHYSICAL DEVICES</span><strong>${disks.length}</strong><p>disk${disks.length === 1 ? '' : 's'} visible to LightNAS</p></article>
+      <article class="panel pool-summary"><span class="eyebrow">ZFS POOLS</span><strong>${zfs.pools?.length || 0}</strong><p>${zfs.available ? 'ZFS inventory online' : 'ZFS is not installed or accessible'}</p></article>
+      <article class="panel pool-summary"><span class="eyebrow">DATASETS</span><strong>${zfs.datasets?.length || 0}</strong><p>${zfs.canManageDatasets ? 'dataset changes enabled' : 'inventory only'}</p></article>
+    </section>
+    <div class="section-heading"><div><span class="eyebrow">POOL INVENTORY</span><h2>Storage pools</h2></div></div>
+    <div class="storage-list">${zfs.pools?.map(pool => `<article class="storage-row pool-inventory-row"><div><h3>${escapeHtml(pool.name)}</h3><p>ZFS · health ${escapeHtml(pool.health || 'unknown')}</p></div><div><div class="track"><span style="width:${pool.sizeBytes ? Math.round((pool.allocatedBytes / pool.sizeBytes) * 100) : 0}%"></span></div><p>${bytes(pool.freeBytes)} free</p></div><div class="storage-size"><b>${bytes(pool.allocatedBytes)}</b><br>of ${bytes(pool.sizeBytes)}</div></article>`).join('') || '<div class="empty"><h3>No storage pools detected</h3><p>Attach an unused data disk to LightNAS, then create the filesystem or pool on the host. LightNAS will show it here without duplicating it as a Storage definition.</p></div>'}</div>
+    <div class="section-heading"><div><span class="eyebrow">FILESYSTEM DATASETS</span><h2>Datasets</h2></div>${zfs.canManageDatasets ? '<button class="primary" type="button" data-show-dataset-form>+ Create dataset</button>' : ''}</div>
+    ${zfs.canManageDatasets ? `<form id="dataset-form" class="panel creation-form dataset-create-form" hidden>
+      <label>Parent pool or dataset<select name="parent" required>${poolOptions.map(item => `<option value="${escapeHtml(item.name)}">${escapeHtml(item.name)}</option>`).join('')}</select></label>
+      <label>Dataset name<input name="name" pattern="[a-zA-Z0-9][a-zA-Z0-9_.-]{1,63}" required placeholder="media"></label>
+      <label>Compression<select name="compression"><option value="lz4">LZ4</option><option value="zstd">Zstandard</option><option value="gzip">Gzip</option><option value="off">Off</option></select></label>
+      <label>Quota (GiB)<input name="quotaGiB" type="number" min="0" max="1048576" value="0"><small>Zero means unlimited.</small></label>
+      <button class="primary" type="submit">Create dataset</button><div class="form-error" role="alert"></div>
+    </form>` : '<div class="module-note">Dataset changes are disabled on this installation. Existing pools and datasets remain visible, but LightNAS will not pretend it can modify them.</div>'}
+    <div class="storage-list">${zfs.datasets?.map(dataset => `<article class="storage-row"><div><h3>${escapeHtml(dataset.name)}</h3><p>${escapeHtml(dataset.mountPoint || 'not mounted')} · compression ${escapeHtml(dataset.compression || 'unknown')}</p></div><div><b>${bytes(dataset.availableBytes)} available</b><p>${bytes(dataset.usedBytes)} used</p></div>${(zfs.pools || []).some(pool => pool.name === dataset.name) ? '' : `<button class="secondary" type="button" data-dataset="${escapeHtml(dataset.name)}">Edit properties</button>`}</article>`).join('') || '<div class="empty"><p>No ZFS datasets detected.</p></div>'}</div>
+    <details class="panel"><summary><b>Physical disk inventory</b></summary><p class="muted">This is the hardware view only. Adding a disk to a pool is destructive and is never simulated by the interface.</p><div class="storage-list">${disks.map(disk => `<article class="storage-row"><div><h3>${escapeHtml(disk.name || disk.path || disk.device || 'Disk')}</h3><p>${escapeHtml(disk.model || disk.type || 'Block device')} · ${escapeHtml(disk.transport || 'local')}</p></div><div class="storage-size"><b>${bytes(disk.sizeBytes || disk.size || 0)}</b></div></article>`).join('') || '<div class="empty"><p>No physical disks are exposed to this LightNAS installation.</p></div>'}</div></details>`;
 }
 
 async function loadSpaces() {
@@ -494,7 +504,6 @@ function render(view) {
   content.focus({ preventScroll: true });
   bindViewActions();
   if (state.view === 'files' && state.files === null) loadFiles();
-  if (['pools', 'storage'].includes(state.view) && state.spaces === null) loadSpaces();
   if (state.view === 'users' && state.users === null) loadUsers();
   if (state.view === 'smtp' && state.smtp === undefined) loadSmtp();
   if (['files', 'media'].includes(state.view) && state.media === null) loadMedia();
@@ -533,12 +542,13 @@ function bindViewActions() {
     catch (error) { toast(error.message); }
     finally { button.disabled = false; button.textContent = 'Repair automatically'; }
   });
-  $$('[data-action="create-pool"]', $('#content')).forEach(button => button.addEventListener('click', () => {
-    const storage = state.overview.storage;
-    if (!storage.disks.length) return toast('No physical disks are exposed to this NAS. Attach data disks to a VM or install on bare metal.');
-    toast('Physical pool creation needs the disk safety agent before it can operate. Existing ZFS datasets can be created below.');
-    $('#dataset-form', $('#content'))?.scrollIntoView({ behavior: 'smooth' });
-  }));
+  $('[data-show-dataset-form]', $('#content'))?.addEventListener('click', () => {
+    const form = $('#dataset-form', $('#content'));
+    if (!form) return;
+    form.hidden = false;
+    form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    $('input[name="name"]', form)?.focus();
+  });
   $$('[data-action="create-container"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     let containers = state.runtimes?.containers;
     if ((!containers?.networks?.length || !containers?.available || !containers.enabled) && containers?.inventoryAvailable !== false) {

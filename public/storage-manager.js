@@ -1,5 +1,22 @@
 const storageUi = { data: null };
 
+const STORAGE_PROVIDERS = [
+  { id: 'directory', label: 'Directory', group: 'Local storage', description: 'Use a mounted local or virtual disk directory.', available: true },
+  { id: 'lvm', label: 'LVM', group: 'Local storage', description: 'Block storage from an existing LVM volume group.' },
+  { id: 'lvmthin', label: 'LVM-Thin', group: 'Local storage', description: 'Thin-provisioned VM and container block storage.' },
+  { id: 'btrfs', label: 'BTRFS', group: 'Local storage', description: 'BTRFS filesystem or subvolume storage.' },
+  { id: 'zfs', label: 'ZFS', group: 'Local storage', description: 'An existing ZFS pool or dataset.' },
+  { id: 'nfs', label: 'NFS', group: 'Network storage', description: 'Network File System export.' },
+  { id: 'cifs', label: 'SMB / CIFS', group: 'Network storage', description: 'Windows-compatible network share.' },
+  { id: 'glusterfs', label: 'GlusterFS', group: 'Network storage', description: 'Distributed Gluster filesystem.' },
+  { id: 'iscsi', label: 'iSCSI', group: 'Block & clustered', description: 'Remote iSCSI target and LUN.' },
+  { id: 'cephfs', label: 'CephFS', group: 'Block & clustered', description: 'Ceph distributed filesystem.' },
+  { id: 'rbd', label: 'RBD', group: 'Block & clustered', description: 'Ceph RADOS block device storage.' },
+  { id: 'zfsiscsi', label: 'ZFS over iSCSI', group: 'Block & clustered', description: 'ZFS-backed remote iSCSI storage.' },
+  { id: 'pbs', label: 'Proxmox Backup Server', group: 'Backup & import', description: 'External Proxmox backup repository.' },
+  { id: 'esxi', label: 'VMware ESXi', group: 'Backup & import', description: 'Import source for VMware virtual machines.' }
+];
+
 function sEsc(value) {
   return String(value ?? '').replace(/[&<>'"]/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' })[ch]);
 }
@@ -42,39 +59,40 @@ async function loadStoragePools() {
   storageUi.data=await sRequest('/api/storage/pools');
   return storageUi.data;
 }
-function storageCard(pool) {
-  const contents=(pool.contentLabels||[]).join(' · ')||'No content types';
-  return `<article class="inventory-card storage-pool-card" data-storage-card="${sEsc(pool.id)}" role="button" tabindex="0" aria-label="Manage storage ${sEsc(pool.name)}">
-    <div class="volume-title"><h3>${sEsc(pool.name)}</h3><span class="volume-state ${pool.online&&pool.writable?'writable':'readonly'}">${pool.online?(pool.writable?'ONLINE':'READ ONLY'):'OFFLINE'}</span></div>
-    <p>${pool.local?(pool.dedicated?'Local appliance storage · dedicated post-OS data partition':'Local appliance storage · shared with the OS filesystem'):sEsc(pool.mountPoint||'Attached virtual storage')}</p>
-    <div class="track"><span style="width:${Math.min(100,pool.usedPercent||0)}%"></span></div>
-    <p><strong>${sBytes(pool.availableBytes)} free</strong> of ${sBytes(pool.totalBytes)} · ${pool.usedPercent||0}% used</p>
-    <p class="muted">${sEsc(contents)}</p>
-    <button class="secondary" type="button" data-manage-storage="${sEsc(pool.id)}">Manage storage</button>
-  </article>`;
+function storageRow(pool) {
+  const contents=(pool.contentLabels||[]).join(', ')||'None';
+  const target=pool.local?(pool.dedicated?'Local data partition':'Local OS filesystem'):pool.mountPoint||'Unavailable';
+  return `<button class="storage-table-row" type="button" data-manage-storage="${sEsc(pool.id)}" aria-label="Open storage ${sEsc(pool.name)}">
+    <span><b>${sEsc(pool.name)}</b><small>${pool.local?'Directory':'Mounted directory'}</small></span>
+    <span class="storage-table-content">${sEsc(contents)}</span>
+    <span>${sEsc(target)}</span>
+    <span><b>${sBytes(pool.availableBytes)}</b><small>of ${sBytes(pool.totalBytes)}</small></span>
+    <span><i class="storage-status-dot ${pool.online&&pool.writable?'online':'warning'}"></i>${pool.online?(pool.writable?'Online':'Read only'):'Offline'}</span>
+    <span aria-hidden="true">›</span>
+  </button>`;
 }
 function renderStorageManager() {
   const slot=document.querySelector('#storage-manager');
   const data=storageUi.data;
   if(!slot||!data) return;
   const visible=data.visibleSummary||data.summary||{};
-  const unconfigured=(data.availableSources||[]).filter(item=>!item.configured);
+  const unconfigured=(data.availableSources||[]).filter(item=>!item.configured&&item.writable);
   const verified=visible.verified!==false;
   const sharedLocalExcluded=Boolean(visible.localExcludedBecauseSharedOs);
-  const dataSources=(data.availableSources||[]);
   slot.innerHTML=`
-    <section class="module-hero">
-      <div class="panel-head"><div><span class="eyebrow">LIGHTNAS STORAGE MANAGER</span><h2>${verified?sBytes(visible.totalBytes||0):'Host capacity metadata required'}${verified?' data capacity':''}</h2></div>
-        <div class="head-actions"><button class="secondary" type="button" data-storage-refresh>Refresh</button>${unconfigured.length?'<button class="primary" type="button" data-create-storage>+ Create storage</button>':''}</div>
-      </div>
-      <p>${verified
+    <section class="storage-overview-strip">
+      <div><span class="eyebrow">CONFIGURED STORAGE</span><strong>${(data.pools||[]).length}</strong><small>target${(data.pools||[]).length===1?'':'s'}</small></div>
+      <div><span class="eyebrow">TOTAL CAPACITY</span><strong>${verified?sBytes(visible.totalBytes||0):'Unverified'}</strong><small>${verified?`${sBytes(visible.availableBytes||0)} available`:'host metadata required'}</small></div>
+      <div class="storage-overview-copy"><p>${verified
         ? `${sBytes(visible.usedBytes||0)} used · ${sBytes(visible.availableBytes||0)} free across attached data volumes.${sharedLocalExcluded?' The OS/root-backed local storage is shown separately and is not included in this total.':''}`
-        : 'This LightNAS instance is running inside a container and has not received authoritative virtual-disk sizes from its host yet. Guest filesystem geometry is not used for the headline total.'}</p>
-      <div class="storage-capacity-breakdown">${dataSources.map(source=>`<span><b>${sEsc(source.mountPoint)}</b> ${source.capacitySource==='proxmox-pct-config'?sBytes(source.totalBytes):'unverified'}${source.configuredSize?` · host ${sEsc(source.configuredSize)}`:''}</span>`).join('')}</div>
+        : 'This installation has not received authoritative virtual-disk sizes from its host.'}</p></div>
     </section>
-    <h2>Storage</h2>
-    <div class="inventory-grid">${(data.pools||[]).map(storageCard).join('')||'<div class="empty"><p>No storage pools are online.</p></div>'}</div>
-    ${unconfigured.length?`<h2>Available virtual storage</h2><div class="inventory-grid">${unconfigured.map(source=>`<article class="inventory-card"><h3>${sEsc(source.mountPoint)}</h3><p>${sEsc(source.device)} · ${sEsc(source.type)}</p><p><strong>${sBytes(source.availableBytes)} free</strong> of ${sBytes(source.totalBytes)}</p>${source.capacitySource==='proxmox-pct-config'?`<p class="muted">Proxmox configured size: <b>${sEsc(source.configuredSize||sBytes(source.totalBytes))}</b></p>`:''}<button class="primary" type="button" data-create-storage-source="${sEsc(source.id)}">Create storage here</button></article>`).join('')}</div>`:''}
+    <div class="section-heading storage-section-heading"><div><span class="eyebrow">STORAGE DEFINITIONS</span><h2>Storage</h2></div><div class="head-actions"><button class="secondary" type="button" data-storage-refresh>Refresh</button><button class="primary" type="button" data-create-storage>+ Add storage</button></div></div>
+    <section class="storage-table" aria-label="Configured storage">
+      <div class="storage-table-head"><span>Name / type</span><span>Content</span><span>Path / target</span><span>Available</span><span>Status</span><span></span></div>
+      ${(data.pools||[]).map(storageRow).join('')||'<div class="empty"><p>No storage definitions are configured.</p></div>'}
+    </section>
+    ${unconfigured.length?`<details class="panel available-storage-panel"><summary><b>${unconfigured.length} mounted source${unconfigured.length===1?'':'s'} available to add</b></summary><div class="storage-list">${unconfigured.map(source=>`<article class="storage-row"><div><h3>${sEsc(source.mountPoint)}</h3><p>${sEsc(source.device)} · ${sEsc(source.type)}</p></div><div><b>${sBytes(source.availableBytes)} free</b><p>of ${sBytes(source.totalBytes)}</p></div><button class="secondary" type="button" data-create-storage-source="${sEsc(source.id)}">Add</button></article>`).join('')}</div></details>`:''}
   `;
 }
 async function refreshStorageManager() {
@@ -88,15 +106,17 @@ function openCreateStorage(sourceId='') {
   if(!data) return;
   const sources=(data.availableSources||[]).filter(item=>!item.configured&&item.writable);
   const dialog=ensureStorageDialog();
-  dialog.querySelector('[data-storage-dialog-title]').textContent='Create storage';
+  dialog.querySelector('[data-storage-dialog-title]').textContent='Add storage';
   dialog.querySelector('[data-storage-dialog-error]').textContent='';
   dialog.querySelector('[data-storage-dialog-body]').innerHTML=`
     <form data-storage-create-form>
-      <p class="muted">Create a file-level LightNAS storage on an attached virtual volume. Existing files outside the LightNAS storage directory are not formatted or deleted.</p>
+      <p class="muted">Choose a storage provider. LightNAS only enables providers it can configure safely on this host; unavailable choices explain where they must be prepared.</p>
+      <div class="storage-provider-grid">${STORAGE_PROVIDERS.map(provider=>`<label class="storage-provider-option ${provider.available?'':'provider-unavailable'}"><input type="radio" name="provider" value="${sEsc(provider.id)}" ${provider.available?'':'disabled'} ${provider.id==='directory'?'checked':''}><span><b>${sEsc(provider.label)}</b><small>${sEsc(provider.description)}</small>${provider.available?'<em>Ready</em>':'<em>Prepare in Pools & datasets or mount on the host</em>'}</span></label>`).join('')}</div>
+      <div class="module-note">Network and block providers appear here for a complete storage inventory, but LightNAS will not create a fake NFS, SMB, iSCSI, Ceph, ZFS, BTRFS, or LVM connection. Once mounted or created, it becomes selectable as a Directory storage target.</div>
       <label>Storage name<input name="name" required pattern="[A-Za-z][A-Za-z0-9_-]{1,31}" placeholder="fastssd"></label>
-      <label>Virtual storage<select name="sourceId" required>${sources.map(item=>`<option value="${sEsc(item.id)}">${sEsc(item.mountPoint)} · ${sBytes(item.totalBytes)}</option>`).join('')}</select></label>
+      <label>Mounted source<select name="sourceId" required>${sources.map(item=>`<option value="${sEsc(item.id)}">${sEsc(item.mountPoint)} · ${sBytes(item.totalBytes)} · ${sEsc(item.type)}</option>`).join('')}</select></label>
       <h3>Allowed content</h3><div class="content-policy-grid">${contentCheckboxes(data.contentTypes||[],['iso','vztmpl','images','rootdir','backup','snippets','files'])}</div>
-      <div class="dialog-actions"><button class="primary" type="submit">Create storage</button></div>
+      <div class="dialog-actions"><button class="primary" type="submit" ${sources.length?'':'disabled'}>Add storage</button></div>
     </form>`;
   const select=dialog.querySelector('select[name="sourceId"]');
   if(sourceId&&[...select.options].some(option=>option.value===sourceId)) select.value=sourceId;
@@ -122,24 +142,26 @@ async function renderManageStorage(poolId,activeType=null) {
   const dialog=ensureStorageDialog();
   dialog.querySelector('[data-storage-dialog-title]').textContent=`Storage · ${pool.name}`;
   dialog.querySelector('[data-storage-dialog-error]').textContent='';
-  const fileTypes=pool.content.filter(type=>['iso','vztmpl','backup','snippets'].includes(type));
-  const selectedType=activeType&&fileTypes.includes(activeType)?activeType:(fileTypes[0]||null);
+  const contentTypes=pool.content.filter(type=>['iso','vztmpl','images','rootdir','backup','snippets','files'].includes(type));
+  const fileTypes=contentTypes.filter(type=>['iso','vztmpl','backup','snippets','files'].includes(type));
+  const selectedType=activeType&&contentTypes.includes(activeType)?activeType:null;
   let files={entries:[]};
   if(selectedType) {
     try{files=await loadStorageContent(pool.id,selectedType);}catch{}
   }
   dialog.querySelector('[data-storage-dialog-body]').innerHTML=`
-    <div class="host-monitor-grid">
+    <div class="storage-detail-summary">
       <article class="monitor-card"><span>Total</span><strong>${sBytes(pool.totalBytes)}</strong></article>
       <article class="monitor-card"><span>Available</span><strong>${sBytes(pool.availableBytes)}</strong></article>
-      <article class="monitor-card"><span>Source</span><strong style="font-size:1rem">${sEsc(pool.local?'local':pool.mountPoint)}</strong></article>
+      <article class="monitor-card"><span>Used</span><strong>${pool.usedPercent||0}%</strong></article>
+      <article class="monitor-card"><span>Status</span><strong style="font-size:1rem">${pool.online?(pool.writable?'Online':'Read only'):'Offline'}</strong></article>
     </div>
-    <form data-storage-policy-form>
-      <h3>Allowed content</h3><div class="content-policy-grid">${contentCheckboxes(data.contentTypes||[],pool.content)}</div>
-      <button class="secondary" type="submit">Save content policy</button>
-    </form>
-    ${selectedType?`<hr><div class="panel-head"><div><h3>Stored content</h3><p class="muted">Upload files or import them directly from a public URL.</p></div></div>
-      <div class="head-actions">${fileTypes.map(type=>`<button type="button" class="${type===selectedType?'primary':'secondary'}" data-storage-content-tab="${sEsc(type)}" data-storage-id="${sEsc(pool.id)}">${sEsc((data.contentTypes||[]).find(item=>item.id===type)?.label||type)}</button>`).join('')}</div>
+    <dl class="storage-detail-list"><div><dt>Type</dt><dd>Directory</dd></div><div><dt>Path / target</dt><dd>${sEsc(pool.root||pool.mountPoint||'—')}</dd></div><div><dt>Content</dt><dd>${sEsc((pool.contentLabels||[]).join(', '))}</dd></div></dl>
+    <div class="section-heading storage-content-heading"><div><span class="eyebrow">CONTENT</span><h3>Select a library</h3></div></div>
+    <div class="storage-content-tabs">${contentTypes.map(type=>`<button type="button" class="${type===selectedType?'active':''}" data-storage-content-tab="${sEsc(type)}" data-storage-id="${sEsc(pool.id)}"><b>${sEsc((data.contentTypes||[]).find(item=>item.id===type)?.label||type)}</b><small>${['images','rootdir'].includes(type)?'Managed by compute':'Open library'}</small></button>`).join('')}</div>
+    ${!selectedType?'<div class="empty storage-select-prompt"><p>Select a content library above to view files, upload content, or open the container template catalog.</p></div>':''}
+    ${selectedType&&['images','rootdir'].includes(selectedType)?`<div class="module-note">${selectedType==='images'?'VM disks are created and attached from Virtual machines.':'Container volumes are created and attached from Containers.'} This storage page reports the role without exposing active disk files for manual deletion.</div>`:''}
+    ${selectedType&&fileTypes.includes(selectedType)?`<div class="storage-library-head"><div><h3>${sEsc((data.contentTypes||[]).find(item=>item.id===selectedType)?.label||selectedType)}</h3><p class="muted">Files stored only on ${sEsc(pool.name)}.</p></div></div>
 ${selectedType==='vztmpl'? `<div class="head-actions"><button class="primary" type="button" data-template-browse data-template-storage="${sEsc(pool.id)}">Browse templates</button><button class="secondary" type="button" data-template-upload data-template-storage="${sEsc(pool.id)}">Upload template</button><button class="secondary" type="button" data-template-url data-template-storage="${sEsc(pool.id)}">Import URL</button></div><p class="muted">Choose a template from the upstream catalog, upload an archive from your computer, or import a public URL into this storage.</p>` : ''}
       <form data-storage-upload-form data-storage-id="${sEsc(pool.id)}" data-storage-type="${sEsc(selectedType)}">
         ${selectedType==='iso'?'<p class="module-note">ISO uploads up to 50 GiB stream directly to storage in resumable chunks. Large ISO files use a larger transfer window to reduce round-trip overhead.</p>':''}
@@ -152,6 +174,7 @@ ${selectedType==='vztmpl'? `<div class="head-actions"><button class="primary" ty
       </form>
       <div class="storage-list">${files.entries?.length?files.entries.map(file=>`<article class="storage-row"><div><h3>${sEsc(file.name)}</h3><p>${sBytes(file.sizeBytes)} · ${sEsc(file.modifiedAt||'')}</p></div><button class="secondary danger-button" type="button" data-storage-file-delete="${sEsc(file.name)}" data-storage-id="${sEsc(pool.id)}" data-storage-type="${sEsc(selectedType)}">Delete</button></article>`).join(''):'<div class="empty"><p>No files stored for this content type.</p></div>'}</div>
     `:''}
+    <details class="panel storage-options-panel"><summary><b>Storage options & allowed content</b></summary><form data-storage-policy-form><div class="content-policy-grid">${contentCheckboxes(data.contentTypes||[],pool.content)}</div><button class="secondary" type="submit">Save options</button></form></details>
     ${!pool.local?'<hr><button class="secondary danger-button" type="button" data-storage-remove-definition>Remove storage definition</button><p class="muted">This removes the LightNAS storage definition only. Existing files are preserved.</p>':''}
   `;
   dialog.dataset.storageId=pool.id;
@@ -260,7 +283,7 @@ document.addEventListener('submit',async event=>{
 },true);
 
 function maybeStorageManager(){
-  if(!['#storage','#pools'].includes(location.hash)||!document.querySelector('#storage-manager')) return;
+  if(location.hash!=='#storage'||!document.querySelector('#storage-manager')) return;
   const slot=document.querySelector('#storage-manager');
   if(slot.dataset.loaded==='1') return;
   slot.dataset.loaded='1';
@@ -269,10 +292,3 @@ function maybeStorageManager(){
 new MutationObserver(maybeStorageManager).observe(document.documentElement,{childList:true,subtree:true});
 window.addEventListener('hashchange',maybeStorageManager);
 maybeStorageManager();
-
-document.addEventListener('keydown',async event=>{
-  const card=event.target.closest?.('[data-storage-card]');
-  if(!card||!['Enter',' '].includes(event.key)) return;
-  event.preventDefault();
-  await renderManageStorage(card.dataset.storageCard);
-});
