@@ -141,3 +141,74 @@ test('Admin Center is a focused operational dashboard and legacy injectors are d
   assert.match(enhancements, /Admin Center is rendered directly by app\.js/);
   assert.match(enhancements, /Permissions moved to the dedicated #permissions workspace/);
 });
+
+
+test('All Files is flat and file/folder uploads expose real progress', async () => {
+  const [files, server, app] = await Promise.all([
+    read('src/files.mjs'),
+    read('src/server.mjs'),
+    read('public/app.js')
+  ]);
+  assert.match(files, /export async function listAllFiles/);
+  assert.match(files, /recursiveFileEntries/);
+  assert.match(server, /url\.searchParams\.get\('all'\) === '1'/);
+  assert.match(app, /\/api\/files\?all=1/);
+  assert.match(app, /id="file-upload" type="file" multiple/);
+  assert.match(app, /id="folder-upload" type="file" webkitdirectory directory multiple/);
+  assert.match(app, /new XMLHttpRequest\(\)/);
+  assert.match(app, /xhr\.upload\.addEventListener\('progress'/);
+  assert.match(app, /uploadFilesWithProgress/);
+  assert.doesNotMatch(app, /accept="[^"]*zip/i);
+});
+
+test('Storage inventory automatically exposes and refreshes newly detected drives', async () => {
+  const [system, pools, manager] = await Promise.all([
+    read('src/system.mjs'),
+    read('src/storage-pools.mjs'),
+    read('public/storage-manager.js')
+  ]);
+  assert.match(system, /system:/);
+  assert.match(system, /blank:/);
+  assert.match(pools, /detectedDisks: inventory\.disks/);
+  assert.match(manager, /Detected drives/);
+  assert.match(manager, /setInterval\(async\(\)=>/);
+  assert.match(manager, /8000/);
+  assert.match(manager, /never formats a drive automatically/);
+});
+
+test('App Store contains a broad searchable one-click catalog', async () => {
+  const [runtime, app] = await Promise.all([read('src/runtimes-next.mjs'), read('public/app.js')]);
+  const catalogBlock = runtime.slice(runtime.indexOf('export const catalog'), runtime.indexOf(']);', runtime.indexOf('export const catalog')));
+  const appCount = (catalogBlock.match(/\{ id: '/g) || []).length;
+  assert.ok(appCount >= 20, `expected at least 20 curated apps, found ${appCount}`);
+  for (const id of ['jellyfin','navidrome','freshrss','gitea','vaultwarden','actual-budget','nextcloud','open-webui']) {
+    assert.match(catalogBlock, new RegExp(`id: '${id}'`));
+  }
+  assert.match(app, /id="app-search"/);
+  assert.match(app, /id="app-category"/);
+  assert.match(app, /data-app-card/);
+});
+
+test('ISO is branded, graphical, hybrid BIOS-UEFI, and provides a local web kiosk', async () => {
+  const [build, preseed] = await Promise.all([read('iso/build.sh'), read('iso/preseed.cfg')]);
+  assert.match(build, /--debian-installer-gui true/);
+  assert.match(build, /--bootloaders 'syslinux,grub-efi'/);
+  assert.match(build, /--uefi-secure-boot auto/);
+  assert.match(build, /--firmware-binary true/);
+  assert.match(build, /--iso-application 'LightNAS'/);
+  assert.match(build, /lightnas-splash\.svg/);
+  assert.match(build, /Install LightNAS \(Graphical\)/);
+  assert.match(build, /xserver-xorg/);
+  assert.match(build, /lightdm/);
+  assert.match(build, /chromium/);
+  assert.match(build, /http:\/\/127\.0\.0\.1:3080/);
+  assert.match(build, /report_el_torito plain/);
+  assert.match(preseed, /netcfg\/get_hostname string lightnas/);
+});
+
+test('collapsed sidebar uses a wider clean icon rail without visible scrollbar', async () => {
+  const styles = await read('public/styles.css');
+  assert.match(styles, /sidebar-collapsed \{ grid-template-columns: 92px 1fr/);
+  assert.match(styles, /sidebar-collapsed \.sidebar nav::\-webkit-scrollbar \{ display:none/);
+  assert.match(styles, /scrollbar-width:none/);
+});
