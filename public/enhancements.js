@@ -438,38 +438,16 @@ function permissionsMarkup(options, selected = []) {
 }
 
 async function enhancePolicies() {
-  if (location.hash !== '#users') return;
-  const content = document.querySelector('#content');
-  if (!content || content.dataset.policiesLoaded === '1') return;
-  try {
-    const result = await apiRequest('/api/users');
-    content.dataset.policiesLoaded = '1';
-    const options = result.permissionOptions || Object.keys(permissionLabels);
-    for (const user of result.users || []) {
-      const form = content.querySelector(`form[data-manage-user="${CSS.escape(user.username)}"]`);
-      if (!form || form.querySelector('.policy-grid')) continue;
-      form.insertAdjacentHTML('beforeend', `${permissionsMarkup(options, user.permissions || [])}<button class="primary save-policy" type="button" data-save-policy="${escapeHtml(user.username)}">Save permissions</button>`);
-    }
-    const create = content.querySelector('#user-form');
-    if (create && !create.querySelector('.policy-grid')) create.querySelector('button[type="submit"]')?.insertAdjacentHTML('beforebegin', permissionsMarkup(options, ['files.read', 'files.write']));
-  } catch {}
+  // Permissions moved to the dedicated #permissions workspace.
+  // Keep this compatibility hook intentionally empty so older enhancement
+  // scheduling does not inject policy controls back into the Users page.
+  return;
 }
 
 function enhanceAdminCenter() {
-  if (location.hash !== '#admin') return;
-  const content = document.querySelector('#content');
-  if (!content || content.querySelector('.admin-tool-groups')) return;
-  const groups = [
-    ['Identity & access', [['users','Users & policies'],['settings','Appliance settings'],['integrations','Identity integrations']]],
-    ['Storage & data', [['storage','Unified storage'],['pools','Pools & datasets'],['files','File manager'],['shares','Shares']]],
-    ['Compute & apps', [['apps','App Store'],['containers','Containers'],['vms','Virtual machines']]],
-    ['Network & security', [['network','Networking'],['firewall','Firewall'],['smtp','Email / SMTP']]],
-    ['System operations', [['monitoring','Monitoring'],['capabilities','Capabilities'],['home','Overview']]]
-  ];
-  const section = document.createElement('section');
-  section.className = 'admin-tool-groups';
-  section.innerHTML = groups.map(([title, tools]) => `<div class="admin-group"><h2>${title}</h2><div class="admin-group-grid">${tools.map(([view,label]) => `<button class="admin-tool-card" type="button" data-admin-view="${view}"><b>${label}</b><span>Open ${label.toLowerCase()}</span></button>`).join('')}</div></div>`).join('');
-  content.querySelector('.page-head')?.insertAdjacentElement('afterend', section);
+  // Admin Center is rendered directly by app.js. Do not inject a second copy
+  // of the navigation/tools here.
+  return;
 }
 
 function scheduleEnhancements() {
