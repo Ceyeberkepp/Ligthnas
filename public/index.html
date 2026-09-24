@@ -84,6 +84,7 @@
           <a href="#smtp" data-view="smtp"><span>✉</span>Email / SMTP</a>
           <a href="#settings" data-view="settings"><span>☷</span>Settings & security</a>
           <a href="#monitoring" data-view="monitoring"><span>⌁</span>Monitoring</a>
+          <a href="#assistant" data-view="assistant"><span>✦</span>AI helper</a>
           <a href="#capabilities" data-view="capabilities"><span>◇</span>Capabilities</a>
         </details>
       </nav>
@@ -113,11 +114,12 @@
   <dialog id="share-dialog">
     <form id="share-form">
       <div class="dialog-head"><div><span class="eyebrow">NEW RESOURCE</span><h2>Create shared folder</h2></div><button type="button" class="close-dialog" aria-label="Close">×</button></div>
-      <p>Save a proposed share configuration. This does not create a folder or enable SMB, NFS, or SFTP.</p>
+      <p>LightNAS creates the folder and applies the selected access service immediately.</p>
       <label>Share name<input name="name" required minlength="2" maxlength="64" placeholder="Team Files"></label>
-      <label>Protocol<select name="protocol"><option>SMB</option><option>NFS</option><option>SFTP</option></select></label>
+      <label>Protocol<select name="protocol"><option>SMB</option><option>SFTP</option></select></label>
+      <label>Access<select name="readOnly"><option value="false">Read and write</option><option value="true">Read only</option></select></label>
       <label>Description<textarea name="description" maxlength="160" placeholder="What belongs in this share?"></textarea></label>
-      <div class="dialog-actions"><button type="button" class="secondary close-dialog">Cancel</button><button class="primary" type="submit">Save plan</button></div>
+      <div class="dialog-actions"><button type="button" class="secondary close-dialog">Cancel</button><button class="primary" type="submit">Create share</button></div>
       <div class="form-error" role="alert"></div>
     </form>
   </dialog>

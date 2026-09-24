@@ -32,6 +32,7 @@ NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9-]{1,39}$")
 IFACE_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,32}$")
 CONNECTION_RE = re.compile(r"^[A-Za-z0-9 _.:@+-]{1,80}$")
 CIDR_RE = re.compile(r"^(?:[0-9A-Fa-f:.]+)/(?:[0-9]{1,3})$")
+SHARE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.-]{1,63}$")
 
 IMAGES = [
     {"id": "debian-13", "label": "Debian 13", "dist": "debian", "release": "trixie", "builder": "debootstrap", "mirror": "https://deb.debian.org/debian", "nested": True},
@@ -52,6 +53,87 @@ def run(args: list[str], timeout: int = 30, check: bool = True) -> str:
 
 def available(program: str) -> bool:
     return shutil.which(program) is not None
+
+
+def access_status() -> dict:
+    return {
+        "ssh": {"installed": available("sshd"), "active": service_active("ssh.service") or service_active("sshd.service"), "port": 22},
+        "smb": {"installed": available("smbd"), "active": service_active("smbd.service"), "ports": [445, 139]},
+    }
+
+
+def access_action(data: dict) -> dict:
+    service = str(data.get("service") or "").lower()
+    enabled = bool(data.get("enabled"))
+    units = {"ssh": "ssh.service", "smb": "smbd.service"}
+    if service not in units:
+        raise ValueError("unsupported access service")
+    executable = "sshd" if service == "ssh" else "smbd"
+    if not available(executable):
+        raise ValueError(f"{service.upper()} is not installed; rerun the LightNAS installer")
+    run(["systemctl", "enable" if enabled else "disable", "--now", units[service]], timeout=60)
+    return access_status()
+
+
+def apply_share(data: dict) -> dict:
+    share_id = str(data.get("id") or "")
+    name = str(data.get("name") or "").strip()
+    protocol = str(data.get("protocol") or "SMB").upper()
+    read_only = bool(data.get("readOnly"))
+    if not re.fullmatch(r"[0-9a-f-]{36}", share_id) or not SHARE_RE.fullmatch(name):
+        raise ValueError("invalid share definition")
+    root = Path("/var/lib/lightnas/files/Shares") / name
+    root.mkdir(parents=True, exist_ok=True)
+    try:
+        shutil.chown(root, user="lightnas", group="lightnas")
+    except LookupError:
+        pass
+    root.chmod(0o2775)
+    if protocol == "SFTP":
+        if not available("sshd"):
+            raise ValueError("OpenSSH is not installed; rerun the LightNAS installer")
+        subprocess.run(["systemctl", "enable", "--now", "ssh.service"], timeout=60, check=True)
+        return {"id": share_id, "path": str(root), "protocol": protocol, "active": True}
+    if protocol != "SMB":
+        raise ValueError("only SMB and SFTP shares are supported")
+    if not available("smbd"):
+        raise ValueError("Samba is not installed; rerun the LightNAS installer")
+    config_dir = Path("/etc/samba/smb.conf.d")
+    config_dir.mkdir(parents=True, exist_ok=True)
+    config_file = config_dir / f"lightnas-{share_id}.conf"
+    config_file.write_text(
+        f"[{name}]\npath = {root}\nbrowseable = yes\nguest ok = yes\n"
+        f"read only = {'yes' if read_only else 'no'}\nforce user = lightnas\n"
+        "create mask = 0664\ndirectory mask = 2775\n",
+        encoding="utf-8",
+    )
+    main_config = Path("/etc/samba/smb.conf")
+    include = f"include = {config_file}"
+    current = main_config.read_text(encoding="utf-8") if main_config.exists() else "[global]\nmap to guest = Bad User\n"
+    if not main_config.exists():
+        main_config.write_text(current, encoding="utf-8")
+    if include not in current:
+        with main_config.open("a", encoding="utf-8") as stream:
+            stream.write(f"\n{include}\n")
+    run(["testparm", "-s"], timeout=20)
+    subprocess.run(["systemctl", "enable", "--now", "smbd.service"], timeout=60, check=True)
+    subprocess.run(["systemctl", "reload", "smbd.service"], timeout=30, check=False)
+    return {"id": share_id, "path": str(root), "protocol": protocol, "active": True}
+
+
+def remove_share(data: dict) -> dict:
+    share_id = str(data.get("id") or "")
+    if not re.fullmatch(r"[0-9a-f-]{36}", share_id):
+        raise ValueError("invalid share id")
+    config_file = Path("/etc/samba/smb.conf.d") / f"lightnas-{share_id}.conf"
+    config_file.unlink(missing_ok=True)
+    main_config = Path("/etc/samba/smb.conf")
+    if main_config.exists():
+        include = f"include = {config_file}"
+        lines = [line for line in main_config.read_text(encoding="utf-8").splitlines() if line.strip() != include]
+        main_config.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    subprocess.run(["systemctl", "reload", "smbd.service"], timeout=30, check=False)
+    return {"id": share_id, "removed": True, "filesPreserved": True}
 
 
 def native_debian_arch() -> str:
@@ -1824,6 +1906,14 @@ def dispatch(request: dict) -> dict:
         return network_inventory()
     if action == "network-action":
         return network_action(data)
+    if action == "access-status":
+        return access_status()
+    if action == "access-action":
+        return access_action(data)
+    if action == "share-apply":
+        return apply_share(data)
+    if action == "share-remove":
+        return remove_share(data)
     if action == "appliance-health":
         return appliance_health()
     if action == "appliance-repair":

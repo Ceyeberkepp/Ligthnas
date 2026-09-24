@@ -232,6 +232,17 @@ export async function getSystemSnapshot() {
   const loadAverages = os.loadavg();
   const load = loadAverages[0];
   const loadPercent = Math.min(100, Math.round((load / Math.max(cores.length, 1)) * 100));
+  const networkText = await readText('/proc/net/dev');
+  const network = networkText.split('\n').slice(2).reduce((result, line) => {
+    const [namePart, countersPart] = line.split(':');
+    const name = String(namePart || '').trim();
+    const counters = String(countersPart || '').trim().split(/\s+/).map(Number);
+    if (!name || name === 'lo' || counters.length < 9) return result;
+    result.receivedBytes += Number.isFinite(counters[0]) ? counters[0] : 0;
+    result.transmittedBytes += Number.isFinite(counters[8]) ? counters[8] : 0;
+    result.interfaces += 1;
+    return result;
+  }, { receivedBytes: 0, transmittedBytes: 0, interfaces: 0 });
 
   return {
     hostname: os.hostname(),
@@ -252,6 +263,7 @@ export async function getSystemSnapshot() {
       usedBytes: totalMemory - freeMemory,
       usedPercent: Math.round(((totalMemory - freeMemory) / totalMemory) * 100)
     },
+    network,
     capabilities: [
       capability('Core NAS', totalMemory >= 1.5 * GIB, 'At least 2 GB RAM is recommended.', '2 GB RAM'),
       capability('Containers', ramGiB >= 4 && os.arch() === 'x64', 'Requires a 64-bit CPU and at least 4 GB RAM.', '4 GB RAM, x86-64'),

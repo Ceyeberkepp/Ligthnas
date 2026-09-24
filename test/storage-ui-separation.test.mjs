@@ -29,16 +29,20 @@ test('Storage and Pools & datasets have separate responsibilities', async () => 
   assert.match(templates, /preferredStorageId/);
 });
 
-test('Overview presents live node summary tabs and real metric charts', async () => {
+test('Overview presents one switchable live graph including network throughput', async () => {
   const [app, system] = await Promise.all([
     readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
     readFile(new URL('../src/system.mjs', import.meta.url), 'utf8')
   ]);
-  assert.match(app, /node-tabs/);
+  assert.doesNotMatch(app, /class="node-tabs"/);
+  assert.match(app, /overview-graph-tabs/);
+  assert.match(app, /\['network','Network'\]/);
   assert.match(app, /overviewChart\('CPU usage'/);
   assert.match(app, /overviewChart\('System load'/);
   assert.match(app, /overviewChart\('Memory usage'/);
   assert.match(app, /overviewChart\('Storage usage'/);
   assert.match(app, /setInterval/);
   assert.match(system, /loadAverage/);
+  assert.match(system, /receivedBytes/);
+  assert.match(system, /transmittedBytes/);
 });

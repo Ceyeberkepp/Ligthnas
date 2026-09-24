@@ -13,7 +13,7 @@ import { listFiles, createFolder, uploadFile, downloadFile, downloadFolder, dele
 import { thumbnailFor } from './thumbnails.mjs';
 import { catalog, runtimeInventory, installCatalogApp, manageCatalogApp, createContainer, createVm } from './runtimes-next.mjs';
 import { proxmoxConsoleSocket, proxmoxUpdateStorage, proxmoxCleanDisk } from './proxmox.mjs';
-import { localContainerSummary, localContainerInventory, localManageContainer, localContainerConsoleSocket, localContainerCommand, localVmConsoleSocket, localNodeConsoleSocket, localNetworkInventory, localNetworkAction, localApplianceHealth, localApplianceRepair } from './local-host.mjs';
+import { localContainerSummary, localContainerInventory, localManageContainer, localContainerConsoleSocket, localContainerCommand, localVmConsoleSocket, localNodeConsoleSocket, localNetworkInventory, localNetworkAction, localAccessStatus, localAccessAction, localApplyShare, localRemoveShare, localApplianceHealth, localApplianceRepair } from './local-host.mjs';
 import { validateSmtp, sendSmtpTest } from './mailer.mjs';
 import { mediaAvailable, convertMedia } from './media.mjs';
 import { createDataset, updateDataset } from './zfs.mjs';
@@ -928,18 +928,21 @@ async function api(req, res, url) {
 
   if (req.method === 'GET' && url.pathname === '/api/overview') {
     const shouldLoadHost = isAdmin || ['storage.view', 'system.view', 'vms.manage'].some(permission => permissions.includes(permission));
-    const [system, filesystems, storage, storagePools, runtimes] = await Promise.all([
+    const [system, filesystems, storage, storagePools, runtimes, access] = await Promise.all([
       getSystemSnapshot(), getFilesystems(), getStorageInventory(), listStoragePools(),
-      shouldLoadHost ? runtimeInventory() : Promise.resolve(null)
+      shouldLoadHost ? runtimeInventory() : Promise.resolve(null),
+      localAccessStatus().catch(error => ({ error: error.message, ssh: { installed: false, active: false }, smb: { installed: false, active: false } }))
     ]);
     // Overview and Storage must use one authoritative capacity figure. This
     // includes local storage once plus each unique attached virtual volume once.
     storage.usableStorage = storagePools.visibleSummary || storage.usableStorage;
     storage.poolSummary = storagePools.summary;
+    storage.configuredPools = storagePools.pools;
+    storage.availableSources = storagePools.availableSources;
     return send(res, 200, {
       appliance: { deviceName: store.state.config.deviceName, username, role: isAdmin ? 'administrator' : context.apiToken ? 'api' : 'user', permissions, timezone: store.state.config.timezone, hasAvatar: Boolean(account.avatarContentType) },
       system, filesystems, storage, host: runtimes?.virtualization?.host || null,
-      shares: store.state.shares, activity: store.state.activity.slice(0, 8)
+      shares: store.state.shares, access, activity: store.state.activity.slice(0, 8)
     });
   }
   if (req.method === 'GET' && url.pathname === '/api/network') {
@@ -1155,14 +1158,25 @@ async function api(req, res, url) {
     if (!requirePermission(res, permissions, 'files.read')) return;
     return send(res, 200, { shares: store.state.shares });
   }
+  if (req.method === 'POST' && url.pathname === '/api/access') {
+    if (!requirePermission(res, permissions, 'shares.manage')) return;
+    const input = await bodyJson(req);
+    const access = await localAccessAction(input);
+    store.addActivity('access', `${String(input.service || '').toUpperCase()} access was ${input.enabled ? 'enabled' : 'disabled'}.`);
+    await store.save();
+    return send(res, 200, { access });
+  }
   if (req.method === 'POST' && url.pathname === '/api/shares') {
     if (!requirePermission(res, permissions, 'shares.manage')) return;
     const input = await bodyJson(req);
     if (!/^[a-zA-Z0-9][a-zA-Z0-9 _.-]{1,63}$/.test(input.name || '')) return send(res, 400, { error: 'Share name must contain 2–64 valid characters.' });
     if (store.state.shares.some(share => share.name.toLowerCase() === input.name.toLowerCase())) return send(res, 409, { error: 'A share with this name already exists.' });
-    const share = { id: crypto.randomUUID(), name: input.name, protocol: ['SMB', 'NFS', 'SFTP'].includes(input.protocol) ? input.protocol : 'SMB', description: String(input.description || '').slice(0, 160), createdAt: new Date().toISOString() };
+    const share = { id: crypto.randomUUID(), name: input.name, protocol: ['SMB', 'SFTP'].includes(input.protocol) ? input.protocol : 'SMB', readOnly: input.readOnly === true || input.readOnly === 'true', description: String(input.description || '').slice(0, 160), createdAt: new Date().toISOString() };
+    const applied = await localApplyShare(share);
+    share.path = applied.path;
+    share.active = Boolean(applied.active);
     store.state.shares.push(share);
-    store.addActivity('share', `Share plan ${share.name} was saved for ${share.protocol}.`, 'info');
+    store.addActivity('share', `${share.protocol} share ${share.name} was created.`, 'info');
     await store.save();
     return send(res, 201, { share });
   }
@@ -1172,7 +1186,8 @@ async function api(req, res, url) {
     const index = store.state.shares.findIndex(share => share.id === id);
     if (index < 0) return send(res, 404, { error: 'Share plan not found.' });
     const [share] = store.state.shares.splice(index, 1);
-    store.addActivity('share', `Share plan ${share.name} was removed.`, 'info');
+    await localRemoveShare({ id: share.id, protocol: share.protocol });
+    store.addActivity('share', `${share.protocol} share ${share.name} was removed; its files were preserved.`, 'info');
     await store.save();
     return send(res, 200, { ok: true });
   }
