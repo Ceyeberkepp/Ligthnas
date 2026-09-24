@@ -735,7 +735,7 @@ function bindViewActions() {
     button.disabled = true;
     button.textContent = 'Converting…';
     try {
-      await request('/api/media/convert', { method: 'POST', body: JSON.stringify({ path: [state.folder, button.dataset.convertFile].filter(Boolean).join('/'), format: format.toLowerCase().trim() }) });
+      await request('/api/media/convert', { method: 'POST', body: JSON.stringify({ path: button.dataset.path || [state.folder, button.dataset.convertFile].filter(Boolean).join('/'), format: format.toLowerCase().trim() }) });
       await loadFiles(); toast('Converted file is ready in this folder.');
     } catch (error) { toast(error.message); button.disabled = false; button.textContent = 'Convert'; }
   }));
@@ -862,10 +862,18 @@ function bindViewActions() {
   $$('[data-action="new-share"]', $('#content')).forEach(button => button.addEventListener('click', () => $('#share-dialog').showModal()));
   $$('[data-view-link]', $('#content')).forEach(button => button.addEventListener('click', () => { location.hash = button.dataset.viewLink; }));
   $$('[data-action="refresh"]', $('#content')).forEach(button => button.addEventListener('click', async () => { try { state.overview = await request('/api/overview'); render(state.view); toast('Readings updated.'); } catch (error) { toast(error.message); } }));
-  $$('[data-action="refresh-files"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+  $('[data-action="refresh-files"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+    const original = button.textContent;
     button.disabled = true;
     button.textContent = 'Refreshing…';
-    await loadFiles();
+    try {
+      state.files = null;
+      await loadFiles();
+      toast('Files refreshed.');
+    } finally {
+      button.disabled = false;
+      button.textContent = original;
+    }
   }));
   $('[data-file-view]', $('#content')).forEach(button => button.addEventListener('click', () => {
     state.fileView = button.dataset.fileView === 'grid' ? 'grid' : 'list';
@@ -873,20 +881,20 @@ function bindViewActions() {
     render('files');
   }));
   $('[data-download-folder]', $('#content')).forEach(button => button.addEventListener('click', () => {
-    const path = [state.folder, button.dataset.downloadFolder].filter(Boolean).join('/');
+    const path = button.dataset.downloadFolder || '';
     const link = document.createElement('a');
     link.href = `/api/files/archive?path=${encodeURIComponent(path)}`;
-    link.download = `${button.dataset.downloadFolder}.tar.gz`;
+    link.download = `${path.split('/').pop() || 'folder'}.tar.gz`;
     document.body.append(link);
     link.click();
     link.remove();
   }));
   $('[data-library-tab]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     const folder = button.dataset.libraryTab || '';
-    if (folder) {
+    if (folder && folder !== 'Attached storage') {
       try { await request(`/api/files?path=${encodeURIComponent(folder)}`); }
       catch {
-        try { await request(`/api/files?path=${encodeURIComponent(folder)}`, { method: 'POST' }); }
+        try { await request(`/api/files?path=${encodeURIComponent(folder)}`, { method: 'POST', body: '{}' }); }
         catch (error) { return toast(error.message); }
       }
     }
@@ -894,27 +902,28 @@ function bindViewActions() {
     state.files = null;
     render('files');
   }));
-  $$('[data-folder]', $('#content')).forEach(button => button.addEventListener('click', () => { state.folder = button.dataset.folder; state.files = null; render('files'); }));
-  $$('[data-open]', $('#content')).forEach(button => button.addEventListener('click', async () => {
-    const path = [state.folder, button.dataset.open].filter(Boolean).join('/');
+  $('[data-folder]', $('#content')).forEach(button => button.addEventListener('click', () => { state.folder = button.dataset.folder; state.files = null; render('files'); }));
+  $('[data-open]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+    const path = button.dataset.path || [state.folder, button.dataset.open].filter(Boolean).join('/');
     if (button.dataset.directory === 'true') { state.folder = path; state.files = null; render('files'); return; }
     try { const response = await fetch(`/api/files/download?path=${encodeURIComponent(path)}`); if (!response.ok) throw new Error((await response.json()).error); const object = URL.createObjectURL(await response.blob()); const link = document.createElement('a'); link.href = object; link.download = button.dataset.open; link.click(); setTimeout(() => URL.revokeObjectURL(object), 60000); } catch (error) { toast(error.message); }
   }));
-  $$('[data-action="new-folder"]', $('#content')).forEach(button => button.addEventListener('click', async () => { const name = prompt('New folder name'); if (name === null) return; try { await request(`/api/files?path=${encodeURIComponent([state.folder, name].filter(Boolean).join('/'))}`, { method: 'POST' }); await loadFiles(); toast('Folder created.'); } catch (error) { toast(error.message); } }));
+  $('[data-action="new-folder"]', $('#content')).forEach(button => button.addEventListener('click', async () => { const name = prompt('New folder name'); if (name === null) return; try { await request(`/api/files?path=${encodeURIComponent([state.folder, name].filter(Boolean).join('/'))}`, { method: 'POST', body: '{}' }); await loadFiles(); toast('Folder created.'); } catch (error) { toast(error.message); } }));
   $('#file-upload', content)?.addEventListener('change', async event => {
     const files = [...event.target.files];
-    let completed = 0;
-    for (const file of files) {
-      try {
-        const response = await fetch(`/api/files?path=${encodeURIComponent([state.folder, file.name].filter(Boolean).join('/'))}`, { method: 'PUT', headers: { 'X-LightNAS-Request': '1' }, body: file });
-        if (!response.ok) throw new Error((await response.json()).error);
-        completed++;
-      } catch (error) { toast(`${file.name}: ${error.message}`); break; }
-    }
-    await loadFiles();
-    if (completed === files.length && completed) toast(`${completed} file${completed === 1 ? '' : 's'} uploaded.`);
+    event.target.value = '';
+    await uploadFilesWithProgress(files, false);
   });
-  $$('[data-delete-file]', content).forEach(button => button.addEventListener('click', async () => { if (!confirm(`Delete ${button.dataset.deleteFile}? Folders must be empty.`)) return; try { await request(`/api/files?path=${encodeURIComponent([state.folder, button.dataset.deleteFile].filter(Boolean).join('/'))}`, { method: 'DELETE' }); await loadFiles(); toast('Deleted.'); } catch (error) { toast(error.message); } }));
+  $('#folder-upload', content)?.addEventListener('change', async event => {
+    const files = [...event.target.files];
+    event.target.value = '';
+    await uploadFilesWithProgress(files, true);
+  });
+  $('[data-delete-file]', content).forEach(button => button.addEventListener('click', async () => {
+    if (!confirm(`Delete ${button.dataset.deleteFile}? Folders must be empty.`)) return;
+    const path = button.dataset.path || [state.folder, button.dataset.deleteFile].filter(Boolean).join('/');
+    try { await request(`/api/files?path=${encodeURIComponent(path)}`, { method: 'DELETE' }); await loadFiles(); toast('Deleted.'); } catch (error) { toast(error.message); }
+  }));
   $$('[data-delete-share]', content).forEach(button => button.addEventListener('click', async () => { if (!confirm(`Remove share plan ${button.dataset.name}?`)) return; try { await request(`/api/shares/${button.dataset.deleteShare}`, { method: 'DELETE' }); state.overview = await request('/api/overview'); render(state.view); toast('Plan removed.'); } catch (error) { toast(error.message); } }));
 }
 
