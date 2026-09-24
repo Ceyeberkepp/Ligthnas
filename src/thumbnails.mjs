@@ -8,8 +8,8 @@ import { downloadFile } from './files.mjs';
 const execute = promisify(execFile);
 const dataRoot = dirname(process.env.NAS_DATA_FILE || 'data/state.json');
 const cacheRoot = join(dataRoot, 'thumbnails');
-const images = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.avif']);
-const videos = new Set(['.mp4', '.webm', '.mov', '.m4v', '.ogv', '.mkv', '.avi']);
+const images = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.avif', '.tif', '.tiff', '.dng', '.cr2', '.cr3', '.nef', '.nrw', '.arw', '.srf', '.sr2', '.raf', '.rw2', '.orf', '.pef', '.srw', '.raw']);
+const videos = new Set(['.mp4', '.webm', '.mov', '.m4v', '.ogv', '.mkv', '.avi', '.wmv', '.flv', '.mpeg', '.mpg', '.ts', '.m2ts', '.mts', '.3gp', '.vob']);
 
 export async function thumbnailFor(relative) {
   const extension = extname(relative).toLowerCase();

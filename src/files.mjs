@@ -1,10 +1,8 @@
 import { access, constants, mkdir, readdir, lstat, unlink, rmdir, open, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
-import { Transform } from 'node:stream';
 
 const root = join(dirname(process.env.NAS_DATA_FILE || 'data/state.json'), 'files');
-const MAX_UPLOAD = Number(process.env.LIGHTNAS_FILE_UPLOAD_MAX_BYTES || 50 * 1024 ** 3);
 const ATTACHED_ROOT = 'Attached storage';
 
 function parts(relative) {
@@ -117,16 +115,24 @@ export async function uploadFile(relative, req) {
   if (!segments.length || (segments.length <= 2 && segments[0] === ATTACHED_ROOT)) throw Object.assign(new Error('Enter a file name inside a writable location.'), { status: 400 });
   const path = await checked(relative, false);
   const file = await open(path, 'wx', 0o600);
-  let size = 0;
   try {
-    await pipeline(req, new Transform({ transform(chunk, encoding, callback) {
-      size += chunk.length;
-      callback(size > MAX_UPLOAD ? Object.assign(new Error('File exceeds the configured upload limit.'), { status: 413 }) : null, chunk);
-    } }), file.createWriteStream());
+    // Stream directly to disk. LightNAS intentionally does not impose an
+    // application-level file-size ceiling; the destination filesystem is the
+    // authoritative limit and the upload is never buffered in memory.
+    await pipeline(req, file.createWriteStream());
   } catch (error) {
     await unlink(path).catch(() => {});
     throw error;
   }
+}
+
+export async function downloadFolder(relative) {
+  const segments = parts(relative);
+  if (!segments.length) throw Object.assign(new Error('Select a folder.'), { status: 400 });
+  const path = await checked(relative);
+  const info = await lstat(path);
+  if (!info.isDirectory()) throw Object.assign(new Error('Not a folder.'), { status: 400 });
+  return { path, name: segments.at(-1) };
 }
 
 export async function downloadFile(relative) {

@@ -179,13 +179,16 @@ function parseDomInfo(text) {
 async function localVmDetails(names) {
   const details = [];
   for (const name of names.slice(0, 100)) {
-    const [info, blockDevices, domainXml] = await Promise.all([
+    const [info, blockDevices, domainXml, memoryStats] = await Promise.all([
       command('virsh', ['-c', 'qemu:///system', 'dominfo', name], 10000),
       command('virsh', ['-c', 'qemu:///system', 'domblklist', name, '--details'], 10000),
-      command('virsh', ['-c', 'qemu:///system', 'dumpxml', name, '--inactive'], 10000)
+      command('virsh', ['-c', 'qemu:///system', 'dumpxml', name, '--inactive'], 10000),
+      command('virsh', ['-c', 'qemu:///system', 'dommemstat', name], 10000)
     ]);
     if (!info.ok) continue;
     const parsed = parseDomInfo(info.output);
+    const memory = memoryStats.ok ? Object.fromEntries(memoryStats.output.split('\n').map(line => line.trim().split(/\s+/, 2)).filter(parts => parts.length === 2)) : {};
+    const memoryUsed = Math.max(0, ((Number(memory.actual) || 0) - (Number(memory.unused) || 0)) * 1024);
     details.push({
       id: name,
       name,
@@ -193,6 +196,7 @@ async function localVmDetails(names) {
       status: parsed.state || 'unknown',
       cpus: Number(parsed['cpu(s)']) || 0,
       memory: (Number(String(parsed['max memory'] || '').split(/\s+/)[0]) || 0) * 1024,
+      memoryUsed,
       persistent: parsed.persistent === 'yes',
       installationMedia: blockDevices.ok && hasInstallerMedia(blockDevices.output),
       installationMediaPath: blockDevices.ok ? installerMediaPath(blockDevices.output) : '',

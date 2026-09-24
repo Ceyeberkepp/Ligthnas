@@ -1,6 +1,6 @@
 const previewExtensions = {
-  image: new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'avif']),
-  video: new Set(['mp4', 'webm', 'mov', 'm4v', 'ogv', 'mkv', 'avi']),
+  image: new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'avif', 'tif', 'tiff', 'dng', 'cr2', 'cr3', 'nef', 'nrw', 'arw', 'srf', 'sr2', 'raf', 'rw2', 'orf', 'pef', 'srw', 'raw']),
+  video: new Set(['mp4', 'webm', 'mov', 'm4v', 'ogv', 'mkv', 'avi', 'wmv', 'flv', 'mpeg', 'mpg', 'ts', 'm2ts', 'mts', '3gp', 'vob']),
   audio: new Set(['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac']),
   pdf: new Set(['pdf']),
   text: new Set(['txt', 'log', 'md', 'json', 'csv', 'xml', 'yaml', 'yml', 'ini', 'conf', 'sh', 'js', 'mjs', 'css', 'html'])
@@ -17,7 +17,14 @@ const permissionLabels = {
   'containers.manage': ['Manage containers', 'Create, edit, control and open LightNAS containers.'],
   'vms.manage': ['Manage VMs', 'Create, edit, control and open VM consoles.'],
   'network.view': ['View networking', 'View network interfaces, routes and firewall inventory.'],
-  'system.view': ['View system health', 'View monitoring, CPU, memory and system details.']
+  'network.manage': ['Manage networking', 'Create and edit bridges, VLANs, addresses, routes and DNS.'],
+  'firewall.manage': ['Manage firewall', 'Create, change and remove host firewall rules.'],
+  'vms.console': ['Open VM consoles', 'Use interactive noVNC consoles without changing VM hardware.'],
+  'containers.console': ['Open container consoles', 'Use interactive root terminals inside assigned containers.'],
+  'backup.manage': ['Manage backups', 'Create, restore and remove managed backups and snapshots.'],
+  'audit.view': ['View audit history', 'Review security and system activity history.'],
+  'system.view': ['View system health', 'View monitoring, CPU, memory and system details.'],
+  'system.shell': ['Open node shell', 'Use a privileged root terminal on the LightNAS node.']
 };
 
 function escapeHtml(value) {
@@ -163,18 +170,22 @@ async function openPreview(name) {
   const kind = previewKind(name);
   if (!kind) return false;
   const path = joinPath(currentFolder(), name);
-  const response = await fetch(`/api/files/download?path=${encodeURIComponent(path)}`);
-  if (!response.ok) {
+  const rawImage = /\.(?:tif|tiff|dng|cr2|cr3|nef|nrw|arw|srf|sr2|raf|rw2|orf|pef|srw|raw)$/i.test(name);
+  const convertedVideo = kind === 'video' && !/\.(?:mp4|webm|ogv|mov|m4v)$/i.test(name);
+  const source = convertedVideo ? `/api/files/video-preview?path=${encodeURIComponent(path)}` : null;
+  const response = source ? null : await fetch(`${rawImage ? '/api/files/thumbnail' : '/api/files/download'}?path=${encodeURIComponent(path)}`);
+  if (response && !response.ok) {
     const body = await response.json().catch(() => ({}));
     throw new Error(body.error || 'Unable to open file.');
   }
-  const blob = await response.blob();
-  const objectUrl = URL.createObjectURL(blob);
+  const blob = response ? await response.blob() : null;
+  const objectUrl = blob ? URL.createObjectURL(blob) : source;
   const dialog = ensureViewer();
   if (dialog.dataset.objectUrl) URL.revokeObjectURL(dialog.dataset.objectUrl);
-  dialog.dataset.objectUrl = objectUrl;
+  if (blob) dialog.dataset.objectUrl = objectUrl;
+  else delete dialog.dataset.objectUrl;
   dialog.querySelector('[data-viewer-title]').textContent = name;
-  dialog.querySelector('[data-viewer-meta]').textContent = `${bytes(blob.size)} · ${kind.toUpperCase()} preview`;
+  dialog.querySelector('[data-viewer-meta]').textContent = `${blob ? `${bytes(blob.size)} · ` : ''}${kind.toUpperCase()} preview${convertedVideo ? ' · browser-compatible stream' : rawImage ? ' · rendered from RAW' : ''}`;
   const stage = dialog.querySelector('[data-viewer-stage]');
   stage.replaceChildren();
   let viewer;
@@ -185,7 +196,7 @@ async function openPreview(name) {
   else { viewer = document.createElement('pre'); viewer.textContent = await blob.text(); }
   stage.append(viewer);
   dialog.querySelector('[data-viewer-download]').onclick = () => {
-    const anchor = document.createElement('a'); anchor.href = objectUrl; anchor.download = name; anchor.click();
+    const anchor = document.createElement('a'); anchor.href = `/api/files/download?path=${encodeURIComponent(path)}`; anchor.download = name; anchor.click();
   };
   updateViewerNavigation(dialog, name);
   if (!dialog.open) dialog.showModal();
@@ -401,7 +412,7 @@ function enhanceFileThumbnails() {
     const media = document.createElement(kind === 'image' ? 'img' : 'video');
     media.className = 'file-thumb';
     media.loading = 'lazy';
-    media.src = `/api/files/download?path=${encodeURIComponent(path)}${kind === 'video' ? '#t=0.15' : ''}`;
+    media.src = `/api/files/thumbnail?path=${encodeURIComponent(path)}`;
     if (kind === 'video') { media.muted = true; media.preload = 'metadata'; media.playsInline = true; }
     button.prepend(media);
   }
@@ -415,7 +426,7 @@ function permissionsMarkup(options, selected = []) {
 }
 
 async function enhancePolicies() {
-  if (location.hash !== '#users') return;
+  if (!['#users', '#permissions'].includes(location.hash)) return;
   const content = document.querySelector('#content');
   if (!content || content.dataset.policiesLoaded === '1') return;
   try {
@@ -457,7 +468,6 @@ function scheduleEnhancements() {
     enhanceRuntimeControls();
     enhanceFileThumbnails();
     enhancePolicies();
-    enhanceAdminCenter();
   }, 100);
 }
 

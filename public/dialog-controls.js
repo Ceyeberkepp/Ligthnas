@@ -836,6 +836,33 @@ document.addEventListener('click', async event => {
     return;
   }
 
+  const addBond = event.target.closest('[data-network-add-bond]');
+  if (addBond) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    let info;
+    try { info = await dialogApi('/api/network'); } catch (problem) { alert(problem.message); return; }
+    const devices = (info.control?.devices || []).filter(item => item.type === 'ethernet').map(item => item.name);
+    if (devices.length < 2) { alert('At least two Ethernet interfaces are required to create a bond.'); return; }
+    showEditor({
+      eyebrow: 'NETWORK BOND',
+      title: 'Create Linux bond',
+      description: `Available Ethernet interfaces: ${devices.join(', ')}. Enter two or more comma-separated member names.`,
+      fields: [
+        { name: 'name', label: 'Bond name', value: 'bond0', required: true },
+        { name: 'members', label: 'Member interfaces', value: devices.slice(0, 2).join(', '), required: true },
+        { name: 'mode', label: 'Bond mode', type: 'select', value: 'active-backup', options: [{ value:'active-backup', label:'Active / backup' }, { value:'802.3ad', label:'802.3ad LACP' }, { value:'balance-xor', label:'Balance XOR' }, { value:'balance-rr', label:'Round robin' }] }
+      ],
+      submitLabel: 'Create bond',
+      onSubmit: async values => {
+        const members = values.members.split(',').map(item => item.trim()).filter(Boolean);
+        await dialogApi('/api/network', { method: 'POST', body: JSON.stringify({ action:'bond-create', name:values.name, members, mode:values.mode }) });
+        location.reload();
+      }
+    });
+    return;
+  }
+
   const addVlan = event.target.closest('[data-network-add-vlan]');
   if (addVlan) {
     event.preventDefault();

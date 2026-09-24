@@ -340,9 +340,16 @@ def container_records(fast: bool = False) -> list[dict]:
                 pass
         memory, cpus = container_limits(name)
         addresses = [] if fast else container_addresses(name)
+        memory_used = 0
+        if pid:
+            try:
+                cgroup = next((line.split(":", 2)[2] for line in Path(f"/proc/{pid}/cgroup").read_text().splitlines() if line.startswith("0::")), "")
+                memory_used = int((Path("/sys/fs/cgroup") / cgroup.lstrip("/") / "memory.current").read_text().strip())
+            except (OSError, ValueError):
+                memory_used = 0
         containers.append({
             "id": name, "name": name, "status": state, "pid": pid,
-            "memory": memory, "cpus": cpus, "provider": "local-lxc",
+            "memory": memory, "memoryUsed": memory_used, "cpus": cpus, "provider": "local-lxc",
             "addresses": addresses,
             "ipv4": next((value for value in addresses if ":" not in value), None),
             **container_settings(name),
@@ -1435,6 +1442,22 @@ def network_action(data: dict) -> dict:
         run(["nmcli", "connection", "add", "type", "bridge", "ifname", name, "con-name", name], timeout=30)
         run(["nmcli", "connection", "add", "type", "bridge-slave", "ifname", uplink, "master", name, "con-name", f"{name}-{uplink}"], timeout=30)
         return {"action": action, "name": name, "uplink": uplink}
+    if action == "bond-create":
+        name = str(data.get("name") or "bond0")
+        members = [str(item) for item in (data.get("members") or [])]
+        mode = str(data.get("mode") or "active-backup")
+        if not IFACE_RE.fullmatch(name) or len(members) < 2 or any(not IFACE_RE.fullmatch(item) for item in members):
+            raise ValueError("select at least two valid bond member interfaces")
+        if mode not in {"active-backup", "balance-rr", "balance-xor", "802.3ad", "balance-tlb", "balance-alb"}:
+            raise ValueError("invalid bond mode")
+        run(["nmcli", "connection", "add", "type", "bond", "ifname", name, "con-name", name, "bond.options", f"mode={mode}"], timeout=30)
+        try:
+            for member in members:
+                run(["nmcli", "connection", "add", "type", "ethernet", "ifname", member, "master", name, "con-name", f"{name}-{member}"], timeout=30)
+        except Exception:
+            run(["nmcli", "connection", "delete", name], timeout=15, check=False)
+            raise
+        return {"action": action, "name": name, "members": members, "mode": mode}
     if action == "vlan-create":
         name = str(data.get("name") or "")
         parent = str(data.get("parent") or "")
@@ -1559,6 +1582,50 @@ def stream_container(connection, data: dict) -> None:
         env=env,
         preexec_fn=child_setup,
     )
+    os.close(slave)
+
+    def input_loop():
+        try:
+            while process.poll() is None:
+                chunk = connection.recv(65536)
+                if not chunk:
+                    break
+                os.write(master, chunk)
+        except OSError:
+            pass
+
+    feeder = threading.Thread(target=input_loop, daemon=True)
+    feeder.start()
+    try:
+        while process.poll() is None:
+            chunk = os.read(master, 65536)
+            if not chunk:
+                break
+            connection.sendall(chunk)
+    except OSError:
+        pass
+    finally:
+        try:
+            os.close(master)
+        except OSError:
+            pass
+        if process.poll() is None:
+            process.terminate()
+        feeder.join(timeout=1)
+
+
+def stream_node(connection) -> None:
+    master, slave = pty.openpty()
+    env = os.environ.copy()
+    env.update({"TERM": "xterm-256color", "HOME": "/root", "USER": "root", "LOGNAME": "root"})
+
+    def child_setup():
+        os.setsid()
+        fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
+
+    shell = "/bin/bash" if Path("/bin/bash").exists() else "/bin/sh"
+    args = [shell, "--noprofile", "--norc", "-i"] if shell.endswith("bash") else [shell, "-i"]
+    process = subprocess.Popen(args, cwd="/root", stdin=slave, stdout=slave, stderr=slave, close_fds=True, env=env, preexec_fn=child_setup)
     os.close(slave)
 
     def input_loop():
@@ -1776,6 +1843,11 @@ class Handler(socketserver.StreamRequestHandler):
                 self.wfile.write(b'{"ok":true,"data":{"mode":"pty"}}\n')
                 self.wfile.flush()
                 stream_container(self.connection, request.get("data") or {})
+                return
+            if request.get("action") == "node-console":
+                self.wfile.write(b'{"ok":true,"data":{"mode":"pty"}}\n')
+                self.wfile.flush()
+                stream_node(self.connection)
                 return
             if request.get("action") == "vm-console":
                 # Establish the QEMU connection before reporting success. This

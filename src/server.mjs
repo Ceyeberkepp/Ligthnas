@@ -1,17 +1,19 @@
 import http from 'node:http';
-import { readFile, mkdir, rmdir } from 'node:fs/promises';
-import { createReadStream } from 'node:fs';
-import { dirname, extname, join, normalize, resolve } from 'node:path';
+import { spawn } from 'node:child_process';
+import { readFile, mkdir, rmdir, rename, unlink, stat } from 'node:fs/promises';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { pipeline } from 'node:stream/promises';
+import { basename, dirname, extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { JsonStore } from './store.mjs';
 import { getFilesystems, getStorageInventory, getSystemSnapshot } from './system.mjs';
 import { hashPassword, Sessions, verifyPassword } from './auth.mjs';
-import { listFiles, createFolder, uploadFile, downloadFile, deleteEntry } from './files.mjs';
+import { listFiles, createFolder, uploadFile, downloadFile, downloadFolder, deleteEntry } from './files.mjs';
 import { thumbnailFor } from './thumbnails.mjs';
 import { catalog, runtimeInventory, installCatalogApp, manageCatalogApp, createContainer, createVm } from './runtimes-next.mjs';
 import { proxmoxConsoleSocket, proxmoxUpdateStorage, proxmoxCleanDisk } from './proxmox.mjs';
-import { localContainerSummary, localContainerInventory, localManageContainer, localContainerConsoleSocket, localContainerCommand, localVmConsoleSocket, localNetworkInventory, localNetworkAction, localApplianceHealth, localApplianceRepair } from './local-host.mjs';
+import { localContainerSummary, localContainerInventory, localManageContainer, localContainerConsoleSocket, localContainerCommand, localVmConsoleSocket, localNodeConsoleSocket, localNetworkInventory, localNetworkAction, localApplianceHealth, localApplianceRepair } from './local-host.mjs';
 import { validateSmtp, sendSmtpTest } from './mailer.mjs';
 import { mediaAvailable, convertMedia } from './media.mjs';
 import { createDataset, updateDataset } from './zfs.mjs';
@@ -54,6 +56,8 @@ store.state.security.apiTokens ||= [];
 store.state.security.webhooks ||= [];
 store.state.security.identityProviders ||= [];
 const spaceRoot = join(dirname(resolve(process.env.NAS_DATA_FILE || 'data/state.json')), 'files', 'Spaces');
+const profileRoot = join(dirname(resolve(process.env.NAS_DATA_FILE || 'data/state.json')), 'profiles');
+const avatarPath = username => join(profileRoot, `${username}.avatar`);
 const spaceName = /^[a-zA-Z0-9][a-zA-Z0-9_-]{1,39}$/;
 const groupName = /^[A-Za-z0-9][A-Za-z0-9 _.-]{1,63}$/;
 const pause = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
@@ -143,7 +147,9 @@ export const PERMISSIONS = Object.freeze([
   'files.read', 'files.write', 'media.convert',
   'storage.view', 'storage.manage', 'shares.manage',
   'apps.manage', 'containers.manage', 'vms.manage',
-  'network.view', 'network.manage', 'system.view'
+  'network.view', 'network.manage', 'firewall.manage',
+  'containers.console', 'vms.console', 'backup.manage', 'audit.view',
+  'system.view', 'system.shell'
 ]);
 const DEFAULT_USER_PERMISSIONS = Object.freeze(['files.read', 'files.write']);
 
@@ -156,8 +162,8 @@ const mimeTypes = {
   '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.mjs': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.json': 'application/json; charset=utf-8',
   '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.gif': 'image/gif', '.webp': 'image/webp',
-  '.bmp': 'image/bmp', '.avif': 'image/avif', '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime',
-  '.m4v': 'video/x-m4v', '.ogv': 'video/ogg', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg',
+  '.bmp': 'image/bmp', '.avif': 'image/avif', '.tif': 'image/tiff', '.tiff': 'image/tiff', '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime',
+  '.m4v': 'video/x-m4v', '.ogv': 'video/ogg', '.mkv': 'video/x-matroska', '.avi': 'video/x-msvideo', '.wmv': 'video/x-ms-wmv', '.flv': 'video/x-flv', '.mpeg': 'video/mpeg', '.mpg': 'video/mpeg', '.ts': 'video/mp2t', '.m2ts': 'video/mp2t', '.mts': 'video/mp2t', '.3gp': 'video/3gpp', '.vob': 'video/mpeg', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg',
   '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.flac': 'audio/flac', '.pdf': 'application/pdf',
   '.txt': 'text/plain; charset=utf-8', '.log': 'text/plain; charset=utf-8', '.md': 'text/markdown; charset=utf-8',
   '.csv': 'text/csv; charset=utf-8', '.xml': 'application/xml; charset=utf-8', '.yaml': 'text/yaml; charset=utf-8',
@@ -356,6 +362,29 @@ async function api(req, res, url) {
   const context = requireSession(req, res);
   if (!context) return;
   const { username, account, isAdmin, permissions } = context;
+
+  if (url.pathname === '/api/profile/avatar' && req.method === 'GET') {
+    if (context.apiToken) return send(res, 403, { error: 'Profile pictures require an interactive account session.' });
+    if (!account.avatarContentType) return send(res, 404, { error: 'Profile picture not found.' });
+    const path = avatarPath(username);
+    const data = await stat(path);
+    res.writeHead(200, { 'Content-Type': account.avatarContentType, 'Content-Length': data.size, 'Cache-Control': 'private, max-age=300', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': csp });
+    return createReadStream(path).pipe(res);
+  }
+  if (url.pathname === '/api/profile/avatar' && req.method === 'PUT') {
+    if (context.apiToken) return send(res, 403, { error: 'Profile pictures require an interactive account session.' });
+    const contentType = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+    if (!/^image\/(?:jpeg|png|gif|webp|avif)$/.test(contentType)) return send(res, 415, { error: 'Choose a JPEG, PNG, GIF, WebP, or AVIF image.' });
+    await mkdir(profileRoot, { recursive: true, mode: 0o700 });
+    const destination = avatarPath(username);
+    const temporary = `${destination}.${process.pid}.tmp`;
+    try { await pipeline(req, createWriteStream(temporary, { mode: 0o600 })); await rename(temporary, destination); }
+    catch (error) { await unlink(temporary).catch(() => {}); throw error; }
+    account.avatarContentType = contentType;
+    store.addActivity('profile', `${username} updated their profile picture.`);
+    await store.save();
+    return send(res, 200, { ok: true });
+  }
 
   if (req.method === 'GET' && url.pathname === '/api/security/totp') {
     if (context.apiToken) return send(res, 403, { error: 'TOTP settings require an interactive local account session.' });
@@ -903,7 +932,7 @@ async function api(req, res, url) {
     storage.usableStorage = storagePools.visibleSummary || storage.usableStorage;
     storage.poolSummary = storagePools.summary;
     return send(res, 200, {
-      appliance: { deviceName: store.state.config.deviceName, username, role: isAdmin ? 'administrator' : context.apiToken ? 'api' : 'user', permissions, timezone: store.state.config.timezone },
+      appliance: { deviceName: store.state.config.deviceName, username, role: isAdmin ? 'administrator' : context.apiToken ? 'api' : 'user', permissions, timezone: store.state.config.timezone, hasAvatar: Boolean(account.avatarContentType) },
       system, filesystems, storage, host: runtimes?.virtualization?.host || null,
       shares: store.state.shares, activity: store.state.activity.slice(0, 8)
     });
@@ -1075,6 +1104,15 @@ async function api(req, res, url) {
     res.writeHead(200, { 'Content-Type': thumbnail.contentType, 'Content-Length': thumbnail.size, 'Cache-Control': 'private, max-age=86400', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': csp });
     return createReadStream(thumbnail.path).pipe(res);
   }
+  if (req.method === 'GET' && url.pathname === '/api/files/video-preview') {
+    if (!requirePermission(res, permissions, 'files.read')) return;
+    const data = await downloadFile(url.searchParams.get('path') || '');
+    res.writeHead(200, { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': csp });
+    const conversion = spawn('ffmpeg', ['-nostdin', '-hide_banner', '-loglevel', 'error', '-i', data.path, '-map', '0:v:0', '-map', '0:a:0?', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '25', '-c:a', 'aac', '-movflags', 'frag_keyframe+empty_moov', '-f', 'mp4', 'pipe:1'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    conversion.on('error', error => res.destroy(error));
+    res.on('close', () => { if (!res.writableEnded && !conversion.killed) conversion.kill(); });
+    return conversion.stdout.pipe(res);
+  }
   if (req.method === 'GET' && url.pathname === '/api/files/download') {
     if (!requirePermission(res, permissions, 'files.read')) return;
     const path = url.searchParams.get('path') || '';
@@ -1089,6 +1127,23 @@ async function api(req, res, url) {
       'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': csp
     });
     return createReadStream(data.path).pipe(res);
+  }
+  if (req.method === 'GET' && url.pathname === '/api/files/archive') {
+    if (!requirePermission(res, permissions, 'files.read')) return;
+    const folder = await downloadFolder(url.searchParams.get('path') || '');
+    const filename = `${folder.name}.tar.gz`;
+    res.writeHead(200, {
+      'Content-Type': 'application/gzip',
+      'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
+      'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': csp
+    });
+    const archive = spawn('tar', ['-czf', '-', '-C', dirname(folder.path), basename(folder.path)], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let errorText = '';
+    archive.stderr.on('data', chunk => { errorText = (errorText + chunk.toString()).slice(-2000); });
+    archive.on('error', error => { if (!res.headersSent) send(res, 500, { error: `Unable to start folder download: ${error.message}` }); else res.destroy(error); });
+    archive.on('close', code => { if (code && !res.destroyed) res.destroy(new Error(errorText || 'Folder archive failed.')); });
+    res.on('close', () => { if (!res.writableEnded && !archive.killed) archive.kill(); });
+    return archive.stdout.pipe(res);
   }
 
   if (req.method === 'GET' && url.pathname === '/api/shares') {
@@ -1228,11 +1283,13 @@ export function createServer() {
       const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
       const vm = url.pathname.match(/^\/api\/console\/vm\/([A-Za-z][A-Za-z0-9-]{1,39}|[1-9][0-9]{1,5})$/);
       const container = url.pathname.match(/^\/api\/console\/container\/([A-Za-z][A-Za-z0-9-]{1,39})$/);
-      if (!vm && !container) return rejectUpgrade(socket, 403, 'Unknown console endpoint.');
-      if (vm && !context.permissions.includes('vms.manage')) return rejectUpgrade(socket, 403, 'VM management permission required.');
-      if (container && !context.permissions.includes('containers.manage')) return rejectUpgrade(socket, 403, 'Container management permission required.');
+      const node = url.pathname === '/api/console/node';
+      if (!vm && !container && !node) return rejectUpgrade(socket, 403, 'Unknown console endpoint.');
+      if (vm && !context.permissions.some(permission => ['vms.manage', 'vms.console'].includes(permission))) return rejectUpgrade(socket, 403, 'VM console permission required.');
+      if (container && !context.permissions.some(permission => ['containers.manage', 'containers.console'].includes(permission))) return rejectUpgrade(socket, 403, 'Container console permission required.');
+      if (node && !context.permissions.includes('system.shell')) return rejectUpgrade(socket, 403, 'Node shell permission required.');
       const useExternalProxmox = process.env.LIGHTNAS_ENABLE_PROXMOX_PROVIDER === '1';
-      const backend = vm
+      const backend = node ? await localNodeConsoleSocket() : vm
         ? (useExternalProxmox && /^[0-9]+$/.test(vm[1]) ? await proxmoxConsoleSocket(Number(vm[1])) : await localVmConsoleSocket(vm[1]))
         : await localContainerConsoleSocket(container[1]);
       wss.handleUpgrade(req, socket, head, ws => bridgeWebSocketToSocket(ws, backend));

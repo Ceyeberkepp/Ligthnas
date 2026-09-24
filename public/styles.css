@@ -112,8 +112,20 @@ textarea { min-height: 92px; resize: vertical; }
 .top-actions { display: flex; align-items: center; gap: 15px; }
 .icon-button { position: relative; color: var(--text); width: 38px; height: 38px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); }
 .notification-dot { position: absolute; width: 6px; height: 6px; border-radius: 50%; background: var(--warning); right: 8px; top: 8px; }
-.avatar { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 50%; color: #06201c; background: linear-gradient(135deg, var(--accent), #7ab8ff); font-weight: 800; }
-.menu-button { display: none; }
+.avatar { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 50%; color: #06201c; background: linear-gradient(135deg, var(--accent), #7ab8ff); font-weight: 800; cursor: pointer; background-position: center; background-size: cover; overflow: hidden; }
+.avatar.has-photo { color: transparent; }
+.menu-button { display: inline-grid; place-items: center; }
+.console.sidebar-collapsed { grid-template-columns: 78px 1fr; }
+.console.sidebar-collapsed .sidebar { padding-inline: 10px; }
+.console.sidebar-collapsed .sidebar-brand > span:last-child { display: none; }
+.console.sidebar-collapsed .sidebar nav a { font-size: 0; justify-content: center; }
+.console.sidebar-collapsed .sidebar nav a span { width: auto; font-size: 18px; }
+.console.sidebar-collapsed .nav-group summary { font-size: 0; text-align: center; }
+.console.sidebar-collapsed .nav-group summary::after { float: none; font-size: 14px; }
+.console.sidebar-collapsed .sidebar-foot .foot-admin { font-size: 0; justify-content: center; }
+.console.sidebar-collapsed .sidebar-foot .foot-admin span { font-size: 18px; }
+.console.sidebar-collapsed .ghost-button, .console.sidebar-collapsed .device-mini div { display: none; }
+.console.sidebar-collapsed .device-mini { justify-content: center; }
 
 .content { grid-column: 2; padding: 32px 34px 70px; width: 100%; max-width: 1560px; }
 .page-head { display: flex; justify-content: space-between; align-items: end; gap: 20px; margin-bottom: 26px; }
@@ -171,6 +183,17 @@ textarea { min-height: 92px; resize: vertical; }
 .storage-row p, .share-row p { margin: 0; color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
 .storage-size { text-align: right; font-size: 12px; color: #c2d1dc; }
 .file-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 14px; flex-wrap: wrap; }
+.view-switch { display: flex; gap: 6px; }
+.view-switch .secondary { min-width: 42px; padding: 10px; }
+.view-switch .active { border-color: var(--accent); color: var(--accent); }
+.file-actions { display: flex; gap: 7px; flex-wrap: wrap; }
+.file-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 14px; }
+.file-grid .file-row { display: grid; grid-template-columns: 1fr; align-content: start; gap: 10px; min-height: 190px; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); }
+.file-grid .file-name { display: grid !important; grid-template-columns: 1fr; justify-items: center; gap: 10px; width: 100%; min-width: 0; text-align: center; }
+.file-grid .file-icon { display: grid; place-items: center; width: 100%; height: 92px; border-radius: 10px; background: var(--panel-2); font-size: 34px; color: var(--accent); }
+.file-grid .file-thumb { width: 100%; height: 92px; flex-basis: auto; }
+.file-grid .file-label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-grid .file-actions { margin-top: auto; }
 .breadcrumbs { display: flex; align-items: center; flex-wrap: wrap; color: var(--muted); }
 .upload-button { display: inline-flex; margin: 0; cursor: pointer; font-size: 13px; }
 .muted { color: var(--muted); font-size: 13px; }
