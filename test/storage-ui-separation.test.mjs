@@ -16,6 +16,7 @@ test('Storage and Pools & datasets have separate responsibilities', async () => 
   assert.match(poolsView, /Pools & datasets/);
   assert.match(poolsView, /Storage pools/);
   assert.match(poolsView, /Datasets/);
+  assert.match(poolsView, /data-create-storage/);
 
   assert.match(manager, /STORAGE_PROVIDERS/);
   for (const label of ['Directory', 'LVM', 'LVM-Thin', 'BTRFS', 'NFS', 'SMB \/ CIFS', 'GlusterFS', 'iSCSI', 'CephFS', 'RBD', 'ZFS over iSCSI', 'ZFS', 'Proxmox Backup Server', 'VMware ESXi']) {
@@ -23,5 +24,21 @@ test('Storage and Pools & datasets have separate responsibilities', async () => 
   }
   assert.match(manager, /selectedType==='vztmpl'/);
   assert.match(manager, /data-template-storage/);
+  assert.doesNotMatch(manager, /name="provider"[^>]+disabled/);
+  assert.match(manager, /already in use/);
   assert.match(templates, /preferredStorageId/);
+});
+
+test('Overview presents live node summary tabs and real metric charts', async () => {
+  const [app, system] = await Promise.all([
+    readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/system.mjs', import.meta.url), 'utf8')
+  ]);
+  assert.match(app, /node-tabs/);
+  assert.match(app, /overviewChart\('CPU usage'/);
+  assert.match(app, /overviewChart\('System load'/);
+  assert.match(app, /overviewChart\('Memory usage'/);
+  assert.match(app, /overviewChart\('Storage usage'/);
+  assert.match(app, /setInterval/);
+  assert.match(system, /loadAverage/);
 });

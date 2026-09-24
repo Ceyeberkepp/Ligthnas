@@ -229,7 +229,8 @@ export async function getSystemSnapshot() {
   const cores = os.cpus();
   const cpu = await cpuCapabilities();
   const ramGiB = totalMemory / GIB;
-  const load = os.loadavg()[0];
+  const loadAverages = os.loadavg();
+  const load = loadAverages[0];
   const loadPercent = Math.min(100, Math.round((load / Math.max(cores.length, 1)) * 100));
 
   return {
@@ -242,6 +243,7 @@ export async function getSystemSnapshot() {
       model: cores[0]?.model?.trim() || 'Unknown processor',
       cores: cores.length,
       loadPercent,
+      loadAverage: loadAverages.map(value => Number(value.toFixed(2))),
       ...cpu
     },
     memory: {

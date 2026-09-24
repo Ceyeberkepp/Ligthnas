@@ -26,6 +26,7 @@ export const STORAGE_CONTENT = Object.freeze([
 
 const CONTENT_BY_ID = new Map(STORAGE_CONTENT.map(item => [item.id, item]));
 const poolName = /^[A-Za-z][A-Za-z0-9_-]{1,31}$/;
+const storageProviders = new Set(['directory', 'lvm', 'lvmthin', 'btrfs', 'zfs', 'nfs', 'cifs', 'glusterfs', 'iscsi', 'cephfs', 'rbd', 'zfsiscsi', 'pbs', 'esxi']);
 const extensions = {
   iso: ['.iso'],
   vztmpl: ['.tar.zst', '.tar.xz', '.tar.gz', '.tgz'],
@@ -119,6 +120,7 @@ function publicPool(pool, source) {
   return {
     id: pool.id,
     name: pool.name,
+    provider: storageProviders.has(pool.provider) ? pool.provider : 'directory',
     sourceId: pool.sourceId,
     mountPoint: source?.mountPoint || pool.mountPoint || null,
     root: pool.root,
@@ -189,8 +191,10 @@ export async function listStoragePools() {
 export async function createStoragePool(input) {
   const name = String(input?.name || '').trim();
   const sourceId = String(input?.sourceId || '').trim();
+  const provider = String(input?.provider || 'directory').trim().toLowerCase();
   if (!poolName.test(name)) throw Object.assign(new Error('Storage name must contain 2–32 letters, numbers, underscores, or hyphens and start with a letter.'), { status: 400 });
   if (name.toLowerCase() === 'local') throw Object.assign(new Error('local is reserved for the default LightNAS storage.'), { status: 409 });
+  if (!storageProviders.has(provider)) throw Object.assign(new Error('Choose a supported storage provider.'), { status: 400 });
   const content = normalizeContent(input?.content, ['iso', 'vztmpl', 'images', 'rootdir', 'backup']);
   if (!content.length) throw Object.assign(new Error('Select at least one allowed content type.'), { status: 400 });
 
@@ -201,13 +205,12 @@ export async function createStoragePool(input) {
 
   const config = await readConfig();
   if (config.pools.some(pool => pool.id.toLowerCase() === name.toLowerCase())) throw Object.assign(new Error('A storage with this name already exists.'), { status: 409 });
-  if (config.pools.some(pool => pool.sourceId === sourceId)) throw Object.assign(new Error('This virtual volume is already assigned to a LightNAS storage. Edit that storage instead.'), { status: 409 });
-
   const root = join(source.mountPoint, '.lightnas', 'storage', name);
   await ensureLayout(root, content);
   const pool = {
     id: name,
     name,
+    provider,
     sourceId,
     mountPoint: source.mountPoint,
     root,

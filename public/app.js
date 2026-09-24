@@ -1,8 +1,9 @@
-const state = { overview: null, view: 'home', folder: '', files: null, fileError: null, fileLayout: localStorage.getItem('lightnas-file-layout') === 'grid' ? 'grid' : 'list', runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, smtp: undefined, media: null, network: null };
+const state = { overview: null, view: 'home', folder: '', files: null, fileError: null, fileLayout: localStorage.getItem('lightnas-file-layout') === 'grid' ? 'grid' : 'list', runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, smtp: undefined, media: null, network: null, metricHistory: { cpu: [], load: [], memory: [], storage: [] } };
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
 const themeChoices = ['system', 'light', 'dark'];
 let theme = themeChoices.includes(localStorage.getItem('lightnas-theme')) ? localStorage.getItem('lightnas-theme') : 'system';
+let overviewTimer = null;
 const systemTheme = matchMedia('(prefers-color-scheme: dark)');
 function applyTheme() {
   document.documentElement.dataset.theme = theme === 'system' ? (systemTheme.matches ? 'dark' : 'light') : theme;
@@ -86,6 +87,7 @@ async function showConsole() {
   $('#auth').classList.add('hidden');
   $('#console').classList.remove('hidden');
   state.overview = await request('/api/overview');
+  captureOverviewMetrics();
   const { appliance } = state.overview;
   $('#mini-name').textContent = appliance.deviceName;
   $('#avatar-initial').textContent = appliance.username[0].toUpperCase();
@@ -95,6 +97,15 @@ async function showConsole() {
   $$('[data-view]').forEach(link => link.classList.toggle('hidden', !canView(link.dataset.view, appliance)));
   $$('.nav-group').forEach(group => group.classList.toggle('hidden', !group.querySelector('[data-view]:not(.hidden)')));
   render(location.hash.slice(1) || 'home');
+  clearInterval(overviewTimer);
+  overviewTimer = setInterval(async () => {
+    if (state.view !== 'home' || $('#console').classList.contains('hidden')) return;
+    try {
+      state.overview = await request('/api/overview');
+      captureOverviewMetrics();
+      render('home');
+    } catch {}
+  }, 15000);
 }
 
 function pageHead(title, description, action = '') {
@@ -105,6 +116,29 @@ function metric(label, value, percent, detail) {
   return `<article class="metric"><div class="metric-head"><span>${label}</span><span>${percent}%</span></div><strong>${value}</strong><div class="track"><span style="width:${Math.min(100, percent)}%"></span></div><small>${detail}</small></article>`;
 }
 
+function captureOverviewMetrics() {
+  if (!state.overview) return;
+  const system = state.overview.system || {};
+  const storage = state.overview.storage?.usableStorage || state.overview.storage?.virtualStorage || state.overview.storage?.local || {};
+  const sample = {
+    cpu: Number(system.cpu?.loadPercent) || 0,
+    load: Number(system.cpu?.loadAverage?.[0]) || 0,
+    memory: Number(system.memory?.usedPercent) || 0,
+    storage: Number(storage.usedPercent) || 0
+  };
+  for (const [key, value] of Object.entries(sample)) {
+    state.metricHistory[key].push(value);
+    if (state.metricHistory[key].length > 60) state.metricHistory[key].shift();
+  }
+}
+
+function overviewChart(label, value, suffix, history, maximum = 100) {
+  const points = history.length > 1 ? history : [history[0] || 0, history[0] || 0];
+  const ceiling = Math.max(maximum, ...points, 1);
+  const coordinates = points.map((item, index) => `${(index / Math.max(points.length - 1, 1)) * 100},${38 - (Math.min(ceiling, item) / ceiling) * 34}`).join(' ');
+  return `<article class="overview-chart panel"><div class="overview-chart-head"><div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}${escapeHtml(suffix)}</strong></div><small>Live · last ${points.length} sample${points.length === 1 ? '' : 's'}</small></div><svg viewBox="0 0 100 40" preserveAspectRatio="none" role="img" aria-label="${escapeHtml(label)} history"><defs><linearGradient id="chart-${escapeHtml(label.replace(/\W/g, ''))}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--accent)" stop-opacity=".52"/><stop offset="1" stop-color="var(--accent)" stop-opacity=".04"/></linearGradient></defs><polygon points="0,40 ${coordinates} 100,40" fill="url(#chart-${escapeHtml(label.replace(/\W/g, ''))})"/><polyline points="${coordinates}" fill="none" stroke="var(--accent)" stroke-width="1.2" vector-effect="non-scaling-stroke"/></svg></article>`;
+}
+
 function homeView() {
   const { system, filesystems, storage, shares, activity, appliance } = state.overview;
   const visibleStorage = storage.usableStorage || storage.virtualStorage || storage.local || { totalBytes: 0, usedBytes: 0, availableBytes: 0, usedPercent: 0, count: 0 };
@@ -112,20 +146,27 @@ function homeView() {
   const used = visibleStorage.usedBytes || 0;
   const available = visibleStorage.availableBytes ?? Math.max(0, total - used);
   const storagePercent = visibleStorage.usedPercent ?? (total ? Math.round((used / total) * 100) : 0);
-  return `${pageHead(`Good day, ${escapeHtml(appliance.username)}`, `Here’s what is happening on ${escapeHtml(appliance.deviceName)}.`)}
-    <section class="hero">
-      <div><span class="eyebrow">LIVE HOST INVENTORY</span><h2>Storage visible to this system</h2><p>Showing current host mounts and disks. An LXC may only expose its virtual storage.</p><div class="hero-actions"><button class="secondary" data-view-link="storage">Review storage</button></div></div>
-      <div class="hero-stat"><strong>${total ? bytes(total) : '—'}</strong><span>total usable storage · ${bytes(available)} free</span></div>
+  const loadAverage = system.cpu.loadAverage || [0, 0, 0];
+  return `${pageHead(`Node '${escapeHtml(appliance.deviceName)}'`, `Uptime ${duration(system.uptimeSeconds)} · ${escapeHtml(system.platform)} ${escapeHtml(system.architecture)}`, '<button class="secondary" data-action="refresh">Refresh</button>')}
+    <nav class="node-tabs" aria-label="Node sections"><button class="active" type="button">Summary</button><button type="button" data-view-link="monitoring">Monitoring</button><button type="button" data-view-link="storage">Storage</button><button type="button" data-view-link="network">Network</button><button type="button" data-view-link="firewall">Firewall</button></nav>
+    <section class="node-overview-grid">
+      <article class="panel node-summary-card"><div class="panel-head"><div><span class="eyebrow">${escapeHtml(appliance.deviceName)}</span><h2>System status</h2></div><span class="volume-state writable">ONLINE</span></div>
+        <div class="node-usage-row"><span>CPU usage</span><div class="track"><span style="width:${system.cpu.loadPercent}%"></span></div><b>${system.cpu.loadPercent}% of ${system.cpu.cores} CPU(s)</b></div>
+        <div class="node-usage-row"><span>Load average</span><div class="track"><span style="width:${Math.min(100, (loadAverage[0] / Math.max(system.cpu.cores, 1)) * 100)}%"></span></div><b>${loadAverage.join(', ')}</b></div>
+        <div class="node-usage-row"><span>RAM usage</span><div class="track"><span style="width:${system.memory.usedPercent}%"></span></div><b>${system.memory.usedPercent}% · ${bytes(system.memory.usedBytes)} of ${bytes(system.memory.totalBytes)}</b></div>
+        <div class="node-usage-row"><span>Storage</span><div class="track"><span style="width:${storagePercent}%"></span></div><b>${storagePercent}% · ${bytes(used)} of ${bytes(total)}</b></div>
+        <dl class="node-facts"><div><dt>CPU</dt><dd>${escapeHtml(system.cpu.model)}</dd></div><div><dt>Kernel</dt><dd>${escapeHtml(system.kernel)}</dd></div><div><dt>Architecture</dt><dd>${escapeHtml(system.architecture)}</dd></div><div><dt>Mounted filesystems</dt><dd>${filesystems.length}</dd></div><div><dt>Available storage</dt><dd>${bytes(available)}</dd></div></dl>
+      </article>
+      <section class="overview-chart-grid">
+        ${overviewChart('CPU usage', `${system.cpu.loadPercent}`, '%', state.metricHistory.cpu)}
+        ${overviewChart('System load', `${loadAverage[0]}`, '', state.metricHistory.load, Math.max(2, system.cpu.cores))}
+        ${overviewChart('Memory usage', `${system.memory.usedPercent}`, '%', state.metricHistory.memory)}
+        ${overviewChart('Storage usage', `${storagePercent}`, '%', state.metricHistory.storage)}
+      </section>
     </section>
-    <section class="metric-grid">
-      ${metric('Storage', bytes(used), storagePercent, `${bytes(available)} available of ${bytes(total)}`)}
-      ${metric('Memory', bytes(system.memory.usedBytes), system.memory.usedPercent, `${bytes(system.memory.totalBytes)} installed`)}
-      ${metric('CPU load', `${system.cpu.loadPercent}%`, system.cpu.loadPercent, `${system.cpu.cores} logical cores`)}
-      ${metric('Mounts', filesystems.length, 0, 'Readable mounted filesystems')}
-    </section>
-    <section class="dashboard-grid">
-      <article class="panel"><div class="panel-head"><h2>Planned shares</h2><button class="panel-link" data-action="new-share">+ Save plan</button></div>${shares.length ? `<div class="share-list">${shares.slice(0, 4).map(share => `<div class="share-row"><div><h3>${escapeHtml(share.name)}</h3><p>${escapeHtml(share.protocol)} · ${escapeHtml(share.description || 'No description')} · Configuration only</p></div></div>`).join('')}</div>` : `<div class="empty"><div><h3>No share plans saved</h3><p>SMB and NFS provisioning are not available yet.</p></div></div>`}</article>
-      <article class="panel"><div class="panel-head"><h2>Recent activity</h2><button class="panel-link" data-view-link="monitoring">View all</button></div><div class="activity-list">${activity.length ? activity.map(item => `<div class="activity"><span class="activity-icon">${item.type === 'setup' ? '✓' : item.type === 'share' ? '□' : '↗'}</span><div><b>${escapeHtml(item.message)}</b><time>${relativeTime(item.timestamp)}</time></div></div>`).join('') : '<p class="muted">No recent activity.</p>'}</div></article>
+    <section class="dashboard-grid overview-bottom-grid">
+      <article class="panel"><div class="panel-head"><h2>Shares</h2><button class="panel-link" data-view-link="shares">Open shares</button></div>${shares.length ? `<div class="share-list">${shares.slice(0, 4).map(share => `<div class="share-row"><div><h3>${escapeHtml(share.name)}</h3><p>${escapeHtml(share.protocol)} · ${escapeHtml(share.description || 'No description')}</p></div></div>`).join('')}</div>` : '<p class="muted">No shares configured.</p>'}</article>
+      <article class="panel"><div class="panel-head"><h2>Recent activity</h2><button class="panel-link" data-view-link="monitoring">View all</button></div><div class="activity-list">${activity.length ? activity.slice(0, 5).map(item => `<div class="activity"><span class="activity-icon">${item.type === 'setup' ? '✓' : '↗'}</span><div><b>${escapeHtml(item.message)}</b><time>${relativeTime(item.timestamp)}</time></div></div>`).join('') : '<p class="muted">No recent activity.</p>'}</div></article>
     </section>`;
 }
 
@@ -144,7 +185,7 @@ function poolsView() {
   const zfs = storage.zfs || { available: false, canManageDatasets: false, pools: [], datasets: [] };
   const disks = storage.disks || [];
   const poolOptions = [...(zfs.pools || []), ...(zfs.datasets || []).filter(item => !(zfs.pools || []).some(pool => pool.name === item.name))];
-  return `${pageHead('Pools & datasets', 'Create and manage physical storage pools and their datasets. Content libraries are configured separately under Storage.', '<button class="secondary" data-view-link="storage">Open Storage</button>')}
+  return `${pageHead('Pools & datasets', 'Create and manage physical storage pools, datasets, and storage providers.', '<div class="head-actions"><button class="secondary" data-view-link="storage">Storage inventory</button><button class="primary" type="button" data-create-storage>+ Add storage</button></div>')}
     <section class="pool-summary-grid">
       <article class="panel pool-summary"><span class="eyebrow">PHYSICAL DEVICES</span><strong>${disks.length}</strong><p>disk${disks.length === 1 ? '' : 's'} visible to LightNAS</p></article>
       <article class="panel pool-summary"><span class="eyebrow">ZFS POOLS</span><strong>${zfs.pools?.length || 0}</strong><p>${zfs.available ? 'ZFS inventory online' : 'ZFS is not installed or accessible'}</p></article>
@@ -726,7 +767,7 @@ function bindViewActions() {
   });
   $$('[data-action="new-share"]', $('#content')).forEach(button => button.addEventListener('click', () => $('#share-dialog').showModal()));
   $$('[data-view-link]', $('#content')).forEach(button => button.addEventListener('click', () => { location.hash = button.dataset.viewLink; }));
-  $$('[data-action="refresh"]', $('#content')).forEach(button => button.addEventListener('click', async () => { try { state.overview = await request('/api/overview'); render(state.view); toast('Readings updated.'); } catch (error) { toast(error.message); } }));
+  $$('[data-action="refresh"]', $('#content')).forEach(button => button.addEventListener('click', async () => { try { state.overview = await request('/api/overview'); captureOverviewMetrics(); render(state.view); toast('Readings updated.'); } catch (error) { toast(error.message); } }));
   $$('[data-action="refresh-files"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     button.disabled = true;
     button.textContent = 'Refreshing…';

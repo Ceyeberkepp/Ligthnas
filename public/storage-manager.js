@@ -2,19 +2,19 @@ const storageUi = { data: null };
 
 const STORAGE_PROVIDERS = [
   { id: 'directory', label: 'Directory', group: 'Local storage', description: 'Use a mounted local or virtual disk directory.', available: true },
-  { id: 'lvm', label: 'LVM', group: 'Local storage', description: 'Block storage from an existing LVM volume group.' },
-  { id: 'lvmthin', label: 'LVM-Thin', group: 'Local storage', description: 'Thin-provisioned VM and container block storage.' },
-  { id: 'btrfs', label: 'BTRFS', group: 'Local storage', description: 'BTRFS filesystem or subvolume storage.' },
-  { id: 'zfs', label: 'ZFS', group: 'Local storage', description: 'An existing ZFS pool or dataset.' },
-  { id: 'nfs', label: 'NFS', group: 'Network storage', description: 'Network File System export.' },
-  { id: 'cifs', label: 'SMB / CIFS', group: 'Network storage', description: 'Windows-compatible network share.' },
-  { id: 'glusterfs', label: 'GlusterFS', group: 'Network storage', description: 'Distributed Gluster filesystem.' },
-  { id: 'iscsi', label: 'iSCSI', group: 'Block & clustered', description: 'Remote iSCSI target and LUN.' },
-  { id: 'cephfs', label: 'CephFS', group: 'Block & clustered', description: 'Ceph distributed filesystem.' },
-  { id: 'rbd', label: 'RBD', group: 'Block & clustered', description: 'Ceph RADOS block device storage.' },
-  { id: 'zfsiscsi', label: 'ZFS over iSCSI', group: 'Block & clustered', description: 'ZFS-backed remote iSCSI storage.' },
-  { id: 'pbs', label: 'Proxmox Backup Server', group: 'Backup & import', description: 'External Proxmox backup repository.' },
-  { id: 'esxi', label: 'VMware ESXi', group: 'Backup & import', description: 'Import source for VMware virtual machines.' }
+  { id: 'lvm', label: 'LVM', group: 'Local storage', description: 'Block storage from a mounted LVM logical volume.', available: true },
+  { id: 'lvmthin', label: 'LVM-Thin', group: 'Local storage', description: 'Thin-provisioned storage exposed through a mounted volume.', available: true },
+  { id: 'btrfs', label: 'BTRFS', group: 'Local storage', description: 'BTRFS filesystem or subvolume storage.', available: true },
+  { id: 'zfs', label: 'ZFS', group: 'Local storage', description: 'An existing mounted ZFS pool or dataset.', available: true },
+  { id: 'nfs', label: 'NFS', group: 'Network storage', description: 'Mounted Network File System export.', available: true },
+  { id: 'cifs', label: 'SMB / CIFS', group: 'Network storage', description: 'Mounted Windows-compatible network share.', available: true },
+  { id: 'glusterfs', label: 'GlusterFS', group: 'Network storage', description: 'Mounted distributed Gluster filesystem.', available: true },
+  { id: 'iscsi', label: 'iSCSI', group: 'Block & clustered', description: 'Mounted filesystem backed by an iSCSI LUN.', available: true },
+  { id: 'cephfs', label: 'CephFS', group: 'Block & clustered', description: 'Mounted Ceph distributed filesystem.', available: true },
+  { id: 'rbd', label: 'RBD', group: 'Block & clustered', description: 'Mounted filesystem backed by a Ceph RBD.', available: true },
+  { id: 'zfsiscsi', label: 'ZFS over iSCSI', group: 'Block & clustered', description: 'Mounted ZFS-backed remote iSCSI storage.', available: true },
+  { id: 'pbs', label: 'Proxmox Backup Server', group: 'Backup & import', description: 'Mounted Proxmox backup repository.', available: true },
+  { id: 'esxi', label: 'VMware ESXi', group: 'Backup & import', description: 'Mounted VMware import source.', available: true }
 ];
 
 function sEsc(value) {
@@ -63,7 +63,7 @@ function storageRow(pool) {
   const contents=(pool.contentLabels||[]).join(', ')||'None';
   const target=pool.local?(pool.dedicated?'Local data partition':'Local OS filesystem'):pool.mountPoint||'Unavailable';
   return `<button class="storage-table-row" type="button" data-manage-storage="${sEsc(pool.id)}" aria-label="Open storage ${sEsc(pool.name)}">
-    <span><b>${sEsc(pool.name)}</b><small>${pool.local?'Directory':'Mounted directory'}</small></span>
+    <span><b>${sEsc(pool.name)}</b><small>${sEsc(pool.provider||'directory')}</small></span>
     <span class="storage-table-content">${sEsc(contents)}</span>
     <span>${sEsc(target)}</span>
     <span><b>${sBytes(pool.availableBytes)}</b><small>of ${sBytes(pool.totalBytes)}</small></span>
@@ -87,7 +87,7 @@ function renderStorageManager() {
         ? `${sBytes(visible.usedBytes||0)} used · ${sBytes(visible.availableBytes||0)} free across attached data volumes.${sharedLocalExcluded?' The OS/root-backed local storage is shown separately and is not included in this total.':''}`
         : 'This installation has not received authoritative virtual-disk sizes from its host.'}</p></div>
     </section>
-    <div class="section-heading storage-section-heading"><div><span class="eyebrow">STORAGE DEFINITIONS</span><h2>Storage</h2></div><div class="head-actions"><button class="secondary" type="button" data-storage-refresh>Refresh</button><button class="primary" type="button" data-create-storage>+ Add storage</button></div></div>
+    <div class="section-heading storage-section-heading"><div><span class="eyebrow">STORAGE DEFINITIONS</span><h2>Storage</h2></div><div class="head-actions"><button class="secondary" type="button" data-storage-refresh>Refresh</button><button class="secondary" type="button" data-view-link="pools">Pools & datasets</button></div></div>
     <section class="storage-table" aria-label="Configured storage">
       <div class="storage-table-head"><span>Name / type</span><span>Content</span><span>Path / target</span><span>Available</span><span>Status</span><span></span></div>
       ${(data.pools||[]).map(storageRow).join('')||'<div class="empty"><p>No storage definitions are configured.</p></div>'}
@@ -101,20 +101,19 @@ async function refreshStorageManager() {
   try{await loadStoragePools();renderStorageManager();}
   catch(error){if(slot) slot.innerHTML=`<div class="module-note">Storage manager unavailable: ${sEsc(error.message)}</div>`;}
 }
-function openCreateStorage(sourceId='') {
-  const data=storageUi.data;
-  if(!data) return;
-  const sources=(data.availableSources||[]).filter(item=>!item.configured&&item.writable);
+async function openCreateStorage(sourceId='') {
+  const data=storageUi.data||await loadStoragePools();
+  const sources=(data.availableSources||[]).filter(item=>item.writable);
   const dialog=ensureStorageDialog();
   dialog.querySelector('[data-storage-dialog-title]').textContent='Add storage';
   dialog.querySelector('[data-storage-dialog-error]').textContent='';
   dialog.querySelector('[data-storage-dialog-body]').innerHTML=`
     <form data-storage-create-form>
-      <p class="muted">Choose a storage provider. LightNAS only enables providers it can configure safely on this host; unavailable choices explain where they must be prepared.</p>
-      <div class="storage-provider-grid">${STORAGE_PROVIDERS.map(provider=>`<label class="storage-provider-option ${provider.available?'':'provider-unavailable'}"><input type="radio" name="provider" value="${sEsc(provider.id)}" ${provider.available?'':'disabled'} ${provider.id==='directory'?'checked':''}><span><b>${sEsc(provider.label)}</b><small>${sEsc(provider.description)}</small>${provider.available?'<em>Ready</em>':'<em>Prepare in Pools & datasets or mount on the host</em>'}</span></label>`).join('')}</div>
-      <div class="module-note">Network and block providers appear here for a complete storage inventory, but LightNAS will not create a fake NFS, SMB, iSCSI, Ceph, ZFS, BTRFS, or LVM connection. Once mounted or created, it becomes selectable as a Directory storage target.</div>
+      <p class="muted">Choose the provider that backs this storage. Every choice is selectable; LightNAS then connects it to a real mounted source visible on this node.</p>
+      <div class="storage-provider-grid">${STORAGE_PROVIDERS.map(provider=>`<label class="storage-provider-option"><input type="radio" name="provider" value="${sEsc(provider.id)}" ${provider.id==='directory'?'checked':''}><span><b>${sEsc(provider.label)}</b><small>${sEsc(provider.description)}</small><em>${sEsc(provider.group)}</em></span></label>`).join('')}</div>
+      <div class="module-note" data-provider-guidance><b>Directory:</b> select a mounted source below. Existing files outside the LightNAS storage folder are preserved.</div>
       <label>Storage name<input name="name" required pattern="[A-Za-z][A-Za-z0-9_-]{1,31}" placeholder="fastssd"></label>
-      <label>Mounted source<select name="sourceId" required>${sources.map(item=>`<option value="${sEsc(item.id)}">${sEsc(item.mountPoint)} · ${sBytes(item.totalBytes)} · ${sEsc(item.type)}</option>`).join('')}</select></label>
+      <label>Mounted source<select name="sourceId" required>${sources.map(item=>`<option value="${sEsc(item.id)}">${sEsc(item.mountPoint)} · ${sBytes(item.totalBytes)} · ${sEsc(item.type)}${item.configured?' · already in use':''}</option>`).join('')}</select><small>${sources.length?'A separate LightNAS folder is created for this storage definition.':'No writable mounted source is available. Attach or mount storage first.'}</small></label>
       <h3>Allowed content</h3><div class="content-policy-grid">${contentCheckboxes(data.contentTypes||[],['iso','vztmpl','images','rootdir','backup','snippets','files'])}</div>
       <div class="dialog-actions"><button class="primary" type="submit" ${sources.length?'':'disabled'}>Add storage</button></div>
     </form>`;
@@ -126,10 +125,14 @@ function openCreateStorage(sourceId='') {
     error.textContent='Creating storage…';
     const content=[...form.querySelectorAll('.content-policy-grid input:checked')].map(input=>input.value);
     try{
-      await sRequest('/api/storage/pools',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:form.elements.name.value,sourceId:form.elements.sourceId.value,content})});
+      await sRequest('/api/storage/pools',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:form.elements.name.value,provider:form.elements.provider.value,sourceId:form.elements.sourceId.value,content})});
       dialog.close();await refreshStorageManager();
     }catch(problem){error.textContent=problem.message;}
   },{once:true});
+  dialog.querySelectorAll('input[name="provider"]').forEach(input=>input.addEventListener('change',()=>{
+    const provider=STORAGE_PROVIDERS.find(item=>item.id===input.value);
+    dialog.querySelector('[data-provider-guidance]').innerHTML=`<b>${sEsc(provider.label)}:</b> ${sEsc(provider.description)} Choose the mounted source that provides this storage. LightNAS will not format or erase it.`;
+  }));
   dialog.showModal();
 }
 async function loadStorageContent(poolId,type) {
@@ -156,7 +159,7 @@ async function renderManageStorage(poolId,activeType=null) {
       <article class="monitor-card"><span>Used</span><strong>${pool.usedPercent||0}%</strong></article>
       <article class="monitor-card"><span>Status</span><strong style="font-size:1rem">${pool.online?(pool.writable?'Online':'Read only'):'Offline'}</strong></article>
     </div>
-    <dl class="storage-detail-list"><div><dt>Type</dt><dd>Directory</dd></div><div><dt>Path / target</dt><dd>${sEsc(pool.root||pool.mountPoint||'—')}</dd></div><div><dt>Content</dt><dd>${sEsc((pool.contentLabels||[]).join(', '))}</dd></div></dl>
+    <dl class="storage-detail-list"><div><dt>Type</dt><dd>${sEsc(STORAGE_PROVIDERS.find(item=>item.id===(pool.provider||'directory'))?.label||'Directory')}</dd></div><div><dt>Path / target</dt><dd>${sEsc(pool.root||pool.mountPoint||'—')}</dd></div><div><dt>Content</dt><dd>${sEsc((pool.contentLabels||[]).join(', '))}</dd></div></dl>
     <div class="section-heading storage-content-heading"><div><span class="eyebrow">CONTENT</span><h3>Select a library</h3></div></div>
     <div class="storage-content-tabs">${contentTypes.map(type=>`<button type="button" class="${type===selectedType?'active':''}" data-storage-content-tab="${sEsc(type)}" data-storage-id="${sEsc(pool.id)}"><b>${sEsc((data.contentTypes||[]).find(item=>item.id===type)?.label||type)}</b><small>${['images','rootdir'].includes(type)?'Managed by compute':'Open library'}</small></button>`).join('')}</div>
     ${!selectedType?'<div class="empty storage-select-prompt"><p>Select a content library above to view files, upload content, or open the container template catalog.</p></div>':''}
@@ -192,12 +195,14 @@ ${selectedType==='vztmpl'? `<div class="head-actions"><button class="primary" ty
 }
 
 document.addEventListener('click',async event=>{
+  const viewLink=event.target.closest('[data-view-link]');
+  if(viewLink){location.hash=viewLink.dataset.viewLink;return;}
   const refresh=event.target.closest('[data-storage-refresh]');
   if(refresh){await refreshStorageManager();return;}
   const create=event.target.closest('[data-create-storage]');
-  if(create){openCreateStorage();return;}
+  if(create){await openCreateStorage();return;}
   const source=event.target.closest('[data-create-storage-source]');
-  if(source){openCreateStorage(source.dataset.createStorageSource);return;}
+  if(source){await openCreateStorage(source.dataset.createStorageSource);return;}
   const manage=event.target.closest('[data-manage-storage]');
   if(manage){await renderManageStorage(manage.dataset.manageStorage);return;}
   const card=event.target.closest('[data-storage-card]');
