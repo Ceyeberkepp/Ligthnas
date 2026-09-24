@@ -832,15 +832,25 @@ async function api(req, res, url) {
     if (!requirePermission(res, permissions, 'apps.manage')) return;
     const id = url.pathname.split('/')[3];
     const input = await bodyJson(req);
+    const app = catalog.find(item => item.id === id);
     const installed = await installCatalogApp(id, input);
+    let firewall = null;
+    if (app?.port) {
+      firewall = await localNetworkAction({ action: 'firewall-add', decision: 'allow', protocol: 'tcp', port: app.port, source: '' })
+        .catch(error => ({ warning: error.message }));
+    }
     store.addActivity('app', `Catalog app ${id} was installed as a Docker container.`);
     await store.save();
-    return send(res, 201, installed);
+    return send(res, 201, { ...installed, firewall });
   }
   if (req.method === 'POST' && /^\/api\/catalog\/[a-z0-9-]+\/(start|stop|restart|remove)$/.test(url.pathname)) {
     if (!requirePermission(res, permissions, 'apps.manage')) return;
     const [, , , id, action] = url.pathname.split('/');
     const result = await manageCatalogApp(id, action);
+    if (action === 'remove') {
+      const app = catalog.find(item => item.id === id);
+      if (app?.port) await localNetworkAction({ action: 'firewall-remove-port', protocol: 'tcp', port: app.port }).catch(() => null);
+    }
     store.addActivity('app', `App ${id}: ${action}.`);
     await store.save();
     return send(res, 200, result);
