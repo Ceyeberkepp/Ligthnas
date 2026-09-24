@@ -10,7 +10,8 @@ import { getStorageInventory } from './system.mjs';
 const dataRoot = dirname(resolve(process.env.NAS_DATA_FILE || 'data/state.json'));
 const configPath = process.env.LIGHTNAS_STORAGE_CONFIG || join(dataRoot, 'storage-pools.json');
 const localRoot = process.env.LIGHTNAS_LOCAL_STORAGE_ROOT || join(dataRoot, 'storage', 'local');
-const MAX_UPLOAD_BYTES = Number(process.env.LIGHTNAS_STORAGE_UPLOAD_MAX_BYTES || 50 * 1024 ** 3);
+const configuredUploadLimit = Number(process.env.LIGHTNAS_STORAGE_UPLOAD_MAX_BYTES || 0);
+const MAX_UPLOAD_BYTES = Number.isFinite(configuredUploadLimit) && configuredUploadLimit > 0 ? configuredUploadLimit : 0;
 const DOWNLOAD_TIMEOUT_MS = Number(process.env.LIGHTNAS_STORAGE_DOWNLOAD_TIMEOUT_MS || 12 * 60 * 60_000);
 const SPACE_RESERVE_BYTES = Number(process.env.LIGHTNAS_STORAGE_SPACE_RESERVE_BYTES || 128 * 1024 ** 2);
 
@@ -307,7 +308,7 @@ function byteLimit() {
   return new Transform({
     transform(chunk, encoding, callback) {
       total += chunk.length;
-      if (total > MAX_UPLOAD_BYTES) return callback(Object.assign(new Error('Upload exceeds the configured maximum size.'), { status: 413 }));
+      if (MAX_UPLOAD_BYTES > 0 && total > MAX_UPLOAD_BYTES) return callback(Object.assign(new Error('Upload exceeds the configured maximum size.'), { status: 413 }));
       callback(null, chunk);
     }
   });
@@ -317,7 +318,7 @@ function parseContentRange(value) {
   const match = String(value || '').match(/^bytes (\d+)-(\d+)\/(\d+)$/);
   if (!match) return null;
   const start = Number(match[1]), end = Number(match[2]), total = Number(match[3]);
-  if (![start, end, total].every(Number.isSafeInteger) || start < 0 || end < start || total <= end || total > MAX_UPLOAD_BYTES) {
+  if (![start, end, total].every(Number.isSafeInteger) || start < 0 || end < start || total <= end || (MAX_UPLOAD_BYTES > 0 && total > MAX_UPLOAD_BYTES)) {
     throw Object.assign(new Error('Invalid or oversized chunked upload range.'), { status: 400 });
   }
   return { start, end, total, length: end - start + 1 };
@@ -335,7 +336,7 @@ export async function uploadStorageContent(poolId, type, filename, request) {
   const expectedLength = range?.length || length;
   const totalLength = range?.total || length;
   if (expectedLength && length && expectedLength !== length) throw Object.assign(new Error('Upload chunk length does not match Content-Range.'), { status: 400 });
-  if (totalLength && totalLength > MAX_UPLOAD_BYTES) throw Object.assign(new Error('Upload exceeds the 50 GiB maximum size.'), { status: 413 });
+  if (MAX_UPLOAD_BYTES > 0 && totalLength && totalLength > MAX_UPLOAD_BYTES) throw Object.assign(new Error('Upload exceeds the configured maximum size.'), { status: 413 });
   if (totalLength && pool.availableBytes > 0 && totalLength + SPACE_RESERVE_BYTES > pool.availableBytes) {
     throw Object.assign(new Error('The selected storage does not have enough free space for this upload and the safety reserve.'), { status: 507 });
   }
@@ -429,7 +430,7 @@ export async function importStorageContent(poolId, type, inputUrl) {
   if (!response?.ok || !response.body) throw Object.assign(new Error(`Download failed with HTTP ${response?.status || 'unknown'}.`), { status: 502 });
   const name = safeFilename(url.pathname, type);
   const length = Number(response.headers.get('content-length') || 0);
-  if (length && length > MAX_UPLOAD_BYTES) throw Object.assign(new Error('Download exceeds the configured maximum size.'), { status: 413 });
+  if (MAX_UPLOAD_BYTES > 0 && length && length > MAX_UPLOAD_BYTES) throw Object.assign(new Error('Download exceeds the configured maximum size.'), { status: 413 });
   if (length && pool.availableBytes > 0 && length + SPACE_RESERVE_BYTES > pool.availableBytes) {
     throw Object.assign(new Error('The selected storage does not have enough free space for this image and the safety reserve.'), { status: 507 });
   }
