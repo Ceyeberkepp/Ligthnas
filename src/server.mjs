@@ -146,9 +146,7 @@ export const PERMISSIONS = Object.freeze([
   'storage.view', 'storage.manage', 'shares.manage',
   'apps.manage', 'containers.manage', 'vms.manage',
   'network.view', 'network.manage', 'firewall.manage',
-  'monitoring.view', 'system.view',
-  'users.manage', 'groups.manage', 'security.manage',
-  'shell.access'
+  'monitoring.view', 'system.view'
 ]);
 const DEFAULT_USER_PERMISSIONS = Object.freeze(['files.read', 'files.write', 'files.download', 'files.delete']);
 
@@ -980,8 +978,11 @@ async function api(req, res, url) {
     return send(res, 200, { ...observed, control, host: null });
   }
   if (req.method === 'POST' && url.pathname === '/api/network') {
-    if (!requirePermission(res, permissions, 'network.manage')) return;
     const input = await bodyJson(req);
+    const networkActionName = String(input.action || '');
+    if (networkActionName.startsWith('firewall-')) {
+      if (!requireAnyPermission(res, permissions, ['firewall.manage', 'network.manage'])) return;
+    } else if (!requirePermission(res, permissions, 'network.manage')) return;
     let result;
     try { result = await localNetworkAction(input); }
     catch (error) {
@@ -995,7 +996,7 @@ async function api(req, res, url) {
     return send(res, 200, result);
   }
   if (req.method === 'GET' && url.pathname === '/api/appliance/health') {
-    if (!isAdmin && !permissions.includes('system.view')) return send(res, 403, { error: 'System health access is required.' });
+    if (!isAdmin && !permissions.includes('system.view') && !permissions.includes('monitoring.view')) return send(res, 403, { error: 'System health access is required.' });
     return send(res, 200, await localApplianceHealth());
   }
   if (req.method === 'POST' && url.pathname === '/api/appliance/repair') {
@@ -1007,7 +1008,7 @@ async function api(req, res, url) {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/system') {
-    if (!requirePermission(res, permissions, 'system.view')) return;
+    if (!requireAnyPermission(res, permissions, ['system.view', 'monitoring.view'])) return;
     const local = await getSystemSnapshot();
     let host = null;
     try { host = (await runtimeInventory()).virtualization?.host || null; } catch {}
