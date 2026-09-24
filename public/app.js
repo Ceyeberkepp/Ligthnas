@@ -207,50 +207,49 @@ function runtimeBanner(kind) {
   return '';
 }
 
+function runtimeResourceSummary(items = [], label = 'guests') {
+  const host = state.overview?.system || {};
+  const running = items.filter(item => /running|active/i.test(String(item.status || '')));
+  const allocatedMemory = items.reduce((total, item) => total + (Number(item.memory) || 0), 0);
+  const allocatedCpus = items.reduce((total, item) => total + (Number(item.cpus) || 0), 0);
+  const hostMemory = Number(host.memory?.totalBytes || 0);
+  const allocationPercent = hostMemory ? Math.min(100, Math.round((allocatedMemory / hostMemory) * 100)) : 0;
+  return `<section class="host-monitor-grid runtime-resource-summary">
+    <article class="monitor-card"><span>Total ${label}</span><strong>${items.length}</strong><small>${running.length} running</small></article>
+    <article class="monitor-card"><span>Allocated RAM</span><strong>${bytes(allocatedMemory)}</strong><div class="track"><span style="width:${allocationPercent}%"></span></div><small>${hostMemory ? `${allocationPercent}% of ${bytes(hostMemory)} host RAM` : 'Host total unavailable'}</small></article>
+    <article class="monitor-card"><span>Allocated vCPU</span><strong>${allocatedCpus}</strong><small>${host.cpu?.cores || '—'} host logical cores</small></article>
+    <article class="monitor-card"><span>Live host pressure</span><strong>${host.cpu?.loadPercent ?? '—'}% CPU</strong><small>${host.memory?.usedPercent ?? '—'}% host memory currently used</small></article>
+  </section>`;
+}
+
 function containersView() {
   const runtime = state.runtimes?.containers;
-  const diagnostics = runtime?.diagnostics;
-  const networks = (runtime?.networks || []).map(item => `<option value="${escapeHtml(item)}">${escapeHtml(item)}</option>`).join('');
-  const images = (runtime?.images || []).map(item => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.label)}</option>`).join('');
+  const containers = runtime?.containers || [];
   const ready = runtime?.available && runtime?.enabled && runtime.images?.length && runtime.networks?.length;
-  const diagnosticPanel = diagnostics ? `<div class="inventory-grid">
-    <article class="inventory-card"><h3>Nested mode</h3><p>${diagnostics.nested ? (diagnostics.nestedEnabled ? 'Enabled' : 'Detected but not enabled') : 'Not nested'}</p></article>
-    <article class="inventory-card"><h3>cgroups</h3><p>${diagnostics.cgroupWritable ? 'Ready' : 'Blocked'}</p></article>
-    <article class="inventory-card"><h3>Namespaces / veth</h3><p>${diagnostics.mountNamespace && diagnostics.networkNamespace && diagnostics.veth ? 'Ready' : 'Blocked'}</p></article>
-    <article class="inventory-card"><h3>Container bridge</h3><p>${escapeHtml((diagnostics.bridges || []).join(', ') || 'Missing')}</p></article>
-  </div>${diagnostics.errors?.length ? `<div class="module-note"><b>Nested self-test:</b> ${diagnostics.errors.map(escapeHtml).join(' · ')}</div>` : ''}` : '';
   const containerList = !runtime
     ? '<div class="empty"><p>Loading existing system containers…</p></div>'
-    : runtime.containers?.length
-      ? runtime.containers.map(item => `<article class="storage-row"><div><h3>${escapeHtml(item.name)}</h3><p>Native LXC · ${escapeHtml(item.status)}${item.pid ? ` · PID ${item.pid}` : ''}</p></div><div class="storage-size">${escapeHtml(item.id || item.name)}</div></article>`).join('')
+    : containers.length
+      ? containers.map(item => `<article class="storage-row"><div><h3>${escapeHtml(item.name)}</h3><p>Native LXC · ${escapeHtml(item.status)} · ${item.cpus || '—'} vCPU · ${bytes(item.memory || 0)} RAM${item.ipv4 ? ` · ${escapeHtml(item.ipv4)}` : ''}</p></div><div class="storage-size">${escapeHtml(item.id || item.name)}</div></article>`).join('')
       : '<div class="empty"><p>No native system containers are visible.</p></div>';
-  return `${pageHead('System containers', 'Native Linux system containers powered by LXC/liblxc inside LightNAS itself.', '<div class="head-actions"><button class="secondary" data-action="refresh-runtime">Refresh</button><button class="primary" data-action="create-container">+ Create container</button></div>')}
+  return `${pageHead('System containers', 'Create, monitor and manage native Linux system containers.', '<div class="head-actions"><button class="secondary" data-action="refresh-runtime">Refresh</button><button class="primary" data-action="create-container">+ Create container</button></div>')}
     ${runtimeBanner('containers')}
-    ${diagnosticPanel}
-    ${runtime?.available && runtime?.enabled && !ready ? '<div class="module-hero"><h2>Container network unavailable</h2><p>Create or enable a local bridge/network under Connectivity before launching a system container.</p></div>' : ''}
-    ${ready ? '<div class="module-note"><b>Ready to create.</b> Use the + Create container button to open the guided setup wizard.</div>' : ''}
+    ${runtimeResourceSummary(containers, 'containers')}
+    ${runtime?.available && runtime?.enabled && !ready ? '<div class="module-hero"><h2>Container resources needed</h2><p>LightNAS needs a usable container image and network before a new container can be created. Low-level runtime diagnostics remain available through Admin Center health checks.</p></div>' : ''}
+    ${ready ? '<div class="module-note"><b>Ready to create.</b> New containers use the configured LightNAS LAN automatically.</div>' : ''}
     <h2>Existing system containers</h2><div class="storage-list">${containerList}</div>`;
 }
 
 function vmsView() {
   const runtime = state.runtimes?.virtualization;
-  const diagnostics = runtime?.diagnostics;
+  const machines = runtime?.machineDetails || [];
   const ready = runtime?.available && runtime?.enabled && runtime.pools?.length && runtime.networks?.length;
-  const choices = items => (items || []).map(item => `<option value="${escapeHtml(item)}">${escapeHtml(item)}</option>`).join('');
-  const acceleration = runtime?.acceleration === 'kvm' ? 'KVM hardware acceleration' : runtime?.acceleration === 'tcg' ? 'QEMU software virtualization (TCG)' : escapeHtml(runtime?.provider || 'QEMU/libvirt');
-  const nestedVmPanel = diagnostics?.nested ? `<div class="inventory-grid">
-    <article class="inventory-card"><h3>VM engine</h3><p>${escapeHtml(acceleration)}</p></article>
-    <article class="inventory-card"><h3>KVM</h3><p>${diagnostics.kvm?.usable ? `Ready · API ${diagnostics.kvm.apiVersion}` : 'Not available · software VM mode will be used'}</p></article>
-    <article class="inventory-card"><h3>TUN/TAP</h3><p>${diagnostics.tun ? 'Ready' : 'Missing /dev/net/tun'}</p></article>
-  </div>` : '';
-  const isoOptions = `<option value="">No ISO — create blank VM</option>${runtime?.isoDetails?.length ? runtime.isoDetails.map(item => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)} · ${escapeHtml(item.storageName)} · ${bytes(item.sizeBytes)}</option>`).join('') : choices(runtime?.images || [])}`;
-  return `${pageHead('Virtual machines', 'QEMU/libvirt virtual machines managed directly by LightNAS.', '<div class="head-actions"><button class="secondary" data-action="refresh-runtime">Refresh</button><button class="primary" data-action="create-vm">+ Create VM</button></div>')}
+  return `${pageHead('Virtual machines', 'Create, monitor and manage QEMU/libvirt virtual machines.', '<div class="head-actions"><button class="secondary" data-action="refresh-runtime">Refresh</button><button class="primary" data-action="create-vm">+ Create VM</button></div>')}
     ${runtimeBanner('virtualization')}
-    ${runtime?.warning ? `<div class="module-note"><b>Software virtualization:</b> ${escapeHtml(runtime.warning)}</div>` : ''}
-    ${nestedVmPanel}
-    ${runtime?.available && runtime?.enabled && !ready ? '<div class="module-hero"><h2>VM resources needed</h2><p>LightNAS needs an active local libvirt storage pool and network. The installer creates default resources automatically.</p></div>' : ''}
+    ${runtimeResourceSummary(machines, 'virtual machines')}
+    ${runtime?.warning ? `<div class="module-note"><b>Virtualization note:</b> ${escapeHtml(runtime.warning)}</div>` : ''}
+    ${runtime?.available && runtime?.enabled && !ready ? '<div class="module-hero"><h2>VM resources needed</h2><p>LightNAS needs an active VM storage location and network before a VM can be created. Engine diagnostics remain available through Admin Center health checks.</p></div>' : ''}
     ${ready ? '<div class="module-note"><b>Ready to create.</b> Use the + Create VM button to open the guided setup wizard.</div>' : ''}
-    <h2>Existing VMs</h2><div class="storage-list">${runtime?.machineDetails?.map(item => `<article class="storage-row"><div><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.status)} · ${item.cpus || '—'} vCPU · ${bytes(item.memory || 0)} RAM</p></div><div class="storage-size">${escapeHtml(runtime.provider || 'libvirt')}</div></article>`).join('') || '<div class="empty"><p>No local virtual machines are visible.</p></div>'}</div>`;
+    <h2>Existing VMs</h2><div class="storage-list">${machines.map(item => `<article class="storage-row"><div><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.status)} · ${item.cpus || '—'} vCPU · ${bytes(item.memory || 0)} RAM${item.disk ? ` · ${bytes(item.disk)} disk` : ''}</p></div><div class="storage-size">${escapeHtml(runtime?.provider || 'libvirt')}</div></article>`).join('') || '<div class="empty"><p>No local virtual machines are visible.</p></div>'}</div>`;
 }
 
 function sharesView() {
