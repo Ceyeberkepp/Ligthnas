@@ -1,4 +1,4 @@
-const state = { overview: null, view: 'home', folder: '', files: null, fileError: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, smtp: undefined, media: null, network: null, fileView: localStorage.getItem('lightnas-file-view') === 'grid' ? 'grid' : 'list' };
+const state = { overview: null, view: 'home', folder: '', files: null, fileError: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, smtp: undefined, media: null, network: null, fileView: localStorage.getItem('lightnas-file-view') === 'grid' ? 'grid' : 'list', fileTruncated: false };
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
 const themeChoices = ['system', 'light', 'dark'];
@@ -287,36 +287,49 @@ const librarySections = [
   ['Documents', 'Documents'],
   ['Photos', 'Photos'],
   ['Videos', 'Videos'],
-  ['Audio', 'Audio']
+  ['Audio', 'Audio'],
+  ['Attached storage', 'Attached storage']
 ];
+
+function fileEntryPath(entry) {
+  return entry.path || [state.folder, entry.name].filter(Boolean).join('/');
+}
 
 function filesView() {
   const segments = state.folder.split('/').filter(Boolean);
   const section = librarySections.some(([folder]) => folder === (segments[0] || '')) ? (segments[0] || '') : '';
+  const allFiles = state.folder === '';
   const crumbs = [`<button class="panel-link" data-folder="">Files & media</button>`, ...segments.map((segment, index) => `<span> / </span><button class="panel-link" data-folder="${escapeHtml(segments.slice(0, index + 1).join('/'))}">${escapeHtml(segment)}</button>`)].join('');
   const entries = state.files;
   const tabs = librarySections.map(([folder, label]) => `<button type="button" class="library-tab ${section === folder ? 'active' : ''}" data-library-tab="${escapeHtml(folder)}" aria-pressed="${section === folder}">${escapeHtml(label)}</button>`).join('');
-  const item = entry => state.fileView === 'grid'
-    ? `<article class="file-card">
-        <button class="file-name file-card-open" data-open="${escapeHtml(entry.name)}" data-directory="${entry.directory}">
-          <span class="file-card-visual">${entry.directory ? '<span class="folder-glyph">▣</span>' : '<span class="file-glyph">▤</span>'}</span>
-          <span class="file-card-title">${escapeHtml(entry.name)}</span>
-        </button>
-        <span class="muted">${entry.directory ? 'Folder' : bytes(entry.sizeBytes)}</span>
-        <div class="file-card-actions">
-          ${entry.directory ? `<button class="secondary" data-download-folder="${escapeHtml(entry.name)}">Download folder</button>` : ''}
-          ${!entry.directory && state.media?.converterAvailable && state.overview.appliance.role === 'administrator' ? `<button class="secondary" data-convert-file="${escapeHtml(entry.name)}">Convert</button>` : ''}
-          <button class="secondary" data-delete-file="${escapeHtml(entry.name)}">Delete</button>
-        </div>
-      </article>`
-    : `<article class="file-row">
-        <button class="file-name" data-open="${escapeHtml(entry.name)}" data-directory="${entry.directory}">${entry.directory ? '▣' : '▤'} ${escapeHtml(entry.name)}</button>
-        <span class="muted">${entry.directory ? 'Folder' : bytes(entry.sizeBytes)}</span>
-        ${entry.directory ? `<button class="secondary" data-download-folder="${escapeHtml(entry.name)}">Download</button>` : ''}
-        ${!entry.directory && state.media?.converterAvailable && state.overview.appliance.role === 'administrator' ? `<button class="secondary" data-convert-file="${escapeHtml(entry.name)}">Convert</button>` : ''}
-        <button class="secondary" data-delete-file="${escapeHtml(entry.name)}">Delete</button>
-      </article>`;
-  return `${pageHead('Files & media', 'Browse documents, photos, audio, video, RAW images, and other files in one library.', '<button class="secondary" data-action="refresh-files">Refresh</button>')}
+
+  const item = entry => {
+    const path = fileEntryPath(entry);
+    const location = !entry.directory && (entry.folder || path.includes('/')) ? (entry.folder || path.split('/').slice(0, -1).join('/') || 'Root') : '';
+    const meta = entry.directory ? 'Folder' : `${bytes(entry.sizeBytes)}${location ? ` · ${escapeHtml(location)}` : ''}`;
+    return state.fileView === 'grid'
+      ? `<article class="file-card">
+          <button class="file-name file-card-open" data-open="${escapeHtml(entry.name)}" data-path="${escapeHtml(path)}" data-directory="${entry.directory}">
+            <span class="file-card-visual">${entry.directory ? '<span class="folder-glyph">▣</span>' : '<span class="file-glyph">▤</span>'}</span>
+            <span class="file-card-title">${escapeHtml(entry.name)}</span>
+          </button>
+          <span class="muted file-location">${meta}</span>
+          <div class="file-card-actions">
+            ${entry.directory ? `<button class="secondary" data-download-folder="${escapeHtml(path)}">Download folder</button>` : ''}
+            ${!entry.directory && state.media?.converterAvailable && state.overview.appliance.role === 'administrator' ? `<button class="secondary" data-convert-file="${escapeHtml(entry.name)}" data-path="${escapeHtml(path)}">Convert</button>` : ''}
+            <button class="secondary" data-delete-file="${escapeHtml(entry.name)}" data-path="${escapeHtml(path)}">Delete</button>
+          </div>
+        </article>`
+      : `<article class="file-row">
+          <button class="file-name" data-open="${escapeHtml(entry.name)}" data-path="${escapeHtml(path)}" data-directory="${entry.directory}">${entry.directory ? '▣' : '▤'} ${escapeHtml(entry.name)}${location ? `<small>${escapeHtml(location)}</small>` : ''}</button>
+          <span class="muted">${entry.directory ? 'Folder' : bytes(entry.sizeBytes)}</span>
+          ${entry.directory ? `<button class="secondary" data-download-folder="${escapeHtml(path)}">Download</button>` : ''}
+          ${!entry.directory && state.media?.converterAvailable && state.overview.appliance.role === 'administrator' ? `<button class="secondary" data-convert-file="${escapeHtml(entry.name)}" data-path="${escapeHtml(path)}">Convert</button>` : ''}
+          <button class="secondary" data-delete-file="${escapeHtml(entry.name)}" data-path="${escapeHtml(path)}">Delete</button>
+        </article>`;
+  };
+
+  return `${pageHead('Files & media', 'Browse and manage the actual files stored in LightNAS.', '<button class="secondary" data-action="refresh-files">Refresh</button>')}
     <nav class="library-tabs" aria-label="File library sections">${tabs}</nav>
     <div class="file-toolbar"><div class="breadcrumbs">${crumbs}</div><div class="file-toolbar-actions">
       <div class="view-toggle" role="group" aria-label="File view">
@@ -324,26 +337,101 @@ function filesView() {
         <button class="secondary ${state.fileView === 'grid' ? 'active' : ''}" type="button" data-file-view="grid" aria-pressed="${state.fileView === 'grid'}">▦ Grid</button>
       </div>
       <button class="secondary" data-action="new-folder">+ Folder</button>
-      <label class="primary upload-button">Upload<input id="file-upload" type="file" multiple hidden></label>
+      <label class="primary upload-button">Upload files<input id="file-upload" type="file" multiple hidden></label>
+      <label class="secondary upload-button">Upload folder<input id="folder-upload" type="file" webkitdirectory directory multiple hidden></label>
     </div></div>
-    <p class="muted">Uploads stream directly to storage with no LightNAS file-size ceiling. RAW photos and broad video formats can be previewed in the browser.</p>
-    <div class="${state.fileView === 'grid' ? 'file-browser-grid' : 'storage-list'}">${state.fileError ? `<div class="empty error-state"><p><b>Files could not be loaded.</b></p><p>${escapeHtml(state.fileError)}</p><button class="secondary" data-action="refresh-files">Try again</button></div>` : entries === null ? '<div class="empty"><p>Loading files…</p></div>' : entries.length ? entries.map(item).join('') : '<div class="empty"><p>This section is empty. Create a folder or upload files here.</p></div>'}</div>`;
+    <p class="muted">${allFiles ? 'All files is a flat view of your real library files, including files inside Documents, Photos, Videos, Audio and other folders.' : 'Open folders normally or switch back to All files for a flat library view.'} ZIP and other file types are accepted, uploads have visible progress, and LightNAS does not impose an application-level file-size ceiling.</p>
+    ${state.fileTruncated && allFiles ? '<div class="module-note">Showing the newest 10,000 files. Open a category or folder to browse beyond that safety limit.</div>' : ''}
+    <div class="${state.fileView === 'grid' ? 'file-browser-grid' : 'storage-list'}">${state.fileError ? `<div class="empty error-state"><p><b>Files could not be loaded.</b></p><p>${escapeHtml(state.fileError)}</p><button class="secondary" data-action="refresh-files">Try again</button></div>` : entries === null ? '<div class="empty"><p>Loading files…</p></div>' : entries.length ? entries.map(item).join('') : `<div class="empty"><p>${allFiles ? 'No files have been uploaded yet.' : 'This folder is empty.'}</p></div>`}</div>`;
 }
 
 async function loadFiles() {
   state.fileError = null;
   try {
-    const result = await request(`/api/files?path=${encodeURIComponent(state.folder)}`);
-    state.files = Array.isArray(result.entries)
-      ? result.entries.filter(entry => entry.supported && !(state.folder === '' && entry.directory && entry.name === 'ISO'))
-      : [];
+    const endpoint = state.folder === ''
+      ? '/api/files?all=1'
+      : `/api/files?path=${encodeURIComponent(state.folder)}`;
+    const result = await request(endpoint);
+    state.files = Array.isArray(result.entries) ? result.entries.filter(entry => entry.supported) : [];
+    state.fileTruncated = Boolean(result.truncated);
   } catch (error) {
     state.files = [];
+    state.fileTruncated = false;
     state.fileError = error.message || 'The file service did not return a valid response.';
     toast(state.fileError);
   }
   if (state.view === 'files') render('files');
 }
+
+function uploadRequest(path, file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', `/api/files?path=${encodeURIComponent(path)}`);
+    xhr.withCredentials = true;
+    xhr.setRequestHeader('X-LightNAS-Request', '1');
+    xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+    xhr.upload.addEventListener('progress', event => {
+      if (event.lengthComputable) onProgress?.(event.loaded, event.total);
+    });
+    xhr.addEventListener('load', () => {
+      if (xhr.status >= 200 && xhr.status < 300) return resolve();
+      let message = 'Upload failed.';
+      try { message = JSON.parse(xhr.responseText || '{}').error || message; } catch {}
+      reject(new Error(message));
+    });
+    xhr.addEventListener('error', () => reject(new Error('The upload connection failed.')));
+    xhr.addEventListener('abort', () => reject(new Error('The upload was cancelled.')));
+    xhr.send(file);
+  });
+}
+
+async function ensureUploadDirectories(paths) {
+  const folders = new Set();
+  for (const path of paths) {
+    const parts = String(path || '').split('/').filter(Boolean);
+    for (let index = 1; index < parts.length; index += 1) folders.add(parts.slice(0, index).join('/'));
+  }
+  for (const folder of [...folders].sort((a, b) => a.split('/').length - b.split('/').length)) {
+    try { await request(`/api/files?path=${encodeURIComponent(folder)}`, { method: 'POST', body: '{}' }); }
+    catch (error) { if (error.status !== 409) throw error; }
+  }
+}
+
+async function uploadFilesWithProgress(fileList, folderMode = false) {
+  const files = [...fileList];
+  if (!files.length) return;
+  const targets = files.map(file => {
+    const relative = folderMode ? (file.webkitRelativePath || file.name) : file.name;
+    const clean = relative.split('/').filter(part => part && part !== '.' && part !== '..').join('/');
+    return { file, path: [state.folder, clean].filter(Boolean).join('/') };
+  });
+  await ensureUploadDirectories(targets.map(item => item.path));
+
+  const totalBytes = targets.reduce((sum, item) => sum + Number(item.file.size || 0), 0);
+  let completedBytes = 0;
+  const progress = window.LightNASProgress?.open(folderMode ? 'Uploading folder' : 'Uploading files', `${targets.length} item${targets.length === 1 ? '' : 's'} · ${bytes(totalBytes)}`);
+  try {
+    for (let index = 0; index < targets.length; index += 1) {
+      const { file, path } = targets[index];
+      await uploadRequest(path, file, loaded => {
+        const current = completedBytes + loaded;
+        const percent = totalBytes ? Math.round((current / totalBytes) * 100) : Math.round(((index + 1) / targets.length) * 100);
+        progress?.update(percent, `${index + 1} of ${targets.length} · ${file.name} · ${bytes(current)} of ${bytes(totalBytes)}`);
+      });
+      completedBytes += Number(file.size || 0);
+      const percent = totalBytes ? Math.round((completedBytes / totalBytes) * 100) : Math.round(((index + 1) / targets.length) * 100);
+      progress?.update(percent, `${index + 1} of ${targets.length} complete`);
+    }
+    progress?.succeed(`${targets.length} item${targets.length === 1 ? '' : 's'} uploaded successfully.`);
+    toast(`${targets.length} item${targets.length === 1 ? '' : 's'} uploaded.`);
+  } catch (error) {
+    progress?.fail(error.message);
+    toast(error.message);
+  } finally {
+    await loadFiles();
+  }
+}
+
 
 function capabilitiesView() {
   const { system } = state.overview;
