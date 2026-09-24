@@ -4,7 +4,8 @@ import { pipeline } from 'node:stream/promises';
 import { Transform } from 'node:stream';
 
 const root = join(dirname(process.env.NAS_DATA_FILE || 'data/state.json'), 'files');
-const MAX_UPLOAD = Number(process.env.LIGHTNAS_FILE_UPLOAD_MAX_BYTES || 50 * 1024 ** 3);
+const configuredUploadLimit = Number(process.env.LIGHTNAS_FILE_UPLOAD_MAX_BYTES || 0);
+const MAX_UPLOAD = Number.isFinite(configuredUploadLimit) && configuredUploadLimit > 0 ? configuredUploadLimit : 0;
 const ATTACHED_ROOT = 'Attached storage';
 
 function parts(relative) {
@@ -121,7 +122,7 @@ export async function uploadFile(relative, req) {
   try {
     await pipeline(req, new Transform({ transform(chunk, encoding, callback) {
       size += chunk.length;
-      callback(size > MAX_UPLOAD ? Object.assign(new Error('File exceeds the configured upload limit.'), { status: 413 }) : null, chunk);
+      callback(MAX_UPLOAD > 0 && size > MAX_UPLOAD ? Object.assign(new Error('File exceeds the configured upload limit.'), { status: 413 }) : null, chunk);
     } }), file.createWriteStream());
   } catch (error) {
     await unlink(path).catch(() => {});
@@ -135,6 +136,14 @@ export async function downloadFile(relative) {
   const info = await lstat(path);
   if (!info.isFile()) throw Object.assign(new Error('Not a file.'), { status: 400 });
   return { path, size: info.size };
+}
+
+export async function downloadEntry(relative) {
+  if (!parts(relative).length) throw Object.assign(new Error('Select a file or folder.'), { status: 400 });
+  const path = await checked(relative);
+  const info = await lstat(path);
+  if (!info.isFile() && !info.isDirectory()) throw Object.assign(new Error('Unsupported file entry.'), { status: 400 });
+  return { path, size: info.isFile() ? info.size : null, directory: info.isDirectory() };
 }
 
 export async function mediaPaths(relative, format) {
