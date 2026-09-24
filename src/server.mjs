@@ -1,13 +1,14 @@
 import http from 'node:http';
+import { spawn } from 'node:child_process';
 import { readFile, mkdir, rmdir } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
-import { dirname, extname, join, normalize, resolve } from 'node:path';
+import { basename, dirname, extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { JsonStore } from './store.mjs';
 import { getFilesystems, getStorageInventory, getSystemSnapshot } from './system.mjs';
 import { hashPassword, Sessions, verifyPassword } from './auth.mjs';
-import { listFiles, createFolder, uploadFile, downloadFile, deleteEntry } from './files.mjs';
+import { listFiles, createFolder, uploadFile, downloadFile, downloadEntry, deleteEntry } from './files.mjs';
 import { thumbnailFor } from './thumbnails.mjs';
 import { catalog, runtimeInventory, installCatalogApp, manageCatalogApp, createContainer, createVm } from './runtimes-next.mjs';
 import { proxmoxConsoleSocket, proxmoxUpdateStorage, proxmoxCleanDisk } from './proxmox.mjs';
@@ -157,7 +158,13 @@ const mimeTypes = {
   '.mjs': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.json': 'application/json; charset=utf-8',
   '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.gif': 'image/gif', '.webp': 'image/webp',
   '.bmp': 'image/bmp', '.avif': 'image/avif', '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime',
-  '.m4v': 'video/x-m4v', '.ogv': 'video/ogg', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg',
+  '.m4v': 'video/x-m4v', '.ogv': 'video/ogg', '.mkv': 'video/x-matroska', '.avi': 'video/x-msvideo',
+  '.wmv': 'video/x-ms-wmv', '.flv': 'video/x-flv', '.mpeg': 'video/mpeg', '.mpg': 'video/mpeg', '.m2v': 'video/mpeg',
+  '.mts': 'video/mp2t', '.m2ts': 'video/mp2t', '.ts': 'video/mp2t', '.3gp': 'video/3gpp', '.3g2': 'video/3gpp2', '.vob': 'video/mpeg',
+  '.raw': 'image/x-raw', '.dng': 'image/x-adobe-dng', '.cr2': 'image/x-canon-cr2', '.cr3': 'image/x-canon-cr3',
+  '.nef': 'image/x-nikon-nef', '.nrw': 'image/x-nikon-nrw', '.arw': 'image/x-sony-arw', '.raf': 'image/x-fuji-raf',
+  '.orf': 'image/x-olympus-orf', '.rw2': 'image/x-panasonic-rw2', '.pef': 'image/x-pentax-pef', '.srw': 'image/x-samsung-srw',
+  '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg',
   '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.flac': 'audio/flac', '.pdf': 'application/pdf',
   '.txt': 'text/plain; charset=utf-8', '.log': 'text/plain; charset=utf-8', '.md': 'text/markdown; charset=utf-8',
   '.csv': 'text/csv; charset=utf-8', '.xml': 'application/xml; charset=utf-8', '.yaml': 'text/yaml; charset=utf-8',
@@ -1071,9 +1078,61 @@ async function api(req, res, url) {
   }
   if (req.method === 'GET' && url.pathname === '/api/files/thumbnail') {
     if (!requirePermission(res, permissions, 'files.read')) return;
-    const thumbnail = await thumbnailFor(url.searchParams.get('path') || '');
+    const thumbnail = await thumbnailFor(url.searchParams.get('path') || '', { preview: url.searchParams.get('preview') === '1' });
     res.writeHead(200, { 'Content-Type': thumbnail.contentType, 'Content-Length': thumbnail.size, 'Cache-Control': 'private, max-age=86400', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': csp });
     return createReadStream(thumbnail.path).pipe(res);
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/files/archive') {
+    if (!requirePermission(res, permissions, 'files.read')) return;
+    const relative = url.searchParams.get('path') || '';
+    const data = await downloadEntry(relative);
+    if (!data.directory) return send(res, 400, { error: 'Select a folder to download.' });
+    const folderName = basename(data.path) || 'folder';
+    res.writeHead(200, {
+      'Content-Type': 'application/gzip',
+      'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(folderName + '.tar.gz')}`,
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': csp
+    });
+    const archive = spawn('tar', ['-C', dirname(data.path), '-czf', '-', folderName], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stderr = '';
+    archive.stderr.on('data', chunk => { if (stderr.length < 4096) stderr += chunk.toString('utf8'); });
+    archive.on('error', error => { if (!res.destroyed) res.destroy(error); });
+    archive.on('close', code => {
+      if (code !== 0 && !res.destroyed) res.destroy(new Error(stderr.trim() || `Folder archive failed with exit code ${code}.`));
+    });
+    req.on('close', () => { if (!archive.killed) archive.kill('SIGTERM'); });
+    return archive.stdout.pipe(res);
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/files/video-preview') {
+    if (!requirePermission(res, permissions, 'files.read')) return;
+    const relative = url.searchParams.get('path') || '';
+    const filename = relative.split('/').pop() || 'video';
+    const extension = extname(filename).toLowerCase();
+    const supportedVideo = new Set(['.mp4', '.webm', '.mov', '.m4v', '.ogv', '.mkv', '.avi', '.wmv', '.flv', '.mpeg', '.mpg', '.m2v', '.mts', '.m2ts', '.ts', '.3gp', '.3g2', '.vob']);
+    if (!supportedVideo.has(extension)) return send(res, 415, { error: 'This file is not a supported video preview format.' });
+    const data = await downloadFile(relative);
+    res.writeHead(200, {
+      'Content-Type': 'video/mp4',
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': csp
+    });
+    const ffmpeg = spawn('ffmpeg', [
+      '-nostdin', '-hide_banner', '-loglevel', 'error',
+      '-i', data.path,
+      '-map', '0:v:0', '-map', '0:a:0?',
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-pix_fmt', 'yuv420p',
+      '-c:a', 'aac', '-b:a', '128k',
+      '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+      '-f', 'mp4', 'pipe:1'
+    ], { stdio: ['ignore', 'pipe', 'pipe'] });
+    ffmpeg.on('error', error => { if (!res.destroyed) res.destroy(error); });
+    req.on('close', () => { if (!ffmpeg.killed) ffmpeg.kill('SIGTERM'); });
+    return ffmpeg.stdout.pipe(res);
   }
   if (req.method === 'GET' && url.pathname === '/api/files/download') {
     if (!requirePermission(res, permissions, 'files.read')) return;
