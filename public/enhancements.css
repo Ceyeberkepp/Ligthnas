@@ -181,3 +181,29 @@
   .file-card { padding:9px; }
   .file-card-visual, .file-card-open .file-thumb { min-height:100px; height:100px; }
 }
+
+
+/* Proxmox-style node networking */
+.network-status-strip { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin:0 0 16px; }
+.network-status-strip > div { border:1px solid var(--line); background:var(--panel); border-radius:12px; padding:13px 15px; display:grid; gap:5px; }
+.network-status-strip span { color:var(--muted); font-size:10px; text-transform:uppercase; letter-spacing:.06em; }
+.network-status-strip strong { font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.network-table-panel { overflow:hidden; }
+.network-table { display:grid; border:1px solid var(--line); border-radius:11px; overflow:auto; }
+.network-table-row { min-width:920px; display:grid; grid-template-columns:140px 180px 120px minmax(170px,1.2fr) minmax(170px,1fr) 190px; gap:10px; align-items:center; min-height:56px; padding:8px 12px; border-bottom:1px solid var(--line); font-size:12px; }
+.network-table-row:last-child { border-bottom:0; }
+.network-table-head { min-height:38px; background:var(--panel-2); color:var(--muted); font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.05em; }
+.network-table-row span { min-width:0; }
+.network-table-row small { display:block; color:var(--muted); margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mono-cell { font-family:ui-monospace,SFMono-Regular,Consolas,monospace; }
+.network-secondary-grid { margin-top:16px; }
+.route-table { display:grid; gap:0; }
+.route-row { display:grid; grid-template-columns:minmax(120px,1.2fr) 1fr 100px 90px; gap:10px; align-items:center; padding:11px 0; border-bottom:1px solid var(--line); font-size:12px; }
+.route-row:last-child { border-bottom:0; }
+.dns-list { display:flex; gap:8px; flex-wrap:wrap; margin:12px 0 18px; }
+.dns-list code { border:1px solid var(--line); background:var(--panel-2); border-radius:8px; padding:8px 10px; }
+
+@media (max-width:900px) {
+  .network-status-strip { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .network-secondary-grid { grid-template-columns:1fr; }
+}
