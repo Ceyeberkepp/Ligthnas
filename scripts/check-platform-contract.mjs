@@ -57,9 +57,12 @@ assert.match(hostAgent, /ports\.ubuntu\.com\/ubuntu-ports/);
 
 // Large NAS/ISO transfers must stay streaming and above the historical 1 GiB
 // limit. Storage images must preserve Content-Range resume support.
-assert.match(files, /LIGHTNAS_FILE_UPLOAD_MAX_BYTES \|\| 50 \* 1024 \*\* 3/);
+assert.equal(contract.upload.unlimitedByDefault, true, 'LightNAS uploads must be unlimited by default');
+assert.equal(contract.upload.genericFileDefaultMaxGiB, 0);
+assert.equal(contract.upload.storageImageDefaultMaxGiB, 0);
+assert.match(files, /LIGHTNAS_FILE_UPLOAD_MAX_BYTES \|\| 0/);
 assert.doesNotMatch(files, /1 GB upload limit/);
-assert.match(storagePools, /LIGHTNAS_STORAGE_UPLOAD_MAX_BYTES \|\| 50 \* 1024 \*\* 3/);
+assert.match(storagePools, /LIGHTNAS_STORAGE_UPLOAD_MAX_BYTES \|\| 0/);
 assert.match(storagePools, /parseContentRange/);
 assert.match(storagePools, /Content-Range/);
 assert.match(storageManager, /\(type==='iso'\?64:32\)\*1024\*\*2/);
