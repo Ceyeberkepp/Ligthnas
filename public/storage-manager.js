@@ -74,7 +74,8 @@ function renderStorageManager() {
     </section>
     <h2>Storage</h2>
     <div class="inventory-grid">${(data.pools||[]).map(storageCard).join('')||'<div class="empty"><p>No storage pools are online.</p></div>'}</div>
-    ${unconfigured.length?`<h2>Available virtual storage</h2><div class="inventory-grid">${unconfigured.map(source=>`<article class="inventory-card"><h3>${sEsc(source.mountPoint)}</h3><p>${sEsc(source.device)} · ${sEsc(source.type)}</p><p><strong>${sBytes(source.availableBytes)} free</strong> of ${sBytes(source.totalBytes)}</p>${source.capacitySource==='proxmox-pct-config'?`<p class="muted">Proxmox configured size: <b>${sEsc(source.configuredSize||sBytes(source.totalBytes))}</b></p>`:''}<button class="primary" type="button" data-create-storage-source="${sEsc(source.id)}">Create storage here</button></article>`).join('')}</div>`:''}
+    ${unconfigured.length?`<h2>Available mounted storage</h2><div class="inventory-grid">${unconfigured.map(source=>`<article class="inventory-card"><h3>${sEsc(source.mountPoint)}</h3><p>${sEsc(source.device)} · ${sEsc(source.type)}</p><p><strong>${sBytes(source.availableBytes)} free</strong> of ${sBytes(source.totalBytes)}</p>${source.capacitySource==='proxmox-pct-config'?`<p class="muted">Proxmox configured size: <b>${sEsc(source.configuredSize||sBytes(source.totalBytes))}</b></p>`:''}<button class="primary" type="button" data-create-storage-source="${sEsc(source.id)}">Create storage here</button></article>`).join('')}</div>`:''}
+    ${(data.detectedDisks||[]).length?`<h2>Detected drives</h2><p class="muted">LightNAS automatically detects new physical and virtual disks. It never formats a drive automatically; destructive initialization stays an explicit administrator action.</p><div class="inventory-grid">${data.detectedDisks.map(disk=>`<article class="inventory-card detected-disk-card"><div class="volume-title"><h3>${sEsc(disk.model||disk.name||disk.path)}</h3><span class="volume-state ${disk.system?'readonly':disk.blank?'writable':''}">${disk.system?'SYSTEM':disk.blank?'NEW DRIVE':disk.mounted?'MOUNTED':'DETECTED'}</span></div><p>${sEsc(disk.path||disk.name)} · ${sBytes(disk.sizeBytes)}${disk.transport?` · ${sEsc(disk.transport)}`:''}</p><p class="muted">${disk.system?'Contains the LightNAS operating system and is protected from storage initialization.':disk.blank?'Blank drive detected. It is visible immediately and ready for an explicit storage initialization workflow.':'Partitions: '+((disk.partitions||[]).map(part=>sEsc(part.path)+(part.filesystem?` (${sEsc(part.filesystem)})`:'')).join(' · ')||'none')}</p></article>`).join('')}</div>`:''}
   `;
 }
 async function refreshStorageManager() {
@@ -142,7 +143,7 @@ async function renderManageStorage(poolId,activeType=null) {
       <div class="head-actions">${fileTypes.map(type=>`<button type="button" class="${type===selectedType?'primary':'secondary'}" data-storage-content-tab="${sEsc(type)}" data-storage-id="${sEsc(pool.id)}">${sEsc((data.contentTypes||[]).find(item=>item.id===type)?.label||type)}</button>`).join('')}</div>
 ${selectedType==='vztmpl'? `<div class="head-actions"><button class="primary" type="button" data-template-browse data-template-storage="${sEsc(pool.id)}">Browse templates</button><button class="secondary" type="button" data-template-upload data-template-storage="${sEsc(pool.id)}">Upload template</button><button class="secondary" type="button" data-template-url data-template-storage="${sEsc(pool.id)}">Import URL</button></div><p class="muted">Choose a template from the upstream catalog, upload an archive from your computer, or import a public URL into this storage.</p>` : ''}
       <form data-storage-upload-form data-storage-id="${sEsc(pool.id)}" data-storage-type="${sEsc(selectedType)}">
-        ${selectedType==='iso'?'<p class="module-note">ISO uploads up to 50 GiB stream directly to storage in resumable chunks. Large ISO files use a larger transfer window to reduce round-trip overhead.</p>':''}
+        ${selectedType==='iso'?'<p class="module-note">ISO uploads stream directly to storage in resumable chunks with no LightNAS application-level size ceiling. Available disk space is the limit.</p>':''}
         <label>Upload ${sEsc((data.contentTypes||[]).find(item=>item.id===selectedType)?.label||selectedType)}<input name="file" type="file" required ${selectedType==='iso'?'accept=".iso"':selectedType==='vztmpl'?'accept=".tar.zst,.tar.xz,.tar.gz,.tgz"':''}></label>
         <button class="secondary" type="submit">Upload</button>
       </form>
@@ -209,8 +210,6 @@ document.addEventListener('submit',async event=>{
     error.textContent=`Uploading ${file.name}…`;
     const progress=window.LightNASProgress?.open(type==='iso'?'Uploading VM installer image':'Uploading storage image',file.name);
     try{
-      const maximum=50*1024**3;
-      if(file.size>maximum) throw new Error('ISO and storage image uploads are limited to 50 GiB.');
       // Blob.slice() is lazy, so a larger chunk reduces HTTP round trips
       // without buffering the whole ISO in browser or server memory.
       const chunkSize=(type==='iso'?64:32)*1024**2;
@@ -269,6 +268,26 @@ function maybeStorageManager(){
 new MutationObserver(maybeStorageManager).observe(document.documentElement,{childList:true,subtree:true});
 window.addEventListener('hashchange',maybeStorageManager);
 maybeStorageManager();
+
+let storageInventorySignature='';
+setInterval(async()=>{
+  if(!['#storage','#pools'].includes(location.hash)) return;
+  try{
+    const next=await sRequest('/api/storage/pools');
+    const signature=JSON.stringify({
+      sources:(next.availableSources||[]).map(item=>[item.id,item.totalBytes,item.configured]),
+      disks:(next.detectedDisks||[]).map(item=>[item.path,item.sizeBytes,item.system,item.blank])
+    });
+    if(storageInventorySignature && signature!==storageInventorySignature){
+      storageUi.data=next;
+      renderStorageManager();
+    }else if(!storageUi.data){
+      storageUi.data=next;
+      renderStorageManager();
+    }
+    storageInventorySignature=signature;
+  }catch{}
+},8000);
 
 document.addEventListener('keydown',async event=>{
   const card=event.target.closest?.('[data-storage-card]');
