@@ -1,6 +1,6 @@
 const previewExtensions = {
-  image: new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'avif']),
-  video: new Set(['mp4', 'webm', 'mov', 'm4v', 'ogv', 'mkv', 'avi']),
+  image: new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'avif', 'raw', 'dng', 'cr2', 'cr3', 'nef', 'nrw', 'arw', 'srf', 'sr2', 'raf', 'orf', 'rw2', 'pef', 'srw', 'x3f']),
+  video: new Set(['mp4', 'webm', 'mov', 'm4v', 'ogv', 'mkv', 'avi', 'wmv', 'flv', 'mpeg', 'mpg', 'm2v', 'mts', 'm2ts', 'ts', '3gp', '3g2', 'vob']),
   audio: new Set(['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac']),
   pdf: new Set(['pdf']),
   text: new Set(['txt', 'log', 'md', 'json', 'csv', 'xml', 'yaml', 'yml', 'ini', 'conf', 'sh', 'js', 'mjs', 'css', 'html'])
@@ -163,29 +163,52 @@ async function openPreview(name) {
   const kind = previewKind(name);
   if (!kind) return false;
   const path = joinPath(currentFolder(), name);
-  const response = await fetch(`/api/files/download?path=${encodeURIComponent(path)}`);
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    throw new Error(body.error || 'Unable to open file.');
-  }
-  const blob = await response.blob();
-  const objectUrl = URL.createObjectURL(blob);
+  const extension = name.toLowerCase().split('.').pop();
+  const raw = ['raw','dng','cr2','cr3','nef','nrw','arw','srf','sr2','raf','orf','rw2','pef','srw','x3f'].includes(extension);
   const dialog = ensureViewer();
   if (dialog.dataset.objectUrl) URL.revokeObjectURL(dialog.dataset.objectUrl);
-  dialog.dataset.objectUrl = objectUrl;
+  delete dialog.dataset.objectUrl;
   dialog.querySelector('[data-viewer-title]').textContent = name;
-  dialog.querySelector('[data-viewer-meta]').textContent = `${bytes(blob.size)} · ${kind.toUpperCase()} preview`;
+  dialog.querySelector('[data-viewer-meta]').textContent = `${kind.toUpperCase()} preview`;
   const stage = dialog.querySelector('[data-viewer-stage]');
   stage.replaceChildren();
   let viewer;
-  if (kind === 'image') { viewer = document.createElement('img'); viewer.src = objectUrl; viewer.alt = name; }
-  else if (kind === 'video') { viewer = document.createElement('video'); viewer.src = objectUrl; viewer.controls = true; viewer.autoplay = true; }
-  else if (kind === 'audio') { viewer = document.createElement('audio'); viewer.src = objectUrl; viewer.controls = true; viewer.autoplay = true; }
-  else if (kind === 'pdf') { viewer = document.createElement('iframe'); viewer.src = objectUrl; viewer.title = name; }
-  else { viewer = document.createElement('pre'); viewer.textContent = await blob.text(); }
+
+  if (kind === 'image') {
+    viewer = document.createElement('img');
+    viewer.src = raw
+      ? `/api/files/thumbnail?preview=1&path=${encodeURIComponent(path)}`
+      : `/api/files/download?path=${encodeURIComponent(path)}`;
+    viewer.alt = name;
+  } else if (kind === 'video') {
+    // Always use the server preview path. Browser codec support differs across
+    // MKV/AVI/WMV/MTS/etc.; LightNAS streams an on-demand H.264/AAC preview.
+    viewer = document.createElement('video');
+    viewer.src = `/api/files/video-preview?path=${encodeURIComponent(path)}`;
+    viewer.controls = true;
+    viewer.autoplay = true;
+    viewer.playsInline = true;
+  } else {
+    const response = await fetch(`/api/files/download?path=${encodeURIComponent(path)}`);
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error || 'Unable to open file.');
+    }
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    dialog.dataset.objectUrl = objectUrl;
+    dialog.querySelector('[data-viewer-meta]').textContent = `${bytes(blob.size)} · ${kind.toUpperCase()} preview`;
+    if (kind === 'audio') { viewer = document.createElement('audio'); viewer.src = objectUrl; viewer.controls = true; viewer.autoplay = true; }
+    else if (kind === 'pdf') { viewer = document.createElement('iframe'); viewer.src = objectUrl; viewer.title = name; }
+    else { viewer = document.createElement('pre'); viewer.textContent = await blob.text(); }
+  }
+
   stage.append(viewer);
   dialog.querySelector('[data-viewer-download]').onclick = () => {
-    const anchor = document.createElement('a'); anchor.href = objectUrl; anchor.download = name; anchor.click();
+    const anchor = document.createElement('a');
+    anchor.href = `/api/files/download?path=${encodeURIComponent(path)}`;
+    anchor.download = name;
+    anchor.click();
   };
   updateViewerNavigation(dialog, name);
   if (!dialog.open) dialog.showModal();
@@ -398,11 +421,11 @@ function enhanceFileThumbnails() {
     const kind = previewKind(name);
     if (!['image', 'video'].includes(kind)) continue;
     const path = joinPath(folder, name);
-    const media = document.createElement(kind === 'image' ? 'img' : 'video');
+    const media = document.createElement('img');
     media.className = 'file-thumb';
     media.loading = 'lazy';
-    media.src = `/api/files/download?path=${encodeURIComponent(path)}${kind === 'video' ? '#t=0.15' : ''}`;
-    if (kind === 'video') { media.muted = true; media.preload = 'metadata'; media.playsInline = true; }
+    media.alt = '';
+    media.src = `/api/files/thumbnail?path=${encodeURIComponent(path)}`;
     button.prepend(media);
   }
 }
