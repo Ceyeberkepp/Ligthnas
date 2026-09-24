@@ -84,6 +84,16 @@ export async function getStorageInventory() {
   const rootFilesystem = filesystems.find(item => item.mountPoint === '/');
   const rootDevice = rootFilesystem?.device || null;
 
+  // Mark the operating-system disk so the Storage UI can distinguish it from
+  // newly attached data drives without ever guessing that a blank disk is safe
+  // to format automatically.
+  disks = disks.map(disk => ({
+    ...disk,
+    system: disk.path === rootDevice || (disk.partitions || []).some(partition => partition.mountPoint === '/' || partition.path === rootDevice),
+    mounted: (disk.partitions || []).some(partition => Boolean(partition.mountPoint)),
+    blank: !(disk.partitions || []).some(partition => partition.filesystem || partition.mountPoint)
+  }));
+
   let proxmoxStorage = null;
   try {
     const parsed = JSON.parse(proxmoxManifestText || 'null');
