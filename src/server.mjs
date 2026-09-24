@@ -1162,7 +1162,7 @@ async function api(req, res, url) {
     archive.on('close', code => {
       if (code !== 0 && !res.destroyed) res.destroy(new Error(stderr.trim() || `Folder archive failed with exit code ${code}.`));
     });
-    req.on('close', () => { if (!archive.killed) archive.kill('SIGTERM'); });
+    res.on('close', () => { if (!archive.killed) archive.kill('SIGTERM'); });
     return archive.stdout.pipe(res);
   }
 
@@ -1190,7 +1190,8 @@ async function api(req, res, url) {
       '-f', 'mp4', 'pipe:1'
     ], { stdio: ['ignore', 'pipe', 'pipe'] });
     ffmpeg.on('error', error => { if (!res.destroyed) res.destroy(error); });
-    req.on('close', () => { if (!ffmpeg.killed) ffmpeg.kill('SIGTERM'); });
+    ffmpeg.stderr.resume();
+    res.on('close', () => { if (!ffmpeg.killed) ffmpeg.kill('SIGTERM'); });
     return ffmpeg.stdout.pipe(res);
   }
   if (req.method === 'GET' && url.pathname === '/api/files/download') {
