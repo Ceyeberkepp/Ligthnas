@@ -68,6 +68,7 @@ openssh-server
 util-linux
 python3
 ffmpeg
+imagemagick
 acl
 novnc
 iproute2
@@ -267,6 +268,9 @@ printf '%s\n' \
 
 apt-get update
 apt-get install -y nodejs
+if apt-cache policy libraw-bin 2>/dev/null | awk '/Candidate:/{exit $2=="(none)" || $2==""}'; then
+  apt-get install -y libraw-bin || true
+fi
 
 # Debian images do not need the ubuntu-keyring package to build LightNAS, but
 # debootstrap must still be able to verify Ubuntu system-container releases.
