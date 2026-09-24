@@ -14,7 +14,8 @@ const PROXMOX_APLINFO_URL = `${PROXMOX_IMAGES_BASE}aplinfo-pve-${PVE_APLINFO_MAJ
 const PROXMOX_FALLBACK_APLINFO_URL = `${PROXMOX_IMAGES_BASE}aplinfo.dat`;
 const TURNKEY_BASE = 'https://releases.turnkeylinux.org/pve/';
 const TURNKEY_APLINFO_URL = `${TURNKEY_BASE}aplinfo.dat`;
-const MAX_TEMPLATE_BYTES = Number(process.env.LIGHTNAS_TEMPLATE_MAX_BYTES || 4 * 1024 ** 3);
+const configuredTemplateLimit = Number(process.env.LIGHTNAS_TEMPLATE_MAX_BYTES || 0);
+const MAX_TEMPLATE_BYTES = Number.isFinite(configuredTemplateLimit) && configuredTemplateLimit > 0 ? configuredTemplateLimit : 0;
 const CATALOG_TIMEOUT_MS = Number(process.env.LIGHTNAS_TEMPLATE_CATALOG_TIMEOUT_MS || 30_000);
 const DOWNLOAD_TIMEOUT_MS = Number(process.env.LIGHTNAS_TEMPLATE_DOWNLOAD_TIMEOUT_MS || 2 * 60 * 60_000);
 const SPACE_RESERVE_BYTES = Number(process.env.LIGHTNAS_TEMPLATE_SPACE_RESERVE_BYTES || 128 * 1024 ** 2);
@@ -200,7 +201,7 @@ function byteLimit() {
   return new Transform({
     transform(chunk, encoding, callback) {
       total += chunk.length;
-      if (total > MAX_TEMPLATE_BYTES) return callback(Object.assign(new Error('Template exceeds the configured maximum size.'), { status: 413 }));
+      if (MAX_TEMPLATE_BYTES > 0 && total > MAX_TEMPLATE_BYTES) return callback(Object.assign(new Error('Template exceeds the configured maximum size.'), { status: 413 }));
       callback(null, chunk);
     }
   });
@@ -225,7 +226,7 @@ export function normalizeTemplateTransferError(error) {
 }
 
 async function saveStream(stream, target, filename, contentLength = 0, expectedSha512 = null) {
-  if (contentLength && contentLength > MAX_TEMPLATE_BYTES) throw Object.assign(new Error('Template exceeds the configured maximum size.'), { status: 413 });
+  if (MAX_TEMPLATE_BYTES > 0 && contentLength && contentLength > MAX_TEMPLATE_BYTES) throw Object.assign(new Error('Template exceeds the configured maximum size.'), { status: 413 });
   if (contentLength && target.availableBytes > 0 && contentLength + SPACE_RESERVE_BYTES > target.availableBytes) {
     throw Object.assign(new Error('The selected storage does not have enough free space for this template and the safety reserve.'), { status: 507 });
   }
