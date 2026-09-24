@@ -161,7 +161,7 @@ function permissionsView() {
     <section class="panel permission-intro">
       <span class="eyebrow">ACCESS CONTROL</span>
       <h2>Fine-grained LightNAS permissions</h2>
-      <p class="muted">Policies cover files, downloads/deletion, storage, shares, apps, containers, virtual machines, networking, firewall, monitoring, users/groups, security, and shell access. The appliance owner always retains full access.</p>
+      <p class="muted">Delegated policy covers file read/write/download/delete, media conversion, storage, shares, apps, containers, virtual machines, networking, firewall and monitoring. Owner-only security settings and the root node shell remain restricted to the appliance owner.</p>
     </section>
     <div data-permissions-root><div class="empty"><p>Loading permission policies…</p></div></div>`;
 }
