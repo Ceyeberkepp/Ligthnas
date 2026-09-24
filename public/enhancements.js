@@ -7,24 +7,39 @@ const previewExtensions = {
 };
 
 const permissionLabels = {
+  'overview.view': ['View overview', 'Open the Overview dashboard.'],
   'files.read': ['Read files', 'Browse, preview and download files.'],
   'files.write': ['Write files', 'Upload, create folders and delete file entries.'],
   'media.convert': ['Convert media', 'Run FFmpeg conversions from Files.'],
   'storage.view': ['View storage', 'See attached volumes, host disks and storage inventory.'],
   'storage.manage': ['Manage storage', 'Create file spaces and manage Proxmox/ZFS storage.'],
+  'pools.view': ['View pools & datasets', 'Open the Pools & datasets page.'],
+  'shares.view': ['View shares', 'Open the Shares page.'],
   'shares.manage': ['Manage shares', 'Create and remove share configurations.'],
+  'apps.view': ['View App Store', 'Open the application catalog.'],
   'apps.manage': ['Manage apps', 'Install, start, stop and remove catalog applications.'],
   'containers.manage': ['Manage containers', 'Create, edit, control and open LightNAS containers.'],
+  'containers.view': ['View containers', 'Open the Containers page.'],
   'vms.manage': ['Manage VMs', 'Create, edit, control and open VM consoles.'],
+  'vms.view': ['View VMs', 'Open the Virtual machines page.'],
   'network.view': ['View networking', 'View network interfaces, routes and firewall inventory.'],
   'network.manage': ['Manage networking', 'Create and edit bridges, VLANs, addresses, routes and DNS.'],
   'firewall.manage': ['Manage firewall', 'Create, change and remove host firewall rules.'],
+  'firewall.view': ['View firewall', 'Open the Firewall page.'],
+  'integrations.view': ['View integrations', 'Open the Integrations page.'],
+  'integrations.manage': ['Manage integrations', 'Manage API tokens, webhooks and identity providers.'],
   'vms.console': ['Open VM consoles', 'Use interactive noVNC consoles without changing VM hardware.'],
   'containers.console': ['Open container consoles', 'Use interactive root terminals inside assigned containers.'],
   'backup.manage': ['Manage backups', 'Create, restore and remove managed backups and snapshots.'],
   'audit.view': ['View audit history', 'Review security and system activity history.'],
   'system.view': ['View system health', 'View monitoring, CPU, memory and system details.'],
-  'system.shell': ['Open node shell', 'Use a privileged root terminal on the LightNAS node.']
+  'monitoring.view': ['View monitoring', 'Open the Monitoring page.'],
+  'capabilities.view': ['View capabilities', 'Open the Capabilities page.'],
+  'system.shell': ['Open node shell', 'Use a privileged root terminal on the LightNAS node.'],
+  'users.manage': ['Manage users & groups', 'Open user and group administration.'],
+  'smtp.manage': ['Manage email / SMTP', 'Open SMTP configuration.'],
+  'settings.manage': ['Manage settings & security', 'Open appliance security settings.'],
+  'admin.view': ['View Admin Center', 'Open the administration dashboard.']
 };
 
 function escapeHtml(value) {
@@ -426,21 +441,7 @@ function permissionsMarkup(options, selected = []) {
 }
 
 async function enhancePolicies() {
-  if (!['#users', '#permissions'].includes(location.hash)) return;
-  const content = document.querySelector('#content');
-  if (!content || content.dataset.policiesLoaded === '1') return;
-  try {
-    const result = await apiRequest('/api/users');
-    content.dataset.policiesLoaded = '1';
-    const options = result.permissionOptions || Object.keys(permissionLabels);
-    for (const user of result.users || []) {
-      const form = content.querySelector(`form[data-manage-user="${CSS.escape(user.username)}"]`);
-      if (!form || form.querySelector('.policy-grid')) continue;
-      form.insertAdjacentHTML('beforeend', `${permissionsMarkup(options, user.permissions || [])}<button class="primary save-policy" type="button" data-save-policy="${escapeHtml(user.username)}">Save permissions</button>`);
-    }
-    const create = content.querySelector('#user-form');
-    if (create && !create.querySelector('.policy-grid')) create.querySelector('button[type="submit"]')?.insertAdjacentHTML('beforebegin', permissionsMarkup(options, ['files.read', 'files.write']));
-  } catch {}
+  // Account access is intentionally assigned only through groups.
 }
 
 function enhanceAdminCenter() {
@@ -475,20 +476,6 @@ const observer = new MutationObserver(scheduleEnhancements);
 observer.observe(document.body, { subtree: true, childList: true });
 window.addEventListener('hashchange', scheduleEnhancements);
 window.addEventListener('load', scheduleEnhancements);
-
-document.addEventListener('submit', async event => {
-  if (event.target.id !== 'user-form' || !event.target.querySelector('.policy-grid')) return;
-  event.preventDefault(); event.stopImmediatePropagation();
-  const form = event.target;
-  const error = form.querySelector('.form-error');
-  error.textContent = '';
-  const data = new FormData(form);
-  const permissions = [...form.querySelectorAll('.policy-grid input:checked')].map(input => input.value);
-  try {
-    await apiRequest('/api/users', { method: 'POST', body: JSON.stringify({ username: data.get('username'), password: data.get('password'), permissions }) });
-    location.reload();
-  } catch (problem) { error.textContent = problem.message; }
-}, true);
 
 document.addEventListener('click', async event => {
   const folderButton = event.target.closest('#content [data-action="new-folder"]');
@@ -591,20 +578,6 @@ document.addEventListener('click', async event => {
       document.querySelector('#content [data-action="refresh-runtime"]')?.click();
     } catch (error) { alert(error.message); }
     finally { vmAction.disabled = false; }
-    return;
-  }
-
-  const policy = event.target.closest('[data-save-policy]');
-  if (policy) {
-    const form = policy.closest('form');
-    const password = form.querySelector('input[name="currentPassword"]')?.value || '';
-    const permissions = [...form.querySelectorAll('.policy-grid input:checked')].map(input => input.value);
-    policy.disabled = true;
-    try {
-      await apiRequest(`/api/users/${encodeURIComponent(policy.dataset.savePolicy)}`, { method: 'PATCH', body: JSON.stringify({ currentPassword: password, permissions }) });
-      policy.textContent = 'Saved';
-      setTimeout(() => { policy.textContent = 'Save permissions'; policy.disabled = false; }, 1200);
-    } catch (error) { alert(error.message); policy.disabled = false; }
     return;
   }
 

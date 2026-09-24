@@ -1617,7 +1617,8 @@ def stream_container(connection, data: dict) -> None:
 def stream_node(connection) -> None:
     master, slave = pty.openpty()
     env = os.environ.copy()
-    env.update({"TERM": "xterm-256color", "HOME": "/root", "USER": "root", "LOGNAME": "root"})
+    node_name = re.sub(r"[^A-Za-z0-9.-]", "-", socket.gethostname().split(".")[0]) or "lightnas"
+    env.update({"TERM": "xterm-256color", "HOME": "/root", "USER": "root", "LOGNAME": "root", "PS1": f"root@{node_name}:\\w# "})
 
     def child_setup():
         os.setsid()

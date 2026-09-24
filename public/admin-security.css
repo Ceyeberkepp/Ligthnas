@@ -1,6 +1,7 @@
 .groups-admin,
 .automation-admin,
 .editable-network { display:grid; gap:16px; margin:18px 0 26px; }
+.groups-admin { padding:20px; border:1px solid var(--line); border-radius:var(--radius); background:var(--panel); }
 
 .admin-section-head { display:flex; align-items:flex-start; justify-content:space-between; gap:18px; margin:6px 0; }
 .admin-section-head h2 { margin:4px 0 5px; font-size:20px; }
@@ -11,9 +12,14 @@
 .group-card form { display:grid; gap:12px; margin-top:14px; }
 .group-card h4 { margin:8px 0 -4px; }
 
+.permission-sections { display:grid; gap:12px; }
+.permission-section { border:1px solid var(--line); border-radius:12px; padding:12px; min-width:0; }
+.permission-section legend { padding:0 7px; color:var(--muted); font-size:12px; font-weight:800; letter-spacing:.04em; text-transform:uppercase; }
+
 .security-check-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:8px; margin:10px 0 16px; }
 .security-check-grid label { display:flex; align-items:center; gap:8px; min-height:38px; padding:9px 10px; border:1px solid var(--line); border-radius:10px; background:var(--panel-2); cursor:pointer; }
 .security-check-grid input { width:17px; height:17px; margin:0; accent-color:var(--accent); }
+.lightnas-dialog[data-group-dialog] { width:min(960px,calc(100vw - 30px)); max-height:90vh; overflow:auto; }
 .membership-policy { display:grid; gap:7px; border:1px solid var(--line); border-radius:12px; padding:12px; margin:14px 0; }
 .membership-policy legend { padding:0 6px; font-weight:750; }
 .membership-policy label { display:flex; align-items:center; gap:8px; margin:0; }

@@ -3,11 +3,24 @@ const qa = (selector, root = document) => [...root.querySelectorAll(selector)];
 const escapeText = value => String(value).replace(/[&<>'"]/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' })[ch]);
 
 const permissionNames = {
+  'overview.view':'View overview',
   'files.read':'Read files', 'files.write':'Write files', 'media.convert':'Convert media',
-  'storage.view':'View storage', 'storage.manage':'Manage storage', 'shares.manage':'Manage shares',
-  'apps.manage':'Manage apps', 'containers.manage':'Manage containers', 'vms.manage':'Manage virtual machines',
-  'network.view':'View networking', 'network.manage':'Manage firewall / Wi-Fi', 'system.view':'View system health'
+  'storage.view':'View storage', 'storage.manage':'Manage storage', 'pools.view':'View pools & datasets', 'shares.view':'View shares', 'shares.manage':'Manage shares',
+  'apps.view':'View App Store', 'apps.manage':'Manage apps', 'containers.view':'View containers', 'containers.manage':'Manage containers', 'containers.console':'Open container terminals',
+  'vms.view':'View virtual machines', 'vms.manage':'Manage virtual machines', 'vms.console':'Open VM consoles',
+  'network.view':'View networking', 'network.manage':'Manage networking', 'firewall.view':'View firewall', 'firewall.manage':'Manage firewall', 'integrations.view':'View integrations', 'integrations.manage':'Manage integrations',
+  'monitoring.view':'View monitoring', 'capabilities.view':'View capabilities', 'system.view':'View system health', 'system.shell':'Open node shell',
+  'backup.manage':'Manage backups & snapshots', 'audit.view':'View audit history',
+  'users.manage':'Manage users & groups', 'smtp.manage':'Manage email / SMTP', 'settings.manage':'Manage settings & security', 'admin.view':'View Admin Center'
 };
+
+const permissionSections = [
+  ['Overview', ['overview.view']],
+  ['Storage & files', ['storage.view','storage.manage','pools.view','files.read','files.write','media.convert','shares.view','shares.manage']],
+  ['Apps & compute', ['apps.view','apps.manage','containers.view','containers.manage','containers.console','vms.view','vms.manage','vms.console']],
+  ['Network', ['network.view','network.manage','firewall.view','firewall.manage','integrations.view','integrations.manage']],
+  ['Administration', ['users.manage','smtp.manage','settings.manage','monitoring.view','capabilities.view','system.view','system.shell','backup.manage','audit.view','admin.view']]
+];
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -21,7 +34,12 @@ async function api(path, options = {}) {
 
 function checkboxes(options, selected = [], prefix = '') {
   const chosen = new Set(selected);
-  return `<div class="security-check-grid">${options.map(value => `<label><input type="checkbox" ${prefix ? `name="${prefix}"` : ''} value="${escapeText(value)}" ${chosen.has(value) ? 'checked' : ''}><span>${escapeText(permissionNames[value] || value)}</span></label>`).join('')}</div>`;
+  const available = new Set(options);
+  const known = new Set(permissionSections.flatMap(([, values]) => values));
+  const sections = permissionSections.map(([title, values]) => [title, values.filter(value => available.has(value))]);
+  const additional = options.filter(value => !known.has(value));
+  if (additional.length) sections.push(['Additional access', additional]);
+  return `<div class="permission-sections">${sections.filter(([, values]) => values.length).map(([title, values]) => `<fieldset class="permission-section"><legend>${escapeText(title)}</legend><div class="security-check-grid">${values.map(value => `<label><input type="checkbox" ${prefix ? `name="${prefix}"` : ''} value="${escapeText(value)}" ${chosen.has(value) ? 'checked' : ''}><span>${escapeText(permissionNames[value] || value)}</span></label>`).join('')}</div></fieldset>`).join('')}</div>`;
 }
 
 function memberCheckboxes(users, selected = []) {
@@ -42,7 +60,7 @@ async function renderGroups() {
   const section = document.createElement('section');
   section.className = 'groups-admin';
   section.innerHTML = `
-    <div class="admin-section-head"><div><span class="eyebrow">GROUP POLICY</span><h2>Groups & inherited permissions</h2><p class="muted">Users receive their direct permissions plus every permission granted by groups they belong to.</p></div><button class="primary" type="button" data-create-group>+ Create group</button></div>
+    <div class="admin-section-head"><div><span class="eyebrow">GROUP POLICY</span><h2>Groups & permissions</h2><p class="muted">Choose exactly which LightNAS pages and actions each group can access, then add members.</p></div><button class="primary" type="button" data-create-group>+ Create group</button></div>
     <div class="group-grid">${groups.map(group => `<article class="panel group-card" data-group-id="${group.id}">
       <div class="volume-title"><div><h3>${escapeText(group.name)}</h3><p>${escapeText(group.description || 'No description')}</p></div><span class="content-badge">${group.members.length} members</span></div>
       <details><summary>Manage group</summary><form data-group-form="${group.id}">
@@ -63,7 +81,8 @@ async function renderGroups() {
       <div class="form-error" role="alert"></div>
       <div class="dialog-actions"><button class="secondary" type="button" data-close-group>Cancel</button><button class="primary" type="submit">Create group</button></div>
     </form></dialog>`;
-  q('.page-head', content)?.insertAdjacentElement('afterend', section);
+  const mount = q('#groups-admin-mount', content);
+  if (mount) mount.replaceWith(section); else q('.page-head', content)?.insertAdjacentElement('afterend', section);
 
   // Add group membership controls to each existing user management form.
   for (const user of users) {
@@ -148,7 +167,7 @@ document.addEventListener('click', async event => {
 
   const deleteGroup = event.target.closest('[data-delete-group]');
   if (deleteGroup) {
-    if (!confirm('Delete this group? Users keep their direct permissions.')) return;
+    if (!confirm('Delete this group? Members will lose all access inherited from it.')) return;
     try { await api(`/api/groups/${deleteGroup.dataset.deleteGroup}`, { method:'DELETE' }); refreshCurrent(); } catch (error) { alert(error.message); }
     return;
   }

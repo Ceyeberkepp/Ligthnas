@@ -31,23 +31,29 @@ test('compute dashboards show operational resource summaries instead of readines
 });
 
 test('node shell, profile pictures, expanded permissions and collapsible navigation are wired end to end', async () => {
-  const [page, app, server, localHost, agent, terminal] = await Promise.all([
+  const [page, app, groups, server, localHost, agent, terminal] = await Promise.all([
     readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
     readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
+    readFile(new URL('../public/admin-security.js', import.meta.url), 'utf8'),
     readFile(new URL('../src/server.mjs', import.meta.url), 'utf8'),
     readFile(new URL('../src/local-host.mjs', import.meta.url), 'utf8'),
     readFile(new URL('../scripts/lightnas-host-agent.py', import.meta.url), 'utf8'),
     readFile(new URL('../public/node-console.js', import.meta.url), 'utf8')
   ]);
-  assert.match(page, /#permissions/);
-  assert.match(page, /#shell/);
+  assert.doesNotMatch(page, /#permissions/);
+  assert.doesNotMatch(page, /#shell/);
+  assert.match(page, /node-shell-button/);
   assert.match(page, /avatar-upload/);
+  assert.match(page, /avatar-initial/);
   assert.match(app, /sidebar-collapsed/);
+  assert.match(groups, /Groups & permissions/);
   assert.match(server, /system\.shell/);
+  assert.match(server, /overview\.view/);
   assert.match(server, /\/api\/profile\/avatar/);
   assert.match(server, /\/api\/console\/node/);
   assert.match(localHost, /localNodeConsoleSocket/);
   assert.match(agent, /def stream_node/);
+  assert.match(agent, /root@\{node_name\}/);
   assert.match(terminal, /api\/console\/node/);
 });
 

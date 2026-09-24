@@ -144,12 +144,14 @@ async function automaticContainerApplication(id, { preferredPort = 0, requestedH
 }
 
 export const PERMISSIONS = Object.freeze([
+  'overview.view',
   'files.read', 'files.write', 'media.convert',
-  'storage.view', 'storage.manage', 'shares.manage',
-  'apps.manage', 'containers.manage', 'vms.manage',
-  'network.view', 'network.manage', 'firewall.manage',
+  'storage.view', 'storage.manage', 'pools.view', 'shares.view', 'shares.manage',
+  'apps.view', 'apps.manage', 'containers.view', 'containers.manage', 'vms.view', 'vms.manage',
+  'network.view', 'network.manage', 'firewall.view', 'firewall.manage', 'integrations.view', 'integrations.manage',
   'containers.console', 'vms.console', 'backup.manage', 'audit.view',
-  'system.view', 'system.shell'
+  'monitoring.view', 'capabilities.view', 'system.view', 'system.shell',
+  'users.manage', 'smtp.manage', 'settings.manage', 'admin.view'
 ]);
 const DEFAULT_USER_PERMISSIONS = Object.freeze(['files.read', 'files.write']);
 
@@ -423,12 +425,14 @@ async function api(req, res, url) {
     return send(res, 200, { enabled: false });
   }
 
-  const ownerOnly = url.pathname === '/api/settings' || url.pathname === '/api/users' || url.pathname.startsWith('/api/users/') ||
-    url.pathname === '/api/groups' || url.pathname.startsWith('/api/groups/') ||
-    url.pathname === '/api/smtp' || url.pathname === '/api/smtp/test' ||
-    url.pathname.startsWith('/api/security/api-tokens') || url.pathname.startsWith('/api/security/webhooks') ||
-    url.pathname.startsWith('/api/security/identity-providers');
-  if (ownerOnly && !requireOwner(res, context)) return;
+  const controlPermission =
+    (url.pathname === '/api/users' || url.pathname.startsWith('/api/users/') || url.pathname === '/api/groups' || url.pathname.startsWith('/api/groups/')) ? 'users.manage' :
+    (url.pathname === '/api/smtp' || url.pathname === '/api/smtp/test') ? 'smtp.manage' :
+    url.pathname === '/api/settings' ? 'settings.manage' :
+    (url.pathname.startsWith('/api/security/api-tokens') || url.pathname.startsWith('/api/security/webhooks') || url.pathname.startsWith('/api/security/identity-providers')) ? 'integrations.manage' : null;
+  if (controlPermission && (!isAdmin && (context.apiToken || !permissions.includes(controlPermission)))) {
+    return send(res, 403, { error: `Permission required: ${controlPermission}.` });
+  }
 
   if (req.method === 'GET' && url.pathname === '/api/smtp') {
     const { password, ...publicConfig } = store.state.smtp || {};
@@ -436,7 +440,7 @@ async function api(req, res, url) {
   }
   if (req.method === 'PUT' && url.pathname === '/api/smtp') {
     const input = await bodyJson(req);
-    if (typeof input.currentPassword !== 'string' || !(await verifyPassword(input.currentPassword, store.state.config.passwordHash))) return send(res, 403, { error: 'Current administrator password is incorrect.' });
+    if (typeof input.currentPassword !== 'string' || !(await verifyPassword(input.currentPassword, account.passwordHash))) return send(res, 403, { error: 'Current account password is incorrect.' });
     const problem = validateSmtp(input);
     if (problem) return send(res, 400, { error: problem });
     store.state.smtp = { host: input.host, port: Number(input.port), security: input.security, from: input.from, username: input.username, password: input.password || store.state.smtp?.password || '' };
@@ -460,7 +464,7 @@ async function api(req, res, url) {
     const input = await bodyJson(req);
     if (!/^[a-zA-Z0-9._-]{3,32}$/.test(input.username || '') || typeof input.password !== 'string' || input.password.length < 10) return send(res, 400, { error: 'Use a 3–32 character username and a password of at least 10 characters.' });
     if (input.username === store.state.config.username || store.state.users.some(user => user.username === input.username)) return send(res, 409, { error: 'Username already exists.' });
-    const user = { username: input.username, passwordHash: await hashPassword(input.password), permissions: normalizePermissions(input.permissions, PERMISSIONS, DEFAULT_USER_PERMISSIONS), createdAt: new Date().toISOString(), totpEnabled: false };
+    const user = { username: input.username, passwordHash: await hashPassword(input.password), permissions: normalizePermissions(input.permissions, PERMISSIONS, []), createdAt: new Date().toISOString(), totpEnabled: false };
     store.state.users.push(user);
     applyUserGroups(input.username, input.groups);
     store.addActivity('user', `User ${input.username} was created.`);
@@ -483,7 +487,7 @@ async function api(req, res, url) {
     const user = store.state.users.find(item => item.username === userName);
     if (!user) return send(res, 404, { error: 'User not found.' });
     const input = await bodyJson(req);
-    if (typeof input.currentPassword !== 'string' || !(await verifyPassword(input.currentPassword, store.state.config.passwordHash))) return send(res, 403, { error: 'Current administrator password is incorrect.' });
+    if (typeof input.currentPassword !== 'string' || !(await verifyPassword(input.currentPassword, account.passwordHash))) return send(res, 403, { error: 'Current account password is incorrect.' });
     let changed = false;
     if (typeof input.disabled === 'boolean') { user.disabled = input.disabled; changed = true; }
     if (typeof input.password === 'string' && input.password) {
@@ -742,10 +746,11 @@ async function api(req, res, url) {
   }
   if (req.method === 'PATCH' && url.pathname === '/api/settings') {
     const input = await bodyJson(req);
-    if (typeof input.currentPassword !== 'string' || !(await verifyPassword(input.currentPassword, store.state.config.passwordHash))) return send(res, 403, { error: 'Current administrator password is incorrect.' });
+    if (typeof input.currentPassword !== 'string' || !(await verifyPassword(input.currentPassword, account.passwordHash))) return send(res, 403, { error: 'Current account password is incorrect.' });
     if (!/^[a-zA-Z0-9][a-zA-Z0-9-]{1,31}$/.test(input.deviceName || '')) return send(res, 400, { error: 'Device name must contain 2–32 letters, numbers, or hyphens.' });
     if (!['UTC', 'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles'].includes(input.timezone)) return send(res, 400, { error: 'Choose a supported time zone.' });
     const changedPassword = Boolean(input.newPassword);
+    if (changedPassword && !isAdmin) return send(res, 403, { error: 'Only the appliance owner can change the owner password.' });
     if (changedPassword && (typeof input.newPassword !== 'string' || input.newPassword.length < 10)) return send(res, 400, { error: 'New password must contain at least 10 characters.' });
     store.state.config.deviceName = input.deviceName;
     store.state.config.timezone = input.timezone;

@@ -39,6 +39,14 @@ test('LightNAS 0.12 setup and owner APIs', async context => {
   assert.ok(overview.appliance.permissions.includes('vms.manage'));
   assert.ok(overview.appliance.permissions.includes('network.manage'));
 
+  response = await apiFetch(`${base}/api/profile/avatar`, {
+    method: 'PUT', headers: { Cookie: cookie, 'Content-Type': 'image/png' }, body: Buffer.from('profile-image')
+  });
+  assert.equal(response.status, 200);
+  response = await apiFetch(`${base}/api/profile/avatar`, { headers: { Cookie: cookie } });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('content-type'), 'image/png');
+
   response = await apiFetch(`${base}/api/users`, {
     method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' },
     body: JSON.stringify({ username: 'reader', [protectedField]: protectedValue })
@@ -56,8 +64,26 @@ test('LightNAS 0.12 setup and owner APIs', async context => {
   response = await apiFetch(`${base}/api/users`, { headers: { Cookie: cookie } });
   const users = await response.json();
   const reader = users.users.find(item => item.username === 'reader');
+  assert.deepEqual(reader.permissions, []);
   assert.ok(reader.effectivePermissions.includes('storage.view'));
   assert.equal(reader.groups[0].id, group.id);
+  assert.ok(users.permissionOptions.includes('overview.view'));
+  assert.ok(users.permissionOptions.includes('system.shell'));
+  assert.ok(users.permissionOptions.includes('users.manage'));
+
+  response = await apiFetch(`${base}/api/groups/${group.id}`, {
+    method: 'PATCH', headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ permissions: ['storage.view', 'users.manage'], members: ['reader'] })
+  });
+  assert.equal(response.status, 200);
+  response = await apiFetch(`${base}/api/login`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: 'reader', [protectedField]: protectedValue })
+  });
+  assert.equal(response.status, 200);
+  const readerCookie = response.headers.get('set-cookie').split(';')[0];
+  response = await apiFetch(`${base}/api/users`, { headers: { Cookie: readerCookie } });
+  assert.equal(response.status, 200);
 
   response = await apiFetch(`${base}/api/security/api-tokens`, {
     method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' },

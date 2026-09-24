@@ -81,8 +81,6 @@
         </details>
         <details class="nav-group"><summary>Administration</summary>
           <a href="#users" data-view="users"><span>◉</span>Users & groups</a>
-          <a href="#permissions" data-view="permissions"><span>⌾</span>Permissions</a>
-          <a href="#shell" data-view="shell"><span>›_</span>Node shell</a>
           <a href="#smtp" data-view="smtp"><span>✉</span>Email / SMTP</a>
           <a href="#settings" data-view="settings"><span>☷</span>Settings & security</a>
           <a href="#monitoring" data-view="monitoring"><span>⌁</span>Monitoring</a>
@@ -98,7 +96,7 @@
 
     <header class="topbar">
       <button id="menu" class="icon-button menu-button" aria-label="Open navigation">☰</button>
-      <div class="top-actions"><button id="theme-toggle" class="icon-button" type="button" aria-label="Change appearance" title="Appearance">◐</button><label class="avatar" id="avatar" title="Upload profile picture">A<input id="avatar-upload" type="file" accept="image/*" hidden></label></div>
+      <div class="top-actions"><button id="node-shell-button" class="secondary shell-button" type="button" title="Open the LightNAS node shell"><span>›_</span> Shell</button><button id="theme-toggle" class="icon-button" type="button" aria-label="Change appearance" title="Appearance">◐</button><label class="avatar" id="avatar" title="Upload profile picture"><span id="avatar-initial">A</span><input id="avatar-upload" type="file" accept="image/*" hidden></label></div>
     </header>
 
     <main id="content" class="content" tabindex="-1"></main>

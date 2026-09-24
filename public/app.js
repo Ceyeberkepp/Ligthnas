@@ -1,4 +1,4 @@
-const state = { overview: null, view: 'home', folder: '', files: null, fileError: null, fileLayout: localStorage.getItem('lightnas-file-layout') === 'grid' ? 'grid' : 'list', runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, smtp: undefined, media: null, network: null };
+const state = { overview: null, view: 'home', folder: '', files: null, fileError: null, fileLayout: localStorage.getItem('lightnas-file-layout') === 'grid' ? 'grid' : 'list', runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, smtp: undefined, media: null, network: null };
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
 const themeChoices = ['system', 'light', 'dark'];
@@ -73,10 +73,10 @@ function canView(view, appliance = state.overview?.appliance) {
   if (appliance.role === 'administrator') return true;
   const allowed = new Set(appliance.permissions || []);
   const required = {
-    home: [], files: ['files.read'], media: ['files.read'], storage: ['storage.view'], pools: ['storage.manage'], shares: ['shares.manage'],
-    apps: ['apps.manage'], containers: ['containers.manage', 'containers.console'], vms: ['vms.manage', 'vms.console'],
-    network: ['network.view'], firewall: ['firewall.manage', 'network.manage'], monitoring: ['system.view'], capabilities: ['system.view'],
-    integrations: ['system.view'], shell: ['system.shell']
+    home: ['overview.view'], files: ['files.read'], media: ['files.read'], storage: ['storage.view'], pools: ['pools.view', 'storage.manage'], shares: ['shares.view', 'shares.manage'],
+    apps: ['apps.view', 'apps.manage'], containers: ['containers.view', 'containers.manage', 'containers.console'], vms: ['vms.view', 'vms.manage', 'vms.console'],
+    network: ['network.view'], firewall: ['firewall.view', 'firewall.manage', 'network.manage'], monitoring: ['monitoring.view', 'system.view'], capabilities: ['capabilities.view', 'system.view'],
+    integrations: ['integrations.view', 'integrations.manage'], users: ['users.manage'], smtp: ['smtp.manage'], settings: ['settings.manage'], admin: ['admin.view']
   }[view];
   return Array.isArray(required) && (!required.length || required.some(permission => allowed.has(permission)));
 }
@@ -88,9 +88,10 @@ async function showConsole() {
   state.overview = await request('/api/overview');
   const { appliance } = state.overview;
   $('#mini-name').textContent = appliance.deviceName;
-  $('#avatar').textContent = appliance.username[0].toUpperCase();
+  $('#avatar-initial').textContent = appliance.username[0].toUpperCase();
   $('#avatar').classList.toggle('has-photo', Boolean(appliance.hasAvatar));
   $('#avatar').style.backgroundImage = appliance.hasAvatar ? `url(/api/profile/avatar?v=${Date.now()})` : '';
+  $('#node-shell-button').classList.toggle('hidden', appliance.role !== 'administrator' && !(appliance.permissions || []).includes('system.shell'));
   $$('[data-view]').forEach(link => link.classList.toggle('hidden', !canView(link.dataset.view, appliance)));
   $$('.nav-group').forEach(group => group.classList.toggle('hidden', !group.querySelector('[data-view]:not(.hidden)')));
   render(location.hash.slice(1) || 'home');
@@ -158,20 +159,18 @@ async function loadSpaces() {
 }
 
 async function loadUsers() {
-  try { state.users = (await request('/api/users')).users; if (['users', 'permissions'].includes(state.view)) render(state.view); } catch (error) { toast(error.message); }
+  try { const data = await request('/api/users'); state.users = data.users; state.groups = data.groups || []; if (state.view === 'users') render(state.view); } catch (error) { toast(error.message); }
 }
 
 function usersView() {
-  return `${pageHead('Administrators & users', 'Local accounts for the LightNAS browser; Linux and SMB accounts are separate.')}
-    <article class="panel"><h2>Administrator</h2><p>${escapeHtml(state.overview.appliance.username)} · appliance owner</p></article>
-    <form id="user-form" class="panel creation-form"><h2>Create local user</h2><p class="muted">Users can browse, upload and delete files. Only the appliance administrator manages settings and runtimes.</p><label>Username<input name="username" pattern="[a-zA-Z0-9._-]{3,32}" required></label><label>Password<input name="password" type="password" minlength="10" autocomplete="new-password" required></label><button class="primary" type="submit">Create user</button><div class="form-error" role="alert"></div></form>
-    <h2>Users</h2><div class="storage-list">${state.users?.map(user => `<article class="storage-row"><div><h3>${escapeHtml(user.username)}</h3><p>${user.disabled ? 'Disabled' : 'Active'}</p></div><details class="user-manager"><summary>Manage account</summary><form data-manage-user="${escapeHtml(user.username)}"><label>Administrator password<input name="currentPassword" type="password" autocomplete="current-password" required></label><label>New user password<input name="password" type="password" minlength="10" autocomplete="new-password" placeholder="At least 10 characters"></label><div class="head-actions"><button class="secondary" type="submit" value="password">Reset password</button><button class="secondary" type="submit" value="${user.disabled ? 'enable' : 'disable'}">${user.disabled ? 'Enable' : 'Disable'}</button><button class="secondary" type="button" data-remove-user="${escapeHtml(user.username)}">Remove</button></div><div class="form-error" role="alert"></div></form></details></article>`).join('') || '<div class="empty"><p>No local users yet.</p></div>'}</div>`;
-}
-
-function permissionsView() {
-  return `${pageHead('Permissions', 'Grant detailed storage, compute, network, console, backup, and audit access.', '<button class="secondary" data-view-link="users">Manage accounts</button>')}
-    <div class="module-note"><b>Least privilege:</b> Expand an account below, select only the capabilities it needs, enter the administrator password, and save.</div>
-    <div class="storage-list">${state.users?.map(user => `<article class="storage-row"><div><h3>${escapeHtml(user.username)}</h3><p>${user.disabled ? 'Disabled' : 'Active'} · ${(user.effectivePermissions || user.permissions || []).length} effective permissions</p></div><details class="user-manager"><summary>Edit permissions</summary><form data-manage-user="${escapeHtml(user.username)}"><label>Administrator password<input name="currentPassword" type="password" autocomplete="current-password" required></label><div class="form-error" role="alert"></div></form></details></article>`).join('') || '<div class="empty"><p>Create a local user before assigning permissions.</p></div>'}</div>`;
+  const groupChoices = state.groups?.map(group => `<label><input type="checkbox" name="groups" value="${escapeHtml(group.id)}"> <span><b>${escapeHtml(group.name)}</b><small>${escapeHtml(group.description || 'Group policy')}</small></span></label>`).join('') || '<p class="muted">Create a group below, then assign users to it.</p>';
+  return `${pageHead('Users & groups', 'Create local accounts and assign all access through reusable group policies.')}
+    <section class="identity-summary"><article class="panel identity-stat"><span class="identity-icon">A</span><div><b>${escapeHtml(state.overview.appliance.username)}</b><small>Appliance owner · full access</small></div></article><article class="panel identity-stat"><strong>${state.users?.length || 0}</strong><div><b>Local users</b><small>${state.groups?.length || 0} permission groups</small></div></article></section>
+    <div id="groups-admin-mount"><div class="panel groups-loading">Loading group policies…</div></div>
+    <section class="identity-layout">
+      <form id="user-form" class="panel user-create-card"><span class="eyebrow">NEW ACCOUNT</span><h2>Create local user</h2><p class="muted">Users receive access from the groups selected here. Permissions are edited on the group, not on individual accounts.</p><div class="identity-form-grid"><label>Username<input name="username" pattern="[a-zA-Z0-9._-]{3,32}" required></label><label>Password<input name="password" type="password" minlength="10" autocomplete="new-password" required></label></div><fieldset class="group-choice-list"><legend>Group membership</legend>${groupChoices}</fieldset><button class="primary" type="submit">Create user</button><div class="form-error" role="alert"></div></form>
+      <section class="user-directory"><div class="section-heading"><div><span class="eyebrow">LOCAL ACCOUNTS</span><h2>Users</h2></div><span class="content-badge">${state.users?.length || 0}</span></div><div class="user-card-list">${state.users?.map(user => `<article class="panel user-card"><div class="user-card-head"><span class="user-avatar">${escapeHtml(user.username[0].toUpperCase())}</span><div><h3>${escapeHtml(user.username)}</h3><p>${user.disabled ? 'Disabled' : 'Active'} · ${(user.groups || []).map(group => escapeHtml(group.name)).join(', ') || 'No group'}</p></div><span class="volume-state ${user.disabled ? 'readonly' : 'writable'}">${user.disabled ? 'DISABLED' : 'ACTIVE'}</span></div><details class="user-manager"><summary>Manage account & groups</summary><form data-manage-user="${escapeHtml(user.username)}"><label>Current account password<input name="currentPassword" type="password" autocomplete="current-password" required></label><label>New user password<input name="password" type="password" minlength="10" autocomplete="new-password" placeholder="At least 10 characters"></label><div class="head-actions"><button class="secondary" type="submit" value="password">Reset password</button><button class="secondary" type="submit" value="${user.disabled ? 'enable' : 'disable'}">${user.disabled ? 'Enable' : 'Disable'}</button><button class="secondary danger-button" type="button" data-remove-user="${escapeHtml(user.username)}">Remove</button></div><div class="form-error" role="alert"></div></form></details></article>`).join('') || '<div class="empty"><p>No local users yet.</p></div>'}</div></section>
+    </section>`;
 }
 
 async function loadSmtp() {
@@ -339,13 +338,13 @@ function capabilitiesView() {
 function settingsView() {
   const { appliance } = state.overview;
   const zones = [['America/New_York', 'Eastern Time'], ['America/Chicago', 'Central Time'], ['America/Denver', 'Mountain Time'], ['America/Los_Angeles', 'Pacific Time'], ['UTC', 'UTC']];
-  return `${pageHead('Appliance settings', 'Update your LightNAS administrator account and display name.')}
+  return `${pageHead('Appliance settings', 'Update the LightNAS device name, time zone, and account security.')}
     <form id="settings-form" class="panel settings-form">
-      <h2>Administrator</h2><p class="muted">Signed in as ${escapeHtml(appliance.username)}. These settings apply to LightNAS only, not the Linux root account.</p>
+      <h2>Appliance identity</h2><p class="muted">Signed in as ${escapeHtml(appliance.username)}. These settings apply to LightNAS only, not the Linux root account.</p>
       <label>Device name<input name="deviceName" value="${escapeHtml(appliance.deviceName)}" required minlength="2" maxlength="32" autocomplete="off"></label>
       <label>Display time zone<select name="timezone">${zones.map(([value, label]) => `<option value="${value}" ${appliance.timezone === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
       <label>Current password<input name="currentPassword" type="password" required autocomplete="current-password"></label>
-      <label>New password (optional)<input name="newPassword" type="password" minlength="10" autocomplete="new-password" placeholder="Leave blank to keep current password"></label>
+      ${appliance.role === 'administrator' ? '<label>New owner password (optional)<input name="newPassword" type="password" minlength="10" autocomplete="new-password" placeholder="Leave blank to keep current password"></label>' : ''}
       <button class="primary" type="submit">Save settings</button>
       <div class="form-error" role="alert"></div>
     </form>`;
@@ -366,7 +365,7 @@ function adminView() {
       </div>
     </section>
     <section class="admin-tool-groups">
-      ${[['Identity & access',[['users','Users'],['permissions','Permissions'],['settings','Security settings']]],['Infrastructure',[['pools','Storage'],['network','Networking'],['firewall','Firewall']]],['Compute & operations',[['apps','Applications'],['containers','Containers'],['vms','Virtual machines'],['shell','Node shell'],['monitoring','Monitoring']]]].map(([title, tools]) => `<div class="admin-group"><h2>${title}</h2><div class="admin-group-grid">${tools.map(([view,label]) => `<button class="admin-tool-card" type="button" data-view-link="${view}"><b>${label}</b><span>Open ${label.toLowerCase()}</span></button>`).join('')}</div></div>`).join('')}
+      ${[['Identity & access',[['users','Users & groups'],['settings','Security settings']]],['Infrastructure',[['pools','Storage'],['network','Networking'],['firewall','Firewall']]],['Compute & operations',[['apps','Applications'],['containers','Containers'],['vms','Virtual machines'],['monitoring','Monitoring']]]].map(([title, tools]) => `<div class="admin-group"><h2>${title}</h2><div class="admin-group-grid">${tools.map(([view,label]) => `<button class="admin-tool-card" type="button" data-view-link="${view}"><b>${label}</b><span>Open ${label.toLowerCase()}</span></button>`).join('')}</div></div>`).join('')}
     </section>`;
 }
 
@@ -486,17 +485,17 @@ function integrationsView() {
 
 function render(view) {
   if (view === 'media') view = 'files';
-  state.view = ['home', 'storage', 'pools', 'files', 'users', 'permissions', 'smtp', 'admin', 'shares', 'capabilities', 'apps', 'containers', 'vms', 'shell', 'monitoring', 'settings', 'network', 'firewall', 'integrations'].includes(view) ? view : 'home';
-  if (!canView(state.view)) state.view = 'home';
+  state.view = ['home', 'storage', 'pools', 'files', 'users', 'smtp', 'admin', 'shares', 'capabilities', 'apps', 'containers', 'vms', 'monitoring', 'settings', 'network', 'firewall', 'integrations'].includes(view) ? view : 'home';
+  if (!canView(state.view)) state.view = $$('[data-view]', $('#nav')).find(link => canView(link.dataset.view))?.dataset.view || 'home';
   const content = $('#content');
-  content.innerHTML = state.view === 'home' ? homeView() : state.view === 'storage' ? storageView() : state.view === 'pools' ? poolsView() : state.view === 'files' ? filesView() : state.view === 'media' ? mediaView() : state.view === 'users' ? usersView() : state.view === 'permissions' ? permissionsView() : state.view === 'smtp' ? smtpView() : state.view === 'admin' ? adminView() : state.view === 'shares' ? sharesView() : state.view === 'containers' ? containersView() : state.view === 'vms' ? vmsView() : state.view === 'shell' ? shellView() : state.view === 'settings' ? settingsView() : state.view === 'capabilities' ? capabilitiesView() : state.view === 'network' ? networkView() : state.view === 'firewall' ? firewallView() : state.view === 'integrations' ? integrationsView() : moduleView(state.view);
+  content.innerHTML = state.view === 'home' ? homeView() : state.view === 'storage' ? storageView() : state.view === 'pools' ? poolsView() : state.view === 'files' ? filesView() : state.view === 'media' ? mediaView() : state.view === 'users' ? usersView() : state.view === 'smtp' ? smtpView() : state.view === 'admin' ? adminView() : state.view === 'shares' ? sharesView() : state.view === 'containers' ? containersView() : state.view === 'vms' ? vmsView() : state.view === 'settings' ? settingsView() : state.view === 'capabilities' ? capabilitiesView() : state.view === 'network' ? networkView() : state.view === 'firewall' ? firewallView() : state.view === 'integrations' ? integrationsView() : moduleView(state.view);
   $$('[data-view]').forEach(link => link.classList.toggle('active', link.dataset.view === state.view));
   $(`[data-view="${state.view}"]`, $('#nav'))?.closest('details')?.setAttribute('open', '');
   content.focus({ preventScroll: true });
   bindViewActions();
   if (state.view === 'files' && state.files === null) loadFiles();
   if (['pools', 'storage'].includes(state.view) && state.spaces === null) loadSpaces();
-  if (['users', 'permissions'].includes(state.view) && state.users === null) loadUsers();
+  if (state.view === 'users' && state.users === null) loadUsers();
   if (state.view === 'smtp' && state.smtp === undefined) loadSmtp();
   if (['files', 'media'].includes(state.view) && state.media === null) loadMedia();
   if (['network', 'firewall'].includes(state.view) && !state.network) loadNetwork();
@@ -621,7 +620,9 @@ function bindViewActions() {
   $('#user-form', $('#content'))?.addEventListener('submit', async event => {
     event.preventDefault();
     const form = event.currentTarget;
-    try { await request('/api/users', { method: 'POST', body: JSON.stringify(Object.fromEntries(new FormData(form))) }); await loadUsers(); toast('User created.'); }
+    const data = Object.fromEntries(new FormData(form));
+    data.groups = $$('input[name="groups"]:checked', form).map(input => input.value);
+    try { await request('/api/users', { method: 'POST', body: JSON.stringify(data) }); await loadUsers(); toast('User created.'); }
     catch (error) { $('.form-error', form).textContent = error.message; }
   });
   $$('[data-remove-user]', $('#content')).forEach(button => button.addEventListener('click', async () => {
@@ -785,12 +786,21 @@ $('#setup-form').addEventListener('submit', event => { event.preventDefault(); s
 $('#login-form').addEventListener('submit', event => { event.preventDefault(); submitAuth(event.currentTarget, '/api/login'); });
 $('#logout').addEventListener('click', async () => { await request('/api/logout', { method: 'POST' }); showAuth('login'); });
 const consoleShell = $('#console');
-if (localStorage.getItem('lightnas-sidebar-collapsed') === '1' && matchMedia('(min-width: 901px)').matches) consoleShell.classList.add('sidebar-collapsed');
+function syncCollapsedSidebar() {
+  if (!consoleShell.classList.contains('sidebar-collapsed')) return;
+  $$('.nav-group', $('.sidebar')).forEach(group => group.setAttribute('open', ''));
+}
+if (localStorage.getItem('lightnas-sidebar-collapsed') === '1' && matchMedia('(min-width: 901px)').matches) {
+  consoleShell.classList.add('sidebar-collapsed');
+  syncCollapsedSidebar();
+}
 $('#menu').addEventListener('click', () => {
   if (matchMedia('(max-width: 900px)').matches) return $('.sidebar').classList.toggle('open');
   consoleShell.classList.toggle('sidebar-collapsed');
+  syncCollapsedSidebar();
   localStorage.setItem('lightnas-sidebar-collapsed', consoleShell.classList.contains('sidebar-collapsed') ? '1' : '0');
 });
+$('#node-shell-button').addEventListener('click', () => window.open(`/node-console.html?v=${Date.now()}`, '_blank', 'noopener,width=1280,height=820'));
 $('#avatar-upload').addEventListener('change', async event => {
   const file = event.target.files?.[0];
   if (!file) return;

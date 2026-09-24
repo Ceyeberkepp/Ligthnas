@@ -55,9 +55,10 @@ assert.match(hostAgent, /"aarch64": "arm64"/);
 assert.match(hostAgent, /"riscv64": "riscv64"/);
 assert.match(hostAgent, /ports\.ubuntu\.com\/ubuntu-ports/);
 
-// Large NAS/ISO transfers must stay streaming and above the historical 1 GiB
-// limit. Storage images must preserve Content-Range resume support.
-assert.match(files, /LIGHTNAS_FILE_UPLOAD_MAX_BYTES \|\| 50 \* 1024 \*\* 3/);
+// General NAS files stream directly to their destination with no application
+// size ceiling. Storage images retain their separate resumable safety limit.
+assert.match(files, /await pipeline\(req, file\.createWriteStream\(\)\)/);
+assert.doesNotMatch(files, /LIGHTNAS_FILE_UPLOAD_MAX_BYTES/);
 assert.doesNotMatch(files, /1 GB upload limit/);
 assert.match(storagePools, /LIGHTNAS_STORAGE_UPLOAD_MAX_BYTES \|\| 50 \* 1024 \*\* 3/);
 assert.match(storagePools, /parseContentRange/);
