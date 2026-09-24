@@ -12,7 +12,7 @@ import { listFiles, createFolder, uploadFile, downloadFile, downloadEntry, delet
 import { thumbnailFor } from './thumbnails.mjs';
 import { catalog, runtimeInventory, installCatalogApp, manageCatalogApp, createContainer, createVm } from './runtimes-next.mjs';
 import { proxmoxConsoleSocket, proxmoxUpdateStorage, proxmoxCleanDisk } from './proxmox.mjs';
-import { localContainerSummary, localContainerInventory, localManageContainer, localContainerConsoleSocket, localContainerCommand, localVmConsoleSocket, localNetworkInventory, localNetworkAction, localApplianceHealth, localApplianceRepair } from './local-host.mjs';
+import { localContainerSummary, localContainerInventory, localManageContainer, localContainerConsoleSocket, localContainerCommand, localVmConsoleSocket, localNodeConsoleSocket, localNetworkInventory, localNetworkAction, localApplianceHealth, localApplianceRepair } from './local-host.mjs';
 import { validateSmtp, sendSmtpTest } from './mailer.mjs';
 import { mediaAvailable, convertMedia } from './media.mjs';
 import { createDataset, updateDataset } from './zfs.mjs';
@@ -141,12 +141,15 @@ async function automaticContainerApplication(id, { preferredPort = 0, requestedH
 }
 
 export const PERMISSIONS = Object.freeze([
-  'files.read', 'files.write', 'media.convert',
+  'files.read', 'files.write', 'files.download', 'files.delete', 'media.convert',
   'storage.view', 'storage.manage', 'shares.manage',
   'apps.manage', 'containers.manage', 'vms.manage',
-  'network.view', 'network.manage', 'system.view'
+  'network.view', 'network.manage', 'firewall.manage',
+  'monitoring.view', 'system.view',
+  'users.manage', 'groups.manage', 'security.manage',
+  'shell.access'
 ]);
-const DEFAULT_USER_PERMISSIONS = Object.freeze(['files.read', 'files.write']);
+const DEFAULT_USER_PERMISSIONS = Object.freeze(['files.read', 'files.write', 'files.download', 'files.delete']);
 
 store.setActivityListener(async event => {
   await deliverEvent(store.state, event);
@@ -1071,10 +1074,13 @@ async function api(req, res, url) {
       if (!requirePermission(res, permissions, 'files.read')) return;
       return send(res, 200, { path, entries: await listFiles(path) });
     }
+    if (req.method === 'DELETE') {
+      if (!requireAnyPermission(res, permissions, ['files.delete', 'files.write'])) return;
+      await deleteEntry(path); store.addActivity('file', `File entry ${path} was deleted.`); await store.save(); return send(res, 200, { ok: true });
+    }
     if (!requirePermission(res, permissions, 'files.write')) return;
     if (req.method === 'POST') { await createFolder(path); store.addActivity('file', `Folder ${path} was created.`); await store.save(); return send(res, 201, { ok: true }); }
     if (req.method === 'PUT') { await uploadFile(path, req); store.addActivity('file', `File ${path} was uploaded.`); await store.save(); return send(res, 201, { ok: true }); }
-    if (req.method === 'DELETE') { await deleteEntry(path); store.addActivity('file', `File entry ${path} was deleted.`); await store.save(); return send(res, 200, { ok: true }); }
   }
   if (req.method === 'GET' && url.pathname === '/api/files/thumbnail') {
     if (!requirePermission(res, permissions, 'files.read')) return;
@@ -1084,7 +1090,7 @@ async function api(req, res, url) {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/files/archive') {
-    if (!requirePermission(res, permissions, 'files.read')) return;
+    if (!requireAnyPermission(res, permissions, ['files.download', 'files.read'])) return;
     const relative = url.searchParams.get('path') || '';
     const data = await downloadEntry(relative);
     if (!data.directory) return send(res, 400, { error: 'Select a folder to download.' });
@@ -1135,7 +1141,7 @@ async function api(req, res, url) {
     return ffmpeg.stdout.pipe(res);
   }
   if (req.method === 'GET' && url.pathname === '/api/files/download') {
-    if (!requirePermission(res, permissions, 'files.read')) return;
+    if (!requireAnyPermission(res, permissions, ['files.download', 'files.read'])) return;
     const path = url.searchParams.get('path') || '';
     const filename = path.split('/').pop() || 'file';
     const data = await downloadFile(path);
@@ -1287,13 +1293,20 @@ export function createServer() {
       const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
       const vm = url.pathname.match(/^\/api\/console\/vm\/([A-Za-z][A-Za-z0-9-]{1,39}|[1-9][0-9]{1,5})$/);
       const container = url.pathname.match(/^\/api\/console\/container\/([A-Za-z][A-Za-z0-9-]{1,39})$/);
-      if (!vm && !container) return rejectUpgrade(socket, 403, 'Unknown console endpoint.');
+      const nodeShell = url.pathname === '/api/console/node';
+      if (!vm && !container && !nodeShell) return rejectUpgrade(socket, 403, 'Unknown console endpoint.');
       if (vm && !context.permissions.includes('vms.manage')) return rejectUpgrade(socket, 403, 'VM management permission required.');
       if (container && !context.permissions.includes('containers.manage')) return rejectUpgrade(socket, 403, 'Container management permission required.');
+      // A host shell is equivalent to root access to the NAS. It is therefore
+      // intentionally limited to the interactive appliance owner session and
+      // cannot be delegated to an API token or ordinary user.
+      if (nodeShell && (!context.isAdmin || context.apiToken)) return rejectUpgrade(socket, 403, 'Appliance owner access required for the node shell.');
       const useExternalProxmox = process.env.LIGHTNAS_ENABLE_PROXMOX_PROVIDER === '1';
-      const backend = vm
-        ? (useExternalProxmox && /^[0-9]+$/.test(vm[1]) ? await proxmoxConsoleSocket(Number(vm[1])) : await localVmConsoleSocket(vm[1]))
-        : await localContainerConsoleSocket(container[1]);
+      const backend = nodeShell
+        ? await localNodeConsoleSocket()
+        : vm
+          ? (useExternalProxmox && /^[0-9]+$/.test(vm[1]) ? await proxmoxConsoleSocket(Number(vm[1])) : await localVmConsoleSocket(vm[1]))
+          : await localContainerConsoleSocket(container[1]);
       wss.handleUpgrade(req, socket, head, ws => bridgeWebSocketToSocket(ws, backend));
     } catch (error) {
       if (!socket.destroyed) rejectUpgrade(socket, error.status === 401 ? 401 : 403, error.message || 'Console unavailable.');
