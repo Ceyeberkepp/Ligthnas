@@ -143,7 +143,7 @@ async function loadSpaces() {
 }
 
 async function loadUsers() {
-  try { state.users = (await request('/api/users')).users; if (state.view === 'users') render('users'); } catch (error) { toast(error.message); }
+  try { state.users = (await request('/api/users')).users; if (['users', 'permissions'].includes(state.view)) render(state.view); } catch (error) { toast(error.message); }
 }
 
 function usersView() {
@@ -151,6 +151,27 @@ function usersView() {
     <article class="panel"><h2>Administrator</h2><p>${escapeHtml(state.overview.appliance.username)} · appliance owner</p></article>
     <form id="user-form" class="panel creation-form"><h2>Create local user</h2><p class="muted">Users can browse, upload and delete files. Only the appliance administrator manages settings and runtimes.</p><label>Username<input name="username" pattern="[a-zA-Z0-9._-]{3,32}" required></label><label>Password<input name="password" type="password" minlength="10" autocomplete="new-password" required></label><button class="primary" type="submit">Create user</button><div class="form-error" role="alert"></div></form>
     <h2>Users</h2><div class="storage-list">${state.users?.map(user => `<article class="storage-row"><div><h3>${escapeHtml(user.username)}</h3><p>${user.disabled ? 'Disabled' : 'Active'}</p></div><details class="user-manager"><summary>Manage account</summary><form data-manage-user="${escapeHtml(user.username)}"><label>Administrator password<input name="currentPassword" type="password" autocomplete="current-password" required></label><label>New user password<input name="password" type="password" minlength="10" autocomplete="new-password" placeholder="At least 10 characters"></label><div class="head-actions"><button class="secondary" type="submit" value="password">Reset password</button><button class="secondary" type="submit" value="${user.disabled ? 'enable' : 'disable'}">${user.disabled ? 'Enable' : 'Disable'}</button><button class="secondary" type="button" data-remove-user="${escapeHtml(user.username)}">Remove</button></div><div class="form-error" role="alert"></div></form></details></article>`).join('') || '<div class="empty"><p>No local users yet.</p></div>'}</div>`;
+}
+
+function permissionsView() {
+  return `${pageHead('Permissions', 'Manage direct access scopes, groups, and inherited policy separately from account lifecycle.')}
+    <section class="panel permission-intro">
+      <span class="eyebrow">ACCESS CONTROL</span>
+      <h2>Fine-grained LightNAS permissions</h2>
+      <p class="muted">Policies cover files, downloads/deletion, storage, shares, apps, containers, virtual machines, networking, firewall, monitoring, users/groups, security, and shell access. The appliance owner always retains full access.</p>
+    </section>
+    <div data-permissions-root><div class="empty"><p>Loading permission policies…</p></div></div>`;
+}
+
+function shellView() {
+  return `${pageHead('Node Shell', 'Open an interactive root terminal for the LightNAS operating system.')}
+    <section class="panel node-shell-launch">
+      <span class="eyebrow">PRIVILEGED NODE ACCESS</span>
+      <h2>LightNAS root shell</h2>
+      <p class="muted">This is a real root terminal on the LightNAS node. Commands can change networking, storage, services, packages, and the operating system. Access is restricted to the interactive appliance owner session.</p>
+      <div class="module-note"><b>Use with care.</b> A command entered here can disconnect the web interface or damage data just like an SSH root session.</div>
+      <div class="head-actions"><button class="primary" type="button" data-open-node-shell>Open node shell</button></div>
+    </section>`;
 }
 
 async function loadSmtp() {
@@ -472,17 +493,17 @@ function integrationsView() {
 
 function render(view) {
   if (view === 'media') view = 'files';
-  state.view = ['home', 'storage', 'pools', 'files', 'users', 'smtp', 'admin', 'shares', 'capabilities', 'apps', 'containers', 'vms', 'monitoring', 'settings', 'network', 'firewall', 'integrations'].includes(view) ? view : 'home';
+  state.view = ['home', 'storage', 'pools', 'files', 'users', 'permissions', 'shell', 'smtp', 'admin', 'shares', 'capabilities', 'apps', 'containers', 'vms', 'monitoring', 'settings', 'network', 'firewall', 'integrations'].includes(view) ? view : 'home';
   if (state.overview.appliance.role !== 'administrator' && !['home', 'files', 'media'].includes(state.view)) state.view = 'home';
   const content = $('#content');
-  content.innerHTML = state.view === 'home' ? homeView() : state.view === 'storage' ? storageView() : state.view === 'pools' ? poolsView() : state.view === 'files' ? filesView() : state.view === 'media' ? mediaView() : state.view === 'users' ? usersView() : state.view === 'smtp' ? smtpView() : state.view === 'admin' ? adminView() : state.view === 'shares' ? sharesView() : state.view === 'containers' ? containersView() : state.view === 'vms' ? vmsView() : state.view === 'settings' ? settingsView() : state.view === 'capabilities' ? capabilitiesView() : state.view === 'network' ? networkView() : state.view === 'firewall' ? firewallView() : state.view === 'integrations' ? integrationsView() : moduleView(state.view);
+  content.innerHTML = state.view === 'home' ? homeView() : state.view === 'storage' ? storageView() : state.view === 'pools' ? poolsView() : state.view === 'files' ? filesView() : state.view === 'media' ? mediaView() : state.view === 'users' ? usersView() : state.view === 'permissions' ? permissionsView() : state.view === 'shell' ? shellView() : state.view === 'smtp' ? smtpView() : state.view === 'admin' ? adminView() : state.view === 'shares' ? sharesView() : state.view === 'containers' ? containersView() : state.view === 'vms' ? vmsView() : state.view === 'settings' ? settingsView() : state.view === 'capabilities' ? capabilitiesView() : state.view === 'network' ? networkView() : state.view === 'firewall' ? firewallView() : state.view === 'integrations' ? integrationsView() : moduleView(state.view);
   $$('[data-view]').forEach(link => link.classList.toggle('active', link.dataset.view === state.view));
   $(`[data-view="${state.view}"]`, $('#nav'))?.closest('details')?.setAttribute('open', '');
   content.focus({ preventScroll: true });
   bindViewActions();
   if (state.view === 'files' && state.files === null) loadFiles();
   if (['pools', 'storage'].includes(state.view) && state.spaces === null) loadSpaces();
-  if (state.view === 'users' && state.users === null) loadUsers();
+  if (['users', 'permissions'].includes(state.view) && state.users === null) loadUsers();
   if (state.view === 'smtp' && state.smtp === undefined) loadSmtp();
   if (['files', 'media'].includes(state.view) && state.media === null) loadMedia();
   if (['network', 'firewall'].includes(state.view) && !state.network) loadNetwork();
@@ -502,7 +523,10 @@ function bindViewActions() {
       (item.healthy ? 'writable' : 'readonly') + '">' + (item.healthy ? 'HEALTHY' : 'NEEDS ATTENTION') +
       '</span></div>').join('') + '</div>';
   };
-  $('[data-appliance-health]', $('#content'))?.addEventListener('click', async event => {
+  $('[data-open-node-shell]', $('#content'))?.addEventListener('click', () => {
+    window.open(`/node-shell.html?v=${Date.now()}`, '_blank', 'noopener,width=1200,height=800');
+  });
+    $('[data-appliance-health]', $('#content'))?.addEventListener('click', async event => {
     const button = event.currentTarget; button.disabled = true; button.textContent = 'Checking…';
     try { const result = await request('/api/appliance/health'); renderHealth(result); toast(result.healthy ? 'LightNAS appliance is healthy.' : 'Some appliance services need attention.'); }
     catch (error) { toast(error.message); }
@@ -771,7 +795,21 @@ async function submitAuth(form, path) {
 $('#setup-form').addEventListener('submit', event => { event.preventDefault(); submitAuth(event.currentTarget, '/api/setup'); });
 $('#login-form').addEventListener('submit', event => { event.preventDefault(); submitAuth(event.currentTarget, '/api/login'); });
 $('#logout').addEventListener('click', async () => { await request('/api/logout', { method: 'POST' }); showAuth('login'); });
-$('#menu').addEventListener('click', () => $('.sidebar').classList.toggle('open'));
+function applySidebarPreference() {
+  const collapsed = localStorage.getItem('lightnas-sidebar-collapsed') === '1';
+  $('#console').classList.toggle('sidebar-collapsed', collapsed && innerWidth > 760);
+}
+applySidebarPreference();
+$('#menu').addEventListener('click', () => {
+  if (innerWidth <= 760) {
+    $('.sidebar').classList.toggle('open');
+    return;
+  }
+  const collapsed = !$('#console').classList.contains('sidebar-collapsed');
+  $('#console').classList.toggle('sidebar-collapsed', collapsed);
+  localStorage.setItem('lightnas-sidebar-collapsed', collapsed ? '1' : '0');
+});
+addEventListener('resize', applySidebarPreference);
 $('#theme-toggle').addEventListener('click', () => { theme = themeChoices[(themeChoices.indexOf(theme) + 1) % themeChoices.length]; localStorage.setItem('lightnas-theme', theme); applyTheme(); toast(`Appearance: ${theme}`); });
 $('#mobile-more').addEventListener('click', () => $('.sidebar').classList.add('open'));
 $$('[data-view]').forEach(link => link.addEventListener('click', () => $('.sidebar').classList.remove('open')));
