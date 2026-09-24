@@ -34,7 +34,8 @@
     "genericFileDefaultMaxGiB": 0,
     "storageImageDefaultMaxGiB": 0,
     "isoChunkMiB": 64,
-    "unlimitedByDefault": true
+    "unlimitedByDefault": true,
+    "templateDefaultMaxGiB": 0
   },
   "notes": [
     "Only amd64 is currently release-qualified as a complete LightNAS control-plane build.",
