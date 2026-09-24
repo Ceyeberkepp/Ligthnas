@@ -176,11 +176,6 @@ function wizardOption(value, label, selected = false) {
   return `<option value="${dialogEsc(value)}" ${selected ? 'selected' : ''}>${dialogEsc(label)}</option>`;
 }
 
-function looksLikeWindowsMedia(value) {
-  const text = String(value || '').toLowerCase();
-  return /(?:windows|win[-_. ]?(?:10|11)|win10|win11|windows10|windows11|windows[_ -]?server)/i.test(text);
-}
-
 async function showRuntimeWizard(kind) {
   const isContainer = kind === 'containers';
   const loading = openProgressDialog(isContainer ? 'Opening container wizard' : 'Opening VM wizard', 'Loading live storage, image, network, and runtime choices…');
@@ -262,9 +257,8 @@ async function showRuntimeWizard(kind) {
             <label>MAC address (optional)<input name="macAddress" placeholder="02:00:00:00:00:10" pattern="[A-Fa-f0-9]{2}(:[A-Fa-f0-9]{2}){5}"></label>
           ` : `
             <label>Firmware<select name="firmware"><option value="bios">BIOS / legacy</option><option value="uefi">UEFI</option></select></label>
-            <label>Disk controller<select name="diskBus"><option value="scsi">VirtIO SCSI · Linux/performance</option><option value="virtio">VirtIO block · Linux/performance</option><option value="sata">SATA / AHCI · Windows compatible</option></select></label>
-            <label>Network adapter<select name="networkModel"><option value="virtio">VirtIO · Linux/performance</option><option value="e1000">Intel E1000 · Windows compatible</option><option value="rtl8139">Realtek RTL8139</option></select></label>
-            <p class="module-note" data-vm-guest-profile>LightNAS automatically selects Windows-compatible hardware when a Windows installer ISO is selected.</p>
+            <label>Disk controller<select name="diskBus"><option value="sata">SATA · works without extra installer drivers</option><option value="scsi">VirtIO SCSI · requires guest driver</option><option value="virtio">VirtIO block · requires guest driver</option></select></label>
+            <label>Network adapter<select name="networkModel"><option value="e1000">Intel E1000 · works without extra installer drivers</option><option value="virtio">VirtIO · requires guest driver</option><option value="rtl8139">Realtek RTL8139</option></select></label>
           `}
           <label class="wizard-check"><input name="startOnBoot" type="checkbox" checked> <span>Start automatically when LightNAS boots</span></label>
         </div>
@@ -330,22 +324,6 @@ async function showRuntimeWizard(kind) {
     }
     return true;
   };
-
-  if (!isContainer && form.elements.iso) {
-    const applyVmGuestProfile = () => {
-      const selected = images.find(item => item.value === form.elements.iso.value);
-      const windows = looksLikeWindowsMedia(selected?.label || form.elements.iso.value);
-      form.elements.firmware.value = windows ? 'uefi' : 'bios';
-      form.elements.diskBus.value = windows ? 'sata' : 'scsi';
-      form.elements.networkModel.value = windows ? 'e1000' : 'virtio';
-      const note = form.querySelector('[data-vm-guest-profile]');
-      if (note) note.textContent = windows
-        ? 'Windows installer detected: LightNAS selected UEFI, SATA/AHCI storage, and Intel E1000 networking so Setup works without VirtIO drivers.'
-        : 'Linux/generic installer profile: LightNAS uses VirtIO hardware for better performance.';
-    };
-    form.elements.iso.addEventListener('change', applyVmGuestProfile);
-    applyVmGuestProfile();
-  }
 
   dialog.querySelectorAll('[data-dialog-close]').forEach(button => button.addEventListener('click', () => dialog.close()));
   dialog.addEventListener('close', () => dialog.remove(), { once: true });
@@ -707,9 +685,6 @@ document.addEventListener('click', async event => {
       ...(virtualization.isoDetails || []).map(iso => ({ value: iso.id, label: `${iso.name} · ${iso.storageName}` }))
     ];
     const recommendedDisplay = item.installationMediaId && item.displayModel === 'virtio' ? 'vga' : (item.displayModel || 'vga');
-    const windowsMedia = looksLikeWindowsMedia(item.installationMediaName || '');
-    const recommendedDiskBus = windowsMedia && ['scsi', 'virtio'].includes(item.diskBus) ? 'sata' : (item.diskBus || 'scsi');
-    const recommendedNetworkModel = windowsMedia && item.networkModel === 'virtio' ? 'e1000' : (item.networkModel || 'virtio');
     showEditor({
       eyebrow: 'VIRTUAL MACHINE SETTINGS',
       title: `Edit ${vmEdit.dataset.vmName || id}`,
@@ -722,8 +697,8 @@ document.addEventListener('click', async event => {
         { name: 'machineInfo', label: 'Machine type', value: item.machineType || 'Default', readonly: true },
         { name: 'displayModel', label: 'Display adapter', type: 'select', value: recommendedDisplay, options: [{ value: 'vga', label: 'Standard VGA · recommended for installers' }, { value: 'qxl', label: 'QXL display' }, { value: 'virtio', label: 'VirtIO GPU · requires guest drivers' }] },
         { name: 'scsiController', label: 'SCSI controller', type: 'select', value: item.scsiController || 'virtio-scsi', options: [{ value: 'virtio-scsi', label: 'VirtIO SCSI' }, { value: 'virtio-scsi-single', label: 'VirtIO SCSI single' }, { value: 'lsilogic', label: 'LSI Logic' }] },
-        { name: 'diskBus', label: 'Virtual disk bus', type: 'select', value: recommendedDiskBus, options: [{ value: 'sata', label: 'SATA / AHCI · Windows compatible' }, { value: 'scsi', label: 'VirtIO SCSI · Linux/performance' }, { value: 'virtio', label: 'VirtIO block · Linux/performance' }] },
-        { name: 'networkModel', label: 'Network adapter model', type: 'select', value: recommendedNetworkModel, options: [{ value: 'e1000', label: 'Intel E1000 · Windows compatible' }, { value: 'virtio', label: 'VirtIO · Linux/performance' }, { value: 'rtl8139', label: 'Realtek RTL8139' }] },
+        { name: 'diskBus', label: 'Virtual disk bus', type: 'select', value: item.diskBus || 'sata', options: [{ value: 'sata', label: 'SATA · Windows/Linux installer compatible' }, { value: 'scsi', label: 'VirtIO SCSI · requires guest driver' }, { value: 'virtio', label: 'VirtIO block · requires guest driver' }] },
+        { name: 'networkModel', label: 'Network adapter model', type: 'select', value: item.networkModel || 'virtio', options: [{ value: 'virtio', label: 'VirtIO · recommended' }, { value: 'e1000', label: 'Intel E1000' }, { value: 'rtl8139', label: 'Realtek RTL8139' }] },
         { name: 'iso', label: 'CD/DVD drive · installer ISO', type: 'select', value: item.installationMediaId || '', options: isoOptions },
         { name: 'bootOrder', label: 'First boot drive', type: 'select', value: item.bootOrder || (item.installationMediaId ? 'iso' : 'disk'), options: [{ value: 'iso', label: 'CD/DVD installer ISO' }, { value: 'disk', label: 'Virtual hard disk' }] },
         { name: 'startOnBoot', label: 'Start automatically with LightNAS', type: 'select', value: String(item.startOnBoot !== false), options: [{ value: 'true', label: 'Enabled' }, { value: 'false', label: 'Disabled' }] }

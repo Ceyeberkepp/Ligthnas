@@ -48,6 +48,9 @@ test('VMs with selected ISO media automatically enter the installer', async () =
   assert.match(dialogs, /Display adapter/);
   assert.match(dialogs, /Standard VGA · recommended for installers/);
   assert.match(dialogs, /SCSI controller/);
+  assert.match(dialogs, /Virtual disk bus/);
+  assert.match(dialogs, /SATA · Windows\/Linux installer compatible/);
+  assert.match(dialogs, /diskBus: values\.diskBus/);
   assert.match(dialogs, /Network adapter model/);
   assert.match(dialogs, /Start automatically with LightNAS/);
   assert.match(dialogs, /bootOrder: values\.bootOrder/);
@@ -61,11 +64,14 @@ test('VMs with selected ISO media automatically enter the installer', async () =
   assert.match(updated, /device='disk'[\s\S]*boot order='2'/);
   assert.doesNotMatch(updated, /boot dev=/);
 
-  const hardware = configureVmEditableHardware(`<domain><devices><controller type='scsi' model='virtio-scsi'/><interface type='network'><model type='virtio'/></interface><video><model type='qxl' ram='65536' vram='65536' vgamem='16384' heads='1' primary='yes'/></video></devices></domain>`, { displayModel: 'vga', networkModel: 'e1000', scsiController: 'virtio-scsi-single' });
+  const hardware = configureVmEditableHardware(`<domain><devices><disk type='file' device='disk'><source file='/vm/disk.qcow2'/><target dev='sda' bus='scsi'/><alias name='scsi0-0-0-0'/><address type='drive' controller='0' bus='0' target='0' unit='0'/></disk><controller type='scsi' model='virtio-scsi'/><interface type='network'><model type='virtio'/></interface><video><model type='qxl' ram='65536' vram='65536' vgamem='16384' heads='1' primary='yes'/></video></devices></domain>`, { displayModel: 'vga', networkModel: 'e1000', scsiController: 'virtio-scsi-single', diskBus: 'sata' });
   assert.match(hardware, /<model type='vga'/);
   assert.doesNotMatch(hardware, /<model type='vga'[^>]*\bram=/);
   assert.match(hardware, /<model type='e1000'/);
   assert.match(hardware, /model='virtio-scsi-single'/);
+  assert.match(hardware, /<target dev='sda' bus='sata'\/>/);
+  assert.doesNotMatch(hardware, /alias name='scsi0-0-0-0'/);
+  assert.doesNotMatch(hardware, /address type='drive'/);
 });
 
 test('image and ISO transfers use the progress dialog', async () => {
