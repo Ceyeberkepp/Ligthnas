@@ -887,6 +887,73 @@ document.addEventListener('click', async event => {
     return;
   }
 
+  const addBond = event.target.closest('[data-network-add-bond]');
+  if (addBond) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    let info;
+    try { info = await dialogApi('/api/network'); } catch (problem) { alert(problem.message); return; }
+    const ethernet = (info.control?.devices || []).filter(item => item.type === 'ethernet').map(item => item.name);
+    if (!ethernet.length) { alert('No Ethernet interfaces are available for a bond.'); return; }
+    showEditor({
+      eyebrow: 'LINUX BOND',
+      title: 'Create bond',
+      description: 'Create a bond profile without activating it. Review the configuration before bringing it up so the management connection is not interrupted unexpectedly.',
+      fields: [
+        { name: 'name', label: 'Bond interface name', value: 'bond0', required: true },
+        { name: 'mode', label: 'Bond mode', type: 'select', value: 'active-backup', options: [
+          { value: 'active-backup', label: 'Active backup · safest default' },
+          { value: '802.3ad', label: '802.3ad / LACP' },
+          { value: 'balance-xor', label: 'Balance XOR' },
+          { value: 'balance-rr', label: 'Round robin' }
+        ] },
+        { name: 'members', label: 'Member interfaces (comma separated)', value: ethernet.join(','), placeholder: 'enp1s0,enp2s0', required: true }
+      ],
+      submitLabel: 'Create bond profile',
+      onSubmit: async values => {
+        const members = String(values.members || '').split(',').map(item => item.trim()).filter(Boolean);
+        await dialogApi('/api/network', { method: 'POST', body: JSON.stringify({ action: 'bond-create', name: values.name, mode: values.mode, members }) });
+        location.reload();
+      }
+    });
+    return;
+  }
+
+  const addRoute = event.target.closest('[data-network-add-route]');
+  if (addRoute) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    let info;
+    try { info = await dialogApi('/api/network'); } catch (problem) { alert(problem.message); return; }
+    const connections = (info.control?.connections || []).map(item => ({ value: item.name, label: `${item.name} · ${item.device || item.type}` }));
+    if (!connections.length) { alert('Create or activate a NetworkManager connection profile before adding a persistent route.'); return; }
+    showEditor({
+      eyebrow: 'STATIC ROUTE',
+      title: 'Add IPv4 route',
+      description: 'Save a persistent route on a NetworkManager profile. Choose Save only to avoid interrupting the active management connection.',
+      fields: [
+        { name: 'connection', label: 'Connection profile', type: 'select', options: connections, required: true },
+        { name: 'destination', label: 'Destination', placeholder: '10.20.0.0/16 or default', required: true },
+        { name: 'gateway', label: 'Gateway', placeholder: '10.5.5.1', required: true },
+        { name: 'metric', label: 'Metric', type: 'number', min: 0, max: 65535, value: '100', required: true },
+        { name: 'activate', label: 'Apply immediately', type: 'select', value: 'no', options: [{ value: 'no', label: 'Save only' }, { value: 'yes', label: 'Save and activate profile now' }] }
+      ],
+      submitLabel: 'Add route',
+      onSubmit: async values => {
+        await dialogApi('/api/network', { method: 'POST', body: JSON.stringify({
+          action: 'route-create',
+          connection: values.connection,
+          destination: values.destination,
+          gateway: values.gateway,
+          metric: Number(values.metric),
+          activate: values.activate === 'yes'
+        }) });
+        location.reload();
+      }
+    });
+    return;
+  }
+
   const firewallAdd = event.target.closest('[data-firewall-add]');
   if (firewallAdd) {
     event.preventDefault();
