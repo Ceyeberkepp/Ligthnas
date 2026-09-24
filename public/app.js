@@ -356,7 +356,7 @@ function sharesView() {
   return `${pageHead('Shares & access', 'Create real network shares and control file-access services on this LightNAS node.', '<button class="primary" data-action="new-share">+ Create share</button>')}
     <section class="access-service-grid">${serviceCard('smb','SMB','Windows, macOS and Linux network file sharing on ports 445/139.')}${serviceCard('ssh','SSH / SFTP','Secure shell and file transfer access on port 22.')}</section>
     <div class="section-heading"><div><span class="eyebrow">ACTIVE SHARES</span><h2>Shared folders</h2></div><span class="content-badge">${shares.length}</span></div>
-    <div class="share-list">${shares.map(share => `<article class="share-row"><div><h3>${escapeHtml(share.name)}</h3><p>${escapeHtml(share.protocol)} · ${share.readOnly ? 'read only' : 'read/write'} · ${escapeHtml(share.path || 'managed folder')} · ${escapeHtml(share.description || 'No description')}</p></div><div class="head-actions"><span class="volume-state ${share.active !== false ? 'writable' : 'readonly'}">${share.active !== false ? 'ACTIVE' : 'OFFLINE'}</span><button class="secondary danger-button" data-delete-share="${escapeHtml(share.id)}" data-name="${escapeHtml(share.name)}">Remove</button></div></article>`).join('') || '<div class="empty"><h3>No shared folders</h3><p>Create an SMB or SFTP share. LightNAS will create its folder and start the required service.</p></div>'}</div>`;
+    <div class="share-list">${shares.map(share => `<article class="share-row"><div class="share-copy"><h3>${escapeHtml(share.name)}</h3><p>${escapeHtml(share.protocol)} · ${share.readOnly ? 'read only' : 'read/write'} · ${escapeHtml(share.path || 'managed folder')} · ${escapeHtml(share.description || 'No description')}</p></div><div class="share-actions"><span class="share-status ${share.active !== false ? 'active' : 'offline'}"><i></i>${share.active !== false ? 'Active' : 'Offline'}</span><button class="share-remove" data-delete-share="${escapeHtml(share.id)}" data-name="${escapeHtml(share.name)}" aria-label="Remove ${escapeHtml(share.name)} share">Remove</button></div></article>`).join('') || '<div class="empty"><h3>No shared folders</h3><p>Create an SMB or SFTP share. LightNAS will create its folder and start the required service.</p></div>'}</div>`;
 }
 
 const librarySections = [
@@ -462,7 +462,7 @@ async function loadNetwork() {
   catch (error) { toast(error.message); }
 }
 
-function networkView() {
+function networkViewLegacy() {
   const info = state.network;
   const control = info?.control;
   if (!info) return `${pageHead('Networking', 'Manage the LightNAS appliance network.', '<button class="secondary" data-action="refresh-network">Refresh</button>')}<div class="empty">Loading network inventory…</div>`;
@@ -532,12 +532,44 @@ function networkView() {
     </details>`;
 }
 
+function networkView() {
+  const info = state.network;
+  const control = info?.control;
+  if (!info) return `${pageHead('Networking', 'Configure this LightNAS node like a virtualization host.', '<button class="secondary" data-action="refresh-network">Refresh</button>')}<div class="empty">Loading network inventory…</div>`;
+  const liveByName = new Map((info.interfaces || []).map(item => [item.name, item]));
+  const connections = control?.connections || [];
+  const profilesByDevice = new Map(connections.filter(item => item.device).map(item => [item.device, item]));
+  const rows = [...(control?.devices || [])].filter(item => item.type !== 'loopback').map(item => {
+    const profile = profilesByDevice.get(item.name) || connections.find(connection => connection.name === item.connection);
+    const live = liveByName.get(item.name);
+    const address = live?.addresses?.filter(entry => entry.family === 'inet').map(entry => `${entry.address}/${entry.prefix}`).join(', ') || '—';
+    return { ...item, profile, live, address };
+  });
+  for (const profile of connections) if (!rows.some(row => row.profile?.name === profile.name)) rows.push({ name:profile.device || profile.name, type:profile.type, state:'disconnected', connection:profile.name, profile, live:null, address:'—' });
+  const defaultRoute = (info.routes || []).find(item => item.destination === 'default');
+  const createMenu = `<details class="create-menu"><summary class="primary">Create</summary><div><button type="button" data-network-add-bridge>Linux Bridge</button><button type="button" data-network-add-bond>Linux Bond</button><button type="button" data-network-add-vlan>Linux VLAN</button><hr><button type="button" data-network-add-ovs-bridge>OVS Bridge</button><button type="button" data-network-add-ovs-bond>OVS Bond</button><button type="button" data-network-add-ovs-port>OVS Internal Port</button></div></details>`;
+  return `${pageHead('Networking', 'Create and manage interfaces, bridges, bonds, VLANs, addressing, routes, and DNS.', `<div class="head-actions"><button class="secondary" data-action="refresh-network">Refresh</button>${createMenu}</div>`)}
+    <section class="network-summary-strip"><div><span>Connectivity</span><b>${escapeHtml(control?.connectivity || 'unknown')}</b></div><div><span>Default route</span><b>${escapeHtml(defaultRoute ? `${defaultRoute.device} · ${defaultRoute.gateway || 'on-link'}` : 'Not configured')}</b></div><div><span>DNS</span><b>${escapeHtml((info.dns || []).join(', ') || 'Not configured')}</b></div><div><span>Manager</span><b>${escapeHtml(control?.manager || 'Read only')}</b></div></section>
+    <section class="panel infrastructure-panel">
+      <div class="table-toolbar"><div><span class="eyebrow">NODE NETWORK</span><h2>Interfaces & connection profiles</h2></div><p>Select Edit to configure DHCP/static IPv4, gateway, DNS, autostart, and immediate activation.</p></div>
+      <div class="infra-table-wrap"><table class="infra-table"><thead><tr><th>Name</th><th>Type</th><th>Active</th><th>Autostart</th><th>IPv4/CIDR</th><th>Connection</th><th></th></tr></thead><tbody>${rows.map(row => `<tr><td><b>${escapeHtml(row.name)}</b></td><td>${escapeHtml(String(row.type || 'interface').replace('802-3-ethernet','Ethernet'))}</td><td><span class="table-state ${/connected|up/i.test(`${row.state} ${row.live?.state}`) ? 'on' : ''}">${/connected|up/i.test(`${row.state} ${row.live?.state}`) ? 'Yes' : 'No'}</span></td><td>${row.profile?.autoconnect ? 'Yes' : 'No'}</td><td>${escapeHtml(row.address)}</td><td>${escapeHtml(row.profile?.name || row.connection || '—')}</td><td><div class="row-actions">${row.profile ? `<button class="secondary" data-network-edit="${escapeHtml(row.profile.name)}">Edit</button><button class="secondary danger-button" data-network-delete="${escapeHtml(row.profile.name)}">Remove</button>` : ''}</div></td></tr>`).join('') || '<tr><td colspan="7">No manageable network interfaces found.</td></tr>'}</tbody></table></div>
+    </section>
+    ${control?.wifiAvailable ? `<section class="panel infrastructure-panel"><div class="table-toolbar"><div><span class="eyebrow">WIRELESS</span><h2>Available Wi‑Fi networks</h2></div></div><div class="wifi-chip-grid">${(control.wifi || []).map(item => `<button class="wifi-chip" data-wifi-connect="${escapeHtml(item.ssid)}"><span><b>${escapeHtml(item.ssid)}</b><small>${escapeHtml(item.security || 'Open')}</small></span><strong>${item.connected ? 'Connected' : `${item.signal}%`}</strong></button>`).join('') || '<p class="muted">No networks in range.</p>'}</div></section>` : ''}
+    <section class="network-detail-grid">
+      <details class="panel" open><summary><b>Routes (${(info.routes || []).length})</b></summary><div class="compact-table">${(info.routes || []).map(route => `<div><b>${escapeHtml(route.destination)}</b><span>${escapeHtml(route.gateway || 'on-link')}</span><span>${escapeHtml(route.device || '—')}</span><span>${route.metric ?? '—'}</span></div>`).join('') || '<p>No routes.</p>'}</div></details>
+      <details class="panel" open><summary><b>DNS resolvers</b></summary><div class="dns-list">${(info.dns || []).map(item => `<code>${escapeHtml(item)}</code>`).join('') || '<p>No resolvers configured.</p>'}</div></details>
+    </section>`;
+}
+
 function firewallView() {
   const firewall = state.network?.firewall;
-  return `${pageHead('Firewall', 'Manage the firewall on this LightNAS host.', '<div class="head-actions"><button class="secondary" data-action="refresh-network">Refresh</button><button class="primary" data-firewall-add>+ Rule</button></div>')}
-    <div class="module-hero"><h2>${escapeHtml(firewall?.status || 'Loading…')}</h2><p>Backend: ${escapeHtml(firewall?.backend || 'detecting')}. Rules here protect LightNAS itself and are applied locally.</p><div class="head-actions"><button class="secondary" data-firewall-toggle="enable">Enable</button><button class="secondary danger-button" data-firewall-toggle="disable">Disable</button></div></div>
-    <h2>Rules</h2><div class="storage-list">${firewall?.rules?.map(item => `<article class="storage-row"><div><h3>${escapeHtml(item.action)} ${escapeHtml(item.target)}</h3><p>Source: ${escapeHtml(item.source)}</p></div><button class="secondary danger-button" data-firewall-delete="${item.number}">Delete</button></article>`).join('') || '<div class="empty">No numbered UFW rules visible.</div>'}</div>
-    <h2>Visible nftables tables</h2><div class="storage-list">${firewall?.tables?.map(item => `<article class="storage-row">${escapeHtml(item)}</article>`).join('') || '<div class="empty">No nftables tables visible.</div>'}</div>`;
+  const enabled = /active|enabled/i.test(firewall?.status || '');
+  return `${pageHead('Firewall', 'Host-level traffic policy for the LightNAS management plane and published services.', '<div class="head-actions"><button class="secondary" data-action="refresh-network">Refresh</button><button class="primary" data-firewall-add>+ Add rule</button></div>')}
+    <section class="network-summary-strip"><div><span>Status</span><b class="${enabled ? 'success-text' : ''}">${escapeHtml(firewall?.status || 'Loading…')}</b></div><div><span>Backend</span><b>${escapeHtml(firewall?.backend || 'detecting')}</b></div><div><span>Rules</span><b>${firewall?.rules?.length || 0}</b></div><div><span>Tables</span><b>${firewall?.tables?.length || 0}</b></div></section>
+    <section class="panel infrastructure-panel"><div class="table-toolbar"><div><span class="eyebrow">RULES</span><h2>Traffic rules</h2></div><div class="head-actions"><button class="secondary" data-firewall-toggle="enable" ${enabled ? 'disabled' : ''}>Enable firewall</button><button class="secondary danger-button" data-firewall-toggle="disable" ${!enabled ? 'disabled' : ''}>Disable firewall</button></div></div>
+      <div class="infra-table-wrap"><table class="infra-table"><thead><tr><th>#</th><th>Enabled</th><th>Direction</th><th>Action</th><th>Destination / port</th><th>Source</th><th></th></tr></thead><tbody>${firewall?.rules?.map(item => `<tr><td>${item.number}</td><td><span class="table-state on">Yes</span></td><td>${escapeHtml(item.direction || 'IN')}</td><td><b>${escapeHtml(item.action)}</b></td><td>${escapeHtml(item.target)}</td><td>${escapeHtml(item.source)}</td><td><button class="secondary danger-button" data-firewall-delete="${item.number}">Remove</button></td></tr>`).join('') || '<tr><td colspan="7">No UFW rules. Add a rule to allow or deny a service.</td></tr>'}</tbody></table></div>
+    </section>
+    <section class="network-detail-grid"><details class="panel" open><summary><b>Firewall options</b></summary><p>Status changes are applied by the privileged LightNAS host agent. Existing SSH and LightNAS management sessions should be allowed before enabling restrictive rules.</p></details><details class="panel"><summary><b>nftables backend (${firewall?.tables?.length || 0})</b></summary><div class="dns-list">${firewall?.tables?.map(item => `<code>${escapeHtml(item)}</code>`).join('') || '<p>No visible nftables tables.</p>'}</div></details></section>`;
 }
 
 function integrationsView() {
@@ -547,7 +579,14 @@ function integrationsView() {
       <article class="panel integration-status"><span class="integration-icon">▦</span><div><span class="eyebrow">SYSTEM CONTAINERS</span><h2>${containers?.available && containers?.enabled ? 'Connected' : 'Unavailable'}</h2><p>${containers?.available && containers?.enabled ? `${escapeHtml(containers.provider || 'LXC')} is ready.` : escapeHtml(containers?.reason || 'Checking provider…')}</p></div><button class="secondary" data-view-link="containers">Manage</button></article>
       <article class="panel integration-status"><span class="integration-icon">▣</span><div><span class="eyebrow">VIRTUALIZATION</span><h2>${vm?.available && vm?.enabled ? 'Connected' : 'Unavailable'}</h2><p>${vm?.available && vm?.enabled ? `${escapeHtml(vm.provider || 'KVM')} is ready.` : escapeHtml(vm?.reason || 'Checking provider…')}</p></div><button class="secondary" data-view-link="vms">Manage</button></article>
       <article class="panel integration-status"><span class="integration-icon">✦</span><div><span class="eyebrow">APP ENGINE</span><h2>${apps?.available && apps?.enabled ? 'Connected' : 'Optional'}</h2><p>${apps?.available && apps?.enabled ? 'Docker/OCI app hosting is ready.' : escapeHtml(apps?.reason || 'Docker/OCI is disabled.')}</p></div><button class="secondary" data-view-link="apps">Manage</button></article>
-    </div>`;
+    </div>
+    <section class="integration-directory"><div class="section-heading"><div><span class="eyebrow">POPULAR CONNECTIONS</span><h2>Connect the tools you already use</h2></div></div><div class="provider-preset-grid integration-presets">
+      <article><span>HA</span><div><b>Home Assistant</b><small>REST API and signed webhook events</small></div></article>
+      <article><span>n8n</span><div><b>n8n / Node-RED</b><small>Scoped tokens and event webhooks</small></div></article>
+      <article><span>PM</span><div><b>Prometheus & Grafana</b><small>Host monitoring integration ready</small></div></article>
+      <article><span>SL</span><div><b>Slack / Teams / Discord</b><small>Webhook-compatible notifications</small></div></article>
+      <article><span>TF</span><div><b>Terraform / Ansible</b><small>Permission-scoped REST automation</small></div></article>
+    </div></section>`;
 }
 
 function assistantView() {
@@ -884,6 +923,36 @@ async function submitAuth(form, path) {
     button.disabled = false;
   }
 }
+
+const authDecode64url = value => Uint8Array.from(atob(String(value).replaceAll('-', '+').replaceAll('_', '/').padEnd(Math.ceil(String(value).length / 4) * 4, '=')), character => character.charCodeAt(0));
+const authEncode64url = value => btoa(String.fromCharCode(...new Uint8Array(value))).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
+
+$('#sms-login-button').addEventListener('click', async () => {
+  const form = $('#login-form');
+  const error = $('.form-error', form);
+  const data = Object.fromEntries(new FormData(form));
+  error.textContent = '';
+  try {
+    const result = await request('/api/security/sms/challenge', { method:'POST', body:JSON.stringify({ username:data.username, password:data.password }) });
+    $('#sms-code-field').classList.remove('hidden');
+    $('#sms-code-field input').focus();
+    toast(`Verification code sent to ${result.destination}.`);
+  } catch (problem) { error.textContent = problem.message; }
+});
+
+$('#fido-login-button').addEventListener('click', async () => {
+  const form = $('#login-form');
+  const error = $('.form-error', form);
+  const data = Object.fromEntries(new FormData(form));
+  error.textContent = '';
+  try {
+    if (!window.PublicKeyCredential) throw new Error('This browser does not support passkeys or FIDO2 security keys.');
+    const options = await request('/api/security/fido/challenge', { method:'POST', body:JSON.stringify({ username:data.username, password:data.password }) });
+    const credential = await navigator.credentials.get({ publicKey:{ challenge:authDecode64url(options.challenge), rpId:options.rpId, allowCredentials:options.allowCredentials.map(item => ({ ...item, id:authDecode64url(item.id) })), timeout:60000, userVerification:'preferred' } });
+    form.elements.fido.value = JSON.stringify({ id:credential.id, clientDataJSON:authEncode64url(credential.response.clientDataJSON), authenticatorData:authEncode64url(credential.response.authenticatorData), signature:authEncode64url(credential.response.signature), userHandle:credential.response.userHandle ? authEncode64url(credential.response.userHandle) : '' });
+    await submitAuth(form, '/api/login');
+  } catch (problem) { error.textContent = problem.message || 'Security-key sign-in was cancelled.'; }
+});
 
 $('#setup-form').addEventListener('submit', event => { event.preventDefault(); submitAuth(event.currentTarget, '/api/setup'); });
 $('#login-form').addEventListener('submit', event => { event.preventDefault(); submitAuth(event.currentTarget, '/api/login'); });

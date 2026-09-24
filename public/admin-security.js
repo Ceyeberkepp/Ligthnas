@@ -1,6 +1,8 @@
 const q = (selector, root = document) => root.querySelector(selector);
 const qa = (selector, root = document) => [...root.querySelectorAll(selector)];
 const escapeText = value => String(value).replace(/[&<>'"]/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' })[ch]);
+const decode64url = value => Uint8Array.from(atob(String(value).replaceAll('-', '+').replaceAll('_', '/').padEnd(Math.ceil(String(value).length / 4) * 4, '=')), character => character.charCodeAt(0));
+const encode64url = value => btoa(String.fromCharCode(...new Uint8Array(value))).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
 
 const permissionNames = {
   'overview.view':'View overview',
@@ -105,10 +107,14 @@ async function renderTotp() {
   section.innerHTML = `<div class="admin-section-head"><div><span class="eyebrow">MULTI-FACTOR AUTHENTICATION</span><h2>Sign-in verification</h2><p class="muted">Protect the appliance owner with a second verification method.</p></div></div>
     <div class="mfa-method-grid">
       <article class="panel mfa-method active"><span class="mfa-icon">123</span><div><h3>Authenticator app</h3><p>Time-based codes from Microsoft Authenticator, Google Authenticator, 1Password, Authy, and compatible apps.</p></div><span class="volume-state ${status.enabled ? 'writable' : 'readonly'}">${status.enabled ? 'ENABLED' : 'AVAILABLE'}</span></article>
-      <article class="panel mfa-method"><span class="mfa-icon">SMS</span><div><h3>Phone message</h3><p>Requires an SMS delivery provider. LightNAS will not claim SMS is active until a provider has been configured.</p></div><span class="volume-state readonly">PROVIDER NEEDED</span></article>
-      <article class="panel mfa-method"><span class="mfa-icon">◆</span><div><h3>Security key / FIDO</h3><p>Passkey and hardware-key enrollment requires a stable HTTPS hostname for WebAuthn origin validation.</p></div><span class="volume-state readonly">HTTPS NEEDED</span></article>
+      <article class="panel mfa-method ${status.sms.enabled ? 'active' : ''}"><span class="mfa-icon">SMS</span><div><h3>Phone message</h3><p>Send a one-time sign-in code through your Twilio account. Credentials stay on this appliance.</p></div><span class="volume-state ${status.sms.enabled ? 'writable' : 'readonly'}">${status.sms.enabled ? 'ENABLED' : 'AVAILABLE'}</span></article>
+      <article class="panel mfa-method ${status.fido.enabled ? 'active' : ''}"><span class="mfa-icon">◆</span><div><h3>Passkey / security key</h3><p>WebAuthn supports FIDO2 hardware keys, platform passkeys, Windows Hello, Touch ID, and Android devices.</p></div><span class="volume-state ${status.fido.enabled ? 'writable' : 'readonly'}">${status.fido.enabled ? `${status.fido.credentials.length} ENROLLED` : 'AVAILABLE'}</span></article>
     </div>
-    <section class="panel mfa-config"><div class="admin-section-head"><div><h3>Authenticator app</h3><p class="muted">Codes are verified locally and the shared secret never leaves LightNAS.</p></div></div>${status.enabled ? `<form data-totp-disable class="security-inline-form"><label>Current password<input name="currentPassword" type="password" required autocomplete="current-password"></label><label>Current 6-digit code<input name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required></label><button class="secondary danger-button" type="submit">Disable 2FA</button><div class="form-error"></div></form>` : `<form data-totp-setup class="security-inline-form"><label>Current password<input name="currentPassword" type="password" required autocomplete="current-password"></label><button class="primary" type="submit">Set up authenticator</button><div class="form-error"></div></form><div data-totp-enrollment></div>`}</section>`;
+    <div class="mfa-config-grid">
+      <section class="panel mfa-config"><div class="admin-section-head"><div><h3>Authenticator app</h3><p class="muted">Scan a QR code with any standards-compatible authenticator.</p></div></div>${status.enabled ? `<form data-totp-disable class="security-inline-form"><label>Current password<input name="currentPassword" type="password" required autocomplete="current-password"></label><label>Current 6-digit code<input name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required></label><button class="secondary danger-button" type="submit">Disable authenticator</button><div class="form-error"></div></form>` : `<form data-totp-setup class="security-inline-form"><label>Current password<input name="currentPassword" type="password" required autocomplete="current-password"></label><button class="primary" type="submit">Set up authenticator</button><div class="form-error"></div></form><div data-totp-enrollment></div>`}</section>
+      <section class="panel mfa-config"><div class="admin-section-head"><div><h3>Phone message</h3><p class="muted">Twilio sends the enrollment and sign-in codes directly to the verified number.</p></div></div>${status.sms.enabled ? `<p class="security-success">Verified number: ${escapeText(status.sms.phone)}</p><form data-sms-disable class="security-inline-form"><label>Current password<input name="currentPassword" type="password" required></label><button class="secondary danger-button" type="submit">Disable SMS</button><div class="form-error"></div></form>` : `<form data-sms-setup class="security-stack-form"><label>Phone number (E.164)<input name="phone" type="tel" placeholder="+15551234567" required></label><label>Twilio sending number<input name="fromNumber" type="tel" placeholder="+15557654321" required></label><label>Twilio Account SID<input name="accountSid" placeholder="AC…" required></label><label>Twilio auth token<input name="authToken" type="password" required></label><label>Current password<input name="currentPassword" type="password" required></label><button class="primary" type="submit">Send verification code</button><div class="form-error"></div></form><div data-sms-enrollment></div>`}</section>
+      <section class="panel mfa-config"><div class="admin-section-head"><div><h3>Passkeys & FIDO2 keys</h3><p class="muted">Registration is bound to this HTTPS hostname. Your private key never leaves the authenticator.</p></div></div><form data-fido-setup class="security-stack-form"><label>Key name<input name="label" value="My security key" maxlength="64" required></label><label>Current password<input name="currentPassword" type="password" required></label><button class="primary" type="submit" ${!window.PublicKeyCredential ? 'disabled' : ''}>Register passkey or key</button><div class="form-error"></div></form><div class="security-key-list">${status.fido.credentials.map(item => `<div><span><b>${escapeText(item.label)}</b><small>Added ${escapeText(new Date(item.createdAt).toLocaleDateString())}</small></span><button class="secondary danger-button" type="button" data-fido-remove="${escapeText(item.id)}">Remove</button></div>`).join('') || '<p class="muted">No passkeys or FIDO2 keys are enrolled.</p>'}</div></section>
+    </div>`;
   q('#settings-form', content)?.insertAdjacentElement('afterend', section);
 }
 
@@ -193,6 +199,15 @@ document.addEventListener('click', async event => {
   const deleteHook = event.target.closest('[data-delete-webhook]');
   if (deleteHook) { if (confirm('Delete this webhook?')) { try { await api(`/api/security/webhooks/${deleteHook.dataset.deleteWebhook}`, { method:'DELETE' }); refreshCurrent(); } catch (error) { alert(error.message); } } return; }
 
+  const removeFido = event.target.closest('[data-fido-remove]');
+  if (removeFido) {
+    const currentPassword = prompt('Enter your current LightNAS password to remove this key:');
+    if (currentPassword === null) return;
+    try { await api(`/api/security/fido/${encodeURIComponent(removeFido.dataset.fidoRemove)}`, { method:'DELETE', body:JSON.stringify({ currentPassword }) }); refreshCurrent(); }
+    catch (error) { alert(error.message); }
+    return;
+  }
+
 
 }, true);
 
@@ -219,7 +234,7 @@ document.addEventListener('submit', async event => {
     const enrollment = q('[data-totp-enrollment]');
     try {
       const result = await api('/api/security/totp/setup', { method:'POST', body:JSON.stringify(Object.fromEntries(new FormData(form))) });
-      enrollment.innerHTML = `<div class="security-enrollment"><p>Add this account to your authenticator app using the secret below, then enter the current code.</p><pre>${escapeText(result.secret)}</pre><details><summary>otpauth URI</summary><code>${escapeText(result.uri)}</code></details><form data-totp-verify><label>6-digit code<input name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required></label><button class="primary" type="submit">Verify & enable</button><div class="form-error"></div></form></div>`;
+      enrollment.innerHTML = `<div class="security-enrollment"><p>Scan this QR code, or enter the secret manually, then confirm the current code.</p>${result.qrDataUrl ? `<img class="totp-qr" src="${result.qrDataUrl}" alt="Authenticator enrollment QR code">` : '<p class="muted">QR generator is unavailable; use the manual secret.</p>'}<pre>${escapeText(result.secret)}</pre><details><summary>Manual setup URI</summary><code>${escapeText(result.uri)}</code></details><form data-totp-verify><label>6-digit code<input name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required></label><button class="primary" type="submit">Verify & enable</button><div class="form-error"></div></form></div>`;
     } catch (error) { q('.form-error', form).textContent = error.message; }
     return;
   }
@@ -231,6 +246,37 @@ document.addEventListener('submit', async event => {
   if (form.matches('[data-totp-disable]')) {
     event.preventDefault();
     try { await api('/api/security/totp/disable', { method:'POST', body:JSON.stringify(Object.fromEntries(new FormData(form))) }); alert('Authenticator 2FA disabled.'); refreshCurrent(); } catch (error) { q('.form-error', form).textContent = error.message; }
+    return;
+  }
+  if (form.matches('[data-sms-setup]')) {
+    event.preventDefault();
+    try {
+      await api('/api/security/sms/setup', { method:'POST', body:JSON.stringify(Object.fromEntries(new FormData(form))) });
+      q('[data-sms-enrollment]').innerHTML = `<form data-sms-verify class="security-inline-form"><label>6-digit SMS code<input name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required></label><button class="primary" type="submit">Verify & enable</button><div class="form-error"></div></form>`;
+    } catch (error) { q('.form-error', form).textContent = error.message; }
+    return;
+  }
+  if (form.matches('[data-sms-verify]')) {
+    event.preventDefault();
+    try { await api('/api/security/sms/verify', { method:'POST', body:JSON.stringify(Object.fromEntries(new FormData(form))) }); alert('SMS verification is enabled.'); refreshCurrent(); } catch (error) { q('.form-error', form).textContent = error.message; }
+    return;
+  }
+  if (form.matches('[data-sms-disable]')) {
+    event.preventDefault();
+    try { await api('/api/security/sms/disable', { method:'POST', body:JSON.stringify(Object.fromEntries(new FormData(form))) }); refreshCurrent(); } catch (error) { q('.form-error', form).textContent = error.message; }
+    return;
+  }
+  if (form.matches('[data-fido-setup]')) {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(form));
+    try {
+      const options = await api('/api/security/fido/options', { method:'POST', body:JSON.stringify({ currentPassword:data.currentPassword }) });
+      const credential = await navigator.credentials.create({ publicKey: { challenge:decode64url(options.challenge), rp:{ id:options.rpId, name:options.rpName }, user:{ ...options.user, id:decode64url(options.user.id) }, pubKeyCredParams:[{ type:'public-key', alg:-7 }, { type:'public-key', alg:-257 }], timeout:60000, authenticatorSelection:{ residentKey:'preferred', userVerification:'preferred' }, attestation:'none', excludeCredentials:options.excludeCredentials.map(item => ({ ...item, id:decode64url(item.id) })) } });
+      const response = credential.response;
+      if (!response.getPublicKey || !response.getAuthenticatorData) throw new Error('This browser does not expose the WebAuthn registration data LightNAS needs. Update the browser and try again.');
+      await api('/api/security/fido/register', { method:'POST', body:JSON.stringify({ label:data.label, response:{ id:credential.id, clientDataJSON:encode64url(response.clientDataJSON), authenticatorData:encode64url(response.getAuthenticatorData()), publicKey:encode64url(response.getPublicKey()), algorithm:response.getPublicKeyAlgorithm() } }) });
+      alert('Security key registered.'); refreshCurrent();
+    } catch (error) { q('.form-error', form).textContent = error.message || 'Security-key registration was cancelled.'; }
     return;
   }
   if (form.matches('[data-token-form]')) {

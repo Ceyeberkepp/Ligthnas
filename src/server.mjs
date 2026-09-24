@@ -27,13 +27,14 @@ import {
   listStorageContent, uploadStorageContent, importStorageContent, deleteStorageContent
 } from './storage-pools.mjs';
 import { generateTotpSecret, totpUri, verifyTotp } from './totp.mjs';
+import { challenge as newChallenge, qrCodeDataUrl, relyingParty, sendTwilioSms, smsCode, verifyAssertion, verifyRegistration } from './mfa.mjs';
 import {
   normalizePermissions, effectivePermissions, groupsForUser,
   createApiTokenRecord, authenticateApiToken,
   createWebhookRecord, deliverWebhook, deliverEvent
 } from './access.mjs';
 import {
-  normalizeIdentityProvider, publicIdentityProvider, testIdentityProvider
+  authenticateLdaps, normalizeIdentityProvider, publicIdentityProvider, testIdentityProvider
 } from './identity-providers.mjs';
 import { ContainerPublisher } from './container-publish.mjs';
 import { discoverContainerApplication } from './container-app-access.mjs';
@@ -61,6 +62,25 @@ const avatarPath = username => join(profileRoot, `${username}.avatar`);
 const spaceName = /^[a-zA-Z0-9][a-zA-Z0-9_-]{1,39}$/;
 const groupName = /^[A-Za-z0-9][A-Za-z0-9 _.-]{1,63}$/;
 const pause = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+const mfaChallenges = new Map();
+
+function accountFor(username) {
+  return username === store.state.config?.username ? store.state.config : store.state.users.find(user => user.username === username);
+}
+
+function putMfaChallenge(key, value) {
+  const now = Date.now();
+  for (const [id, item] of mfaChallenges) if (item.expiresAt <= now) mfaChallenges.delete(id);
+  mfaChallenges.set(key, { ...value, expiresAt: now + 5 * 60 * 1000, attempts: 0 });
+}
+
+function takeMfaChallenge(key, consume = false) {
+  const item = mfaChallenges.get(key);
+  if (!item || item.expiresAt <= Date.now() || item.attempts >= 5) { mfaChallenges.delete(key); return null; }
+  item.attempts += 1;
+  if (consume) mfaChallenges.delete(key);
+  return item;
+}
 
 async function containerReadyForPublication(id) {
   let started = false;
@@ -344,16 +364,66 @@ async function api(req, res, url) {
   if (req.method === 'POST' && url.pathname === '/api/login') {
     if (!store.state.config) return send(res, 409, { error: 'Complete setup first.' });
     const input = await bodyJson(req);
-    const account = input.username === store.state.config.username ? store.state.config : store.state.users.find(user => user.username === input.username);
-    const validPassword = account && !account.disabled && await verifyPassword(input.password, account.passwordHash);
+    let account = accountFor(input.username);
+    let validPassword = account && !account.disabled && account.passwordHash && await verifyPassword(input.password, account.passwordHash);
+    if (!validPassword && input.username !== store.state.config.username && /^[a-zA-Z0-9._@-]{3,128}$/.test(String(input.username || ''))) {
+      for (const provider of store.state.security.identityProviders.filter(item => item.enabled && item.type === 'ldaps')) {
+        if (!(await authenticateLdaps(provider, input.username, input.password))) continue;
+        account = store.state.users.find(user => user.username === input.username);
+        if (!account) {
+          account = { username: input.username, externalProviderId: provider.id, externalProviderName: provider.name, permissions: normalizePermissions(provider.permissions, PERMISSIONS, DEFAULT_USER_PERMISSIONS), createdAt: new Date().toISOString(), totpEnabled: false };
+          store.state.users.push(account);
+        } else {
+          account.externalProviderId = provider.id;
+          account.externalProviderName = provider.name;
+          account.permissions = normalizePermissions(provider.permissions, PERMISSIONS, DEFAULT_USER_PERMISSIONS);
+        }
+        validPassword = !account.disabled;
+        break;
+      }
+    }
     if (!validPassword) return send(res, 401, { error: 'Username or password is incorrect.' });
-    if (account.totpEnabled && (!account.totpSecret || !verifyTotp(account.totpSecret, input.totp))) {
-      return send(res, 401, { error: 'Authenticator code is required or invalid.', totpRequired: true });
+    const methodsEnabled = Boolean(account.totpEnabled || account.sms?.enabled || account.fidoCredentials?.length);
+    let secondFactorValid = !methodsEnabled;
+    if (account.totpEnabled && account.totpSecret && input.totp) secondFactorValid ||= verifyTotp(account.totpSecret, input.totp);
+    if (account.sms?.enabled && input.smsCode) {
+      const sms = takeMfaChallenge(`sms-login:${input.username}`, true);
+      secondFactorValid ||= Boolean(sms && sms.code === String(input.smsCode));
+    }
+    if (account.fidoCredentials?.length && input.fido) {
+      const pending = takeMfaChallenge(`fido-login:${input.username}`, true);
+      let response = input.fido;
+      try { if (typeof response === 'string') response = JSON.parse(response); } catch { response = null; }
+      const credential = account.fidoCredentials.find(item => item.id === response?.id);
+      secondFactorValid ||= Boolean(pending && credential && verifyAssertion({ response, credential, expectedChallenge: pending.challenge, rpId: pending.rpId }));
+    }
+    if (!secondFactorValid) {
+      return send(res, 401, { error: 'Complete one configured verification method.', mfaRequired: true, methods: { totp: Boolean(account.totpEnabled), sms: Boolean(account.sms?.enabled), fido: Boolean(account.fidoCredentials?.length) } });
     }
     const token = sessions.create(input.username);
     store.addActivity('login', `${input.username} signed in.`, 'info');
     await store.save();
     return send(res, 200, { ok: true }, { 'Set-Cookie': `nas_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200` });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/security/sms/challenge') {
+    const input = await bodyJson(req);
+    const account = accountFor(input.username);
+    if (!account || account.disabled || !account.sms?.enabled || !(await verifyPassword(input.password, account.passwordHash))) return send(res, 401, { error: 'Username or password is incorrect.' });
+    const code = smsCode();
+    await sendTwilioSms(account.sms, `Your LightNAS verification code is ${code}. It expires in 5 minutes.`);
+    putMfaChallenge(`sms-login:${input.username}`, { code });
+    return send(res, 200, { sent: true, destination: account.sms.phone.replace(/.(?=.{4})/g, '•') });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/security/fido/challenge') {
+    const input = await bodyJson(req);
+    const account = accountFor(input.username);
+    if (!account || account.disabled || !account.fidoCredentials?.length || !(await verifyPassword(input.password, account.passwordHash))) return send(res, 401, { error: 'Username or password is incorrect.' });
+    const rpId = relyingParty(req);
+    const challenge = newChallenge();
+    putMfaChallenge(`fido-login:${input.username}`, { challenge, rpId });
+    return send(res, 200, { challenge, rpId, allowCredentials: account.fidoCredentials.map(item => ({ type: 'public-key', id: item.id })) });
   }
 
   if (req.method === 'POST' && url.pathname === '/api/logout') {
@@ -390,16 +460,17 @@ async function api(req, res, url) {
 
   if (req.method === 'GET' && url.pathname === '/api/security/totp') {
     if (context.apiToken) return send(res, 403, { error: 'TOTP settings require an interactive local account session.' });
-    return send(res, 200, { enabled: Boolean(account.totpEnabled), pending: Boolean(account.totpPendingSecret) });
+    return send(res, 200, { enabled: Boolean(account.totpEnabled), pending: Boolean(account.totpPendingSecret), sms: { enabled: Boolean(account.sms?.enabled), phone: account.sms?.phone ? account.sms.phone.replace(/.(?=.{4})/g, '•') : '' }, fido: { enabled: Boolean(account.fidoCredentials?.length), credentials: (account.fidoCredentials || []).map(({ id, label, createdAt, lastUsedAt }) => ({ id, label, createdAt, lastUsedAt })) } });
   }
   if (req.method === 'POST' && url.pathname === '/api/security/totp/setup') {
     if (context.apiToken) return send(res, 403, { error: 'TOTP settings require an interactive local account session.' });
     const input = await bodyJson(req);
     if (!(await verifyPassword(input.currentPassword, account.passwordHash))) return send(res, 403, { error: 'Current account password is incorrect.' });
     const secret = generateTotpSecret();
+    const uri = totpUri({ secret, username, issuer: `LightNAS ${store.state.config.deviceName}` });
     account.totpPendingSecret = secret;
     await store.save();
-    return send(res, 200, { secret, uri: totpUri({ secret, username, issuer: `LightNAS ${store.state.config.deviceName}` }) });
+    return send(res, 200, { secret, uri, qrDataUrl: await qrCodeDataUrl(uri) });
   }
   if (req.method === 'POST' && url.pathname === '/api/security/totp/verify') {
     if (context.apiToken) return send(res, 403, { error: 'TOTP settings require an interactive local account session.' });
@@ -423,6 +494,65 @@ async function api(req, res, url) {
     store.addActivity('security', `TOTP authenticator disabled for ${username}.`, 'warning');
     await store.save();
     return send(res, 200, { enabled: false });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/security/sms/setup') {
+    if (context.apiToken) return send(res, 403, { error: 'SMS settings require an interactive local account session.' });
+    const input = await bodyJson(req);
+    if (!(await verifyPassword(input.currentPassword, account.passwordHash))) return send(res, 403, { error: 'Current account password is incorrect.' });
+    const pending = { phone: String(input.phone || ''), accountSid: String(input.accountSid || ''), authToken: String(input.authToken || ''), fromNumber: String(input.fromNumber || '') };
+    const code = smsCode();
+    await sendTwilioSms(pending, `Your LightNAS enrollment code is ${code}. It expires in 5 minutes.`);
+    putMfaChallenge(`sms-setup:${username}`, { code, pending });
+    return send(res, 200, { sent: true });
+  }
+  if (req.method === 'POST' && url.pathname === '/api/security/sms/verify') {
+    const input = await bodyJson(req);
+    const pending = takeMfaChallenge(`sms-setup:${username}`, true);
+    if (!pending || pending.code !== String(input.code || '')) return send(res, 400, { error: 'SMS verification code is invalid or expired.' });
+    account.sms = { ...pending.pending, enabled: true, configuredAt: new Date().toISOString() };
+    store.addActivity('security', `SMS verification enabled for ${username}.`, 'success');
+    await store.save();
+    return send(res, 200, { enabled: true });
+  }
+  if (req.method === 'POST' && url.pathname === '/api/security/sms/disable') {
+    const input = await bodyJson(req);
+    if (!(await verifyPassword(input.currentPassword, account.passwordHash))) return send(res, 403, { error: 'Current account password is incorrect.' });
+    delete account.sms;
+    await store.save();
+    return send(res, 200, { enabled: false });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/security/fido/options') {
+    if (context.apiToken) return send(res, 403, { error: 'Security-key settings require an interactive local account session.' });
+    const input = await bodyJson(req);
+    if (!(await verifyPassword(input.currentPassword, account.passwordHash))) return send(res, 403, { error: 'Current account password is incorrect.' });
+    const rpId = relyingParty(req);
+    const challenge = newChallenge();
+    putMfaChallenge(`fido-setup:${username}`, { challenge, rpId });
+    return send(res, 200, { challenge, rpId, rpName: `LightNAS ${store.state.config.deviceName}`, user: { id: Buffer.from(username).toString('base64url'), name: username, displayName: username }, excludeCredentials: (account.fidoCredentials || []).map(item => ({ type: 'public-key', id: item.id })) });
+  }
+  if (req.method === 'POST' && url.pathname === '/api/security/fido/register') {
+    const input = await bodyJson(req);
+    const pending = takeMfaChallenge(`fido-setup:${username}`, true);
+    if (!pending) return send(res, 400, { error: 'Security-key registration expired. Start again.' });
+    const credential = verifyRegistration({ response: input.response, expectedChallenge: pending.challenge, rpId: pending.rpId });
+    account.fidoCredentials ||= [];
+    if (account.fidoCredentials.some(item => item.id === credential.id)) return send(res, 409, { error: 'This security key is already registered.' });
+    account.fidoCredentials.push({ ...credential, label: String(input.label || 'Security key').trim().slice(0, 64), createdAt: new Date().toISOString() });
+    store.addActivity('security', `Security key registered for ${username}.`, 'success');
+    await store.save();
+    return send(res, 201, { enabled: true });
+  }
+  if (req.method === 'DELETE' && url.pathname.startsWith('/api/security/fido/')) {
+    const id = decodeURIComponent(url.pathname.slice('/api/security/fido/'.length));
+    const input = await bodyJson(req);
+    if (!(await verifyPassword(input.currentPassword, account.passwordHash))) return send(res, 403, { error: 'Current account password is incorrect.' });
+    const before = account.fidoCredentials?.length || 0;
+    account.fidoCredentials = (account.fidoCredentials || []).filter(item => item.id !== id);
+    if (account.fidoCredentials.length === before) return send(res, 404, { error: 'Security key not found.' });
+    await store.save();
+    return send(res, 200, { enabled: Boolean(account.fidoCredentials.length) });
   }
 
   const controlPermission =
@@ -946,16 +1076,17 @@ async function api(req, res, url) {
     });
   }
   if (req.method === 'GET' && url.pathname === '/api/network') {
-    if (!requirePermission(res, permissions, 'network.view')) return;
+    if (!requireAnyPermission(res, permissions, ['network.view', 'firewall.view'])) return;
     const [observed, control] = await Promise.all([
       networkInventory(),
       localNetworkInventory().catch(error => ({ editable: false, manager: null, reason: error.message, devices: [], connections: [], wifi: [] }))
     ]);
-    return send(res, 200, { ...observed, control, host: null });
+    return send(res, 200, { ...observed, firewall: control.firewall || observed.firewall, control, host: null });
   }
   if (req.method === 'POST' && url.pathname === '/api/network') {
-    if (!requirePermission(res, permissions, 'network.manage')) return;
     const input = await bodyJson(req);
+    const requiredPermission = String(input.action || '').startsWith('firewall-') ? 'firewall.manage' : 'network.manage';
+    if (!requirePermission(res, permissions, requiredPermission)) return;
     let result;
     try { result = await localNetworkAction(input); }
     catch (error) {

@@ -33,6 +33,16 @@
 .mfa-icon { display:grid; place-items:center; width:42px; height:42px; border-radius:12px; background:var(--panel-2); color:var(--accent); font-size:11px; font-weight:900; }
 .mfa-method.active { border-color:color-mix(in srgb,var(--accent) 45%,var(--line)); }
 .mfa-config { margin-top:14px; }
+.mfa-config-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; margin-top:14px; }
+.mfa-config-grid .mfa-config { margin-top:0; }
+.security-stack-form { display:grid; gap:10px; }
+.security-stack-form label { margin:0; }
+.totp-qr { display:block; width:min(260px,100%); aspect-ratio:1; margin:14px auto; padding:10px; border-radius:14px; background:white; }
+.security-success { color:var(--success); font-weight:750; }
+.security-key-list { display:grid; gap:8px; margin-top:14px; }
+.security-key-list > div { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; border:1px solid var(--line); border-radius:10px; }
+.security-key-list span { display:grid; gap:3px; }
+.security-key-list small { color:var(--muted); }
 .security-inline-form { display:flex; align-items:end; gap:12px; flex-wrap:wrap; }
 .security-inline-form > label { min-width:180px; flex:1 1 180px; }
 .security-inline-form > button { flex:0 0 auto; margin-bottom:1px; }
@@ -44,6 +54,19 @@
 .secret-once.hidden { display:none; }
 
 .automation-admin > .storage-list { margin-bottom:10px; }
+.identity-provider-admin { display:grid; gap:16px; margin:18px 0 26px; }
+.provider-preset-grid { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:10px; }
+.provider-preset-grid button { display:grid; grid-template-columns:38px 1fr; grid-template-rows:auto auto; column-gap:10px; align-items:center; min-width:0; padding:13px; text-align:left; border:1px solid var(--line); border-radius:13px; background:var(--panel); color:var(--text); }
+.provider-preset-grid button:hover { border-color:var(--accent); transform:translateY(-1px); }
+.provider-preset-grid button > span { grid-row:1/3; display:grid; place-items:center; width:38px; height:38px; border-radius:10px; background:var(--panel-2); color:var(--accent); font-weight:900; }
+.integration-directory { margin:22px 0; }
+.integration-presets article { display:grid; grid-template-columns:42px 1fr; align-items:center; gap:11px; padding:14px; border:1px solid var(--line); border-radius:13px; background:var(--panel); }
+.integration-presets article > span { display:grid; place-items:center; width:42px; height:42px; border-radius:11px; background:var(--panel-2); color:var(--accent); font-size:11px; font-weight:900; }
+.integration-presets article div { display:grid; gap:4px; min-width:0; }
+.integration-presets article small { color:var(--muted); }
+.provider-preset-grid b,.provider-preset-grid small { overflow:hidden; text-overflow:ellipsis; }
+.provider-preset-grid small { color:var(--muted); }
+.provider-list { margin-top:0; }
 .editable-network .inventory-grid { margin-top:0; }
 .editable-network .security-inline-form { background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:16px; }
 
@@ -53,4 +76,7 @@
   .security-check-grid { grid-template-columns:1fr; }
   .security-inline-form { display:grid; align-items:stretch; }
   .mfa-method-grid { grid-template-columns:1fr; }
+  .mfa-config-grid { grid-template-columns:1fr; }
+  .provider-preset-grid { grid-template-columns:1fr; }
 }
+@media (min-width:721px) and (max-width:1180px) { .provider-preset-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }

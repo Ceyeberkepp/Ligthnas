@@ -889,6 +889,34 @@ document.addEventListener('click', async event => {
     return;
   }
 
+  const addOvsBridge = event.target.closest('[data-network-add-ovs-bridge]');
+  if (addOvsBridge) {
+    event.preventDefault(); event.stopImmediatePropagation();
+    showEditor({ eyebrow:'OPEN VSWITCH', title:'Create OVS bridge', description:'Create an Open vSwitch bridge for advanced VM and container switching.', fields:[{ name:'name', label:'OVS bridge name', value:'ovsbr0', required:true }], submitLabel:'Create OVS bridge', onSubmit:async values => { await dialogApi('/api/network', { method:'POST', body:JSON.stringify({ action:'ovs-bridge-create', name:values.name }) }); location.reload(); } });
+    return;
+  }
+
+  const addOvsPort = event.target.closest('[data-network-add-ovs-port]');
+  if (addOvsPort) {
+    event.preventDefault(); event.stopImmediatePropagation();
+    let info; try { info = await dialogApi('/api/network'); } catch (problem) { alert(problem.message); return; }
+    const bridges = (info.control?.connections || []).filter(item => /ovs-bridge/i.test(item.type)).map(item => ({ value:item.name, label:item.name }));
+    if (!bridges.length) { alert('Create an OVS bridge first.'); return; }
+    showEditor({ eyebrow:'OPEN VSWITCH', title:'Create OVS internal port', description:'Add a host-visible internal interface to an OVS bridge.', fields:[{ name:'name', label:'Interface name', value:'ovsint0', required:true },{ name:'bridge', label:'OVS bridge', type:'select', options:bridges, required:true }], submitLabel:'Create internal port', onSubmit:async values => { await dialogApi('/api/network', { method:'POST', body:JSON.stringify({ action:'ovs-port-create', ...values }) }); location.reload(); } });
+    return;
+  }
+
+  const addOvsBond = event.target.closest('[data-network-add-ovs-bond]');
+  if (addOvsBond) {
+    event.preventDefault(); event.stopImmediatePropagation();
+    let info; try { info = await dialogApi('/api/network'); } catch (problem) { alert(problem.message); return; }
+    const bridges = (info.control?.connections || []).filter(item => /ovs-bridge/i.test(item.type)).map(item => ({ value:item.name, label:item.name }));
+    const devices = (info.control?.devices || []).filter(item => item.type === 'ethernet').map(item => item.name);
+    if (!bridges.length || devices.length < 2) { alert('An OVS bridge and at least two Ethernet interfaces are required.'); return; }
+    showEditor({ eyebrow:'OPEN VSWITCH', title:'Create OVS bond', description:`Available Ethernet interfaces: ${devices.join(', ')}.`, fields:[{ name:'name', label:'Bond name', value:'ovsbond0', required:true },{ name:'bridge', label:'OVS bridge', type:'select', options:bridges, required:true },{ name:'members', label:'Member interfaces', value:devices.slice(0,2).join(', '), required:true },{ name:'mode', label:'Bond mode', type:'select', value:'active-backup', options:['active-backup','balance-slb','balance-tcp'] }], submitLabel:'Create OVS bond', onSubmit:async values => { await dialogApi('/api/network', { method:'POST', body:JSON.stringify({ action:'ovs-bond-create', name:values.name, bridge:values.bridge, members:values.members.split(',').map(item => item.trim()).filter(Boolean), mode:values.mode }) }); location.reload(); } });
+    return;
+  }
+
   const firewallAdd = event.target.closest('[data-firewall-add]');
   if (firewallAdd) {
     event.preventDefault();
@@ -896,16 +924,20 @@ document.addEventListener('click', async event => {
     showEditor({
       eyebrow: 'FIREWALL RULE',
       title: 'Add firewall rule',
-      description: 'Add a local UFW rule to the LightNAS host.',
+      description: 'Create an ordered host rule with Proxmox-style direction, action, interface, source, destination, protocol, and port controls.',
       fields: [
-        { name: 'decision', label: 'Action', type: 'select', value: 'allow', options: ['allow', 'deny'] },
-        { name: 'protocol', label: 'Protocol', type: 'select', value: 'tcp', options: ['tcp', 'udp'] },
+        { name: 'direction', label: 'Direction', type: 'select', value: 'in', options: [{ value:'in', label:'IN · traffic entering LightNAS' }, { value:'out', label:'OUT · traffic leaving LightNAS' }] },
+        { name: 'decision', label: 'Action', type: 'select', value: 'allow', options: ['allow', 'deny', 'reject', 'limit'] },
+        { name: 'interface', label: 'Interface (optional)', placeholder: 'eth0 or vmbr0' },
+        { name: 'protocol', label: 'Protocol', type: 'select', value: 'tcp', options: ['tcp', 'udp', 'any'] },
         { name: 'port', label: 'Port', type: 'number', min: 1, max: 65535, required: true },
-        { name: 'source', label: 'Source IP/CIDR (optional)', placeholder: '10.0.0.0/24' }
+        { name: 'source', label: 'Source IP/CIDR (optional)', placeholder: '10.0.0.0/24' },
+        { name: 'destination', label: 'Destination IP/CIDR (optional)', placeholder: '192.168.1.10' },
+        { name: 'comment', label: 'Comment', placeholder: 'Allow administration from trusted LAN' }
       ],
       submitLabel: 'Add rule',
       onSubmit: async values => {
-        await dialogApi('/api/network', { method: 'POST', body: JSON.stringify({ action: 'firewall-add', decision: values.decision, protocol: values.protocol, port: Number(values.port), source: values.source || '' }) });
+        await dialogApi('/api/network', { method: 'POST', body: JSON.stringify({ action: 'firewall-add', decision: values.decision, direction: values.direction, interface: values.interface || '', protocol: values.protocol, port: Number(values.port), source: values.source || '', destination: values.destination || '', comment: values.comment || '' }) });
         location.reload();
       }
     });

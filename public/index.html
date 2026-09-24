@@ -49,7 +49,10 @@
         <label>Username<input name="username" required autocomplete="username"></label>
         <label>Password<input name="password" type="password" required autocomplete="current-password"></label>
         <label>Authenticator code <span class="muted">(when enabled)</span><input name="totp" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" placeholder="6-digit code"></label>
+        <label id="sms-code-field" class="hidden">SMS code<input name="smsCode" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" placeholder="6-digit text code"></label>
+        <input name="fido" type="hidden">
         <button class="primary wide" type="submit">Sign in</button>
+        <div class="auth-alternatives"><button id="sms-login-button" class="secondary" type="button">Send SMS code</button><button id="fido-login-button" class="secondary" type="button">Use passkey / security key</button></div>
         <div class="form-error" role="alert"></div>
       </form>
     </section>

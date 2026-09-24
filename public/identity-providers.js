@@ -56,15 +56,15 @@ function fieldsFor(provider = {}) {
     <label>Scopes<input name="scopes" value="${idpEscape(provider.scopes || 'openid profile email')}"></label>`;
 }
 
-function openProviderDialog(data, provider = null) {
+function openProviderDialog(data, provider = null, template = null) {
   const options = data.permissionOptions || Object.keys(idpPermissionNames);
-  const existing = provider || { type:'ldaps', enabled:false, permissions:['files.read'] };
+  const existing = provider || template || { type:'ldaps', enabled:false, permissions:['files.read'] };
   const dialog = document.createElement('dialog');
   dialog.className = 'lightnas-dialog identity-provider-dialog';
   dialog.innerHTML = `<form class="dialog-body" data-provider-form>
     <div class="dialog-head"><div><span class="eyebrow">IDENTITY & SSO</span><h2>${provider ? 'Edit identity provider' : 'Add identity provider'}</h2></div><button class="dialog-close" type="button" data-provider-close>×</button></div>
     <label>Provider name<input name="name" maxlength="64" value="${idpEscape(existing.name || '')}" required placeholder="Corporate directory"></label>
-    <label>Type<select name="type"><option value="ldaps" ${existing.type === 'ldaps' ? 'selected' : ''}>LDAPS</option><option value="saml" ${existing.type === 'saml' ? 'selected' : ''}>SAML 2.0</option><option value="oidc" ${existing.type === 'oidc' ? 'selected' : ''}>OpenID Connect</option></select></label>
+    <label>Type<select name="type"><option value="ldaps" ${existing.type === 'ldaps' ? 'selected' : ''}>Active Directory / LDAP over TLS</option><option value="saml" ${existing.type === 'saml' ? 'selected' : ''}>SAML 2.0 SSO</option><option value="oidc" ${existing.type === 'oidc' ? 'selected' : ''}>OpenID Connect SSO</option></select></label>
     <label class="policy-option"><input type="checkbox" name="enabled" ${existing.enabled ? 'checked' : ''}><span><b>Enable provider</b><small>Enabled profiles may be used by the authentication layer when that sign-in flow is activated.</small></span></label>
     <div data-provider-fields>${fieldsFor(existing)}</div>
     ${permissionMarkup(options, existing.permissions || [])}
@@ -103,9 +103,16 @@ async function renderProviders() {
   try { data = await idpApi('/api/security/identity-providers'); } catch { return; }
   const section = document.createElement('section');
   section.className = 'identity-provider-admin';
-  section.innerHTML = `<div class="admin-section-head"><div><span class="eyebrow">IDENTITY & SSO</span><h2>Authentication providers</h2><p class="muted">Configure and test LDAPS, SAML 2.0, and OpenID Connect profiles. Secrets are write-only and are never returned to the browser.</p></div><button class="primary" type="button" data-add-provider>+ Add provider</button></div>
-    <div class="storage-list">${(data.providers || []).map(provider => `<article class="storage-row"><div><h3>${idpEscape(provider.name)}</h3><p>${provider.type.toUpperCase()} · ${idpEscape(providerSummary(provider))} · ${provider.enabled ? 'Enabled' : 'Disabled'}</p></div><div class="head-actions"><button class="secondary" type="button" data-test-provider="${provider.id}">Test</button><button class="secondary" type="button" data-edit-provider="${provider.id}">Edit</button><button class="secondary danger-button" type="button" data-delete-provider="${provider.id}">Delete</button></div></article>`).join('') || '<div class="empty"><p>No external identity providers configured.</p></div>'}</div>
-    <div class="module-hero"><h3>Sign-in status</h3><p>LDAPS/SAML/OIDC profiles and connection tests are managed here. Local accounts and TOTP remain available. Full browser SAML/OIDC assertion/callback sign-in is not enabled until that authentication flow is configured and validated.</p></div>`;
+  section.innerHTML = `<div class="admin-section-head"><div><span class="eyebrow">IDENTITY & SSO</span><h2>Directory and sign-in providers</h2><p class="muted">Connect an Active Directory/LDAP directory or prepare a standards-based SSO provider. Secrets are write-only.</p></div><button class="primary" type="button" data-add-provider>+ Custom provider</button></div>
+    <div class="provider-preset-grid">
+      <button type="button" data-provider-preset="ad"><span>AD</span><b>Microsoft Active Directory</b><small>Working LDAPS username/password sign-in</small></button>
+      <button type="button" data-provider-preset="entra"><span>◎</span><b>Microsoft Entra ID</b><small>OpenID Connect profile</small></button>
+      <button type="button" data-provider-preset="google"><span>G</span><b>Google Workspace</b><small>OpenID Connect profile</small></button>
+      <button type="button" data-provider-preset="keycloak"><span>K</span><b>Keycloak / Authentik</b><small>OIDC or SAML profile</small></button>
+      <button type="button" data-provider-preset="okta"><span>O</span><b>Okta</b><small>OpenID Connect profile</small></button>
+    </div>
+    <div class="storage-list provider-list">${(data.providers || []).map(provider => `<article class="storage-row"><div><h3>${idpEscape(provider.name)}</h3><p>${provider.type === 'ldaps' ? 'ACTIVE DIRECTORY / LDAPS' : provider.type.toUpperCase()} · ${idpEscape(providerSummary(provider))} · ${provider.enabled ? 'Enabled' : 'Disabled'}</p></div><div class="head-actions"><button class="secondary" type="button" data-test-provider="${provider.id}">Test connection</button><button class="secondary" type="button" data-edit-provider="${provider.id}">Edit</button><button class="secondary danger-button" type="button" data-delete-provider="${provider.id}">Delete</button></div></article>`).join('') || '<div class="empty"><p>No external identity providers configured. Choose a template above.</p></div>'}</div>
+    <div class="module-note"><b>Authentication status:</b> Active Directory/LDAPS sign-in is enabled when its profile is enabled and passes the connection test. SAML and OIDC profiles can be saved and tested; browser redirect/callback sign-in remains disabled until full assertion validation is configured.</div>`;
   section.dataset.providerJson = JSON.stringify(data);
   idpQ('.page-head', content)?.insertAdjacentElement('afterend', section);
 }
@@ -126,14 +133,26 @@ addEventListener('load', renderProviders);
 document.addEventListener('click', async event => {
   const section = event.target.closest('.identity-provider-admin');
   const add = event.target.closest('[data-add-provider]');
+  const preset = event.target.closest('[data-provider-preset]');
   const edit = event.target.closest('[data-edit-provider]');
   const test = event.target.closest('[data-test-provider]');
   const remove = event.target.closest('[data-delete-provider]');
-  if (!add && !edit && !test && !remove) return;
+  if (!add && !preset && !edit && !test && !remove) return;
   let data;
   try { data = JSON.parse((section || idpQ('.identity-provider-admin'))?.dataset.providerJson || '{}'); }
   catch { data = {}; }
   if (add) { openProviderDialog(data); return; }
+  if (preset) {
+    const templates = {
+      ad:{ name:'Microsoft Active Directory', type:'ldaps', port:636, principalTemplate:'{username}@example.com', permissions:['files.read'] },
+      entra:{ name:'Microsoft Entra ID', type:'oidc', issuer:'https://login.microsoftonline.com/common/v2.0', scopes:'openid profile email', permissions:['files.read'] },
+      google:{ name:'Google Workspace', type:'oidc', issuer:'https://accounts.google.com', scopes:'openid profile email', permissions:['files.read'] },
+      keycloak:{ name:'Keycloak / Authentik', type:'oidc', scopes:'openid profile email', permissions:['files.read'] },
+      okta:{ name:'Okta', type:'oidc', scopes:'openid profile email', permissions:['files.read'] }
+    };
+    openProviderDialog(data, null, templates[preset.dataset.providerPreset]);
+    return;
+  }
   if (edit) {
     const provider = (data.providers || []).find(item => item.id === edit.dataset.editProvider);
     if (provider) openProviderDialog(data, provider);

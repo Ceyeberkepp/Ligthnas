@@ -1330,6 +1330,15 @@ def network_inventory() -> dict:
             seen.add(ssid)
             wifi.append({"ssid": ssid, "connected": row[0] == "*", "signal": int(row[2] or 0), "security": row[3] or "Open"})
 
+    firewall_status = run(["ufw", "status"], timeout=15, check=False) if available("ufw") else ""
+    firewall_numbered = run(["ufw", "status", "numbered"], timeout=15, check=False) if available("ufw") else ""
+    firewall_rules = []
+    for line in firewall_numbered.splitlines():
+        match = re.match(r"^\[\s*(\d+)\]\s+(.+?)\s{2,}(ALLOW|DENY|REJECT|LIMIT)(?:\s+(IN|OUT))?\s{2,}(.+)$", line, re.I)
+        if match:
+            firewall_rules.append({"number": int(match.group(1)), "target": match.group(2).strip(), "action": match.group(3).upper(), "direction": (match.group(4) or "IN").upper(), "source": match.group(5).strip()})
+    nft_tables = run(["nft", "list", "tables"], timeout=15, check=False).splitlines()[:30] if available("nft") else []
+
     return {
         "editable": True,
         "manager": "NetworkManager",
@@ -1345,6 +1354,13 @@ def network_inventory() -> dict:
             "mode": state.get("LIGHTNAS_NETWORK_MODE") or None,
             "name": bridge_name or None,
             "port": bridge_port or None,
+        },
+        "firewall": {
+            "backend": "ufw" if available("ufw") else ("nftables" if available("nft") else "unavailable"),
+            "editable": available("ufw"),
+            "status": (re.search(r"^Status:\s*(.+)$", firewall_status, re.M).group(1) if re.search(r"^Status:\s*(.+)$", firewall_status, re.M) else "unknown"),
+            "rules": firewall_rules,
+            "tables": [line for line in nft_tables if line.startswith("table ")],
         },
     }
 
@@ -1410,22 +1426,52 @@ def network_action(data: dict) -> dict:
         except (TypeError, ValueError) as exc:
             raise ValueError("invalid firewall port") from exc
         source = str(data.get("source") or "").strip()
-        if decision not in {"allow", "deny"} or protocol not in {"tcp", "udp"} or not (1 <= port <= 65535):
+        destination = str(data.get("destination") or "").strip()
+        direction = str(data.get("direction") or "in").lower()
+        interface = str(data.get("interface") or "").strip()
+        comment = str(data.get("comment") or "").strip()[:120]
+        if decision not in {"allow", "deny", "reject", "limit"} or protocol not in {"tcp", "udp", "any"} or direction not in {"in", "out"} or not (1 <= port <= 65535):
             raise ValueError("invalid firewall rule")
-        args = ["ufw", decision]
+        if interface and not IFACE_RE.fullmatch(interface):
+            raise ValueError("invalid firewall interface")
         if source:
             if not re.fullmatch(r"[A-Fa-f0-9:.]+(?:/[0-9]{1,3})?", source):
                 raise ValueError("invalid firewall source address")
-            args += ["from", source, "to", "any"]
-        else:
-            # UFW's long rule form requires an explicit destination.  Using
-            # ``allow port 8443 proto tcp`` makes UFW reject the request with
-            # "Need 'to' or 'from' clause", which used to make container app
-            # publishing look like an image-download failure in the UI.
+        if destination and not re.fullmatch(r"[A-Fa-f0-9:.]+(?:/[0-9]{1,3})?", destination):
+            raise ValueError("invalid firewall destination address")
+        if direction == "in" and not interface and not source and not destination:
+            # Keep the minimal UFW form for automatic app publication.
+            args = ["ufw", decision]
             args += ["to", "any"]
-        args += ["port", str(port), "proto", protocol]
+            args += ["port", str(port)]
+        else:
+            args = ["ufw", decision, direction]
+            if interface:
+                args += ["on", interface]
+            args += ["from", source or "any", "to", destination or "any", "port", str(port)]
+        if protocol != "any":
+            args += ["proto", protocol]
+        if comment:
+            args += ["comment", comment]
         run(args, timeout=30)
-        return {"action": action, "decision": decision, "protocol": protocol, "port": port, "source": source or "any"}
+        return {"action": action, "decision": decision, "direction": direction, "interface": interface, "protocol": protocol, "port": port, "source": source or "any", "destination": destination or "any", "comment": comment}
+    if action == "firewall-policy":
+        if not available("ufw"):
+            raise RuntimeError("UFW is not installed on this LightNAS host")
+        policy = str(data.get("policy") or "").lower()
+        direction = str(data.get("direction") or "").lower()
+        if policy not in {"allow", "deny", "reject"} or direction not in {"incoming", "outgoing", "routed"}:
+            raise ValueError("invalid firewall default policy")
+        run(["ufw", "default", policy, direction], timeout=30)
+        return {"action": action, "policy": policy, "direction": direction}
+    if action == "firewall-logging":
+        if not available("ufw"):
+            raise RuntimeError("UFW is not installed on this LightNAS host")
+        level = str(data.get("level") or "").lower()
+        if level not in {"off", "low", "medium", "high", "full"}:
+            raise ValueError("invalid firewall logging level")
+        run(["ufw", "logging", level], timeout=30)
+        return {"action": action, "level": level}
     if action == "firewall-delete":
         if not available("ufw"):
             raise RuntimeError("UFW is not installed on this LightNAS host")
@@ -1548,6 +1594,46 @@ def network_action(data: dict) -> dict:
             raise ValueError("invalid VLAN settings")
         run(["nmcli", "connection", "add", "type", "vlan", "con-name", name, "ifname", name, "dev", parent, "id", str(vlan_id)], timeout=30)
         return {"action": action, "name": name, "parent": parent, "vlanId": vlan_id}
+    if action == "ovs-bridge-create":
+        name = str(data.get("name") or "ovsbr0")
+        if not IFACE_RE.fullmatch(name):
+            raise ValueError("invalid OVS bridge name")
+        if not available("ovs-vsctl"):
+            raise RuntimeError("Open vSwitch is not installed; rerun the LightNAS installer")
+        run(["nmcli", "connection", "add", "type", "ovs-bridge", "con-name", name, "ifname", name], timeout=30)
+        return {"action": action, "name": name}
+    if action == "ovs-port-create":
+        name = str(data.get("name") or "ovsint0")
+        bridge = str(data.get("bridge") or "")
+        if not IFACE_RE.fullmatch(name) or not IFACE_RE.fullmatch(bridge):
+            raise ValueError("invalid OVS internal port or bridge name")
+        if not available("ovs-vsctl"):
+            raise RuntimeError("Open vSwitch is not installed; rerun the LightNAS installer")
+        port_profile = f"{name}-port"
+        run(["nmcli", "connection", "add", "type", "ovs-port", "con-name", port_profile, "ifname", name, "master", bridge], timeout=30)
+        try:
+            run(["nmcli", "connection", "add", "type", "ovs-interface", "con-name", name, "ifname", name, "master", port_profile, "ipv4.method", "disabled", "ipv6.method", "disabled"], timeout=30)
+        except Exception:
+            run(["nmcli", "connection", "delete", port_profile], timeout=15, check=False)
+            raise
+        return {"action": action, "name": name, "bridge": bridge}
+    if action == "ovs-bond-create":
+        name = str(data.get("name") or "ovsbond0")
+        bridge = str(data.get("bridge") or "")
+        members = [str(item) for item in (data.get("members") or [])]
+        mode = str(data.get("mode") or "active-backup")
+        if not IFACE_RE.fullmatch(name) or not IFACE_RE.fullmatch(bridge) or len(members) < 2 or any(not IFACE_RE.fullmatch(item) for item in members) or mode not in {"active-backup", "balance-slb", "balance-tcp"}:
+            raise ValueError("invalid OVS bond settings")
+        if not available("ovs-vsctl"):
+            raise RuntimeError("Open vSwitch is not installed; rerun the LightNAS installer")
+        run(["nmcli", "connection", "add", "type", "ovs-port", "con-name", name, "ifname", name, "master", bridge, "ovs-port.bond-mode", mode], timeout=30)
+        try:
+            for member in members:
+                run(["nmcli", "connection", "add", "type", "ethernet", "con-name", f"{name}-{member}", "ifname", member, "master", name], timeout=30)
+        except Exception:
+            run(["nmcli", "connection", "delete", name], timeout=15, check=False)
+            raise
+        return {"action": action, "name": name, "bridge": bridge, "members": members, "mode": mode}
     raise ValueError("unsupported network action")
 
 
