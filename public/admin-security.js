@@ -3,10 +3,26 @@ const qa = (selector, root = document) => [...root.querySelectorAll(selector)];
 const escapeText = value => String(value).replace(/[&<>'"]/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' })[ch]);
 
 const permissionNames = {
-  'files.read':'Read files', 'files.write':'Write files', 'media.convert':'Convert media',
-  'storage.view':'View storage', 'storage.manage':'Manage storage', 'shares.manage':'Manage shares',
-  'apps.manage':'Manage apps', 'containers.manage':'Manage containers', 'vms.manage':'Manage virtual machines',
-  'network.view':'View networking', 'network.manage':'Manage firewall / Wi-Fi', 'system.view':'View system health'
+  'files.read':'Read / preview files',
+  'files.write':'Upload / create files',
+  'files.download':'Download files & folders',
+  'files.delete':'Delete files & folders',
+  'media.convert':'Convert media',
+  'storage.view':'View storage',
+  'storage.manage':'Manage storage & datasets',
+  'shares.manage':'Manage shares',
+  'apps.manage':'Manage apps',
+  'containers.manage':'Manage containers',
+  'vms.manage':'Manage virtual machines',
+  'network.view':'View networking',
+  'network.manage':'Manage interfaces, bridges & VLANs',
+  'firewall.manage':'Manage firewall',
+  'monitoring.view':'View monitoring',
+  'system.view':'View system information',
+  'users.manage':'Manage user accounts',
+  'groups.manage':'Manage groups & policy',
+  'security.manage':'Manage tokens / identity / security',
+  'shell.access':'Node shell access (owner policy only)'
 };
 
 async function api(path, options = {}) {
@@ -30,7 +46,7 @@ function memberCheckboxes(users, selected = []) {
 }
 
 async function renderGroups() {
-  if (location.hash !== '#users') return;
+  if (location.hash !== '#permissions') return;
   const content = q('#content');
   if (!content || q('.groups-admin', content)) return;
   let data;
@@ -42,6 +58,18 @@ async function renderGroups() {
   const section = document.createElement('section');
   section.className = 'groups-admin';
   section.innerHTML = `
+    <div class="admin-section-head"><div><span class="eyebrow">USER POLICY</span><h2>Direct permissions</h2><p class="muted">Set permissions directly on an account. Effective access is the union of direct permissions and group permissions.</p></div></div>
+    <div class="group-grid user-policy-grid">${users.map(user => `<article class="panel group-card">
+      <div class="volume-title"><div><h3>${escapeText(user.username)}</h3><p>${user.disabled ? 'Disabled account' : 'Active account'} · ${(user.groups || []).map(group => escapeText(group.name)).join(', ') || 'No groups'}</p></div><span class="content-badge">${(user.effectivePermissions || []).length} effective</span></div>
+      <details><summary>Manage direct policy</summary><form data-user-policy="${escapeText(user.username)}">
+        <h4>Direct permissions</h4>${checkboxes(permissions, user.permissions || [], 'permissions')}
+        <h4>Group memberships</h4>${groups.map(group => `<label class="security-member"><input type="checkbox" name="groups" value="${group.id}" ${(user.groups || []).some(item => item.id === group.id) ? 'checked' : ''}> <span>${escapeText(group.name)}</span></label>`).join('') || '<p class="muted">No groups created yet.</p>'}
+        <label>Administrator password<input name="currentPassword" type="password" required autocomplete="current-password"></label>
+        <button class="primary" type="submit">Save user policy</button>
+        <div class="form-error" role="alert"></div>
+      </form></details>
+    </article>`).join('') || '<div class="empty"><p>No local users. Create accounts under Users first.</p></div>'}</div>
+
     <div class="admin-section-head"><div><span class="eyebrow">GROUP POLICY</span><h2>Groups & inherited permissions</h2><p class="muted">Users receive their direct permissions plus every permission granted by groups they belong to.</p></div><button class="primary" type="button" data-create-group>+ Create group</button></div>
     <div class="group-grid">${groups.map(group => `<article class="panel group-card" data-group-id="${group.id}">
       <div class="volume-title"><div><h3>${escapeText(group.name)}</h3><p>${escapeText(group.description || 'No description')}</p></div><span class="content-badge">${group.members.length} members</span></div>
@@ -65,14 +93,6 @@ async function renderGroups() {
     </form></dialog>`;
   q('.page-head', content)?.insertAdjacentElement('afterend', section);
 
-  // Add group membership controls to each existing user management form.
-  for (const user of users) {
-    const form = q(`form[data-manage-user="${CSS.escape(user.username)}"]`, content);
-    if (!form || q('.membership-policy', form)) continue;
-    const selected = new Set((user.groups || []).map(group => group.id));
-    const markup = `<fieldset class="membership-policy"><legend>Group memberships</legend>${groups.map(group => `<label><input type="checkbox" value="${group.id}" ${selected.has(group.id) ? 'checked' : ''}> ${escapeText(group.name)}</label>`).join('') || '<p class="muted">No groups have been created.</p>'}</fieldset><button class="secondary" type="button" data-save-memberships="${escapeText(user.username)}">Save group memberships</button>`;
-    q('.form-error', form)?.insertAdjacentHTML('beforebegin', markup);
-  }
 }
 
 async function renderTotp() {
@@ -174,6 +194,21 @@ document.addEventListener('click', async event => {
 
 document.addEventListener('submit', async event => {
   const form = event.target;
+  if (form.matches('[data-user-policy]')) {
+    event.preventDefault();
+    const permissions = qa('input[name="permissions"]:checked', form).map(input => input.value);
+    const groups = qa('input[name="groups"]:checked', form).map(input => input.value);
+    const currentPassword = q('input[name="currentPassword"]', form)?.value || '';
+    try {
+      await api(`/api/users/${encodeURIComponent(form.dataset.userPolicy)}`, {
+        method:'PATCH',
+        body:JSON.stringify({ currentPassword, permissions, groups })
+      });
+      alert('User permission policy saved. Existing sessions for that user were ended.');
+      refreshCurrent();
+    } catch (error) { q('.form-error', form).textContent = error.message; }
+    return;
+  }
   if (form.matches('[data-new-group-form]')) {
     event.preventDefault();
     const data = new FormData(form);
