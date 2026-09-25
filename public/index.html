@@ -59,6 +59,7 @@
           </div>
           <div class="login-mfa-panel hidden" data-login-panel="sms">
             <p class="muted">A verification code can be sent to the phone configured for this account.</p>
+            <p id="login-sms-status" class="muted login-mfa-status"></p>
             <button class="secondary wide" type="button" id="login-send-sms">Send SMS code</button>
             <label>SMS code<input name="smsCode" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" placeholder="6-digit code"></label>
           </div>
