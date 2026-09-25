@@ -33,6 +33,11 @@ lb config \
   --architectures amd64 \
   --binary-image iso-hybrid \
   --debian-installer live \
+  --debian-installer-gui true \
+  --bootappend-install "preseed/file=/cdrom/install/preseed.cfg auto=true priority=high" \
+  --iso-application "LightNAS Appliance" \
+  --iso-publisher "LightNAS" \
+  --iso-volume "LIGHTNAS" \
   --archive-areas 'main contrib non-free-firmware' \
   --security false \
   --linux-packages linux-image \
@@ -45,6 +50,7 @@ mkdir -p \
   config/includes.chroot/etc/systemd/system/multi-user.target.wants \
   config/includes.chroot/etc/apt/sources.list.d \
   config/includes.chroot/etc/modules-load.d \
+  config/includes.chroot/etc/default \
   config/hooks/live
 
 echo \
@@ -68,6 +74,9 @@ openssh-server
 util-linux
 python3
 ffmpeg
+imagemagick
+unzip
+zip
 acl
 novnc
 iproute2
@@ -122,6 +131,36 @@ cp -a \
 cp \
   "${REPO_ROOT}/iso/preseed.cfg" \
   config/binary_debian-installer/preseed.cfg
+
+# Brand both the live environment and the installed appliance. Keep ID=debian
+# for package/tool compatibility while presenting LightNAS to operators.
+cat >config/includes.chroot/etc/os-release <<'EOF'
+PRETTY_NAME="LightNAS 1 (Debian 13)"
+NAME="LightNAS"
+VERSION_ID="1"
+VERSION="1 (Debian 13 / trixie)"
+VERSION_CODENAME=trixie
+ID=debian
+ID_LIKE=debian
+HOME_URL="https://github.com/Ceyeberkepp/Ligthnas"
+SUPPORT_URL="https://github.com/Ceyeberkepp/Ligthnas/issues"
+EOF
+
+cat >config/includes.chroot/etc/issue <<'EOF'
+LightNAS Appliance 1
+Private storage, apps, containers and virtual machines
+\n \l
+EOF
+
+cat >config/includes.chroot/etc/issue.net <<'EOF'
+LightNAS Appliance 1
+EOF
+
+cat >config/includes.chroot/etc/default/grub.d/99-lightnas.cfg <<'EOF'
+GRUB_DISTRIBUTOR="LightNAS"
+GRUB_TIMEOUT_STYLE=menu
+GRUB_TIMEOUT=5
+EOF
 
 #
 # First-boot host network bootstrap.
@@ -268,6 +307,9 @@ printf '%s\n' \
 apt-get update
 apt-get install -y nodejs
 
+# LightNAS branding and archive/media utilities used by the control center.
+apt-get install -y unzip zip imagemagick
+
 # Debian images do not need the ubuntu-keyring package to build LightNAS, but
 # debootstrap must still be able to verify Ubuntu system-container releases.
 ubuntu_candidate="$(apt-cache policy ubuntu-keyring 2>/dev/null | awk '/Candidate:/{print $2; exit}')"
@@ -412,6 +454,10 @@ systemctl disable lxc-net.service >/dev/null 2>&1 || true
 if systemctl list-unit-files libvirtd.socket >/dev/null 2>&1; then
   systemctl enable libvirtd.socket >/dev/null 2>&1 || true
 fi
+
+# Refresh bootloader labels on installed systems. This is harmless in the
+# live-build chroot and ensures generated GRUB menus identify LightNAS.
+update-grub >/dev/null 2>&1 || true
 
 echo
 echo "=== LightNAS chroot configuration complete ==="
