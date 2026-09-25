@@ -142,11 +142,14 @@ async function automaticContainerApplication(id, { preferredPort = 0, requestedH
 }
 
 export const PERMISSIONS = Object.freeze([
+  'overview.view',
   'files.read', 'files.write', 'files.download', 'files.delete', 'media.convert',
-  'storage.view', 'storage.manage', 'shares.manage',
-  'apps.manage', 'containers.manage', 'vms.manage',
-  'network.view', 'network.manage', 'firewall.manage',
-  'monitoring.view', 'system.view'
+  'storage.view', 'storage.manage', 'pools.view', 'shares.view', 'shares.manage',
+  'apps.view', 'apps.manage', 'containers.view', 'containers.manage', 'vms.view', 'vms.manage',
+  'network.view', 'network.manage', 'firewall.view', 'firewall.manage', 'integrations.view', 'integrations.manage',
+  'containers.console', 'vms.console', 'backup.manage', 'audit.view',
+  'monitoring.view', 'capabilities.view', 'system.view', 'system.shell',
+  'users.manage', 'smtp.manage', 'settings.manage', 'admin.view'
 ]);
 const DEFAULT_USER_PERMISSIONS = Object.freeze(['files.read', 'files.write', 'files.download', 'files.delete']);
 
@@ -311,7 +314,7 @@ function userPublic(user) {
     createdAt: user.createdAt,
     disabled: Boolean(user.disabled),
     totpEnabled: Boolean(user.totpEnabled),
-    permissions: normalizePermissions(user.permissions, PERMISSIONS, DEFAULT_USER_PERMISSIONS),
+    permissions: normalizePermissions(user.permissions, PERMISSIONS, []),
     effectivePermissions: effectivePermissions({ state: store.state, username: user.username, account: user, isAdmin: false, allowed: PERMISSIONS, defaults: DEFAULT_USER_PERMISSIONS }),
     groups: groups.map(group => ({ id: group.id, name: group.name }))
   };
@@ -455,8 +458,7 @@ async function api(req, res, url) {
     return send(res, 200, { enabled: false });
   }
 
-  const ownerOnly = url.pathname === '/api/settings' || url.pathname === '/api/users' || url.pathname.startsWith('/api/users/') ||
-    url.pathname === '/api/groups' || url.pathname.startsWith('/api/groups/') ||
+  const ownerOnly = url.pathname === '/api/settings' ||
     url.pathname === '/api/smtp' || url.pathname === '/api/smtp/test' ||
     url.pathname.startsWith('/api/security/api-tokens') || url.pathname.startsWith('/api/security/webhooks') ||
     url.pathname.startsWith('/api/security/identity-providers');
@@ -485,6 +487,9 @@ async function api(req, res, url) {
     return send(res, 200, { ok: true });
   }
 
+  if ((url.pathname === '/api/users' || url.pathname.startsWith('/api/users/') || url.pathname === '/api/groups' || url.pathname.startsWith('/api/groups/')) &&
+      !requirePermission(res, permissions, 'users.manage')) return;
+
   if (req.method === 'GET' && url.pathname === '/api/users') {
     return send(res, 200, { permissionOptions: PERMISSIONS, users: store.state.users.map(userPublic), groups: store.state.groups.map(groupPublic) });
   }
@@ -492,7 +497,7 @@ async function api(req, res, url) {
     const input = await bodyJson(req);
     if (!/^[a-zA-Z0-9._-]{3,32}$/.test(input.username || '') || typeof input.password !== 'string' || input.password.length < 10) return send(res, 400, { error: 'Use a 3–32 character username and a password of at least 10 characters.' });
     if (input.username === store.state.config.username || store.state.users.some(user => user.username === input.username)) return send(res, 409, { error: 'Username already exists.' });
-    const user = { username: input.username, passwordHash: await hashPassword(input.password), permissions: normalizePermissions(input.permissions, PERMISSIONS, DEFAULT_USER_PERMISSIONS), createdAt: new Date().toISOString(), totpEnabled: false };
+    const user = { username: input.username, passwordHash: await hashPassword(input.password), permissions: normalizePermissions(input.permissions, PERMISSIONS, []), createdAt: new Date().toISOString(), totpEnabled: false };
     store.state.users.push(user);
     applyUserGroups(input.username, input.groups);
     store.addActivity('user', `User ${input.username} was created.`);
