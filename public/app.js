@@ -159,9 +159,9 @@ async function showConsole() {
   avatar.textContent = appliance.avatar ? '' : appliance.username[0].toUpperCase();
   avatar.style.backgroundImage = appliance.avatar ? `url("/api/profile/avatar?v=${Date.now()}")` : '';
   avatar.classList.toggle('has-photo', Boolean(appliance.avatar));
-  $('[data-view]').forEach(link => link.classList.toggle('hidden', !canView(link.dataset.view, appliance)));
+  $$('[data-view]').forEach(link => link.classList.toggle('hidden', !canView(link.dataset.view, appliance)));
   $('#node-shell-top')?.classList.toggle('hidden', !canView('shell', appliance));
-  $('.nav-group').forEach(group => group.classList.toggle('hidden', !group.querySelector('[data-view]:not(.hidden)')));
+  $$('.nav-group').forEach(group => group.classList.toggle('hidden', !group.querySelector('[data-view]:not(.hidden)')));
   render(location.hash.slice(1) || 'home');
   $$('#nav a[data-view], .foot-admin[data-view]').forEach(link => {
     const label = link.textContent.replace(/\s+/g, ' ').trim();

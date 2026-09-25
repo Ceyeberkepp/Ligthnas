@@ -41,7 +41,7 @@ test('node shell, profile pictures, expanded permissions and collapsible navigat
     readFile(new URL('../public/node-shell.js', import.meta.url), 'utf8')
   ]);
   assert.match(page, /#permissions/);
-  assert.match(page, /#shell/);
+  assert.match(page, /id="node-shell-top"/);
   assert.match(page, /id="avatar"/);
   assert.match(app, /\/api\/profile\/avatar/);
   assert.match(app, /sidebar-collapsed/);
