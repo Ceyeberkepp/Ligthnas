@@ -29,5 +29,6 @@ test('LXC appliance networking stays internal while VM and bare metal can bridge
   assert.match(agent, /LIGHTNAS_NETWORK_MODE.*lxc-nat/);
   assert.match(agent, /lightnas0/);
   assert.match(runtime, /LightNAS managed NAT/);
-  assert.match(ui, /CURRENT APPLIANCE NETWORK/);
+  assert.match(ui, /Proxmox-style host networking/);
+  assert.match(ui, /network-table-row/);
 });
