@@ -550,7 +550,7 @@ function moduleView(view) {
     return `${pageHead('App Store', 'Install curated open-source applications directly from LightNAS.', '<button class="secondary" data-action="refresh-runtime">Refresh apps</button>')}
       ${runtimeBanner('docker')}
       <section class="app-catalog-toolbar panel">
-        <div><span class="eyebrow">LIGHTNAS APPLICATION CATALOG</span><h2>${apps.length} one-click apps</h2><p class="muted">The catalog focuses on container apps LightNAS can install safely with its current one-click engine. More complex multi-container apps can be added as Compose support expands.</p></div>
+        <div><span class="eyebrow">LIGHTNAS APPLICATION CATALOG</span><h2>${apps.length} one-click apps</h2><p class="muted">A broad NAS app catalog sourced from official upstream and community container images, including many apps commonly found in TrueNAS-style catalogs. LightNAS only lists entries its current one-click engine can actually launch; complex multi-service stacks will join as Compose support expands.</p></div>
         <div class="app-filter-controls">
           <label>Search<input id="app-search" type="search" placeholder="Search apps, categories, or images…"></label>
           <label>Category<select id="app-category"><option value="">All categories</option>${categories.map(category => `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`).join('')}</select></label>
