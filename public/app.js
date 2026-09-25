@@ -94,10 +94,10 @@ async function showConsole() {
   avatar.textContent = appliance.avatar ? '' : appliance.username[0].toUpperCase();
   avatar.style.backgroundImage = appliance.avatar ? `url("/api/profile/avatar?v=${Date.now()}")` : '';
   avatar.classList.toggle('has-photo', Boolean(appliance.avatar));
-  $('[data-view]').forEach(link => link.classList.toggle('hidden', !canView(link.dataset.view, appliance)));
+  $$('[data-view]').forEach(link => link.classList.toggle('hidden', !canView(link.dataset.view, appliance)));
   $$('.nav-group').forEach(group => group.classList.toggle('hidden', !group.querySelector('[data-view]:not(.hidden)')));
   render(location.hash.slice(1) || 'home');
-  $('#nav a[data-view], .foot-admin[data-view]').forEach(link => {
+  $$('#nav a[data-view], .foot-admin[data-view]').forEach(link => {
     const label = link.textContent.replace(/\s+/g, ' ').trim();
     if (label) link.title = label;
   });
@@ -813,7 +813,7 @@ function bindViewActions() {
       (item.healthy ? 'writable' : 'readonly') + '">' + (item.healthy ? 'HEALTHY' : 'NEEDS ATTENTION') +
       '</span></div>').join('') + '</div>';
   };
-  $('[data-overview-metric]', $('#content')).forEach(button => button.addEventListener('click', () => {
+  $$('[data-overview-metric]', $('#content')).forEach(button => button.addEventListener('click', () => {
     state.overviewMetric = button.dataset.overviewMetric;
     localStorage.setItem('lightnas-overview-metric', state.overviewMetric);
     render('home');
@@ -1025,8 +1025,8 @@ function bindViewActions() {
   $('#app-category', $('#content'))?.addEventListener('change', filterApps);
   $$('[data-action="new-share"]', $('#content')).forEach(button => button.addEventListener('click', () => $('#share-dialog').showModal()));
   $$('[data-view-link]', $('#content')).forEach(button => button.addEventListener('click', () => { location.hash = button.dataset.viewLink; }));
-  $('[data-action="refresh"]', $('#content')).forEach(button => button.addEventListener('click', async () => { try { state.overview = await request('/api/overview'); captureOverviewMetrics(); render(state.view); toast('Readings updated.'); } catch (error) { toast(error.message); } }));
-  $('[data-action="refresh-files"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+  $$('[data-action="refresh"]', $('#content')).forEach(button => button.addEventListener('click', async () => { try { state.overview = await request('/api/overview'); captureOverviewMetrics(); render(state.view); toast('Readings updated.'); } catch (error) { toast(error.message); } }));
+  $$('[data-action="refresh-files"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     button.disabled = true;
     button.textContent = 'Refreshing…';
     state.files = null;
@@ -1034,11 +1034,13 @@ function bindViewActions() {
     await loadFiles(true);
     toast('Files refreshed.');
   }));
-  $('[data-action="refresh-storage"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+  $$('[data-action="refresh-storage"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     button.disabled = true;
     button.textContent = 'Scanning…';
     try {
+      await request('/api/storage/scan');
       state.overview = await request('/api/overview');
+      rememberStorageSignature();
       render(state.view);
       toast('Storage rescan complete.');
     } catch (error) { toast(error.message); }
