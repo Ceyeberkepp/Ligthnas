@@ -53,7 +53,7 @@ lb config \
   --security false \
   --linux-packages linux-image \
   --linux-flavours amd64 \
-  --compression gzip
+  --compression zstd
 
 # Brand both BIOS and UEFI boot menus as LightNAS.
 # live-build ships known-good bootloader templates for the installed version;
