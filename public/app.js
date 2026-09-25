@@ -446,20 +446,37 @@ async function uploadFilesWithProgress(fileList, folderMode = false) {
   await ensureUploadDirectories(targets.map(item => item.path));
 
   const totalBytes = targets.reduce((sum, item) => sum + Number(item.file.size || 0), 0);
-  let completedBytes = 0;
+  const loadedByFile = new Array(targets.length).fill(0);
+  let completedCount = 0;
+  let nextIndex = 0;
   const progress = window.LightNASProgress?.open(folderMode ? 'Uploading folder' : 'Uploading files', `${targets.length} item${targets.length === 1 ? '' : 's'} · ${bytes(totalBytes)}`);
-  try {
-    for (let index = 0; index < targets.length; index += 1) {
+
+  const updateProgress = (activeName = '') => {
+    const transferred = loadedByFile.reduce((sum, value) => sum + value, 0);
+    const percent = totalBytes ? Math.round((transferred / totalBytes) * 100) : Math.round((completedCount / targets.length) * 100);
+    progress?.update(percent, `${completedCount} of ${targets.length} complete${activeName ? ` · ${activeName}` : ''} · ${bytes(transferred)} of ${bytes(totalBytes)}`);
+  };
+
+  const worker = async () => {
+    while (true) {
+      const index = nextIndex++;
+      if (index >= targets.length) return;
       const { file, path } = targets[index];
       await uploadRequest(path, file, loaded => {
-        const current = completedBytes + loaded;
-        const percent = totalBytes ? Math.round((current / totalBytes) * 100) : Math.round(((index + 1) / targets.length) * 100);
-        progress?.update(percent, `${index + 1} of ${targets.length} · ${file.name} · ${bytes(current)} of ${bytes(totalBytes)}`);
+        loadedByFile[index] = loaded;
+        updateProgress(file.name);
       });
-      completedBytes += Number(file.size || 0);
-      const percent = totalBytes ? Math.round((completedBytes / totalBytes) * 100) : Math.round(((index + 1) / targets.length) * 100);
-      progress?.update(percent, `${index + 1} of ${targets.length} complete`);
+      loadedByFile[index] = Number(file.size || 0);
+      completedCount += 1;
+      updateProgress();
     }
+  };
+
+  try {
+    // Three concurrent streams noticeably improve folders with many small
+    // files without creating a large RAM/connection spike on the 2 GiB target.
+    const concurrency = Math.min(3, targets.length);
+    await Promise.all(Array.from({ length: concurrency }, () => worker()));
     progress?.succeed(`${targets.length} item${targets.length === 1 ? '' : 's'} uploaded successfully.`);
     toast(`${targets.length} item${targets.length === 1 ? '' : 's'} uploaded.`);
   } catch (error) {
