@@ -70,7 +70,7 @@ function renderStorageManager() {
       <p>${verified
         ? `${sBytes(visible.usedBytes||0)} used · ${sBytes(visible.availableBytes||0)} free across attached data volumes.${sharedLocalExcluded?' The OS/root-backed local storage is shown separately and is not included in this total.':''}`
         : 'This LightNAS instance is running inside a container and has not received authoritative virtual-disk sizes from its host yet. Guest filesystem geometry is not used for the headline total.'}</p>
-      <div class="storage-capacity-breakdown">${dataSources.map(source=>`<span><b>${sEsc(source.mountPoint)}</b> ${source.capacitySource==='proxmox-pct-config'?sBytes(source.totalBytes):'unverified'}${source.configuredSize?` · host ${sEsc(source.configuredSize)}`:''}</span>`).join('')}</div>
+      <div class="storage-capacity-breakdown">${dataSources.map(source=>`<span><b>${sEsc(source.mountPoint)}</b> ${source.capacitySource==='proxmox-pct-config'?sBytes(source.totalBytes):'unverified'}${source.configuredSize?` · host ${sEsc(source.configuredSize)}`:''}${source.configured?' · already in use':''}</span>`).join('')}</div>
     </section>
     <h2>Storage</h2>
     <div class="inventory-grid">${(data.pools||[]).map(storageCard).join('')||'<div class="empty"><p>No storage pools are online.</p></div>'}</div>
