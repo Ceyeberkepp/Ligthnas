@@ -47,6 +47,7 @@ const sessions = new Sessions();
 await store.load();
 const containerPublisher = new ContainerPublisher(store);
 await containerPublisher.restore();
+queueMicrotask(warmOverviewStorage);
 store.state.users ||= [];
 store.state.groups ||= [];
 store.state.spaces ||= [];
@@ -59,6 +60,64 @@ const profileRoot = join(dirname(resolve(process.env.NAS_DATA_FILE || 'data/stat
 const spaceName = /^[a-zA-Z0-9][a-zA-Z0-9_-]{1,39}$/;
 const groupName = /^[A-Za-z0-9][A-Za-z0-9 _.-]{1,63}$/;
 const pause = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+
+let overviewStorageCache = null;
+let overviewStorageCacheAt = 0;
+let overviewStorageRefresh = null;
+const OVERVIEW_STORAGE_TTL_MS = 15000;
+
+function quickStorageSummary(filesystems = []) {
+  const candidates = filesystems
+    .filter(item => Number(item.totalBytes) > 0)
+    .filter(item => !['/boot', '/boot/efi'].includes(item.mountPoint))
+    .sort((a, b) => Number(b.totalBytes || 0) - Number(a.totalBytes || 0));
+  const preferred = candidates.find(item => /^\/(?:mnt|media|srv|data|storage)(?:\/|$)/.test(item.mountPoint))
+    || candidates.find(item => item.mountPoint === '/')
+    || candidates[0]
+    || null;
+  const usableStorage = preferred ? {
+    totalBytes: Number(preferred.totalBytes) || 0,
+    availableBytes: Number(preferred.availableBytes) || 0,
+    usedBytes: Number(preferred.usedBytes) || 0,
+    usedPercent: Number(preferred.usedPercent) || 0,
+    count: preferred ? 1 : 0,
+    provisional: true
+  } : { totalBytes: 0, availableBytes: 0, usedBytes: 0, usedPercent: 0, count: 0, provisional: true };
+  return {
+    disks: [],
+    attachedVolumes: [],
+    zfs: { available: false, canManageDatasets: false, pools: [], datasets: [] },
+    virtualStorage: usableStorage,
+    usableStorage,
+    poolSummary: null,
+    provisional: true
+  };
+}
+
+async function refreshOverviewStorage(force = false) {
+  const now = Date.now();
+  if (!force && overviewStorageCache && now - overviewStorageCacheAt < OVERVIEW_STORAGE_TTL_MS) return overviewStorageCache;
+  if (overviewStorageRefresh) return overviewStorageRefresh;
+  overviewStorageRefresh = (async () => {
+    try {
+      const [storage, storagePools] = await Promise.all([getStorageInventory(), listStoragePools()]);
+      storage.usableStorage = storagePools.visibleSummary || storage.usableStorage;
+      storage.poolSummary = storagePools.summary;
+      storage.provisional = false;
+      overviewStorageCache = storage;
+      overviewStorageCacheAt = Date.now();
+      return storage;
+    } finally {
+      overviewStorageRefresh = null;
+    }
+  })();
+  return overviewStorageRefresh;
+}
+
+function warmOverviewStorage() {
+  refreshOverviewStorage().catch(() => null);
+}
+
 
 async function containerReadyForPublication(id) {
   let started = false;
@@ -969,15 +1028,13 @@ async function api(req, res, url) {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/overview') {
-    // Keep the first dashboard request intentionally lightweight. Runtime
-    // discovery can invoke Docker, LXC and libvirt commands and used to delay
-    // every login even when the user only wanted Files or the home page.
-    // VM/container/app pages fetch their runtime inventory only when opened.
-    const [system, filesystems, storage, storagePools] = await Promise.all([
-      getSystemSnapshot(), getFilesystems(), getStorageInventory(), listStoragePools()
-    ]);
-    storage.usableStorage = storagePools.visibleSummary || storage.usableStorage;
-    storage.poolSummary = storagePools.summary;
+    // Login/home must stay fast on old CPUs and 2 GiB systems. Filesystem
+    // metadata is cheap, while ZFS/pool probing can take seconds on cold or
+    // disconnected storage. Serve the last warm storage inventory immediately
+    // and refresh it in the background instead of blocking the whole UI.
+    const [system, filesystems] = await Promise.all([getSystemSnapshot(), getFilesystems()]);
+    const storage = overviewStorageCache || quickStorageSummary(filesystems);
+    if (!overviewStorageCache || Date.now() - overviewStorageCacheAt >= OVERVIEW_STORAGE_TTL_MS) warmOverviewStorage();
     return send(res, 200, {
       appliance: { deviceName: store.state.config.deviceName, username, role: isAdmin ? 'administrator' : context.apiToken ? 'api' : 'user', permissions, timezone: store.state.config.timezone, avatar: Boolean(account.avatarExt) },
       system, filesystems, storage, host: null,
@@ -986,7 +1043,7 @@ async function api(req, res, url) {
   }
   if (req.method === 'GET' && url.pathname === '/api/storage/scan') {
     if (!requirePermission(res, permissions, 'storage.view')) return;
-    const storage = await getStorageInventory();
+    const storage = await refreshOverviewStorage(true);
     return send(res, 200, {
       disks: (storage.disks || []).map(item => ({ path: item.path, sizeBytes: item.sizeBytes, system: item.system, blank: item.blank })),
       attachedVolumes: (storage.attachedVolumes || []).map(item => ({ device: item.device, mountPoint: item.mountPoint, totalBytes: item.totalBytes }))

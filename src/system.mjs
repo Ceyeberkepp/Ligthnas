@@ -90,7 +90,7 @@ export async function getStorageInventory() {
       partition.path === rootDevice || ['/', '/boot', '/boot/efi'].includes(partition.mountPoint)
     );
     const blank = !system && partitions.length === 0;
-    return { ...disk, system, blank };
+    return { ...disk, system: system, blank: blank };
   });
 
   let proxmoxStorage = null;
