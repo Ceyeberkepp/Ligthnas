@@ -4,22 +4,23 @@ import { readFile } from 'node:fs/promises';
 
 const read = path => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
-test('All Files is flat, includes attached storage, and folder uploads show progress', async () => {
+test('All Files is limited to the four media/document libraries and folder uploads show progress', async () => {
   const [files, app, server] = await Promise.all([
     read('src/files.mjs'),
     read('public/app.js'),
     read('src/server.mjs')
   ]);
   assert.match(files, /export async function listAllFiles/);
-  assert.match(files, /for \(const volume of await attachedVolumes\(\)\)/);
-  assert.match(files, /\$\{ATTACHED_ROOT\}\/\$\{volume\.name\}/);
+  assert.match(files, /const MEDIA_LIBRARY_ROOTS = \['Documents', 'Photos', 'Videos', 'Audio'\]/);
+  assert.match(files, /for \(const folder of MEDIA_LIBRARY_ROOTS\)/);
+  assert.doesNotMatch(files.slice(files.indexOf('export async function listAllFiles'), files.indexOf('export async function listFiles')), /attachedVolumes\(\)/);
   assert.match(server, /url\.searchParams\.get\('all'\) === '1'/);
   assert.match(app, /webkitdirectory/);
   assert.match(app, /multiple hidden/);
   assert.match(app, /uploadFilesWithProgress/);
   assert.match(app, /XMLHttpRequest/);
   assert.match(app, /ZIP and other file types are accepted/);
-  assert.match(app, /All files is a flat view/);
+  assert.match(app, /All files shows only your Documents, Photos, Videos, and Audio libraries/);
   assert.match(app, /data-file-drop/);
   assert.match(app, /event\.dataTransfer\?\.files/);
   assert.match(files, /mkdir\(await checked\(relative, false\), \{ recursive: true/);
