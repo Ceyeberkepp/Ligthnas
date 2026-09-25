@@ -419,3 +419,55 @@
   .task-dock-head,.task-row { grid-template-columns:85px minmax(180px,1fr) 72px; padding-left:10px; padding-right:10px; }
   .compute-table { min-width:720px; }
 }
+
+
+/* 2026-09 shell/task/network alignment fixes */
+.top-shell-button {
+  min-height:38px;
+  display:inline-flex;
+  align-items:center;
+  gap:7px;
+  padding:0 12px;
+  border:1px solid var(--line);
+  border-radius:10px;
+  background:var(--panel);
+  color:var(--text);
+  font:inherit;
+  font-size:12px;
+  font-weight:750;
+}
+.top-shell-button:hover { border-color:var(--line-strong); background:var(--panel-2); }
+.top-shell-button span { font-family:ui-monospace,SFMono-Regular,Consolas,monospace; color:var(--accent); font-size:14px; }
+
+.network-state-badge {
+  display:inline-flex;
+  align-items:center;
+  max-width:100%;
+  padding:3px 7px;
+  border-radius:7px;
+  border:1px solid var(--line);
+  background:var(--panel-2);
+  color:var(--muted);
+  font-size:9px;
+  font-weight:800;
+  letter-spacing:.045em;
+  line-height:1.15;
+  white-space:nowrap;
+}
+.network-state-badge.online {
+  color:var(--success);
+  border-color:color-mix(in srgb,var(--success) 25%,var(--line));
+  background:color-mix(in srgb,var(--success) 5%,var(--panel));
+}
+.network-state-badge.neutral { color:var(--text); }
+
+/* Sidebar is 250px wide in the desktop grid. Keep the task bar exactly
+   inside the content column instead of overlapping the sidebar. */
+.task-dock { left:250px; }
+.console.sidebar-collapsed .task-dock { left:86px; }
+
+@media (max-width:760px) {
+  .top-shell-button b { display:none; }
+  .top-shell-button { width:38px; justify-content:center; padding:0; }
+  .task-dock,.console.sidebar-collapsed .task-dock { left:0; }
+}
