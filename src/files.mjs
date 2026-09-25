@@ -7,6 +7,7 @@ const root = join(dirname(process.env.NAS_DATA_FILE || 'data/state.json'), 'file
 const configuredUploadLimit = Number(process.env.LIGHTNAS_FILE_UPLOAD_MAX_BYTES || 0);
 const MAX_UPLOAD = Number.isFinite(configuredUploadLimit) && configuredUploadLimit > 0 ? configuredUploadLimit : 0;
 const ATTACHED_ROOT = 'Attached storage';
+const MEDIA_LIBRARY_ROOTS = ['Documents', 'Photos', 'Videos', 'Audio'];
 const infrastructureImageSuffixes = [
   '.iso', '.img', '.qcow', '.qcow2', '.vmdk', '.vhd', '.vhdx', '.ova', '.ovf',
   '.vma', '.vma.zst', '.vma.gz', '.tar.zst', '.tar.xz', '.tgz'
@@ -162,19 +163,16 @@ export async function listAllFiles(forceRefresh = false) {
   await mkdir(root, { recursive: true, mode: 0o700 });
   const limits = { count: 0, max: 10000 };
   const entries = [];
-  await recursiveFileEntries(root, '', entries, limits);
 
-  // "All files" means all files LightNAS can currently see, including
-  // attached NAS volumes. Keep one global safety cap so a very large mount
-  // cannot lock the browser or the control-plane process.
-  for (const volume of await attachedVolumes()) {
+  // Files & media is intentionally a curated personal library. "All files"
+  // means the union of Documents, Photos, Videos, and Audio only. Attached
+  // storage, VM disks, ISOs, container templates, backups, and unrelated
+  // folders belong to Storage / VM / Container workflows and are excluded.
+  for (const folder of MEDIA_LIBRARY_ROOTS) {
     if (limits.count >= limits.max) break;
-    await recursiveFileEntries(
-      volume.mountPoint,
-      `${ATTACHED_ROOT}/${volume.name}`,
-      entries,
-      limits
-    );
+    const absolute = join(root, folder);
+    try { await mkdir(absolute, { recursive: true, mode: 0o700 }); } catch {}
+    await recursiveFileEntries(absolute, folder, entries, limits);
   }
 
   const value = {
@@ -196,8 +194,15 @@ export async function listFiles(relative = '') {
 
   const path = await checked(relative);
   if (!(await lstat(path)).isDirectory()) throw Object.assign(new Error('Not a folder.'), { status: 400 });
-  const entries = (await directoryEntries(path)).filter(entry => entry.directory || !infrastructureFile(entry.name));
-  if (!segments.length && volumes.length) entries.push({ name: ATTACHED_ROOT, directory: true, sizeBytes: null, modifiedAt: null, supported: true, attached: true });
+  let entries = (await directoryEntries(path)).filter(entry => entry.directory || !infrastructureFile(entry.name));
+  if (!segments.length) {
+    // The Files & media root is a library selector, not a raw filesystem
+    // browser. Only the four media/document libraries are visible here.
+    for (const folder of MEDIA_LIBRARY_ROOTS) {
+      try { await mkdir(join(root, folder), { recursive: true, mode: 0o700 }); } catch {}
+    }
+    entries = (await directoryEntries(root)).filter(entry => entry.directory && MEDIA_LIBRARY_ROOTS.includes(entry.name));
+  }
   return entries.sort((a, b) => Number(b.directory) - Number(a.directory) || a.name.localeCompare(b.name));
 }
 
