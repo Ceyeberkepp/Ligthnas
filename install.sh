@@ -171,10 +171,10 @@ for vm_user in libvirt-qemu qemu; do
   fi
 done
 
+RUNTIME_PROVISION_NEEDED=0
 if [[ "${EXISTING_INSTALL}" == "0" || ! -s "${DATA_DIRECTORY}/runtime-status.txt" || "${LIGHTNAS_REPAIR_RUNTIMES:-0}" == "1" ]]; then
-  echo "      Provisioning LightNAS runtime engines..."
-  LIGHTNAS_RUNTIME_STATUS_FILE="${DATA_DIRECTORY}/runtime-status.txt" \
-    bash "${INSTALL_DIRECTORY}/scripts/provision-runtimes.sh"
+  RUNTIME_PROVISION_NEEDED=1
+  echo "      Runtime engines will finish provisioning in the background after the control panel starts."
 else
   echo "      Existing runtime configuration detected; skipping slow reprovisioning."
   echo "      Set LIGHTNAS_REPAIR_RUNTIMES=1 to force container/VM/app runtime repair."
@@ -244,6 +244,15 @@ systemctl enable lightnas-host-agent.service
 systemctl restart lightnas-host-agent.service
 systemctl enable "${SERVICE_NAME}"
 systemctl restart "${SERVICE_NAME}"
+
+if [[ "${RUNTIME_PROVISION_NEEDED}" == "1" ]]; then
+  echo "      Starting container, VM, and App Store provisioning in the background..."
+  systemd-run --unit=lightnas-runtime-bootstrap --collect --no-block \
+    --property=Type=oneshot \
+    --setenv="LIGHTNAS_RUNTIME_STATUS_FILE=${DATA_DIRECTORY}/runtime-status.txt" \
+    /bin/bash -lc "bash '${INSTALL_DIRECTORY}/scripts/provision-runtimes.sh'; chown lightnas:lightnas '${DATA_DIRECTORY}/runtime-status.txt' 2>/dev/null || true" \
+    >/dev/null
+fi
 
 if command -v ufw >/dev/null 2>&1 && ufw status | grep -q '^Status: active'; then
   ufw allow 3080/tcp >/dev/null
