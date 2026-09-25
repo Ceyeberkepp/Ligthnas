@@ -1586,7 +1586,15 @@ def stream_node_shell(connection) -> None:
     """Open an interactive root shell on the LightNAS node for the web console."""
     master, slave = pty.openpty()
     env = os.environ.copy()
-    env.update({"TERM": "xterm-256color", "HOME": "/root", "USER": "root", "LOGNAME": "root"})
+    node_name = socket.gethostname().strip() or "lightnas"
+    env.update({
+        "TERM": "xterm-256color",
+        "HOME": "/root",
+        "USER": "root",
+        "LOGNAME": "root",
+        "HOSTNAME": node_name,
+        "PS1": f"root@{node_name}:\\w# ",
+    })
 
     def child_setup():
         os.setsid()
