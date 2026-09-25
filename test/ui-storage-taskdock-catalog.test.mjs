@@ -31,7 +31,8 @@ test('compute inventory exposes manage actions and shell is named Bash', async (
   assert.match(app, /data-container-edit=/);
   assert.match(app, /data-vm-edit=/);
   assert.match(app, /Bash Shell/);
-  assert.match(html, />Bash Shell<\/a>/);
+  assert.match(html, /id="node-shell-top"/);
+  assert.match(html, /<b>Shell<\/b>/);
 });
 
 test('App Store contains at least ninety unique one-click entries and host ports', async () => {
