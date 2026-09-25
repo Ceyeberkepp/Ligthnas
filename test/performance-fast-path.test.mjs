@@ -44,3 +44,13 @@ test('static JS and CSS can be cached briefly while HTML revalidates', async () 
   assert.match(server, /private, max-age=120/);
   assert.match(server, /no-cache, max-age=0/);
 });
+
+
+test('ISO favors faster installation and avoids first-boot package downloads', async () => {
+  const iso = await read('iso/build.sh');
+  assert.match(iso, /--compression gzip/);
+  assert.match(iso, /^docker\.io$/m);
+  assert.match(iso, /^libraw-bin$/m);
+  assert.match(iso, /package-lock\.json/);
+  assert.match(iso, /\bci \\\n\s+--omit=dev/);
+});
