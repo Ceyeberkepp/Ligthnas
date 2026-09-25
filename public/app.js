@@ -383,11 +383,11 @@ function filesView() {
     <div class="${state.fileView === 'grid' ? 'file-browser-grid' : 'storage-list'}">${state.fileError ? `<div class="empty error-state"><p><b>Files could not be loaded.</b></p><p>${escapeHtml(state.fileError)}</p><button class="secondary" data-action="refresh-files">Try again</button></div>` : entries === null ? '<div class="empty"><p>Loading files…</p></div>' : entries.length ? entries.map(item).join('') : `<div class="empty"><p>${allFiles ? 'No files have been uploaded yet.' : 'This folder is empty.'}</p></div>`}</div>`;
 }
 
-async function loadFiles() {
+async function loadFiles(forceRefresh = false) {
   state.fileError = null;
   try {
     const endpoint = state.folder === ''
-      ? '/api/files?all=1'
+      ? `/api/files?all=1${forceRefresh ? '&refresh=1' : ''}`
       : `/api/files?path=${encodeURIComponent(state.folder)}`;
     const result = await request(endpoint);
     state.files = Array.isArray(result.entries) ? result.entries.filter(entry => entry.supported) : [];
@@ -943,7 +943,7 @@ function bindViewActions() {
     button.textContent = 'Refreshing…';
     state.files = null;
     render('files');
-    await loadFiles();
+    await loadFiles(true);
     toast('Files refreshed.');
   }));
   $('[data-action="refresh-storage"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
