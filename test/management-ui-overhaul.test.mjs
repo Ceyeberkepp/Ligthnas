@@ -93,8 +93,9 @@ test('node shell is a real permission-controlled root PTY exposed through the GU
   assert.match(local, /localNodeConsoleSocket/);
   assert.match(server, /url\.pathname === '\/api\/console\/node'/);
   assert.match(server, /context\.permissions\.includes\('system\.shell'\)/);
-  assert.match(index, /href="#shell"/);
-  assert.match(app, /data-open-node-shell/);
+  assert.match(index, /id="node-shell-top"/);
+  assert.doesNotMatch(index, /href="#shell" data-view="shell"/);
+  assert.match(app, /#node-shell-top/);
   assert.match(shell, /\/api\/console\/node/);
 });
 
