@@ -62,6 +62,7 @@ store.state.security.webhooks ||= [];
 store.state.security.identityProviders ||= [];
 const spaceRoot = join(dirname(resolve(process.env.NAS_DATA_FILE || 'data/state.json')), 'files', 'Spaces');
 const profileRoot = join(dirname(resolve(process.env.NAS_DATA_FILE || 'data/state.json')), 'profiles');
+const brandingRoot = join(dirname(resolve(process.env.NAS_DATA_FILE || 'data/state.json')), 'branding');
 const spaceName = /^[a-zA-Z0-9][a-zA-Z0-9_-]{1,39}$/;
 const groupName = /^[A-Za-z0-9][A-Za-z0-9 _.-]{1,63}$/;
 const pause = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
@@ -640,6 +641,42 @@ async function api(req, res, url) {
     return send(res, 200, { ok: true, avatar: false });
   }
 
+  if (req.method === 'GET' && url.pathname === '/api/branding/logo') {
+    if (!store.state.config?.logoExt) return send(res, 404, { error: 'No custom logo is configured.' });
+    const extension = store.state.config.logoExt;
+    const path = join(brandingRoot, `logo.${extension}`);
+    const type = extension === 'png' ? 'image/png' : extension === 'webp' ? 'image/webp' : 'image/jpeg';
+    try {
+      const data = await readFile(path);
+      res.writeHead(200, { 'Content-Type': type, 'Content-Length': data.length, 'Cache-Control': 'private, max-age=300', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': csp });
+      return res.end(data);
+    } catch (error) {
+      if (error.code === 'ENOENT') return send(res, 404, { error: 'Custom logo is unavailable.' });
+      throw error;
+    }
+  }
+  if (req.method === 'PUT' && url.pathname === '/api/branding/logo') {
+    if (!requireOwner(res, context)) return;
+    const type = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+    const extension = ({ 'image/jpeg':'jpg', 'image/png':'png', 'image/webp':'webp' })[type];
+    if (!extension) return send(res, 415, { error: 'Use a JPEG, PNG, or WebP logo.' });
+    const data = await bodyBuffer(req, 8 * 1024 * 1024);
+    if (!data.length) return send(res, 400, { error: 'Choose a logo image.' });
+    await mkdir(brandingRoot, { recursive: true, mode: 0o700 });
+    for (const old of ['jpg','png','webp']) if (old !== extension) await rm(join(brandingRoot, `logo.${old}`), { force: true }).catch(() => {});
+    await writeFile(join(brandingRoot, `logo.${extension}`), data, { mode: 0o600 });
+    store.state.config.logoExt = extension;
+    await store.save();
+    return send(res, 200, { ok: true, logo: true });
+  }
+  if (req.method === 'DELETE' && url.pathname === '/api/branding/logo') {
+    if (!requireOwner(res, context)) return;
+    for (const old of ['jpg','png','webp']) await rm(join(brandingRoot, `logo.${old}`), { force: true }).catch(() => {});
+    delete store.state.config.logoExt;
+    await store.save();
+    return send(res, 200, { ok: true, logo: false });
+  }
+
   if (req.method === 'GET' && url.pathname === '/api/security/totp') {
     if (context.apiToken) return send(res, 403, { error: 'TOTP settings require an interactive local account session.' });
     return send(res, 200, { enabled: Boolean(account.totpEnabled), pending: Boolean(account.totpPendingSecret) });
@@ -1124,16 +1161,18 @@ async function api(req, res, url) {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/settings') {
-    const { username: owner, deviceName, timezone } = store.state.config;
-    return send(res, 200, { username: owner, deviceName, timezone });
+    const { username: owner, deviceName, timezone, logoExt } = store.state.config;
+    return send(res, 200, { username: owner, deviceName, timezone, logo: Boolean(logoExt) });
   }
   if (req.method === 'PATCH' && url.pathname === '/api/settings') {
     const input = await bodyJson(req);
-    if (typeof input.currentPassword !== 'string' || !(await verifyPassword(input.currentPassword, store.state.config.passwordHash))) return send(res, 403, { error: 'Current administrator password is incorrect.' });
     if (!/^[a-zA-Z0-9][a-zA-Z0-9-]{1,31}$/.test(input.deviceName || '')) return send(res, 400, { error: 'Device name must contain 2–32 letters, numbers, or hyphens.' });
     if (!['UTC', 'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles'].includes(input.timezone)) return send(res, 400, { error: 'Choose a supported time zone.' });
     const changedPassword = Boolean(input.newPassword);
-    if (changedPassword && (typeof input.newPassword !== 'string' || input.newPassword.length < 10)) return send(res, 400, { error: 'New password must contain at least 10 characters.' });
+    if (changedPassword) {
+      if (typeof input.currentPassword !== 'string' || !(await verifyPassword(input.currentPassword, store.state.config.passwordHash))) return send(res, 403, { error: 'Current administrator password is required to change the password.' });
+      if (typeof input.newPassword !== 'string' || input.newPassword.length < 10) return send(res, 400, { error: 'New password must contain at least 10 characters.' });
+    }
     store.state.config.deviceName = input.deviceName;
     store.state.config.timezone = input.timezone;
     if (changedPassword) store.state.config.passwordHash = await hashPassword(input.newPassword);
@@ -1327,7 +1366,7 @@ async function api(req, res, url) {
     const storage = overviewStorageCache || quickStorageSummary(filesystems);
     if (!overviewStorageCache || Date.now() - overviewStorageCacheAt >= OVERVIEW_STORAGE_TTL_MS) warmOverviewStorage();
     return send(res, 200, {
-      appliance: { deviceName: store.state.config.deviceName, username, role: isAdmin ? 'administrator' : context.apiToken ? 'api' : 'user', permissions, timezone: store.state.config.timezone, avatar: Boolean(account.avatarExt) },
+      appliance: { deviceName: store.state.config.deviceName, username, role: isAdmin ? 'administrator' : context.apiToken ? 'api' : 'user', permissions, timezone: store.state.config.timezone, avatar: Boolean(account.avatarExt), logo: Boolean(store.state.config.logoExt) },
       system, filesystems, storage, host: null,
       shares: store.state.shares, activity: store.state.activity.slice(0, 8)
     });
