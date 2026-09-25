@@ -1386,7 +1386,7 @@ export function createServer() {
       // A host shell is equivalent to root access to the NAS. It is therefore
       // intentionally limited to the interactive appliance owner session and
       // cannot be delegated to an API token or ordinary user.
-      if (nodeShell && (!context.isAdmin || context.apiToken)) return rejectUpgrade(socket, 403, 'Appliance owner access required for the node shell.');
+      if (nodeShell && (context.apiToken || (!context.isAdmin && !context.permissions.includes('system.shell')))) return rejectUpgrade(socket, 403, 'Node shell permission required.');
       const useExternalProxmox = process.env.LIGHTNAS_ENABLE_PROXMOX_PROVIDER === '1';
       const backend = nodeShell
         ? await localNodeConsoleSocket()
