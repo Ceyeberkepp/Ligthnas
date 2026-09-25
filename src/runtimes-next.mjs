@@ -38,19 +38,67 @@ export const containerImages = Object.freeze([
 const persistentShellImages = new Set(['debian:13-slim', 'ubuntu:24.04', 'alpine:latest', 'busybox:latest']);
 
 export const catalog = Object.freeze([
-  { id: 'nginx', name: 'Nginx', category: 'Web server', image: 'nginx:stable-alpine', port: 8081, containerPort: 80, memory: '256m', description: 'Open-source web server with a default landing page.', source: 'https://hub.docker.com/_/nginx', volumes: [] },
-  { id: 'jellyfin', name: 'Jellyfin', category: 'Media', image: 'jellyfin/jellyfin:latest', port: 8096, containerPort: 8096, memory: '2g', description: 'Open-source media server. Reads your LightNAS Files as a library.', source: 'https://jellyfin.org/docs/general/installation/container/', volumes: [['config', '/config'], ['cache', '/cache'], ['@files', '/media:ro']] },
-  { id: 'uptime-kuma', name: 'Uptime Kuma', category: 'Monitoring', image: 'louislam/uptime-kuma:2', port: 3001, containerPort: 3001, memory: '1g', description: 'Self-hosted uptime and status monitoring.', source: 'https://github.com/louislam/uptime-kuma', volumes: [['data', '/app/data']] },
-  { id: 'heimdall', name: 'Heimdall', category: 'Dashboard', image: 'lscr.io/linuxserver/heimdall:latest', port: 8083, containerPort: 80, memory: '512m', description: 'Personal dashboard for your hosted applications. Configure a password before exposing it publicly.', source: 'https://docs.linuxserver.io/images/docker-heimdall/', volumes: [['config', '/config']] },
-  { id: 'openspeedtest', name: 'OpenSpeedTest', category: 'Network', image: 'openspeedtest/latest', port: 8082, containerPort: 3000, memory: '512m', description: 'Test LAN speed from your browser against this server.', source: 'https://github.com/openspeedtest/Docker-Image', volumes: [] },
-  { id: 'file-browser', name: 'File Browser', category: 'Files', image: 'filebrowser/filebrowser:s6', port: 8084, containerPort: 80, memory: '512m', description: 'A fast browser-based file manager for your LightNAS Files library.', source: 'https://filebrowser.org/installation', volumes: [['@files', '/srv'], ['database', '/database'], ['config', '/config']] },
-  { id: 'vaultwarden', name: 'Vaultwarden', category: 'Security', image: 'vaultwarden/server:latest', port: 8085, containerPort: 80, memory: '512m', description: 'Community password-manager server compatible with Bitwarden clients. Configure an admin token after installation.', source: 'https://github.com/dani-garcia/vaultwarden', volumes: [['data', '/data']] },
-  { id: 'freshrss', name: 'FreshRSS', category: 'News', image: 'freshrss/freshrss:latest', port: 8086, containerPort: 80, memory: '512m', description: 'Private, multi-user RSS and Atom feed reader.', source: 'https://github.com/FreshRSS/FreshRSS/tree/edge/Docker', volumes: [['data', '/var/www/FreshRSS/data'], ['extensions', '/var/www/FreshRSS/extensions']] },
-  { id: 'home-assistant', name: 'Home Assistant', category: 'Home automation', image: 'ghcr.io/home-assistant/home-assistant:stable', port: 8123, containerPort: 8123, memory: '2g', description: 'Open-source home automation dashboard and integration hub.', source: 'https://www.home-assistant.io/installation/linux#install-home-assistant-container', volumes: [['config', '/config']] },
-  { id: 'syncthing', name: 'Syncthing', category: 'Files', image: 'syncthing/syncthing:latest', port: 8384, containerPort: 8384, memory: '1g', description: 'Continuous peer-to-peer file synchronization with a local web console.', source: 'https://docs.syncthing.net/users/faq.html#how-do-i-run-syncthing-in-docker', volumes: [['data', '/var/syncthing']] },
-  { id: 'mealie', name: 'Mealie', category: 'Home', image: 'ghcr.io/mealie-recipes/mealie:latest', port: 9925, containerPort: 9000, memory: '1g', description: 'Self-hosted recipe manager, meal planner, and shopping lists.', source: 'https://docs.mealie.io/documentation/getting-started/installation/backend-config/', volumes: [['data', '/app/data']] },
-  { id: 'gitea', name: 'Gitea', category: 'Development', image: 'gitea/gitea:latest-rootless', port: 3002, containerPort: 3000, memory: '1g', description: 'Private Git hosting with issues, pull requests, packages, and actions.', source: 'https://docs.gitea.com/installation/install-with-docker-rootless', volumes: [['data', '/var/lib/gitea'], ['config', '/etc/gitea']] },
-  { id: 'ansible-semaphore', name: 'Ansible Semaphore', category: 'Automation', image: 'semaphoreui/semaphore:latest', port: 3000, containerPort: 3000, memory: '1g', description: 'Browser-based Ansible automation, playbooks, inventories, schedules, and access control.', source: 'https://semaphoreui.com/docs/admin-guide/installation/docker', volumes: [['data', '/etc/semaphore']], namedVolumes: true, requiresAdminPassword: true, requiresAccessKeyEncryption: true, adminUsername: 'admin', environment: [['SEMAPHORE_DB_DIALECT', 'sqlite'], ['SEMAPHORE_DB', '/etc/semaphore/semaphore.sqlite'], ['SEMAPHORE_ADMIN', 'admin'], ['SEMAPHORE_ADMIN_NAME', 'LightNAS Administrator'], ['SEMAPHORE_ADMIN_EMAIL', 'admin@localhost']] }
+  { id: 'nginx', name: 'Nginx', category: 'Web', image: 'nginx:stable-alpine', port: 8081, containerPort: 80, memory: '256m', description: 'Open-source web server and reverse proxy.', source: 'Docker Official Image', volumes: [] },
+  { id: 'jellyfin', name: 'Jellyfin', category: 'Media', image: 'jellyfin/jellyfin:latest', port: 8096, containerPort: 8096, memory: '2g', description: 'Free software media server for movies, TV, music and photos.', source: 'Jellyfin', volumes: [['config', '/config'], ['cache', '/cache'], ['@files', '/media:ro']] },
+  { id: 'navidrome', name: 'Navidrome', category: 'Media', image: 'deluan/navidrome:latest', port: 4533, containerPort: 4533, memory: '1g', description: 'Lightweight music server compatible with Subsonic clients.', source: 'Navidrome', volumes: [['data', '/data'], ['@files', '/music:ro']] },
+  { id: 'audiobookshelf', name: 'Audiobookshelf', category: 'Media', image: 'ghcr.io/advplyr/audiobookshelf:latest', port: 13378, containerPort: 80, memory: '1g', description: 'Self-hosted audiobook and podcast server.', source: 'Audiobookshelf', volumes: [['config', '/config'], ['metadata', '/metadata'], ['@files', '/audiobooks:ro']] },
+  { id: 'komga', name: 'Komga', category: 'Media', image: 'gotson/komga:latest', port: 25600, containerPort: 25600, memory: '1g', description: 'Comics, manga and ebook media server.', source: 'Komga', volumes: [['config', '/config'], ['@files', '/data:ro']] },
+  { id: 'calibre-web', name: 'Calibre-Web', category: 'Media', image: 'lscr.io/linuxserver/calibre-web:latest', port: 8088, containerPort: 8083, memory: '1g', description: 'Browser interface for browsing and reading a Calibre ebook library.', source: 'LinuxServer.io', volumes: [['config', '/config'], ['@files', '/books']] },
+
+  { id: 'freshrss', name: 'FreshRSS', category: 'Productivity', image: 'freshrss/freshrss:latest', port: 8084, containerPort: 80, memory: '768m', description: 'Fast self-hosted RSS and Atom feed reader.', source: 'FreshRSS', volumes: [['data', '/var/www/FreshRSS/data'], ['extensions', '/var/www/FreshRSS/extensions']] },
+  { id: 'actual-budget', name: 'Actual Budget', category: 'Productivity', image: 'actualbudget/actual-server:latest', port: 5006, containerPort: 5006, memory: '768m', description: 'Privacy-focused personal budgeting application.', source: 'Actual Budget', volumes: [['data', '/data']] },
+  { id: 'memos', name: 'Memos', category: 'Productivity', image: 'neosmemo/memos:stable', port: 5230, containerPort: 5230, memory: '512m', description: 'Lightweight self-hosted notes and knowledge capture.', source: 'Memos', volumes: [['data', '/var/opt/memos']] },
+  { id: 'linkding', name: 'Linkding', category: 'Productivity', image: 'sissbruecker/linkding:latest', port: 9090, containerPort: 9090, memory: '512m', description: 'Minimal bookmark manager with tags and search.', source: 'Linkding', volumes: [['data', '/etc/linkding/data']] },
+  { id: 'nextcloud', name: 'Nextcloud', category: 'Productivity', image: 'nextcloud:apache', port: 8090, containerPort: 80, memory: '2g', description: 'Self-hosted files, collaboration and sync. The first-run wizard can use SQLite for a simple deployment.', source: 'Nextcloud', volumes: [['html', '/var/www/html']] },
+  { id: 'stirling-pdf', name: 'Stirling PDF', category: 'Productivity', image: 'frooodle/s-pdf:latest', port: 8086, containerPort: 8080, memory: '1g', description: 'Local web toolkit for PDF conversion, editing, OCR and document operations.', source: 'Stirling PDF', volumes: [['configs', '/configs'], ['custom-files', '/customFiles']] },
+  { id: 'drawio', name: 'draw.io', category: 'Productivity', image: 'jgraph/drawio:latest', port: 8091, containerPort: 8080, memory: '768m', description: 'Self-hosted diagrams.net diagram editor.', source: 'diagrams.net', volumes: [] },
+
+  { id: 'gitea', name: 'Gitea', category: 'Development', image: 'gitea/gitea:latest', port: 3002, containerPort: 3000, memory: '1g', description: 'Lightweight self-hosted Git service with issues, pull requests and packages.', source: 'Gitea', volumes: [['data', '/data']] },
+  { id: 'code-server', name: 'code-server', category: 'Development', image: 'lscr.io/linuxserver/code-server:latest', port: 8443, containerPort: 8443, memory: '2g', description: 'VS Code in the browser for development and administration.', source: 'LinuxServer.io', volumes: [['config', '/config'], ['@files', '/data']] },
+  { id: 'ansible-semaphore', name: 'Ansible Semaphore', category: 'Automation', image: 'semaphoreui/semaphore:latest', port: 3000, containerPort: 3000, memory: '1g', description: 'Browser-based Ansible automation, playbooks, inventories and schedules.', source: 'Semaphore UI', volumes: [['data', '/etc/semaphore']], namedVolumes: true, requiresAdminPassword: true, requiresAccessKeyEncryption: true, adminUsername: 'admin', environment: [['SEMAPHORE_DB_DIALECT', 'sqlite'], ['SEMAPHORE_DB', '/etc/semaphore/semaphore.sqlite'], ['SEMAPHORE_ADMIN', 'admin'], ['SEMAPHORE_ADMIN_NAME', 'LightNAS Administrator'], ['SEMAPHORE_ADMIN_EMAIL', 'admin@localhost']] },
+
+  { id: 'vaultwarden', name: 'Vaultwarden', category: 'Security', image: 'vaultwarden/server:latest', port: 8085, containerPort: 80, memory: '768m', description: 'Lightweight Bitwarden-compatible password vault server.', source: 'Vaultwarden', volumes: [['data', '/data']] },
+  { id: 'gotify', name: 'Gotify', category: 'Notifications', image: 'gotify/server:latest', port: 8087, containerPort: 80, memory: '512m', description: 'Simple self-hosted push notification server.', source: 'Gotify', volumes: [['data', '/app/data']] },
+
+  { id: 'uptime-kuma', name: 'Uptime Kuma', category: 'Monitoring', image: 'louislam/uptime-kuma:2', port: 3001, containerPort: 3001, memory: '1g', description: 'Self-hosted uptime and status monitoring.', source: 'Uptime Kuma', volumes: [['data', '/app/data']] },
+  { id: 'changedetection', name: 'changedetection.io', category: 'Monitoring', image: 'ghcr.io/dgtlmoon/changedetection.io:latest', port: 5000, containerPort: 5000, memory: '1g', description: 'Monitor websites for content changes and alerts.', source: 'changedetection.io', volumes: [['data', '/datastore']] },
+
+  { id: 'heimdall', name: 'Heimdall', category: 'Dashboard', image: 'lscr.io/linuxserver/heimdall:latest', port: 8083, containerPort: 80, memory: '512m', description: 'Personal dashboard for hosted applications.', source: 'LinuxServer.io', volumes: [['config', '/config']] },
+  { id: 'pairdrop', name: 'PairDrop', category: 'Files', image: 'lscr.io/linuxserver/pairdrop:latest', port: 3003, containerPort: 3000, memory: '512m', description: 'Local-network browser file transfer inspired by AirDrop.', source: 'LinuxServer.io', volumes: [['config', '/config']] },
+  { id: 'filebrowser', name: 'File Browser', category: 'Files', image: 'filebrowser/filebrowser:s6', port: 8092, containerPort: 80, memory: '512m', description: 'Alternative browser-based file manager for your LightNAS files.', source: 'File Browser', volumes: [['@files', '/srv'], ['database', '/database'], ['config', '/config']] },
+
+  { id: 'openspeedtest', name: 'OpenSpeedTest', category: 'Network', image: 'openspeedtest/latest', port: 8082, containerPort: 3000, memory: '512m', description: 'Test LAN speed from a browser against the LightNAS node.', source: 'OpenSpeedTest', volumes: [] },
+  { id: 'searxng', name: 'SearXNG', category: 'Search', image: 'searxng/searxng:latest', port: 8089, containerPort: 8080, memory: '1g', description: 'Privacy-respecting self-hosted metasearch engine.', source: 'SearXNG', volumes: [['config', '/etc/searxng']] },
+  { id: 'open-webui', name: 'Open WebUI', category: 'AI', image: 'ghcr.io/open-webui/open-webui:main', port: 8093, containerPort: 8080, memory: '2g', description: 'Self-hosted web interface for local and remote AI model providers.', source: 'Open WebUI', volumes: [['data', '/app/backend/data']] },
+
+  // Broad one-click catalog: popular self-hosted applications that also
+  // overlap heavily with TrueNAS/community NAS application catalogs.
+  { id: 'emby', name: 'Emby', category: 'Media', image: 'emby/embyserver:latest', port: 8094, containerPort: 8096, memory: '2g', description: 'Personal media server for movies, TV, music and photos.', source: 'Emby', volumes: [['config', '/config'], ['@files', '/mnt/share1']] },
+  { id: 'plex', name: 'Plex Media Server', category: 'Media', image: 'lscr.io/linuxserver/plex:latest', port: 32400, containerPort: 32400, memory: '2g', description: 'Popular personal media server with broad client support.', source: 'LinuxServer.io', volumes: [['config', '/config'], ['@files', '/media']], environment: [['VERSION', 'docker']] },
+  { id: 'jellyseerr', name: 'Jellyseerr', category: 'Media', image: 'fallenbagel/jellyseerr:latest', port: 5055, containerPort: 5055, memory: '768m', description: 'Media request and discovery manager for Jellyfin and related services.', source: 'Jellyseerr', volumes: [['config', '/app/config']] },
+  { id: 'tautulli', name: 'Tautulli', category: 'Media', image: 'lscr.io/linuxserver/tautulli:latest', port: 8181, containerPort: 8181, memory: '512m', description: 'Plex monitoring, statistics and notifications.', source: 'LinuxServer.io', volumes: [['config', '/config']] },
+  { id: 'metube', name: 'MeTube', category: 'Media', image: 'ghcr.io/alexta69/metube:latest', port: 8101, containerPort: 8081, memory: '768m', description: 'Browser-based media downloader powered by yt-dlp.', source: 'MeTube', volumes: [['@files', '/downloads']] },
+
+  { id: 'sonarr', name: 'Sonarr', category: 'Downloads', image: 'lscr.io/linuxserver/sonarr:latest', port: 8989, containerPort: 8989, memory: '1g', description: 'TV series collection and download automation.', source: 'LinuxServer.io', volumes: [['config', '/config'], ['@files', '/data']] },
+  { id: 'radarr', name: 'Radarr', category: 'Downloads', image: 'lscr.io/linuxserver/radarr:latest', port: 7878, containerPort: 7878, memory: '1g', description: 'Movie collection and download automation.', source: 'LinuxServer.io', volumes: [['config', '/config'], ['@files', '/data']] },
+  { id: 'lidarr', name: 'Lidarr', category: 'Downloads', image: 'lscr.io/linuxserver/lidarr:latest', port: 8686, containerPort: 8686, memory: '1g', description: 'Music collection and download automation.', source: 'LinuxServer.io', volumes: [['config', '/config'], ['@files', '/data']] },
+  { id: 'prowlarr', name: 'Prowlarr', category: 'Downloads', image: 'lscr.io/linuxserver/prowlarr:latest', port: 9696, containerPort: 9696, memory: '768m', description: 'Indexer manager for the *arr application family.', source: 'LinuxServer.io', volumes: [['config', '/config']] },
+  { id: 'bazarr', name: 'Bazarr', category: 'Downloads', image: 'lscr.io/linuxserver/bazarr:latest', port: 6767, containerPort: 6767, memory: '768m', description: 'Subtitle automation companion for Sonarr and Radarr.', source: 'LinuxServer.io', volumes: [['config', '/config'], ['@files', '/data']] },
+  { id: 'sabnzbd', name: 'SABnzbd', category: 'Downloads', image: 'lscr.io/linuxserver/sabnzbd:latest', port: 8095, containerPort: 8080, memory: '1g', description: 'Usenet download client with a browser interface.', source: 'LinuxServer.io', volumes: [['config', '/config'], ['@files', '/downloads']] },
+  { id: 'qbittorrent', name: 'qBittorrent', category: 'Downloads', image: 'lscr.io/linuxserver/qbittorrent:latest', port: 8097, containerPort: 8080, memory: '1g', description: 'BitTorrent client with a full web interface.', source: 'LinuxServer.io', volumes: [['config', '/config'], ['@files', '/downloads']], extraPorts: [[6881, 6881, 'tcp'], [6881, 6881, 'udp']] },
+  { id: 'transmission', name: 'Transmission', category: 'Downloads', image: 'lscr.io/linuxserver/transmission:latest', port: 9091, containerPort: 9091, memory: '768m', description: 'Lightweight BitTorrent client with remote web management.', source: 'LinuxServer.io', volumes: [['config', '/config'], ['@files', '/downloads']], extraPorts: [[51413, 51413, 'tcp'], [51413, 51413, 'udp']] },
+
+  { id: 'syncthing', name: 'Syncthing', category: 'Files', image: 'lscr.io/linuxserver/syncthing:latest', port: 8384, containerPort: 8384, memory: '1g', description: 'Continuous peer-to-peer file synchronization.', source: 'LinuxServer.io', volumes: [['config', '/config'], ['@files', '/data']], extraPorts: [[22000, 22000, 'tcp'], [22000, 22000, 'udp'], [21027, 21027, 'udp']] },
+  { id: 'duplicati', name: 'Duplicati', category: 'Backup', image: 'lscr.io/linuxserver/duplicati:latest', port: 8200, containerPort: 8200, memory: '1g', description: 'Encrypted backup client supporting local and cloud destinations.', source: 'LinuxServer.io', volumes: [['config', '/config'], ['@files', '/source']] },
+  { id: 'mealie', name: 'Mealie', category: 'Productivity', image: 'ghcr.io/mealie-recipes/mealie:latest', port: 9925, containerPort: 9000, memory: '1g', description: 'Self-hosted recipe manager and meal planner.', source: 'Mealie', volumes: [['data', '/app/data']] },
+  { id: 'forgejo', name: 'Forgejo', category: 'Development', image: 'codeberg.org/forgejo/forgejo:latest', port: 3004, containerPort: 3000, memory: '1g', description: 'Community-driven Git forge for repositories, issues and collaboration.', source: 'Forgejo', volumes: [['data', '/data']] },
+  { id: 'vikunja', name: 'Vikunja', category: 'Productivity', image: 'vikunja/vikunja:latest', port: 3456, containerPort: 3456, memory: '1g', description: 'Open-source task and project management.', source: 'Vikunja', volumes: [['files', '/app/vikunja/files'], ['db', '/db']] },
+  { id: 'home-assistant', name: 'Home Assistant', category: 'Home', image: 'ghcr.io/home-assistant/home-assistant:stable', port: 8123, containerPort: 8123, memory: '2g', description: 'Open-source home automation platform.', source: 'Home Assistant', volumes: [['config', '/config']] },
+  { id: 'homarr', name: 'Homarr', category: 'Dashboard', image: 'ghcr.io/homarr-labs/homarr:latest', port: 7575, containerPort: 7575, memory: '768m', description: 'Modern dashboard for self-hosted services.', source: 'Homarr', volumes: [['appdata', '/appdata']] },
+  { id: 'dashy', name: 'Dashy', category: 'Dashboard', image: 'lissy93/dashy:latest', port: 8102, containerPort: 8080, memory: '768m', description: 'Customizable dashboard for homelab and NAS services.', source: 'Dashy', volumes: [] },
+  { id: 'it-tools', name: 'IT-Tools', category: 'Utility', image: 'corentinth/it-tools:latest', port: 8100, containerPort: 80, memory: '512m', description: 'Collection of browser-based tools for developers and IT administrators.', source: 'IT-Tools', volumes: [] },
+  { id: 'whoogle', name: 'Whoogle', category: 'Search', image: 'benbusby/whoogle-search:latest', port: 5001, containerPort: 5000, memory: '512m', description: 'Privacy-focused search frontend.', source: 'Whoogle', volumes: [] },
+  { id: 'glances', name: 'Glances', category: 'Monitoring', image: 'nicolargo/glances:latest-full', port: 61208, containerPort: 61208, memory: '512m', description: 'System monitoring dashboard and metrics viewer.', source: 'Glances', volumes: [], environment: [['GLANCES_OPT', '-w']] }
 ]);
 
 async function command(program, args, timeout = 4000) {
@@ -95,6 +143,12 @@ function installerMediaPath(output) {
     if (fields[1]?.toLowerCase() === 'cdrom' && fields[3] && fields[3] !== '-') return fields.slice(3).join(' ');
   }
   return '';
+}
+
+function isWindowsInstaller(entry) {
+  const text = `${entry?.name || ''} ${entry?.id || ''} ${entry?.path || ''}`.toLowerCase();
+  return /(?:^|[^a-z])(windows|win(?:dows)?[-_. ]?(?:10|11)|win[-_. ]?(?:10|11)|server[-_. ]?20\d\d)(?:[^a-z]|$)/i.test(text)
+    || /(?:win11|win10|windows11|windows10|windows[_ -]?server)/i.test(text);
 }
 
 export function configureVmBootXml(source, isoPath, bootOrder) {
@@ -142,11 +196,10 @@ function vmHardwareDetails(source) {
 
 export function configureVmEditableHardware(source, settings = {}) {
   let xml = String(source || '');
-  const existing = vmHardwareDetails(xml);
-  const displayModel = ['vga', 'qxl', 'virtio'].includes(settings.displayModel) ? settings.displayModel : existing.displayModel;
-  const networkModel = ['virtio', 'e1000', 'rtl8139'].includes(settings.networkModel) ? settings.networkModel : existing.networkModel;
-  const scsiController = ['virtio-scsi', 'virtio-scsi-single', 'lsilogic'].includes(settings.scsiController) ? settings.scsiController : existing.scsiController;
-  const diskBus = ['scsi', 'virtio', 'sata'].includes(settings.diskBus) ? settings.diskBus : existing.diskBus;
+  const displayModel = ['vga', 'qxl', 'virtio'].includes(settings.displayModel) ? settings.displayModel : 'vga';
+  const networkModel = ['virtio', 'e1000', 'rtl8139'].includes(settings.networkModel) ? settings.networkModel : 'virtio';
+  const scsiController = ['virtio-scsi', 'virtio-scsi-single', 'lsilogic'].includes(settings.scsiController) ? settings.scsiController : 'virtio-scsi';
+  const diskBus = ['scsi', 'virtio', 'sata'].includes(settings.diskBus) ? settings.diskBus : null;
   // Video model attributes are not interchangeable. In particular, libvirt
   // rejects qxl's `ram` attribute after changing only type='qxl' to
   // type='vga'. Replace the complete model element so switching adapters in
@@ -159,16 +212,22 @@ export function configureVmEditableHardware(source, settings = {}) {
   xml = xml.replace(/(<video>\s*)<model\b[^>]*(?:\/>|>[\s\S]*?<\/model>)/i, `$1${videoModel}`);
   xml = xml.replace(/(<interface\b[\s\S]*?<model\b[^>]*type=)(['"])[^'"]+\2/i, `$1'${networkModel}'`);
   xml = xml.replace(/(<controller\b[^>]*type=(['"])scsi\2[^>]*model=)(['"])[^'"]+\3/i, `$1'${scsiController}'`);
-  const diskPattern = /<disk\b[^>]*device=(['"])disk\1[^>]*>[\s\S]*?<\/disk>/i;
-  xml = xml.replace(diskPattern, block => {
-    const device = diskBus === 'virtio' ? 'vda' : 'sda';
-    return block
-      .replace(/<target\b[^>]*\/>/i, `<target dev='${device}' bus='${diskBus}'/>`)
-      .replace(/\s*<alias\b[^>]*\/>/gi, '')
-      .replace(/\s*<address\b[^>]*type=(['"])drive\1[^>]*\/>/gi, '');
-  });
-  if (diskBus === 'scsi' && !/<controller\b[^>]*type=(['"])scsi\1/i.test(xml)) {
-    xml = xml.replace('</devices>', `<controller type='scsi' model='${scsiController}'/></devices>`);
+
+  // Switching the disk bus does not move or recreate the qcow2 file; it only
+  // changes how QEMU presents that same disk to the guest. Windows installation
+  // media has an inbox AHCI/SATA driver but not the VirtIO storage driver, so
+  // this is also the safe in-place recovery path for an existing Windows VM
+  // that reaches Setup with an empty disk list.
+  if (diskBus) {
+    const diskPattern = /<disk\b[^>]*device=(['"])disk\1[^>]*>[\s\S]*?<\/disk>/i;
+    const disk = xml.match(diskPattern)?.[0] || '';
+    if (disk) {
+      const targetDevice = diskBus === 'virtio' ? 'vda' : 'sda';
+      const updatedDisk = /<target\b[^>]*\/>/i.test(disk)
+        ? disk.replace(/<target\b[^>]*\/>/i, `<target dev='${targetDevice}' bus='${diskBus}'/>`)
+        : disk.replace('</disk>', `<target dev='${targetDevice}' bus='${diskBus}'/></disk>`);
+      xml = xml.replace(diskPattern, updatedDisk);
+    }
   }
   return xml;
 }
@@ -186,16 +245,13 @@ function parseDomInfo(text) {
 async function localVmDetails(names) {
   const details = [];
   for (const name of names.slice(0, 100)) {
-    const [info, blockDevices, domainXml, memoryStats] = await Promise.all([
+    const [info, blockDevices, domainXml] = await Promise.all([
       command('virsh', ['-c', 'qemu:///system', 'dominfo', name], 10000),
       command('virsh', ['-c', 'qemu:///system', 'domblklist', name, '--details'], 10000),
-      command('virsh', ['-c', 'qemu:///system', 'dumpxml', name, '--inactive'], 10000),
-      command('virsh', ['-c', 'qemu:///system', 'dommemstat', name], 10000)
+      command('virsh', ['-c', 'qemu:///system', 'dumpxml', name, '--inactive'], 10000)
     ]);
     if (!info.ok) continue;
     const parsed = parseDomInfo(info.output);
-    const memory = memoryStats.ok ? Object.fromEntries(memoryStats.output.split('\n').map(line => line.trim().split(/\s+/, 2)).filter(parts => parts.length === 2)) : {};
-    const memoryUsed = Math.max(0, ((Number(memory.actual) || 0) - (Number(memory.unused) || 0)) * 1024);
     details.push({
       id: name,
       name,
@@ -203,7 +259,6 @@ async function localVmDetails(names) {
       status: parsed.state || 'unknown',
       cpus: Number(parsed['cpu(s)']) || 0,
       memory: (Number(String(parsed['max memory'] || '').split(/\s+/)[0]) || 0) * 1024,
-      memoryUsed,
       persistent: parsed.persistent === 'yes',
       installationMedia: blockDevices.ok && hasInstallerMedia(blockDevices.output),
       installationMediaPath: blockDevices.ok ? installerMediaPath(blockDevices.output) : '',
@@ -471,6 +526,10 @@ export async function installCatalogApp(id, input = {}) {
     '--label', `lightnas.web.port=${app.port}`,
     '--restart', 'unless-stopped', '--memory', app.memory, '--pids-limit', '256',
     '--security-opt', 'no-new-privileges', '-p', `0.0.0.0:${app.port}:${app.containerPort}`];
+  for (const mapping of app.extraPorts || []) {
+    const [hostPort, containerPort, protocol = 'tcp'] = mapping;
+    args.push('-p', `0.0.0.0:${hostPort}:${containerPort}/${protocol}`);
+  }
   const environment = [...(app.environment || [])];
   if (app.requiresAdminPassword) {
     const adminPassword = String(input.adminPassword || '');
@@ -491,6 +550,7 @@ export async function installCatalogApp(id, input = {}) {
     args.push('-v', `${hostPath}:${target}`);
   }
   args.push(app.image);
+  for (const argument of app.command || []) args.push(String(argument));
   const containerId = await runDocker(args);
   const ready = await waitForAppPort(app.port);
   return {
@@ -620,12 +680,17 @@ export async function createVm(input) {
   if (iso && !isoEntry) throw Object.assign(new Error('Selected installer ISO is incomplete or no longer available. Upload it again and wait for the transfer to finish.'), { status: 409 });
 
   const networkDetail = virtualization.networkDetails?.find(item => item.name === input.network);
-  const firmware = ['bios', 'uefi'].includes(input.firmware) ? input.firmware : 'bios';
-  // SATA and E1000 work in Windows and Linux installers without a separate
-  // VirtIO driver ISO. Users can switch to VirtIO after the guest drivers are
-  // installed when they prefer its performance.
-  const diskBus = ['scsi', 'virtio', 'sata'].includes(input.diskBus) ? input.diskBus : 'sata';
-  const networkModel = ['virtio', 'e1000', 'rtl8139'].includes(input.networkModel) ? input.networkModel : 'e1000';
+  const windowsInstaller = isWindowsInstaller(isoEntry);
+  const firmware = windowsInstaller
+    ? 'uefi'
+    : (['bios', 'uefi'].includes(input.firmware) ? input.firmware : 'bios');
+  const requestedDiskBus = ['scsi', 'virtio', 'sata'].includes(input.diskBus) ? input.diskBus : 'scsi';
+  const requestedNetworkModel = ['virtio', 'e1000', 'rtl8139'].includes(input.networkModel) ? input.networkModel : 'virtio';
+  // Windows Setup must work without a separate VirtIO driver ISO. Present the
+  // install disk through AHCI/SATA and a broadly supported Intel NIC. Linux
+  // guests retain the faster VirtIO defaults.
+  const diskBus = windowsInstaller ? 'sata' : requestedDiskBus;
+  const networkModel = windowsInstaller ? 'e1000' : requestedNetworkModel;
   const networkArg = networkDetail?.type === 'qemu-user'
     ? `user,model=${networkModel}`
     : networkDetail?.type === 'host-bridge'
@@ -655,5 +720,5 @@ export async function createVm(input) {
     if (!autostart.ok) throw Object.assign(new Error(`VM was created, but autostart could not be enabled: ${autostart.error}`), { status: 409 });
   }
   if (isoEntry) queueInstallerBootKey(input.name);
-  return { id: input.name, name: input.name, provider: virtualization.provider, acceleration: virtualization.acceleration, firmware, diskBus, networkModel, details: response.output || 'VM created and started.' };
+  return { id: input.name, name: input.name, provider: virtualization.provider, acceleration: virtualization.acceleration, firmware, diskBus, networkModel, guestProfile: windowsInstaller ? 'windows' : 'generic', details: response.output || 'VM created and started.' };
 }
