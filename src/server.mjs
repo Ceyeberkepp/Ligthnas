@@ -26,7 +26,11 @@ import {
   listStorageContent, uploadStorageContent, importStorageContent, deleteStorageContent
 } from './storage-pools.mjs';
 import { generateTotpSecret, totpUri, verifyTotp } from './totp.mjs';
-import { qrCodeDataUrl } from './mfa.mjs';
+import {
+  qrCodeDataUrl, challenge as mfaChallenge, relyingParty,
+  verifyRegistration, verifyAssertion, sendTwilioSms,
+  smsCode, smsCodeDigest, verifySmsCode
+} from './mfa.mjs';
 import {
   normalizePermissions, effectivePermissions, groupsForUser,
   createApiTokenRecord, authenticateApiToken,
@@ -61,6 +65,71 @@ const profileRoot = join(dirname(resolve(process.env.NAS_DATA_FILE || 'data/stat
 const spaceName = /^[a-zA-Z0-9][a-zA-Z0-9_-]{1,39}$/;
 const groupName = /^[A-Za-z0-9][A-Za-z0-9 _.-]{1,63}$/;
 const pause = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+
+const pendingSmsLogins = new Map();
+const pendingSmsEnrollments = new Map();
+const pendingPasskeyLogins = new Map();
+const pendingPasskeyRegistrations = new Map();
+const smsSendThrottle = new Map();
+const MFA_CODE_TTL_MS = 5 * 60 * 1000;
+const PASSKEY_CHALLENGE_TTL_MS = 2 * 60 * 1000;
+
+function pendingValue(map, username) {
+  const item = map.get(username);
+  if (!item) return null;
+  if (Number(item.expiresAt) <= Date.now()) {
+    map.delete(username);
+    return null;
+  }
+  return item;
+}
+
+function maskPhone(value) {
+  const phone = String(value || '');
+  return phone.length >= 4 ? `••••${phone.slice(-4)}` : 'configured phone';
+}
+
+function enabledMfaMethods(account) {
+  const methods = [];
+  if (account?.totpEnabled) methods.push('totp');
+  if (account?.smsMfa?.enabled) methods.push('sms');
+  if (Array.isArray(account?.passkeys) && account.passkeys.length) methods.push('passkey');
+  return methods;
+}
+
+async function accountForPassword(username, password) {
+  const account = username === store.state.config?.username
+    ? store.state.config
+    : store.state.users.find(user => user.username === username);
+  if (!account || account.disabled || !(await verifyPassword(password, account.passwordHash))) return null;
+  return account;
+}
+
+function issueSmsChallenge(map, username, settings) {
+  const code = smsCode();
+  const nonce = mfaChallenge();
+  map.set(username, {
+    nonce,
+    digest: smsCodeDigest(code, nonce),
+    expiresAt: Date.now() + MFA_CODE_TTL_MS,
+    attempts: 0,
+    settings
+  });
+  return code;
+}
+
+function verifyPendingSms(map, username, code) {
+  const pending = pendingValue(map, username);
+  if (!pending) return false;
+  pending.attempts = Number(pending.attempts || 0) + 1;
+  if (pending.attempts > 5) {
+    map.delete(username);
+    return false;
+  }
+  const valid = verifySmsCode(code, pending.nonce, pending.digest);
+  if (valid) map.delete(username);
+  return valid;
+}
 
 let overviewStorageCache = null;
 let overviewStorageCacheAt = 0;
@@ -425,24 +494,94 @@ async function api(req, res, url) {
     const username = String(url.searchParams.get('username') || '').trim();
     const account = username === store.state.config.username ? store.state.config : store.state.users.find(user => user.username === username);
     if (!account || account.disabled) return send(res, 200, { configured: true, methods: [] });
-    const methods = [];
-    if (account.totpEnabled) methods.push('totp');
-    if (account.smsMfa?.enabled) methods.push('sms');
-    if (Array.isArray(account.passkeys) && account.passkeys.length) methods.push('passkey');
-    return send(res, 200, { configured: true, methods });
+    return send(res, 200, { configured: true, methods: enabledMfaMethods(account), smsDestination: account.smsMfa?.enabled ? maskPhone(account.smsMfa.phone) : null });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/login/sms/send') {
+    if (!store.state.config) return send(res, 409, { error: 'Complete setup first.' });
+    const input = await bodyJson(req);
+    const username = String(input.username || '');
+    const account = await accountForPassword(username, input.password);
+    if (!account) return send(res, 401, { error: 'Username or password is incorrect.' });
+    if (!account.smsMfa?.enabled) return send(res, 409, { error: 'SMS verification is not enabled for this account.' });
+    const lastSent = Number(smsSendThrottle.get(username) || 0);
+    if (Date.now() - lastSent < 30000) return send(res, 429, { error: 'Wait 30 seconds before requesting another SMS code.' });
+    const code = issueSmsChallenge(pendingSmsLogins, username, null);
+    try {
+      await sendTwilioSms(account.smsMfa, `Your LightNAS verification code is ${code}. It expires in 5 minutes.`);
+    } catch (error) {
+      pendingSmsLogins.delete(username);
+      throw error;
+    }
+    smsSendThrottle.set(username, Date.now());
+    return send(res, 200, { ok: true, sentTo: maskPhone(account.smsMfa.phone), expiresInSeconds: 300 });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/login/passkey/options') {
+    if (!store.state.config) return send(res, 409, { error: 'Complete setup first.' });
+    const input = await bodyJson(req);
+    const username = String(input.username || '');
+    const account = await accountForPassword(username, input.password);
+    if (!account) return send(res, 401, { error: 'Username or password is incorrect.' });
+    if (!Array.isArray(account.passkeys) || !account.passkeys.length) return send(res, 409, { error: 'No passkey is registered for this account.' });
+    const rpId = relyingParty(req);
+    const challenge = mfaChallenge();
+    pendingPasskeyLogins.set(username, { challenge, rpId, expiresAt: Date.now() + PASSKEY_CHALLENGE_TTL_MS });
+    return send(res, 200, {
+      challenge,
+      rpId,
+      timeout: 60000,
+      allowCredentials: account.passkeys.map(item => ({ type: 'public-key', id: item.id }))
+    });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/login/passkey/verify') {
+    if (!store.state.config) return send(res, 409, { error: 'Complete setup first.' });
+    const input = await bodyJson(req);
+    const username = String(input.username || '');
+    const account = username === store.state.config.username ? store.state.config : store.state.users.find(user => user.username === username);
+    const pending = pendingValue(pendingPasskeyLogins, username);
+    if (!account || account.disabled || !pending) return send(res, 401, { error: 'Passkey sign-in expired. Start again.' });
+    const credential = (account.passkeys || []).find(item => item.id === String(input.response?.id || ''));
+    if (!credential || !verifyAssertion({ response: input.response, credential, expectedChallenge: pending.challenge, rpId: pending.rpId })) {
+      return send(res, 401, { error: 'Passkey verification failed.' });
+    }
+    pendingPasskeyLogins.delete(username);
+    const token = sessions.create(username);
+    store.addActivity('login', `${username} signed in with a passkey.`, 'info');
+    await store.save();
+    return send(res, 200, { ok: true }, { 'Set-Cookie': `nas_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200` });
   }
 
   if (req.method === 'POST' && url.pathname === '/api/login') {
     if (!store.state.config) return send(res, 409, { error: 'Complete setup first.' });
     const input = await bodyJson(req);
-    const account = input.username === store.state.config.username ? store.state.config : store.state.users.find(user => user.username === input.username);
-    const validPassword = account && !account.disabled && await verifyPassword(input.password, account.passwordHash);
-    if (!validPassword) return send(res, 401, { error: 'Username or password is incorrect.' });
-    if (account.totpEnabled && (!account.totpSecret || !verifyTotp(account.totpSecret, input.totp))) {
-      return send(res, 401, { error: 'Authenticator code is required or invalid.', totpRequired: true });
+    const username = String(input.username || '');
+    const account = await accountForPassword(username, input.password);
+    if (!account) return send(res, 401, { error: 'Username or password is incorrect.' });
+
+    const methods = enabledMfaMethods(account);
+    if (methods.length) {
+      const method = String(input.mfaMethod || '');
+      let verified = false;
+      if (method === 'totp' && methods.includes('totp')) {
+        verified = Boolean(account.totpSecret && verifyTotp(account.totpSecret, input.totp));
+      } else if (method === 'sms' && methods.includes('sms')) {
+        verified = verifyPendingSms(pendingSmsLogins, username, input.smsCode);
+      } else if (method === 'passkey' && methods.includes('passkey')) {
+        return send(res, 401, { error: 'Use the Passkey / security key button to complete verification.', mfaRequired: true, methods });
+      }
+      if (!verified) {
+        return send(res, 401, {
+          error: method ? 'Verification code is missing, expired, or invalid.' : 'Additional verification is required.',
+          mfaRequired: true,
+          methods
+        });
+      }
     }
-    const token = sessions.create(input.username);
-    store.addActivity('login', `${input.username} signed in.`, 'info');
+
+    const token = sessions.create(username);
+    store.addActivity('login', `${username} signed in.`, 'info');
     await store.save();
     return send(res, 200, { ok: true }, { 'Set-Cookie': `nas_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200` });
   }
