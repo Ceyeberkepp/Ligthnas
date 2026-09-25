@@ -134,6 +134,16 @@ textarea { min-height: 92px; resize: vertical; }
 .console.sidebar-collapsed .sidebar nav a.active { border-radius:12px; box-shadow: inset 3px 0 var(--accent); }
 .console.sidebar-collapsed .nav-group { border-top:0; padding-top:0; margin-top:0; }
 .console.sidebar-collapsed .nav-group:not([open]) > a { display:flex; }
+.console.sidebar-collapsed .sidebar nav a[data-view="pools"],
+.console.sidebar-collapsed .sidebar nav a[data-view="shares"],
+.console.sidebar-collapsed .sidebar nav a[data-view="firewall"],
+.console.sidebar-collapsed .sidebar nav a[data-view="integrations"],
+.console.sidebar-collapsed .sidebar nav a[data-view="permissions"],
+.console.sidebar-collapsed .sidebar nav a[data-view="shell"],
+.console.sidebar-collapsed .sidebar nav a[data-view="smtp"],
+.console.sidebar-collapsed .sidebar nav a[data-view="settings"],
+.console.sidebar-collapsed .sidebar nav a[data-view="monitoring"],
+.console.sidebar-collapsed .sidebar nav a[data-view="capabilities"] { display:none; }
 .console.sidebar-collapsed .sidebar-foot { padding-top:10px; }
 .console.sidebar-collapsed .device-mini { justify-content:center; padding-left:0; padding-right:0; }
 
@@ -450,4 +460,31 @@ dialog::backdrop { background: rgba(1,7,13,.76); backdrop-filter: blur(5px); }
   .container-manager-tabs { flex-direction:row; overflow:auto; border-right:0; border-bottom:1px solid var(--border); }
   .container-manager-tabs button { width:auto; white-space:nowrap; }
   .container-manager-content .form-grid,.manager-summary { grid-template-columns:1fr; }
+}
+
+
+/* Cleaner navigation rail */
+.sidebar { overflow:hidden; }
+.sidebar nav { padding-right:2px; }
+.console.sidebar-collapsed .sidebar nav { justify-items:stretch; }
+.console.sidebar-collapsed .sidebar nav a,
+.console.sidebar-collapsed .foot-admin { min-height:44px; border-radius:12px; }
+.console.sidebar-collapsed .sidebar nav a span,
+.console.sidebar-collapsed .foot-admin span { font-size:20px; }
+.console.sidebar-collapsed .sidebar nav a:hover::after,
+.console.sidebar-collapsed .foot-admin:hover::after {
+  content: attr(title);
+  position: fixed;
+  left: 78px;
+  z-index: 100;
+  max-width: 220px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
 }
