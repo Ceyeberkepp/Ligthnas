@@ -232,9 +232,15 @@ export function configureVmEditableHardware(source, settings = {}) {
     const disk = xml.match(diskPattern)?.[0] || '';
     if (disk) {
       const targetDevice = diskBus === 'virtio' ? 'vda' : 'sda';
-      const updatedDisk = /<target\b[^>]*\/>/i.test(disk)
+      let updatedDisk = /<target\b[^>]*\/>/i.test(disk)
         ? disk.replace(/<target\b[^>]*\/>/i, `<target dev='${targetDevice}' bus='${diskBus}'/>`)
         : disk.replace('</disk>', `<target dev='${targetDevice}' bus='${diskBus}'/></disk>`);
+      // Alias/address elements encode the old controller topology. Let libvirt
+      // regenerate them after a bus change instead of carrying stale SCSI
+      // controller coordinates onto a SATA/VirtIO disk.
+      updatedDisk = updatedDisk
+        .replace(/\s*<alias\b[^>]*\/>/gi, '')
+        .replace(/\s*<address\b[^>]*type=(['"])drive\1[^>]*\/>/gi, '');
       xml = xml.replace(diskPattern, updatedDisk);
     }
   }
