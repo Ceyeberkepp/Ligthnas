@@ -671,6 +671,135 @@ async function api(req, res, url) {
     return send(res, 200, { enabled: false });
   }
 
+  if (req.method === 'GET' && url.pathname === '/api/security/sms') {
+    if (context.apiToken) return send(res, 403, { error: 'SMS settings require an interactive local account session.' });
+    return send(res, 200, {
+      enabled: Boolean(account.smsMfa?.enabled),
+      phone: account.smsMfa?.enabled ? maskPhone(account.smsMfa.phone) : null,
+      provider: account.smsMfa?.enabled ? 'Twilio' : null
+    });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/security/sms/setup') {
+    if (context.apiToken) return send(res, 403, { error: 'SMS settings require an interactive local account session.' });
+    const input = await bodyJson(req);
+    if (!(await verifyPassword(input.currentPassword, account.passwordHash))) return send(res, 403, { error: 'Current account password is incorrect.' });
+    const settings = {
+      accountSid: String(input.accountSid || '').trim(),
+      authToken: String(input.authToken || ''),
+      fromNumber: String(input.fromNumber || '').trim(),
+      phone: String(input.phone || '').trim()
+    };
+    const code = issueSmsChallenge(pendingSmsEnrollments, username, settings);
+    try {
+      await sendTwilioSms(settings, `Your LightNAS SMS verification setup code is ${code}. It expires in 5 minutes.`);
+    } catch (error) {
+      pendingSmsEnrollments.delete(username);
+      throw error;
+    }
+    return send(res, 200, { ok: true, sentTo: maskPhone(settings.phone), expiresInSeconds: 300 });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/security/sms/verify') {
+    if (context.apiToken) return send(res, 403, { error: 'SMS settings require an interactive local account session.' });
+    const input = await bodyJson(req);
+    const pending = pendingValue(pendingSmsEnrollments, username);
+    if (!pending) return send(res, 400, { error: 'SMS setup expired. Send a new verification code.' });
+    const settings = pending.settings;
+    if (!verifyPendingSms(pendingSmsEnrollments, username, input.code)) return send(res, 400, { error: 'SMS verification code is invalid or expired.' });
+    account.smsMfa = { ...settings, enabled: true, verifiedAt: new Date().toISOString() };
+    store.addActivity('security', `SMS verification enabled for ${username}.`, 'success');
+    await store.save();
+    return send(res, 200, { enabled: true, phone: maskPhone(settings.phone) });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/security/sms/disable') {
+    if (context.apiToken) return send(res, 403, { error: 'SMS settings require an interactive local account session.' });
+    const input = await bodyJson(req);
+    if (!(await verifyPassword(input.currentPassword, account.passwordHash))) return send(res, 403, { error: 'Current account password is incorrect.' });
+    delete account.smsMfa;
+    pendingSmsEnrollments.delete(username);
+    pendingSmsLogins.delete(username);
+    store.addActivity('security', `SMS verification disabled for ${username}.`, 'warning');
+    await store.save();
+    return send(res, 200, { enabled: false });
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/security/passkeys') {
+    if (context.apiToken) return send(res, 403, { error: 'Passkey settings require an interactive local account session.' });
+    return send(res, 200, {
+      secureContextRequired: true,
+      passkeys: (account.passkeys || []).map(item => ({
+        id: item.id,
+        name: item.name || 'Security key',
+        createdAt: item.createdAt,
+        lastUsedAt: item.lastUsedAt || null
+      }))
+    });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/security/passkeys/register/options') {
+    if (context.apiToken) return send(res, 403, { error: 'Passkey settings require an interactive local account session.' });
+    const input = await bodyJson(req);
+    if (!(await verifyPassword(input.currentPassword, account.passwordHash))) return send(res, 403, { error: 'Current account password is incorrect.' });
+    const name = String(input.name || 'Passkey').trim().slice(0, 64) || 'Passkey';
+    const rpId = relyingParty(req);
+    const registrationChallenge = mfaChallenge();
+    account.webauthnUserId ||= mfaChallenge();
+    pendingPasskeyRegistrations.set(username, {
+      challenge: registrationChallenge,
+      rpId,
+      name,
+      expiresAt: Date.now() + PASSKEY_CHALLENGE_TTL_MS
+    });
+    await store.save();
+    return send(res, 200, {
+      challenge: registrationChallenge,
+      rp: { id: rpId, name: `LightNAS ${store.state.config.deviceName}` },
+      user: { id: account.webauthnUserId, name: username, displayName: username },
+      pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+      timeout: 60000,
+      excludeCredentials: (account.passkeys || []).map(item => ({ type: 'public-key', id: item.id }))
+    });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/security/passkeys/register/verify') {
+    if (context.apiToken) return send(res, 403, { error: 'Passkey settings require an interactive local account session.' });
+    const input = await bodyJson(req);
+    const pending = pendingValue(pendingPasskeyRegistrations, username);
+    if (!pending) return send(res, 400, { error: 'Passkey registration expired. Start again.' });
+    const registered = verifyRegistration({
+      response: input.response,
+      expectedChallenge: pending.challenge,
+      rpId: pending.rpId
+    });
+    account.passkeys ||= [];
+    if (account.passkeys.some(item => item.id === registered.id)) return send(res, 409, { error: 'This passkey is already registered.' });
+    account.passkeys.push({
+      ...registered,
+      name: pending.name,
+      createdAt: new Date().toISOString(),
+      lastUsedAt: null
+    });
+    pendingPasskeyRegistrations.delete(username);
+    store.addActivity('security', `Passkey "${pending.name}" registered for ${username}.`, 'success');
+    await store.save();
+    return send(res, 201, { ok: true, id: registered.id, name: pending.name });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/security/passkeys/remove') {
+    if (context.apiToken) return send(res, 403, { error: 'Passkey settings require an interactive local account session.' });
+    const input = await bodyJson(req);
+    if (!(await verifyPassword(input.currentPassword, account.passwordHash))) return send(res, 403, { error: 'Current account password is incorrect.' });
+    const id = String(input.id || '');
+    const before = (account.passkeys || []).length;
+    account.passkeys = (account.passkeys || []).filter(item => item.id !== id);
+    if (account.passkeys.length === before) return send(res, 404, { error: 'Passkey not found.' });
+    store.addActivity('security', `A passkey was removed from ${username}.`, 'warning');
+    await store.save();
+    return send(res, 200, { ok: true, remaining: account.passkeys.length });
+  }
+
   const ownerOnly = url.pathname === '/api/settings' ||
     url.pathname === '/api/smtp' || url.pathname === '/api/smtp/test' ||
     url.pathname.startsWith('/api/security/api-tokens') || url.pathname.startsWith('/api/security/webhooks') ||
