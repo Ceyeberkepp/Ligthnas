@@ -752,15 +752,17 @@ function bindViewActions() {
     try { await request('/api/zfs/datasets', { method: 'PATCH', body: JSON.stringify({ name: button.dataset.dataset, property: property.trim(), value: value.trim() }) }); state.overview = await request('/api/overview'); render('pools'); toast('Dataset property updated.'); }
     catch (error) { toast(error.message); }
   }));
-  $$('[data-convert-file]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+  $('[data-convert-file], [data-convert-path]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     const format = prompt('Output format: mp4, webm, mp3, jpg, png, or webp');
     if (format === null) return;
+    const sourcePath = button.dataset.convertPath || [state.folder, button.dataset.convertFile].filter(Boolean).join('/');
     button.disabled = true;
+    const original = button.textContent;
     button.textContent = 'Converting…';
     try {
-      await request('/api/media/convert', { method: 'POST', body: JSON.stringify({ path: [state.folder, button.dataset.convertFile].filter(Boolean).join('/'), format: format.toLowerCase().trim() }) });
-      await loadFiles(); toast('Converted file is ready in this folder.');
-    } catch (error) { toast(error.message); button.disabled = false; button.textContent = 'Convert'; }
+      await request('/api/media/convert', { method: 'POST', body: JSON.stringify({ path: sourcePath, format: format.toLowerCase().trim() }) });
+      await loadFiles(); toast('Converted file is ready.');
+    } catch (error) { toast(error.message); button.disabled = false; button.textContent = original; }
   }));
   $('#smtp-form', $('#content'))?.addEventListener('submit', async event => {
     event.preventDefault();
@@ -887,10 +889,12 @@ function bindViewActions() {
   $$('[data-action="new-share"]', $('#content')).forEach(button => button.addEventListener('click', () => $('#share-dialog').showModal()));
   $$('[data-view-link]', $('#content')).forEach(button => button.addEventListener('click', () => { location.hash = button.dataset.viewLink; }));
   $$('[data-action="refresh"]', $('#content')).forEach(button => button.addEventListener('click', async () => { try { state.overview = await request('/api/overview'); captureOverviewMetrics(); render(state.view); toast('Readings updated.'); } catch (error) { toast(error.message); } }));
-  $$('[data-action="refresh-files"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
-    button.disabled = true;
-    button.textContent = 'Refreshing…';
+  $('[data-action="refresh-files"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+    state.files = null;
+    state.fileError = null;
+    render('files');
     await loadFiles();
+    toast('Files refreshed.');
   }));
   $$('[data-library-tab]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     const folder = button.dataset.libraryTab || '';
