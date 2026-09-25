@@ -69,7 +69,36 @@ export const catalog = Object.freeze([
 
   { id: 'openspeedtest', name: 'OpenSpeedTest', category: 'Network', image: 'openspeedtest/latest', port: 8082, containerPort: 3000, memory: '512m', description: 'Test LAN speed from a browser against the LightNAS node.', source: 'OpenSpeedTest', volumes: [] },
   { id: 'searxng', name: 'SearXNG', category: 'Search', image: 'searxng/searxng:latest', port: 8089, containerPort: 8080, memory: '1g', description: 'Privacy-respecting self-hosted metasearch engine.', source: 'SearXNG', volumes: [['config', '/etc/searxng']] },
-  { id: 'open-webui', name: 'Open WebUI', category: 'AI', image: 'ghcr.io/open-webui/open-webui:main', port: 8093, containerPort: 8080, memory: '2g', description: 'Self-hosted web interface for local and remote AI model providers.', source: 'Open WebUI', volumes: [['data', '/app/backend/data']] }
+  { id: 'open-webui', name: 'Open WebUI', category: 'AI', image: 'ghcr.io/open-webui/open-webui:main', port: 8093, containerPort: 8080, memory: '2g', description: 'Self-hosted web interface for local and remote AI model providers.', source: 'Open WebUI', volumes: [['data', '/app/backend/data']] },
+
+  // Broad one-click catalog: popular self-hosted applications that also
+  // overlap heavily with TrueNAS/community NAS application catalogs.
+  { id: 'emby', name: 'Emby', category: 'Media', image: 'emby/embyserver:latest', port: 8094, containerPort: 8096, memory: '2g', description: 'Personal media server for movies, TV, music and photos.', source: 'Emby', volumes: [['config', '/config'], ['@files', '/mnt/share1']] },
+  { id: 'plex', name: 'Plex Media Server', category: 'Media', image: 'lscr.io/linuxserver/plex:latest', port: 32400, containerPort: 32400, memory: '2g', description: 'Popular personal media server with broad client support.', source: 'LinuxServer.io', volumes: [['config', '/config'], ['@files', '/media']], environment: [['VERSION', 'docker']] },
+  { id: 'jellyseerr', name: 'Jellyseerr', category: 'Media', image: 'fallenbagel/jellyseerr:latest', port: 5055, containerPort: 5055, memory: '768m', description: 'Media request and discovery manager for Jellyfin and related services.', source: 'Jellyseerr', volumes: [['config', '/app/config']] },
+  { id: 'tautulli', name: 'Tautulli', category: 'Media', image: 'lscr.io/linuxserver/tautulli:latest', port: 8181, containerPort: 8181, memory: '512m', description: 'Plex monitoring, statistics and notifications.', source: 'LinuxServer.io', volumes: [['config', '/config']] },
+  { id: 'metube', name: 'MeTube', category: 'Media', image: 'ghcr.io/alexta69/metube:latest', port: 8101, containerPort: 8081, memory: '768m', description: 'Browser-based media downloader powered by yt-dlp.', source: 'MeTube', volumes: [['@files', '/downloads']] },
+
+  { id: 'sonarr', name: 'Sonarr', category: 'Downloads', image: 'lscr.io/linuxserver/sonarr:latest', port: 8989, containerPort: 8989, memory: '1g', description: 'TV series collection and download automation.', source: 'LinuxServer.io', volumes: [['config', '/config'], ['@files', '/data']] },
+  { id: 'radarr', name: 'Radarr', category: 'Downloads', image: 'lscr.io/linuxserver/radarr:latest', port: 7878, containerPort: 7878, memory: '1g', description: 'Movie collection and download automation.', source: 'LinuxServer.io', volumes: [['config', '/config'], ['@files', '/data']] },
+  { id: 'lidarr', name: 'Lidarr', category: 'Downloads', image: 'lscr.io/linuxserver/lidarr:latest', port: 8686, containerPort: 8686, memory: '1g', description: 'Music collection and download automation.', source: 'LinuxServer.io', volumes: [['config', '/config'], ['@files', '/data']] },
+  { id: 'prowlarr', name: 'Prowlarr', category: 'Downloads', image: 'lscr.io/linuxserver/prowlarr:latest', port: 9696, containerPort: 9696, memory: '768m', description: 'Indexer manager for the *arr application family.', source: 'LinuxServer.io', volumes: [['config', '/config']] },
+  { id: 'bazarr', name: 'Bazarr', category: 'Downloads', image: 'lscr.io/linuxserver/bazarr:latest', port: 6767, containerPort: 6767, memory: '768m', description: 'Subtitle automation companion for Sonarr and Radarr.', source: 'LinuxServer.io', volumes: [['config', '/config'], ['@files', '/data']] },
+  { id: 'sabnzbd', name: 'SABnzbd', category: 'Downloads', image: 'lscr.io/linuxserver/sabnzbd:latest', port: 8095, containerPort: 8080, memory: '1g', description: 'Usenet download client with a browser interface.', source: 'LinuxServer.io', volumes: [['config', '/config'], ['@files', '/downloads']] },
+  { id: 'qbittorrent', name: 'qBittorrent', category: 'Downloads', image: 'lscr.io/linuxserver/qbittorrent:latest', port: 8097, containerPort: 8080, memory: '1g', description: 'BitTorrent client with a full web interface.', source: 'LinuxServer.io', volumes: [['config', '/config'], ['@files', '/downloads']], extraPorts: [[6881, 6881, 'tcp'], [6881, 6881, 'udp']] },
+  { id: 'transmission', name: 'Transmission', category: 'Downloads', image: 'lscr.io/linuxserver/transmission:latest', port: 9091, containerPort: 9091, memory: '768m', description: 'Lightweight BitTorrent client with remote web management.', source: 'LinuxServer.io', volumes: [['config', '/config'], ['@files', '/downloads']], extraPorts: [[51413, 51413, 'tcp'], [51413, 51413, 'udp']] },
+
+  { id: 'syncthing', name: 'Syncthing', category: 'Files', image: 'lscr.io/linuxserver/syncthing:latest', port: 8384, containerPort: 8384, memory: '1g', description: 'Continuous peer-to-peer file synchronization.', source: 'LinuxServer.io', volumes: [['config', '/config'], ['@files', '/data']], extraPorts: [[22000, 22000, 'tcp'], [22000, 22000, 'udp'], [21027, 21027, 'udp']] },
+  { id: 'duplicati', name: 'Duplicati', category: 'Backup', image: 'lscr.io/linuxserver/duplicati:latest', port: 8200, containerPort: 8200, memory: '1g', description: 'Encrypted backup client supporting local and cloud destinations.', source: 'LinuxServer.io', volumes: [['config', '/config'], ['@files', '/source']] },
+  { id: 'mealie', name: 'Mealie', category: 'Productivity', image: 'ghcr.io/mealie-recipes/mealie:latest', port: 9925, containerPort: 9000, memory: '1g', description: 'Self-hosted recipe manager and meal planner.', source: 'Mealie', volumes: [['data', '/app/data']] },
+  { id: 'forgejo', name: 'Forgejo', category: 'Development', image: 'codeberg.org/forgejo/forgejo:latest', port: 3004, containerPort: 3000, memory: '1g', description: 'Community-driven Git forge for repositories, issues and collaboration.', source: 'Forgejo', volumes: [['data', '/data']] },
+  { id: 'vikunja', name: 'Vikunja', category: 'Productivity', image: 'vikunja/vikunja:latest', port: 3456, containerPort: 3456, memory: '1g', description: 'Open-source task and project management.', source: 'Vikunja', volumes: [['files', '/app/vikunja/files'], ['db', '/db']] },
+  { id: 'home-assistant', name: 'Home Assistant', category: 'Home', image: 'ghcr.io/home-assistant/home-assistant:stable', port: 8123, containerPort: 8123, memory: '2g', description: 'Open-source home automation platform.', source: 'Home Assistant', volumes: [['config', '/config']] },
+  { id: 'homarr', name: 'Homarr', category: 'Dashboard', image: 'ghcr.io/homarr-labs/homarr:latest', port: 7575, containerPort: 7575, memory: '768m', description: 'Modern dashboard for self-hosted services.', source: 'Homarr', volumes: [['appdata', '/appdata']] },
+  { id: 'dashy', name: 'Dashy', category: 'Dashboard', image: 'lissy93/dashy:latest', port: 8102, containerPort: 8080, memory: '768m', description: 'Customizable dashboard for homelab and NAS services.', source: 'Dashy', volumes: [] },
+  { id: 'it-tools', name: 'IT-Tools', category: 'Utility', image: 'corentinth/it-tools:latest', port: 8100, containerPort: 80, memory: '512m', description: 'Collection of browser-based tools for developers and IT administrators.', source: 'IT-Tools', volumes: [] },
+  { id: 'whoogle', name: 'Whoogle', category: 'Search', image: 'benbusby/whoogle-search:latest', port: 5001, containerPort: 5000, memory: '512m', description: 'Privacy-focused search frontend.', source: 'Whoogle', volumes: [] },
+  { id: 'glances', name: 'Glances', category: 'Monitoring', image: 'nicolargo/glances:latest-full', port: 61208, containerPort: 61208, memory: '512m', description: 'System monitoring dashboard and metrics viewer.', source: 'Glances', volumes: [], command: ['glances', '-w'] }
 ]);
 
 async function command(program, args, timeout = 4000) {
@@ -497,6 +526,10 @@ export async function installCatalogApp(id, input = {}) {
     '--label', `lightnas.web.port=${app.port}`,
     '--restart', 'unless-stopped', '--memory', app.memory, '--pids-limit', '256',
     '--security-opt', 'no-new-privileges', '-p', `0.0.0.0:${app.port}:${app.containerPort}`];
+  for (const mapping of app.extraPorts || []) {
+    const [hostPort, containerPort, protocol = 'tcp'] = mapping;
+    args.push('-p', `0.0.0.0:${hostPort}:${containerPort}/${protocol}`);
+  }
   const environment = [...(app.environment || [])];
   if (app.requiresAdminPassword) {
     const adminPassword = String(input.adminPassword || '');
@@ -517,6 +550,7 @@ export async function installCatalogApp(id, input = {}) {
     args.push('-v', `${hostPath}:${target}`);
   }
   args.push(app.image);
+  for (const argument of app.command || []) args.push(String(argument));
   const containerId = await runDocker(args);
   const ready = await waitForAppPort(app.port);
   return {
