@@ -1,19 +1,18 @@
 import http from 'node:http';
 import { spawn } from 'node:child_process';
-import { readFile, mkdir, rmdir, rename, unlink, stat } from 'node:fs/promises';
-import { createReadStream, createWriteStream } from 'node:fs';
-import { pipeline } from 'node:stream/promises';
+import { readFile, mkdir, rmdir, writeFile, rm } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
 import { basename, dirname, extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { JsonStore } from './store.mjs';
 import { getFilesystems, getStorageInventory, getSystemSnapshot } from './system.mjs';
 import { hashPassword, Sessions, verifyPassword } from './auth.mjs';
-import { listFiles, createFolder, uploadFile, downloadFile, downloadFolder, deleteEntry } from './files.mjs';
+import { listFiles, listAllFiles, createFolder, uploadFile, downloadFile, downloadEntry, deleteEntry } from './files.mjs';
 import { thumbnailFor } from './thumbnails.mjs';
 import { catalog, runtimeInventory, installCatalogApp, manageCatalogApp, createContainer, createVm } from './runtimes-next.mjs';
 import { proxmoxConsoleSocket, proxmoxUpdateStorage, proxmoxCleanDisk } from './proxmox.mjs';
-import { localContainerSummary, localContainerInventory, localManageContainer, localContainerConsoleSocket, localContainerCommand, localVmConsoleSocket, localNodeConsoleSocket, localNetworkInventory, localNetworkAction, localAccessStatus, localAccessAction, localApplyShare, localRemoveShare, localApplianceHealth, localApplianceRepair } from './local-host.mjs';
+import { localContainerSummary, localContainerInventory, localManageContainer, localContainerConsoleSocket, localContainerCommand, localVmConsoleSocket, localNodeConsoleSocket, localNetworkInventory, localNetworkAction, localApplianceHealth, localApplianceRepair } from './local-host.mjs';
 import { validateSmtp, sendSmtpTest } from './mailer.mjs';
 import { mediaAvailable, convertMedia } from './media.mjs';
 import { createDataset, updateDataset } from './zfs.mjs';
@@ -27,14 +26,13 @@ import {
   listStorageContent, uploadStorageContent, importStorageContent, deleteStorageContent
 } from './storage-pools.mjs';
 import { generateTotpSecret, totpUri, verifyTotp } from './totp.mjs';
-import { challenge as newChallenge, qrCodeDataUrl, relyingParty, sendTwilioSms, smsCode, verifyAssertion, verifyRegistration } from './mfa.mjs';
 import {
   normalizePermissions, effectivePermissions, groupsForUser,
   createApiTokenRecord, authenticateApiToken,
   createWebhookRecord, deliverWebhook, deliverEvent
 } from './access.mjs';
 import {
-  authenticateLdaps, normalizeIdentityProvider, publicIdentityProvider, testIdentityProvider
+  normalizeIdentityProvider, publicIdentityProvider, testIdentityProvider
 } from './identity-providers.mjs';
 import { ContainerPublisher } from './container-publish.mjs';
 import { discoverContainerApplication } from './container-app-access.mjs';
@@ -58,29 +56,9 @@ store.state.security.webhooks ||= [];
 store.state.security.identityProviders ||= [];
 const spaceRoot = join(dirname(resolve(process.env.NAS_DATA_FILE || 'data/state.json')), 'files', 'Spaces');
 const profileRoot = join(dirname(resolve(process.env.NAS_DATA_FILE || 'data/state.json')), 'profiles');
-const avatarPath = username => join(profileRoot, `${username}.avatar`);
 const spaceName = /^[a-zA-Z0-9][a-zA-Z0-9_-]{1,39}$/;
 const groupName = /^[A-Za-z0-9][A-Za-z0-9 _.-]{1,63}$/;
 const pause = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
-const mfaChallenges = new Map();
-
-function accountFor(username) {
-  return username === store.state.config?.username ? store.state.config : store.state.users.find(user => user.username === username);
-}
-
-function putMfaChallenge(key, value) {
-  const now = Date.now();
-  for (const [id, item] of mfaChallenges) if (item.expiresAt <= now) mfaChallenges.delete(id);
-  mfaChallenges.set(key, { ...value, expiresAt: now + 5 * 60 * 1000, attempts: 0 });
-}
-
-function takeMfaChallenge(key, consume = false) {
-  const item = mfaChallenges.get(key);
-  if (!item || item.expiresAt <= Date.now() || item.attempts >= 5) { mfaChallenges.delete(key); return null; }
-  item.attempts += 1;
-  if (consume) mfaChallenges.delete(key);
-  return item;
-}
 
 async function containerReadyForPublication(id) {
   let started = false;
@@ -164,16 +142,13 @@ async function automaticContainerApplication(id, { preferredPort = 0, requestedH
 }
 
 export const PERMISSIONS = Object.freeze([
-  'overview.view',
-  'files.read', 'files.write', 'media.convert',
-  'storage.view', 'storage.manage', 'pools.view', 'shares.view', 'shares.manage',
-  'apps.view', 'apps.manage', 'containers.view', 'containers.manage', 'vms.view', 'vms.manage',
-  'network.view', 'network.manage', 'firewall.view', 'firewall.manage', 'integrations.view', 'integrations.manage',
-  'containers.console', 'vms.console', 'backup.manage', 'audit.view',
-  'monitoring.view', 'capabilities.view', 'system.view', 'system.shell',
-  'users.manage', 'smtp.manage', 'settings.manage', 'admin.view'
+  'files.read', 'files.write', 'files.download', 'files.delete', 'media.convert',
+  'storage.view', 'storage.manage', 'shares.manage',
+  'apps.manage', 'containers.manage', 'vms.manage',
+  'network.view', 'network.manage', 'firewall.manage',
+  'monitoring.view', 'system.view'
 ]);
-const DEFAULT_USER_PERMISSIONS = Object.freeze(['files.read', 'files.write']);
+const DEFAULT_USER_PERMISSIONS = Object.freeze(['files.read', 'files.write', 'files.download', 'files.delete']);
 
 store.setActivityListener(async event => {
   await deliverEvent(store.state, event);
@@ -184,8 +159,14 @@ const mimeTypes = {
   '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.mjs': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.json': 'application/json; charset=utf-8',
   '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.gif': 'image/gif', '.webp': 'image/webp',
-  '.bmp': 'image/bmp', '.avif': 'image/avif', '.tif': 'image/tiff', '.tiff': 'image/tiff', '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime',
-  '.m4v': 'video/x-m4v', '.ogv': 'video/ogg', '.mkv': 'video/x-matroska', '.avi': 'video/x-msvideo', '.wmv': 'video/x-ms-wmv', '.flv': 'video/x-flv', '.mpeg': 'video/mpeg', '.mpg': 'video/mpeg', '.ts': 'video/mp2t', '.m2ts': 'video/mp2t', '.mts': 'video/mp2t', '.3gp': 'video/3gpp', '.vob': 'video/mpeg', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg',
+  '.bmp': 'image/bmp', '.avif': 'image/avif', '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime',
+  '.m4v': 'video/x-m4v', '.ogv': 'video/ogg', '.mkv': 'video/x-matroska', '.avi': 'video/x-msvideo',
+  '.wmv': 'video/x-ms-wmv', '.flv': 'video/x-flv', '.mpeg': 'video/mpeg', '.mpg': 'video/mpeg', '.m2v': 'video/mpeg',
+  '.mts': 'video/mp2t', '.m2ts': 'video/mp2t', '.ts': 'video/mp2t', '.3gp': 'video/3gpp', '.3g2': 'video/3gpp2', '.vob': 'video/mpeg',
+  '.raw': 'image/x-raw', '.dng': 'image/x-adobe-dng', '.cr2': 'image/x-canon-cr2', '.cr3': 'image/x-canon-cr3',
+  '.nef': 'image/x-nikon-nef', '.nrw': 'image/x-nikon-nrw', '.arw': 'image/x-sony-arw', '.raf': 'image/x-fuji-raf',
+  '.orf': 'image/x-olympus-orf', '.rw2': 'image/x-panasonic-rw2', '.pef': 'image/x-pentax-pef', '.srw': 'image/x-samsung-srw',
+  '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg',
   '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.flac': 'audio/flac', '.pdf': 'application/pdf',
   '.txt': 'text/plain; charset=utf-8', '.log': 'text/plain; charset=utf-8', '.md': 'text/markdown; charset=utf-8',
   '.csv': 'text/csv; charset=utf-8', '.xml': 'application/xml; charset=utf-8', '.yaml': 'text/yaml; charset=utf-8',
@@ -219,6 +200,21 @@ async function bodyJson(req) {
   } catch {
     throw Object.assign(new Error('Invalid JSON.'), { status: 400 });
   }
+}
+
+async function bodyBuffer(req, maxBytes) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > maxBytes) throw Object.assign(new Error('Uploaded profile image is too large.'), { status: 413 });
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
+}
+
+function avatarPath(username, extension) {
+  return join(profileRoot, `${username}.${extension}`);
 }
 
 function cookies(req) {
@@ -364,66 +360,16 @@ async function api(req, res, url) {
   if (req.method === 'POST' && url.pathname === '/api/login') {
     if (!store.state.config) return send(res, 409, { error: 'Complete setup first.' });
     const input = await bodyJson(req);
-    let account = accountFor(input.username);
-    let validPassword = account && !account.disabled && account.passwordHash && await verifyPassword(input.password, account.passwordHash);
-    if (!validPassword && input.username !== store.state.config.username && /^[a-zA-Z0-9._@-]{3,128}$/.test(String(input.username || ''))) {
-      for (const provider of store.state.security.identityProviders.filter(item => item.enabled && item.type === 'ldaps')) {
-        if (!(await authenticateLdaps(provider, input.username, input.password))) continue;
-        account = store.state.users.find(user => user.username === input.username);
-        if (!account) {
-          account = { username: input.username, externalProviderId: provider.id, externalProviderName: provider.name, permissions: normalizePermissions(provider.permissions, PERMISSIONS, DEFAULT_USER_PERMISSIONS), createdAt: new Date().toISOString(), totpEnabled: false };
-          store.state.users.push(account);
-        } else {
-          account.externalProviderId = provider.id;
-          account.externalProviderName = provider.name;
-          account.permissions = normalizePermissions(provider.permissions, PERMISSIONS, DEFAULT_USER_PERMISSIONS);
-        }
-        validPassword = !account.disabled;
-        break;
-      }
-    }
+    const account = input.username === store.state.config.username ? store.state.config : store.state.users.find(user => user.username === input.username);
+    const validPassword = account && !account.disabled && await verifyPassword(input.password, account.passwordHash);
     if (!validPassword) return send(res, 401, { error: 'Username or password is incorrect.' });
-    const methodsEnabled = Boolean(account.totpEnabled || account.sms?.enabled || account.fidoCredentials?.length);
-    let secondFactorValid = !methodsEnabled;
-    if (account.totpEnabled && account.totpSecret && input.totp) secondFactorValid ||= verifyTotp(account.totpSecret, input.totp);
-    if (account.sms?.enabled && input.smsCode) {
-      const sms = takeMfaChallenge(`sms-login:${input.username}`, true);
-      secondFactorValid ||= Boolean(sms && sms.code === String(input.smsCode));
-    }
-    if (account.fidoCredentials?.length && input.fido) {
-      const pending = takeMfaChallenge(`fido-login:${input.username}`, true);
-      let response = input.fido;
-      try { if (typeof response === 'string') response = JSON.parse(response); } catch { response = null; }
-      const credential = account.fidoCredentials.find(item => item.id === response?.id);
-      secondFactorValid ||= Boolean(pending && credential && verifyAssertion({ response, credential, expectedChallenge: pending.challenge, rpId: pending.rpId }));
-    }
-    if (!secondFactorValid) {
-      return send(res, 401, { error: 'Complete one configured verification method.', mfaRequired: true, methods: { totp: Boolean(account.totpEnabled), sms: Boolean(account.sms?.enabled), fido: Boolean(account.fidoCredentials?.length) } });
+    if (account.totpEnabled && (!account.totpSecret || !verifyTotp(account.totpSecret, input.totp))) {
+      return send(res, 401, { error: 'Authenticator code is required or invalid.', totpRequired: true });
     }
     const token = sessions.create(input.username);
     store.addActivity('login', `${input.username} signed in.`, 'info');
     await store.save();
     return send(res, 200, { ok: true }, { 'Set-Cookie': `nas_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200` });
-  }
-
-  if (req.method === 'POST' && url.pathname === '/api/security/sms/challenge') {
-    const input = await bodyJson(req);
-    const account = accountFor(input.username);
-    if (!account || account.disabled || !account.sms?.enabled || !(await verifyPassword(input.password, account.passwordHash))) return send(res, 401, { error: 'Username or password is incorrect.' });
-    const code = smsCode();
-    await sendTwilioSms(account.sms, `Your LightNAS verification code is ${code}. It expires in 5 minutes.`);
-    putMfaChallenge(`sms-login:${input.username}`, { code });
-    return send(res, 200, { sent: true, destination: account.sms.phone.replace(/.(?=.{4})/g, '•') });
-  }
-
-  if (req.method === 'POST' && url.pathname === '/api/security/fido/challenge') {
-    const input = await bodyJson(req);
-    const account = accountFor(input.username);
-    if (!account || account.disabled || !account.fidoCredentials?.length || !(await verifyPassword(input.password, account.passwordHash))) return send(res, 401, { error: 'Username or password is incorrect.' });
-    const rpId = relyingParty(req);
-    const challenge = newChallenge();
-    putMfaChallenge(`fido-login:${input.username}`, { challenge, rpId });
-    return send(res, 200, { challenge, rpId, allowCredentials: account.fidoCredentials.map(item => ({ type: 'public-key', id: item.id })) });
   }
 
   if (req.method === 'POST' && url.pathname === '/api/logout') {
@@ -435,42 +381,55 @@ async function api(req, res, url) {
   if (!context) return;
   const { username, account, isAdmin, permissions } = context;
 
-  if (url.pathname === '/api/profile/avatar' && req.method === 'GET') {
-    if (context.apiToken) return send(res, 403, { error: 'Profile pictures require an interactive account session.' });
-    if (!account.avatarContentType) return send(res, 404, { error: 'Profile picture not found.' });
-    const path = avatarPath(username);
-    const data = await stat(path);
-    res.writeHead(200, { 'Content-Type': account.avatarContentType, 'Content-Length': data.size, 'Cache-Control': 'private, max-age=300', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': csp });
-    return createReadStream(path).pipe(res);
+  if (req.method === 'GET' && url.pathname === '/api/profile/avatar') {
+    if (context.apiToken || !account.avatarExt) return send(res, 404, { error: 'No profile picture is configured.' });
+    const path = avatarPath(username, account.avatarExt);
+    const type = account.avatarExt === 'png' ? 'image/png' : account.avatarExt === 'webp' ? 'image/webp' : 'image/jpeg';
+    try {
+      const data = await readFile(path);
+      res.writeHead(200, { 'Content-Type': type, 'Content-Length': data.length, 'Cache-Control': 'private, max-age=300', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': csp });
+      return res.end(data);
+    } catch (error) {
+      if (error.code === 'ENOENT') return send(res, 404, { error: 'Profile picture is unavailable.' });
+      throw error;
+    }
   }
-  if (url.pathname === '/api/profile/avatar' && req.method === 'PUT') {
-    if (context.apiToken) return send(res, 403, { error: 'Profile pictures require an interactive account session.' });
-    const contentType = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
-    if (!/^image\/(?:jpeg|png|gif|webp|avif)$/.test(contentType)) return send(res, 415, { error: 'Choose a JPEG, PNG, GIF, WebP, or AVIF image.' });
+  if (req.method === 'PUT' && url.pathname === '/api/profile/avatar') {
+    if (context.apiToken) return send(res, 403, { error: 'Profile pictures require an interactive user session.' });
+    const type = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+    const extension = ({ 'image/jpeg':'jpg', 'image/png':'png', 'image/webp':'webp' })[type];
+    if (!extension) return send(res, 415, { error: 'Use a JPEG, PNG, or WebP profile picture.' });
+    const data = await bodyBuffer(req, 8 * 1024 * 1024);
+    if (!data.length) return send(res, 400, { error: 'Choose a profile picture.' });
     await mkdir(profileRoot, { recursive: true, mode: 0o700 });
-    const destination = avatarPath(username);
-    const temporary = `${destination}.${process.pid}.tmp`;
-    try { await pipeline(req, createWriteStream(temporary, { mode: 0o600 })); await rename(temporary, destination); }
-    catch (error) { await unlink(temporary).catch(() => {}); throw error; }
-    account.avatarContentType = contentType;
-    store.addActivity('profile', `${username} updated their profile picture.`);
+    for (const old of ['jpg', 'png', 'webp']) {
+      if (old !== extension) await rm(avatarPath(username, old), { force: true }).catch(() => {});
+    }
+    await writeFile(avatarPath(username, extension), data, { mode: 0o600 });
+    account.avatarExt = extension;
     await store.save();
-    return send(res, 200, { ok: true });
+    return send(res, 200, { ok: true, avatar: true });
+  }
+  if (req.method === 'DELETE' && url.pathname === '/api/profile/avatar') {
+    if (context.apiToken) return send(res, 403, { error: 'Profile pictures require an interactive user session.' });
+    for (const old of ['jpg', 'png', 'webp']) await rm(avatarPath(username, old), { force: true }).catch(() => {});
+    delete account.avatarExt;
+    await store.save();
+    return send(res, 200, { ok: true, avatar: false });
   }
 
   if (req.method === 'GET' && url.pathname === '/api/security/totp') {
     if (context.apiToken) return send(res, 403, { error: 'TOTP settings require an interactive local account session.' });
-    return send(res, 200, { enabled: Boolean(account.totpEnabled), pending: Boolean(account.totpPendingSecret), sms: { enabled: Boolean(account.sms?.enabled), phone: account.sms?.phone ? account.sms.phone.replace(/.(?=.{4})/g, '•') : '' }, fido: { enabled: Boolean(account.fidoCredentials?.length), credentials: (account.fidoCredentials || []).map(({ id, label, createdAt, lastUsedAt }) => ({ id, label, createdAt, lastUsedAt })) } });
+    return send(res, 200, { enabled: Boolean(account.totpEnabled), pending: Boolean(account.totpPendingSecret) });
   }
   if (req.method === 'POST' && url.pathname === '/api/security/totp/setup') {
     if (context.apiToken) return send(res, 403, { error: 'TOTP settings require an interactive local account session.' });
     const input = await bodyJson(req);
     if (!(await verifyPassword(input.currentPassword, account.passwordHash))) return send(res, 403, { error: 'Current account password is incorrect.' });
     const secret = generateTotpSecret();
-    const uri = totpUri({ secret, username, issuer: `LightNAS ${store.state.config.deviceName}` });
     account.totpPendingSecret = secret;
     await store.save();
-    return send(res, 200, { secret, uri, qrDataUrl: await qrCodeDataUrl(uri) });
+    return send(res, 200, { secret, uri: totpUri({ secret, username, issuer: `LightNAS ${store.state.config.deviceName}` }) });
   }
   if (req.method === 'POST' && url.pathname === '/api/security/totp/verify') {
     if (context.apiToken) return send(res, 403, { error: 'TOTP settings require an interactive local account session.' });
@@ -496,73 +455,12 @@ async function api(req, res, url) {
     return send(res, 200, { enabled: false });
   }
 
-  if (req.method === 'POST' && url.pathname === '/api/security/sms/setup') {
-    if (context.apiToken) return send(res, 403, { error: 'SMS settings require an interactive local account session.' });
-    const input = await bodyJson(req);
-    if (!(await verifyPassword(input.currentPassword, account.passwordHash))) return send(res, 403, { error: 'Current account password is incorrect.' });
-    const pending = { phone: String(input.phone || ''), accountSid: String(input.accountSid || ''), authToken: String(input.authToken || ''), fromNumber: String(input.fromNumber || '') };
-    const code = smsCode();
-    await sendTwilioSms(pending, `Your LightNAS enrollment code is ${code}. It expires in 5 minutes.`);
-    putMfaChallenge(`sms-setup:${username}`, { code, pending });
-    return send(res, 200, { sent: true });
-  }
-  if (req.method === 'POST' && url.pathname === '/api/security/sms/verify') {
-    const input = await bodyJson(req);
-    const pending = takeMfaChallenge(`sms-setup:${username}`, true);
-    if (!pending || pending.code !== String(input.code || '')) return send(res, 400, { error: 'SMS verification code is invalid or expired.' });
-    account.sms = { ...pending.pending, enabled: true, configuredAt: new Date().toISOString() };
-    store.addActivity('security', `SMS verification enabled for ${username}.`, 'success');
-    await store.save();
-    return send(res, 200, { enabled: true });
-  }
-  if (req.method === 'POST' && url.pathname === '/api/security/sms/disable') {
-    const input = await bodyJson(req);
-    if (!(await verifyPassword(input.currentPassword, account.passwordHash))) return send(res, 403, { error: 'Current account password is incorrect.' });
-    delete account.sms;
-    await store.save();
-    return send(res, 200, { enabled: false });
-  }
-
-  if (req.method === 'POST' && url.pathname === '/api/security/fido/options') {
-    if (context.apiToken) return send(res, 403, { error: 'Security-key settings require an interactive local account session.' });
-    const input = await bodyJson(req);
-    if (!(await verifyPassword(input.currentPassword, account.passwordHash))) return send(res, 403, { error: 'Current account password is incorrect.' });
-    const rpId = relyingParty(req);
-    const challenge = newChallenge();
-    putMfaChallenge(`fido-setup:${username}`, { challenge, rpId });
-    return send(res, 200, { challenge, rpId, rpName: `LightNAS ${store.state.config.deviceName}`, user: { id: Buffer.from(username).toString('base64url'), name: username, displayName: username }, excludeCredentials: (account.fidoCredentials || []).map(item => ({ type: 'public-key', id: item.id })) });
-  }
-  if (req.method === 'POST' && url.pathname === '/api/security/fido/register') {
-    const input = await bodyJson(req);
-    const pending = takeMfaChallenge(`fido-setup:${username}`, true);
-    if (!pending) return send(res, 400, { error: 'Security-key registration expired. Start again.' });
-    const credential = verifyRegistration({ response: input.response, expectedChallenge: pending.challenge, rpId: pending.rpId });
-    account.fidoCredentials ||= [];
-    if (account.fidoCredentials.some(item => item.id === credential.id)) return send(res, 409, { error: 'This security key is already registered.' });
-    account.fidoCredentials.push({ ...credential, label: String(input.label || 'Security key').trim().slice(0, 64), createdAt: new Date().toISOString() });
-    store.addActivity('security', `Security key registered for ${username}.`, 'success');
-    await store.save();
-    return send(res, 201, { enabled: true });
-  }
-  if (req.method === 'DELETE' && url.pathname.startsWith('/api/security/fido/')) {
-    const id = decodeURIComponent(url.pathname.slice('/api/security/fido/'.length));
-    const input = await bodyJson(req);
-    if (!(await verifyPassword(input.currentPassword, account.passwordHash))) return send(res, 403, { error: 'Current account password is incorrect.' });
-    const before = account.fidoCredentials?.length || 0;
-    account.fidoCredentials = (account.fidoCredentials || []).filter(item => item.id !== id);
-    if (account.fidoCredentials.length === before) return send(res, 404, { error: 'Security key not found.' });
-    await store.save();
-    return send(res, 200, { enabled: Boolean(account.fidoCredentials.length) });
-  }
-
-  const controlPermission =
-    (url.pathname === '/api/users' || url.pathname.startsWith('/api/users/') || url.pathname === '/api/groups' || url.pathname.startsWith('/api/groups/')) ? 'users.manage' :
-    (url.pathname === '/api/smtp' || url.pathname === '/api/smtp/test') ? 'smtp.manage' :
-    url.pathname === '/api/settings' ? 'settings.manage' :
-    (url.pathname.startsWith('/api/security/api-tokens') || url.pathname.startsWith('/api/security/webhooks') || url.pathname.startsWith('/api/security/identity-providers')) ? 'integrations.manage' : null;
-  if (controlPermission && (!isAdmin && (context.apiToken || !permissions.includes(controlPermission)))) {
-    return send(res, 403, { error: `Permission required: ${controlPermission}.` });
-  }
+  const ownerOnly = url.pathname === '/api/settings' || url.pathname === '/api/users' || url.pathname.startsWith('/api/users/') ||
+    url.pathname === '/api/groups' || url.pathname.startsWith('/api/groups/') ||
+    url.pathname === '/api/smtp' || url.pathname === '/api/smtp/test' ||
+    url.pathname.startsWith('/api/security/api-tokens') || url.pathname.startsWith('/api/security/webhooks') ||
+    url.pathname.startsWith('/api/security/identity-providers');
+  if (ownerOnly && !requireOwner(res, context)) return;
 
   if (req.method === 'GET' && url.pathname === '/api/smtp') {
     const { password, ...publicConfig } = store.state.smtp || {};
@@ -570,7 +468,7 @@ async function api(req, res, url) {
   }
   if (req.method === 'PUT' && url.pathname === '/api/smtp') {
     const input = await bodyJson(req);
-    if (typeof input.currentPassword !== 'string' || !(await verifyPassword(input.currentPassword, account.passwordHash))) return send(res, 403, { error: 'Current account password is incorrect.' });
+    if (typeof input.currentPassword !== 'string' || !(await verifyPassword(input.currentPassword, store.state.config.passwordHash))) return send(res, 403, { error: 'Current administrator password is incorrect.' });
     const problem = validateSmtp(input);
     if (problem) return send(res, 400, { error: problem });
     store.state.smtp = { host: input.host, port: Number(input.port), security: input.security, from: input.from, username: input.username, password: input.password || store.state.smtp?.password || '' };
@@ -594,7 +492,7 @@ async function api(req, res, url) {
     const input = await bodyJson(req);
     if (!/^[a-zA-Z0-9._-]{3,32}$/.test(input.username || '') || typeof input.password !== 'string' || input.password.length < 10) return send(res, 400, { error: 'Use a 3–32 character username and a password of at least 10 characters.' });
     if (input.username === store.state.config.username || store.state.users.some(user => user.username === input.username)) return send(res, 409, { error: 'Username already exists.' });
-    const user = { username: input.username, passwordHash: await hashPassword(input.password), permissions: normalizePermissions(input.permissions, PERMISSIONS, []), createdAt: new Date().toISOString(), totpEnabled: false };
+    const user = { username: input.username, passwordHash: await hashPassword(input.password), permissions: normalizePermissions(input.permissions, PERMISSIONS, DEFAULT_USER_PERMISSIONS), createdAt: new Date().toISOString(), totpEnabled: false };
     store.state.users.push(user);
     applyUserGroups(input.username, input.groups);
     store.addActivity('user', `User ${input.username} was created.`);
@@ -617,7 +515,7 @@ async function api(req, res, url) {
     const user = store.state.users.find(item => item.username === userName);
     if (!user) return send(res, 404, { error: 'User not found.' });
     const input = await bodyJson(req);
-    if (typeof input.currentPassword !== 'string' || !(await verifyPassword(input.currentPassword, account.passwordHash))) return send(res, 403, { error: 'Current account password is incorrect.' });
+    if (typeof input.currentPassword !== 'string' || !(await verifyPassword(input.currentPassword, store.state.config.passwordHash))) return send(res, 403, { error: 'Current administrator password is incorrect.' });
     let changed = false;
     if (typeof input.disabled === 'boolean') { user.disabled = input.disabled; changed = true; }
     if (typeof input.password === 'string' && input.password) {
@@ -876,11 +774,10 @@ async function api(req, res, url) {
   }
   if (req.method === 'PATCH' && url.pathname === '/api/settings') {
     const input = await bodyJson(req);
-    if (typeof input.currentPassword !== 'string' || !(await verifyPassword(input.currentPassword, account.passwordHash))) return send(res, 403, { error: 'Current account password is incorrect.' });
+    if (typeof input.currentPassword !== 'string' || !(await verifyPassword(input.currentPassword, store.state.config.passwordHash))) return send(res, 403, { error: 'Current administrator password is incorrect.' });
     if (!/^[a-zA-Z0-9][a-zA-Z0-9-]{1,31}$/.test(input.deviceName || '')) return send(res, 400, { error: 'Device name must contain 2–32 letters, numbers, or hyphens.' });
     if (!['UTC', 'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles'].includes(input.timezone)) return send(res, 400, { error: 'Choose a supported time zone.' });
     const changedPassword = Boolean(input.newPassword);
-    if (changedPassword && !isAdmin) return send(res, 403, { error: 'Only the appliance owner can change the owner password.' });
     if (changedPassword && (typeof input.newPassword !== 'string' || input.newPassword.length < 10)) return send(res, 400, { error: 'New password must contain at least 10 characters.' });
     store.state.config.deviceName = input.deviceName;
     store.state.config.timezone = input.timezone;
@@ -935,15 +832,25 @@ async function api(req, res, url) {
     if (!requirePermission(res, permissions, 'apps.manage')) return;
     const id = url.pathname.split('/')[3];
     const input = await bodyJson(req);
+    const app = catalog.find(item => item.id === id);
     const installed = await installCatalogApp(id, input);
+    let firewall = null;
+    if (app?.port) {
+      firewall = await localNetworkAction({ action: 'firewall-add', decision: 'allow', protocol: 'tcp', port: app.port, source: '' })
+        .catch(error => ({ warning: error.message }));
+    }
     store.addActivity('app', `Catalog app ${id} was installed as a Docker container.`);
     await store.save();
-    return send(res, 201, installed);
+    return send(res, 201, { ...installed, firewall });
   }
   if (req.method === 'POST' && /^\/api\/catalog\/[a-z0-9-]+\/(start|stop|restart|remove)$/.test(url.pathname)) {
     if (!requirePermission(res, permissions, 'apps.manage')) return;
     const [, , , id, action] = url.pathname.split('/');
     const result = await manageCatalogApp(id, action);
+    if (action === 'remove') {
+      const app = catalog.find(item => item.id === id);
+      if (app?.port) await localNetworkAction({ action: 'firewall-remove-port', protocol: 'tcp', port: app.port }).catch(() => null);
+    }
     store.addActivity('app', `App ${id}: ${action}.`);
     await store.save();
     return send(res, 200, result);
@@ -1058,35 +965,34 @@ async function api(req, res, url) {
 
   if (req.method === 'GET' && url.pathname === '/api/overview') {
     const shouldLoadHost = isAdmin || ['storage.view', 'system.view', 'vms.manage'].some(permission => permissions.includes(permission));
-    const [system, filesystems, storage, storagePools, runtimes, access] = await Promise.all([
+    const [system, filesystems, storage, storagePools, runtimes] = await Promise.all([
       getSystemSnapshot(), getFilesystems(), getStorageInventory(), listStoragePools(),
-      shouldLoadHost ? runtimeInventory() : Promise.resolve(null),
-      localAccessStatus().catch(error => ({ error: error.message, ssh: { installed: false, active: false }, smb: { installed: false, active: false } }))
+      shouldLoadHost ? runtimeInventory() : Promise.resolve(null)
     ]);
     // Overview and Storage must use one authoritative capacity figure. This
     // includes local storage once plus each unique attached virtual volume once.
     storage.usableStorage = storagePools.visibleSummary || storage.usableStorage;
     storage.poolSummary = storagePools.summary;
-    storage.configuredPools = storagePools.pools;
-    storage.availableSources = storagePools.availableSources;
     return send(res, 200, {
-      appliance: { deviceName: store.state.config.deviceName, username, role: isAdmin ? 'administrator' : context.apiToken ? 'api' : 'user', permissions, timezone: store.state.config.timezone, hasAvatar: Boolean(account.avatarContentType) },
+      appliance: { deviceName: store.state.config.deviceName, username, role: isAdmin ? 'administrator' : context.apiToken ? 'api' : 'user', permissions, timezone: store.state.config.timezone, avatar: Boolean(account.avatarExt) },
       system, filesystems, storage, host: runtimes?.virtualization?.host || null,
-      shares: store.state.shares, access, activity: store.state.activity.slice(0, 8)
+      shares: store.state.shares, activity: store.state.activity.slice(0, 8)
     });
   }
   if (req.method === 'GET' && url.pathname === '/api/network') {
-    if (!requireAnyPermission(res, permissions, ['network.view', 'firewall.view'])) return;
+    if (!requirePermission(res, permissions, 'network.view')) return;
     const [observed, control] = await Promise.all([
       networkInventory(),
       localNetworkInventory().catch(error => ({ editable: false, manager: null, reason: error.message, devices: [], connections: [], wifi: [] }))
     ]);
-    return send(res, 200, { ...observed, firewall: control.firewall || observed.firewall, control, host: null });
+    return send(res, 200, { ...observed, control, host: null });
   }
   if (req.method === 'POST' && url.pathname === '/api/network') {
     const input = await bodyJson(req);
-    const requiredPermission = String(input.action || '').startsWith('firewall-') ? 'firewall.manage' : 'network.manage';
-    if (!requirePermission(res, permissions, requiredPermission)) return;
+    const networkActionName = String(input.action || '');
+    if (networkActionName.startsWith('firewall-')) {
+      if (!requireAnyPermission(res, permissions, ['firewall.manage', 'network.manage'])) return;
+    } else if (!requirePermission(res, permissions, 'network.manage')) return;
     let result;
     try { result = await localNetworkAction(input); }
     catch (error) {
@@ -1100,7 +1006,7 @@ async function api(req, res, url) {
     return send(res, 200, result);
   }
   if (req.method === 'GET' && url.pathname === '/api/appliance/health') {
-    if (!isAdmin && !permissions.includes('system.view')) return send(res, 403, { error: 'System health access is required.' });
+    if (!isAdmin && !permissions.includes('system.view') && !permissions.includes('monitoring.view')) return send(res, 403, { error: 'System health access is required.' });
     return send(res, 200, await localApplianceHealth());
   }
   if (req.method === 'POST' && url.pathname === '/api/appliance/repair') {
@@ -1112,7 +1018,7 @@ async function api(req, res, url) {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/system') {
-    if (!requirePermission(res, permissions, 'system.view')) return;
+    if (!requireAnyPermission(res, permissions, ['system.view', 'monitoring.view'])) return;
     const local = await getSystemSnapshot();
     let host = null;
     try { host = (await runtimeInventory()).virtualization?.host || null; } catch {}
@@ -1230,30 +1136,81 @@ async function api(req, res, url) {
     const path = url.searchParams.get('path') || '';
     if (req.method === 'GET') {
       if (!requirePermission(res, permissions, 'files.read')) return;
-      return send(res, 200, { path, entries: await listFiles(path) });
+      if (!path && url.searchParams.get('all') === '1') {
+        const all = await listAllFiles();
+        return send(res, 200, { path: '', ...all });
+      }
+      return send(res, 200, { path, entries: await listFiles(path), truncated: false });
+    }
+    if (req.method === 'DELETE') {
+      if (!requireAnyPermission(res, permissions, ['files.delete', 'files.write'])) return;
+      await deleteEntry(path); store.addActivity('file', `File entry ${path} was deleted.`); await store.save(); return send(res, 200, { ok: true });
     }
     if (!requirePermission(res, permissions, 'files.write')) return;
     if (req.method === 'POST') { await createFolder(path); store.addActivity('file', `Folder ${path} was created.`); await store.save(); return send(res, 201, { ok: true }); }
     if (req.method === 'PUT') { await uploadFile(path, req); store.addActivity('file', `File ${path} was uploaded.`); await store.save(); return send(res, 201, { ok: true }); }
-    if (req.method === 'DELETE') { await deleteEntry(path); store.addActivity('file', `File entry ${path} was deleted.`); await store.save(); return send(res, 200, { ok: true }); }
   }
   if (req.method === 'GET' && url.pathname === '/api/files/thumbnail') {
     if (!requirePermission(res, permissions, 'files.read')) return;
-    const thumbnail = await thumbnailFor(url.searchParams.get('path') || '');
+    const thumbnail = await thumbnailFor(url.searchParams.get('path') || '', { preview: url.searchParams.get('preview') === '1' });
     res.writeHead(200, { 'Content-Type': thumbnail.contentType, 'Content-Length': thumbnail.size, 'Cache-Control': 'private, max-age=86400', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': csp });
     return createReadStream(thumbnail.path).pipe(res);
   }
+
+  if (req.method === 'GET' && url.pathname === '/api/files/archive') {
+    if (!requireAnyPermission(res, permissions, ['files.download', 'files.read'])) return;
+    const relative = url.searchParams.get('path') || '';
+    const data = await downloadEntry(relative);
+    if (!data.directory) return send(res, 400, { error: 'Select a folder to download.' });
+    const folderName = basename(data.path) || 'folder';
+    res.writeHead(200, {
+      'Content-Type': 'application/gzip',
+      'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(folderName + '.tar.gz')}`,
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': csp
+    });
+    const archive = spawn('tar', ['-C', dirname(data.path), '-czf', '-', folderName], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stderr = '';
+    archive.stderr.on('data', chunk => { if (stderr.length < 4096) stderr += chunk.toString('utf8'); });
+    archive.on('error', error => { if (!res.destroyed) res.destroy(error); });
+    archive.on('close', code => {
+      if (code !== 0 && !res.destroyed) res.destroy(new Error(stderr.trim() || `Folder archive failed with exit code ${code}.`));
+    });
+    res.on('close', () => { if (!archive.killed) archive.kill('SIGTERM'); });
+    return archive.stdout.pipe(res);
+  }
+
   if (req.method === 'GET' && url.pathname === '/api/files/video-preview') {
     if (!requirePermission(res, permissions, 'files.read')) return;
-    const data = await downloadFile(url.searchParams.get('path') || '');
-    res.writeHead(200, { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': csp });
-    const conversion = spawn('ffmpeg', ['-nostdin', '-hide_banner', '-loglevel', 'error', '-i', data.path, '-map', '0:v:0', '-map', '0:a:0?', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '25', '-c:a', 'aac', '-movflags', 'frag_keyframe+empty_moov', '-f', 'mp4', 'pipe:1'], { stdio: ['ignore', 'pipe', 'pipe'] });
-    conversion.on('error', error => res.destroy(error));
-    res.on('close', () => { if (!res.writableEnded && !conversion.killed) conversion.kill(); });
-    return conversion.stdout.pipe(res);
+    const relative = url.searchParams.get('path') || '';
+    const filename = relative.split('/').pop() || 'video';
+    const extension = extname(filename).toLowerCase();
+    const supportedVideo = new Set(['.mp4', '.webm', '.mov', '.m4v', '.ogv', '.mkv', '.avi', '.wmv', '.flv', '.mpeg', '.mpg', '.m2v', '.mts', '.m2ts', '.ts', '.3gp', '.3g2', '.vob']);
+    if (!supportedVideo.has(extension)) return send(res, 415, { error: 'This file is not a supported video preview format.' });
+    const data = await downloadFile(relative);
+    res.writeHead(200, {
+      'Content-Type': 'video/mp4',
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': csp
+    });
+    const ffmpeg = spawn('ffmpeg', [
+      '-nostdin', '-hide_banner', '-loglevel', 'error',
+      '-i', data.path,
+      '-map', '0:v:0', '-map', '0:a:0?',
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-pix_fmt', 'yuv420p',
+      '-c:a', 'aac', '-b:a', '128k',
+      '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+      '-f', 'mp4', 'pipe:1'
+    ], { stdio: ['ignore', 'pipe', 'pipe'] });
+    ffmpeg.on('error', error => { if (!res.destroyed) res.destroy(error); });
+    ffmpeg.stderr.resume();
+    res.on('close', () => { if (!ffmpeg.killed) ffmpeg.kill('SIGTERM'); });
+    return ffmpeg.stdout.pipe(res);
   }
   if (req.method === 'GET' && url.pathname === '/api/files/download') {
-    if (!requirePermission(res, permissions, 'files.read')) return;
+    if (!requireAnyPermission(res, permissions, ['files.download', 'files.read'])) return;
     const path = url.searchParams.get('path') || '';
     const filename = path.split('/').pop() || 'file';
     const data = await downloadFile(path);
@@ -1267,47 +1224,19 @@ async function api(req, res, url) {
     });
     return createReadStream(data.path).pipe(res);
   }
-  if (req.method === 'GET' && url.pathname === '/api/files/archive') {
-    if (!requirePermission(res, permissions, 'files.read')) return;
-    const folder = await downloadFolder(url.searchParams.get('path') || '');
-    const filename = `${folder.name}.tar.gz`;
-    res.writeHead(200, {
-      'Content-Type': 'application/gzip',
-      'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
-      'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': csp
-    });
-    const archive = spawn('tar', ['-czf', '-', '-C', dirname(folder.path), basename(folder.path)], { stdio: ['ignore', 'pipe', 'pipe'] });
-    let errorText = '';
-    archive.stderr.on('data', chunk => { errorText = (errorText + chunk.toString()).slice(-2000); });
-    archive.on('error', error => { if (!res.headersSent) send(res, 500, { error: `Unable to start folder download: ${error.message}` }); else res.destroy(error); });
-    archive.on('close', code => { if (code && !res.destroyed) res.destroy(new Error(errorText || 'Folder archive failed.')); });
-    res.on('close', () => { if (!res.writableEnded && !archive.killed) archive.kill(); });
-    return archive.stdout.pipe(res);
-  }
 
   if (req.method === 'GET' && url.pathname === '/api/shares') {
     if (!requirePermission(res, permissions, 'files.read')) return;
     return send(res, 200, { shares: store.state.shares });
-  }
-  if (req.method === 'POST' && url.pathname === '/api/access') {
-    if (!requirePermission(res, permissions, 'shares.manage')) return;
-    const input = await bodyJson(req);
-    const access = await localAccessAction(input);
-    store.addActivity('access', `${String(input.service || '').toUpperCase()} access was ${input.enabled ? 'enabled' : 'disabled'}.`);
-    await store.save();
-    return send(res, 200, { access });
   }
   if (req.method === 'POST' && url.pathname === '/api/shares') {
     if (!requirePermission(res, permissions, 'shares.manage')) return;
     const input = await bodyJson(req);
     if (!/^[a-zA-Z0-9][a-zA-Z0-9 _.-]{1,63}$/.test(input.name || '')) return send(res, 400, { error: 'Share name must contain 2–64 valid characters.' });
     if (store.state.shares.some(share => share.name.toLowerCase() === input.name.toLowerCase())) return send(res, 409, { error: 'A share with this name already exists.' });
-    const share = { id: crypto.randomUUID(), name: input.name, protocol: ['SMB', 'SFTP'].includes(input.protocol) ? input.protocol : 'SMB', readOnly: input.readOnly === true || input.readOnly === 'true', description: String(input.description || '').slice(0, 160), createdAt: new Date().toISOString() };
-    const applied = await localApplyShare(share);
-    share.path = applied.path;
-    share.active = Boolean(applied.active);
+    const share = { id: crypto.randomUUID(), name: input.name, protocol: ['SMB', 'NFS', 'SFTP'].includes(input.protocol) ? input.protocol : 'SMB', description: String(input.description || '').slice(0, 160), createdAt: new Date().toISOString() };
     store.state.shares.push(share);
-    store.addActivity('share', `${share.protocol} share ${share.name} was created.`, 'info');
+    store.addActivity('share', `Share plan ${share.name} was saved for ${share.protocol}.`, 'info');
     await store.save();
     return send(res, 201, { share });
   }
@@ -1317,8 +1246,7 @@ async function api(req, res, url) {
     const index = store.state.shares.findIndex(share => share.id === id);
     if (index < 0) return send(res, 404, { error: 'Share plan not found.' });
     const [share] = store.state.shares.splice(index, 1);
-    await localRemoveShare({ id: share.id, protocol: share.protocol });
-    store.addActivity('share', `${share.protocol} share ${share.name} was removed; its files were preserved.`, 'info');
+    store.addActivity('share', `Share plan ${share.name} was removed.`, 'info');
     await store.save();
     return send(res, 200, { ok: true });
   }
@@ -1434,15 +1362,20 @@ export function createServer() {
       const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
       const vm = url.pathname.match(/^\/api\/console\/vm\/([A-Za-z][A-Za-z0-9-]{1,39}|[1-9][0-9]{1,5})$/);
       const container = url.pathname.match(/^\/api\/console\/container\/([A-Za-z][A-Za-z0-9-]{1,39})$/);
-      const node = url.pathname === '/api/console/node';
-      if (!vm && !container && !node) return rejectUpgrade(socket, 403, 'Unknown console endpoint.');
-      if (vm && !context.permissions.some(permission => ['vms.manage', 'vms.console'].includes(permission))) return rejectUpgrade(socket, 403, 'VM console permission required.');
-      if (container && !context.permissions.some(permission => ['containers.manage', 'containers.console'].includes(permission))) return rejectUpgrade(socket, 403, 'Container console permission required.');
-      if (node && !context.permissions.includes('system.shell')) return rejectUpgrade(socket, 403, 'Node shell permission required.');
+      const nodeShell = url.pathname === '/api/console/node';
+      if (!vm && !container && !nodeShell) return rejectUpgrade(socket, 403, 'Unknown console endpoint.');
+      if (vm && !context.permissions.includes('vms.manage')) return rejectUpgrade(socket, 403, 'VM management permission required.');
+      if (container && !context.permissions.includes('containers.manage')) return rejectUpgrade(socket, 403, 'Container management permission required.');
+      // A host shell is equivalent to root access to the NAS. It is therefore
+      // intentionally limited to the interactive appliance owner session and
+      // cannot be delegated to an API token or ordinary user.
+      if (nodeShell && (!context.isAdmin || context.apiToken)) return rejectUpgrade(socket, 403, 'Appliance owner access required for the node shell.');
       const useExternalProxmox = process.env.LIGHTNAS_ENABLE_PROXMOX_PROVIDER === '1';
-      const backend = node ? await localNodeConsoleSocket() : vm
-        ? (useExternalProxmox && /^[0-9]+$/.test(vm[1]) ? await proxmoxConsoleSocket(Number(vm[1])) : await localVmConsoleSocket(vm[1]))
-        : await localContainerConsoleSocket(container[1]);
+      const backend = nodeShell
+        ? await localNodeConsoleSocket()
+        : vm
+          ? (useExternalProxmox && /^[0-9]+$/.test(vm[1]) ? await proxmoxConsoleSocket(Number(vm[1])) : await localVmConsoleSocket(vm[1]))
+          : await localContainerConsoleSocket(container[1]);
       wss.handleUpgrade(req, socket, head, ws => bridgeWebSocketToSocket(ws, backend));
     } catch (error) {
       if (!socket.destroyed) rejectUpgrade(socket, error.status === 401 ? 401 : 403, error.message || 'Console unavailable.');
