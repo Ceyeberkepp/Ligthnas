@@ -191,7 +191,7 @@ export async function listFiles(relative = '') {
 export async function createFolder(relative) {
   const segments = parts(relative);
   if (!segments.length || (segments.length <= 2 && segments[0] === ATTACHED_ROOT)) throw Object.assign(new Error('Enter a folder name inside a writable location.'), { status: 400 });
-  await mkdir(await checked(relative, false), { mode: 0o700 });
+  await mkdir(await checked(relative, false), { recursive: true, mode: 0o700 });
   invalidateAllFilesCache();
 }
 
