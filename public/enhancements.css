@@ -471,3 +471,42 @@
   .top-shell-button { width:38px; justify-content:center; padding:0; }
   .task-dock,.console.sidebar-collapsed .task-dock { left:0; }
 }
+
+
+/* 2026-09 compute/media/network refinements */
+.compute-table-actions { min-width:1320px; }
+.compute-table-actions .compute-table-head,
+.compute-table-actions .compute-row {
+  grid-template-columns:120px minmax(210px,1fr) 90px 120px 150px minmax(520px,auto);
+}
+.compute-actions {
+  display:flex;
+  align-items:center;
+  justify-content:flex-start;
+  gap:6px;
+  flex-wrap:wrap;
+}
+.compute-actions .primary,
+.compute-actions .secondary {
+  min-height:34px;
+  padding:7px 10px;
+  font-size:11px;
+  white-space:nowrap;
+}
+.network-table-row {
+  grid-template-columns:140px 180px 112px minmax(190px,1.2fr) minmax(170px,1fr) 190px;
+}
+.network-state-badge {
+  max-width:100%;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.file-kind-photo { color:var(--accent); }
+.file-kind-video { color:var(--accent-2); }
+.file-kind-audio { color:var(--warning); }
+.file-kind-document { color:var(--muted); }
+.storage-spaces-section { margin-top:24px; }
+
+@media (max-width:900px) {
+  .compute-table-actions { min-width:1180px; }
+}
