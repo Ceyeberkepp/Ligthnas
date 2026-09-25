@@ -31,7 +31,7 @@ test('current Files UI supports true All Files and multi/folder uploads with pro
     read('src/files.mjs'),
     read('src/server.mjs')
   ]);
-  assert.match(app, /Upload files<input id="file-upload" type="file" multiple/);
+  assert.match(app, /Upload<input id="file-upload" type="file" multiple/);
   assert.match(app, /Upload folder<input id="folder-upload" type="file" webkitdirectory directory multiple/);
   assert.match(app, /uploadFilesWithProgress/);
   assert.match(app, /XMLHttpRequest/);
