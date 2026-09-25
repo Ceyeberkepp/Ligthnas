@@ -20,8 +20,7 @@ export DEBIAN_FRONTEND=noninteractive
 
 echo "[1/6] Installing system requirements..."
 apt-get update
-apt-get install -y ca-certificates curl git gnupg python3 ffmpeg acl novnc iproute2 nftables ufw qrencode \
-  samba openssh-server \
+apt-get install -y ca-certificates curl git gnupg python3 ffmpeg imagemagick acl novnc iproute2 nftables ufw \
   tar gzip xz-utils zstd
 
 if ! command -v node >/dev/null 2>&1 || \
@@ -48,7 +47,7 @@ fi
 echo "      Installing native system-container engine and network bridge tools..."
 runtime_packages=(
   lxc lxc-templates lxcfs uidmap bridge-utils debootstrap
-  dnsmasq-base network-manager openvswitch-switch
+  dnsmasq-base network-manager
 )
 
 # Archive-signing keyrings are distribution packages. apt-cache show can
@@ -67,6 +66,12 @@ for keyring in debian-archive-keyring ubuntu-keyring; do
     echo "      Optional package $keyring has no installable APT candidate; continuing."
   fi
 done
+
+# LibRaw improves camera RAW previews. Keep it optional so an architecture
+# whose repository does not carry the package can still install LightNAS.
+if apt_has_candidate libraw-bin; then
+  runtime_packages+=(libraw-bin)
+fi
 
 apt-get install -y "${runtime_packages[@]}"
 
