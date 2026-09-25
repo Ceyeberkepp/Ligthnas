@@ -1,45 +1,23 @@
 const previewExtensions = {
-  image: new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'avif', 'tif', 'tiff', 'dng', 'cr2', 'cr3', 'nef', 'nrw', 'arw', 'srf', 'sr2', 'raf', 'rw2', 'orf', 'pef', 'srw', 'raw']),
-  video: new Set(['mp4', 'webm', 'mov', 'm4v', 'ogv', 'mkv', 'avi', 'wmv', 'flv', 'mpeg', 'mpg', 'ts', 'm2ts', 'mts', '3gp', 'vob']),
+  image: new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'avif', 'raw', 'dng', 'cr2', 'cr3', 'nef', 'nrw', 'arw', 'srf', 'sr2', 'raf', 'orf', 'rw2', 'pef', 'srw', 'x3f']),
+  video: new Set(['mp4', 'webm', 'mov', 'm4v', 'ogv', 'mkv', 'avi', 'wmv', 'flv', 'mpeg', 'mpg', 'm2v', 'mts', 'm2ts', 'ts', '3gp', '3g2', 'vob']),
   audio: new Set(['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac']),
   pdf: new Set(['pdf']),
   text: new Set(['txt', 'log', 'md', 'json', 'csv', 'xml', 'yaml', 'yml', 'ini', 'conf', 'sh', 'js', 'mjs', 'css', 'html'])
 };
 
 const permissionLabels = {
-  'overview.view': ['View overview', 'Open the Overview dashboard.'],
   'files.read': ['Read files', 'Browse, preview and download files.'],
   'files.write': ['Write files', 'Upload, create folders and delete file entries.'],
   'media.convert': ['Convert media', 'Run FFmpeg conversions from Files.'],
   'storage.view': ['View storage', 'See attached volumes, host disks and storage inventory.'],
   'storage.manage': ['Manage storage', 'Create file spaces and manage Proxmox/ZFS storage.'],
-  'pools.view': ['View pools & datasets', 'Open the Pools & datasets page.'],
-  'shares.view': ['View shares', 'Open the Shares page.'],
   'shares.manage': ['Manage shares', 'Create and remove share configurations.'],
-  'apps.view': ['View App Store', 'Open the application catalog.'],
   'apps.manage': ['Manage apps', 'Install, start, stop and remove catalog applications.'],
   'containers.manage': ['Manage containers', 'Create, edit, control and open LightNAS containers.'],
-  'containers.view': ['View containers', 'Open the Containers page.'],
   'vms.manage': ['Manage VMs', 'Create, edit, control and open VM consoles.'],
-  'vms.view': ['View VMs', 'Open the Virtual machines page.'],
   'network.view': ['View networking', 'View network interfaces, routes and firewall inventory.'],
-  'network.manage': ['Manage networking', 'Create and edit bridges, VLANs, addresses, routes and DNS.'],
-  'firewall.manage': ['Manage firewall', 'Create, change and remove host firewall rules.'],
-  'firewall.view': ['View firewall', 'Open the Firewall page.'],
-  'integrations.view': ['View integrations', 'Open the Integrations page.'],
-  'integrations.manage': ['Manage integrations', 'Manage API tokens, webhooks and identity providers.'],
-  'vms.console': ['Open VM consoles', 'Use interactive noVNC consoles without changing VM hardware.'],
-  'containers.console': ['Open container consoles', 'Use interactive root terminals inside assigned containers.'],
-  'backup.manage': ['Manage backups', 'Create, restore and remove managed backups and snapshots.'],
-  'audit.view': ['View audit history', 'Review security and system activity history.'],
-  'system.view': ['View system health', 'View monitoring, CPU, memory and system details.'],
-  'monitoring.view': ['View monitoring', 'Open the Monitoring page.'],
-  'capabilities.view': ['View capabilities', 'Open the Capabilities page.'],
-  'system.shell': ['Open node shell', 'Use a privileged root terminal on the LightNAS node.'],
-  'users.manage': ['Manage users & groups', 'Open user and group administration.'],
-  'smtp.manage': ['Manage email / SMTP', 'Open SMTP configuration.'],
-  'settings.manage': ['Manage settings & security', 'Open appliance security settings.'],
-  'admin.view': ['View Admin Center', 'Open the administration dashboard.']
+  'system.view': ['View system health', 'View monitoring, CPU, memory and system details.']
 };
 
 function escapeHtml(value) {
@@ -115,14 +93,14 @@ function ensureFolderDialog() {
 
 function previewItems() {
   return [...document.querySelectorAll('#content .file-name[data-directory="false"]')]
-    .map(button => button.dataset.open || '')
-    .filter(name => name && previewKind(name));
+    .map(button => ({ name: button.dataset.open || '', path: button.dataset.path || joinPath(currentFolder(), button.dataset.open || '') }))
+    .filter(item => item.name && item.path && previewKind(item.name));
 }
 
 function updateViewerNavigation(dialog, name) {
   const items = previewItems();
-  const index = items.indexOf(name);
-  dialog.dataset.currentName = name;
+  const index = items.findIndex(item => item.path === name || item.name === name);
+  dialog.dataset.currentName = index >= 0 ? items[index].path : name;
   const previous = dialog.querySelector('[data-viewer-previous]');
   const next = dialog.querySelector('[data-viewer-next]');
   const multiple = items.length > 1;
@@ -137,9 +115,9 @@ async function navigatePreview(offset) {
   const dialog = document.querySelector('#lightnas-viewer');
   if (!dialog?.open) return;
   const items = previewItems();
-  const current = items.indexOf(dialog.dataset.currentName || '');
+  const current = items.findIndex(item => item.path === (dialog.dataset.currentName || ''));
   const target = items[current + offset];
-  if (target) await openPreview(target);
+  if (target) await openPreview(target.name, target.path);
 }
 
 function ensureViewer() {
@@ -181,39 +159,58 @@ function previewKind(name) {
   return Object.entries(previewExtensions).find(([, list]) => list.has(extension))?.[0] || null;
 }
 
-async function openPreview(name) {
+async function openPreview(name, explicitPath = '') {
   const kind = previewKind(name);
   if (!kind) return false;
-  const path = joinPath(currentFolder(), name);
-  const rawImage = /\.(?:tif|tiff|dng|cr2|cr3|nef|nrw|arw|srf|sr2|raf|rw2|orf|pef|srw|raw)$/i.test(name);
-  const convertedVideo = kind === 'video' && !/\.(?:mp4|webm|ogv|mov|m4v)$/i.test(name);
-  const source = convertedVideo ? `/api/files/video-preview?path=${encodeURIComponent(path)}` : null;
-  const response = source ? null : await fetch(`${rawImage ? '/api/files/thumbnail' : '/api/files/download'}?path=${encodeURIComponent(path)}`);
-  if (response && !response.ok) {
-    const body = await response.json().catch(() => ({}));
-    throw new Error(body.error || 'Unable to open file.');
-  }
-  const blob = response ? await response.blob() : null;
-  const objectUrl = blob ? URL.createObjectURL(blob) : source;
+  const path = explicitPath || joinPath(currentFolder(), name);
+  const extension = name.toLowerCase().split('.').pop();
+  const raw = ['raw','dng','cr2','cr3','nef','nrw','arw','srf','sr2','raf','orf','rw2','pef','srw','x3f'].includes(extension);
   const dialog = ensureViewer();
   if (dialog.dataset.objectUrl) URL.revokeObjectURL(dialog.dataset.objectUrl);
-  if (blob) dialog.dataset.objectUrl = objectUrl;
-  else delete dialog.dataset.objectUrl;
+  delete dialog.dataset.objectUrl;
   dialog.querySelector('[data-viewer-title]').textContent = name;
-  dialog.querySelector('[data-viewer-meta]').textContent = `${blob ? `${bytes(blob.size)} · ` : ''}${kind.toUpperCase()} preview${convertedVideo ? ' · browser-compatible stream' : rawImage ? ' · rendered from RAW' : ''}`;
+  dialog.querySelector('[data-viewer-meta]').textContent = `${kind.toUpperCase()} preview`;
   const stage = dialog.querySelector('[data-viewer-stage]');
   stage.replaceChildren();
   let viewer;
-  if (kind === 'image') { viewer = document.createElement('img'); viewer.src = objectUrl; viewer.alt = name; }
-  else if (kind === 'video') { viewer = document.createElement('video'); viewer.src = objectUrl; viewer.controls = true; viewer.autoplay = true; }
-  else if (kind === 'audio') { viewer = document.createElement('audio'); viewer.src = objectUrl; viewer.controls = true; viewer.autoplay = true; }
-  else if (kind === 'pdf') { viewer = document.createElement('iframe'); viewer.src = objectUrl; viewer.title = name; }
-  else { viewer = document.createElement('pre'); viewer.textContent = await blob.text(); }
+
+  if (kind === 'image') {
+    viewer = document.createElement('img');
+    viewer.src = raw
+      ? `/api/files/thumbnail?preview=1&path=${encodeURIComponent(path)}`
+      : `/api/files/download?path=${encodeURIComponent(path)}`;
+    viewer.alt = name;
+  } else if (kind === 'video') {
+    // Always use the server preview path. Browser codec support differs across
+    // MKV/AVI/WMV/MTS/etc.; LightNAS streams an on-demand H.264/AAC preview.
+    viewer = document.createElement('video');
+    viewer.src = `/api/files/video-preview?path=${encodeURIComponent(path)}`;
+    viewer.controls = true;
+    viewer.autoplay = true;
+    viewer.playsInline = true;
+  } else {
+    const response = await fetch(`/api/files/download?path=${encodeURIComponent(path)}`);
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error || 'Unable to open file.');
+    }
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    dialog.dataset.objectUrl = objectUrl;
+    dialog.querySelector('[data-viewer-meta]').textContent = `${bytes(blob.size)} · ${kind.toUpperCase()} preview`;
+    if (kind === 'audio') { viewer = document.createElement('audio'); viewer.src = objectUrl; viewer.controls = true; viewer.autoplay = true; }
+    else if (kind === 'pdf') { viewer = document.createElement('iframe'); viewer.src = objectUrl; viewer.title = name; }
+    else { viewer = document.createElement('pre'); viewer.textContent = await blob.text(); }
+  }
+
   stage.append(viewer);
   dialog.querySelector('[data-viewer-download]').onclick = () => {
-    const anchor = document.createElement('a'); anchor.href = `/api/files/download?path=${encodeURIComponent(path)}`; anchor.download = name; anchor.click();
+    const anchor = document.createElement('a');
+    anchor.href = `/api/files/download?path=${encodeURIComponent(path)}`;
+    anchor.download = name;
+    anchor.click();
   };
-  updateViewerNavigation(dialog, name);
+  updateViewerNavigation(dialog, path);
   if (!dialog.open) dialog.showModal();
   return true;
 }
@@ -423,12 +420,12 @@ function enhanceFileThumbnails() {
     const name = button.dataset.open || '';
     const kind = previewKind(name);
     if (!['image', 'video'].includes(kind)) continue;
-    const path = joinPath(folder, name);
-    const media = document.createElement(kind === 'image' ? 'img' : 'video');
+    const path = button.dataset.path || joinPath(folder, name);
+    const media = document.createElement('img');
     media.className = 'file-thumb';
     media.loading = 'lazy';
+    media.alt = '';
     media.src = `/api/files/thumbnail?path=${encodeURIComponent(path)}`;
-    if (kind === 'video') { media.muted = true; media.preload = 'metadata'; media.playsInline = true; }
     button.prepend(media);
   }
 }
@@ -441,24 +438,16 @@ function permissionsMarkup(options, selected = []) {
 }
 
 async function enhancePolicies() {
-  // Account access is intentionally assigned only through groups.
+  // Permissions moved to the dedicated #permissions workspace.
+  // Keep this compatibility hook intentionally empty so older enhancement
+  // scheduling does not inject policy controls back into the Users page.
+  return;
 }
 
 function enhanceAdminCenter() {
-  if (location.hash !== '#admin') return;
-  const content = document.querySelector('#content');
-  if (!content || content.querySelector('.admin-tool-groups')) return;
-  const groups = [
-    ['Identity & access', [['users','Users & policies'],['settings','Appliance settings'],['integrations','Identity integrations']]],
-    ['Storage & data', [['storage','Unified storage'],['pools','Pools & datasets'],['files','File manager'],['shares','Shares']]],
-    ['Compute & apps', [['apps','App Store'],['containers','Containers'],['vms','Virtual machines']]],
-    ['Network & security', [['network','Networking'],['firewall','Firewall'],['smtp','Email / SMTP']]],
-    ['System operations', [['monitoring','Monitoring'],['capabilities','Capabilities'],['home','Overview']]]
-  ];
-  const section = document.createElement('section');
-  section.className = 'admin-tool-groups';
-  section.innerHTML = groups.map(([title, tools]) => `<div class="admin-group"><h2>${title}</h2><div class="admin-group-grid">${tools.map(([view,label]) => `<button class="admin-tool-card" type="button" data-admin-view="${view}"><b>${label}</b><span>Open ${label.toLowerCase()}</span></button>`).join('')}</div></div>`).join('');
-  content.querySelector('.page-head')?.insertAdjacentElement('afterend', section);
+  // Admin Center is rendered directly by app.js. Do not inject a second copy
+  // of the navigation/tools here.
+  return;
 }
 
 function scheduleEnhancements() {
@@ -469,6 +458,7 @@ function scheduleEnhancements() {
     enhanceRuntimeControls();
     enhanceFileThumbnails();
     enhancePolicies();
+    enhanceAdminCenter();
   }, 100);
 }
 
@@ -476,6 +466,20 @@ const observer = new MutationObserver(scheduleEnhancements);
 observer.observe(document.body, { subtree: true, childList: true });
 window.addEventListener('hashchange', scheduleEnhancements);
 window.addEventListener('load', scheduleEnhancements);
+
+document.addEventListener('submit', async event => {
+  if (event.target.id !== 'user-form' || !event.target.querySelector('.policy-grid')) return;
+  event.preventDefault(); event.stopImmediatePropagation();
+  const form = event.target;
+  const error = form.querySelector('.form-error');
+  error.textContent = '';
+  const data = new FormData(form);
+  const permissions = [...form.querySelectorAll('.policy-grid input:checked')].map(input => input.value);
+  try {
+    await apiRequest('/api/users', { method: 'POST', body: JSON.stringify({ username: data.get('username'), password: data.get('password'), permissions }) });
+    location.reload();
+  } catch (problem) { error.textContent = problem.message; }
+}, true);
 
 document.addEventListener('click', async event => {
   const folderButton = event.target.closest('#content [data-action="new-folder"]');
@@ -493,7 +497,7 @@ document.addEventListener('click', async event => {
   const fileButton = event.target.closest('#content .file-name[data-directory="false"]');
   if (fileButton && previewKind(fileButton.dataset.open || '')) {
     event.preventDefault(); event.stopImmediatePropagation();
-    try { await openPreview(fileButton.dataset.open); } catch (problem) { alert(problem.message); }
+    try { await openPreview(fileButton.dataset.open, fileButton.dataset.path || ''); } catch (problem) { alert(problem.message); }
     return;
   }
 
@@ -578,6 +582,20 @@ document.addEventListener('click', async event => {
       document.querySelector('#content [data-action="refresh-runtime"]')?.click();
     } catch (error) { alert(error.message); }
     finally { vmAction.disabled = false; }
+    return;
+  }
+
+  const policy = event.target.closest('[data-save-policy]');
+  if (policy) {
+    const form = policy.closest('form');
+    const password = form.querySelector('input[name="currentPassword"]')?.value || '';
+    const permissions = [...form.querySelectorAll('.policy-grid input:checked')].map(input => input.value);
+    policy.disabled = true;
+    try {
+      await apiRequest(`/api/users/${encodeURIComponent(policy.dataset.savePolicy)}`, { method: 'PATCH', body: JSON.stringify({ currentPassword: password, permissions }) });
+      policy.textContent = 'Saved';
+      setTimeout(() => { policy.textContent = 'Save permissions'; policy.disabled = false; }, 1200);
+    } catch (error) { alert(error.message); policy.disabled = false; }
     return;
   }
 
