@@ -1070,7 +1070,8 @@ function bindViewActions() {
     try {
       state.fileError = null;
       await loadFiles(true);
-      toast('Files refreshed.');
+      if (state.fileError) toast(state.fileError);
+      else toast('Files refreshed.');
     } catch (error) {
       toast(error.message || 'Unable to refresh files.');
     } finally {
