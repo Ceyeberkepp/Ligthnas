@@ -52,7 +52,8 @@ lb config \
   --archive-areas 'main contrib non-free-firmware' \
   --security false \
   --linux-packages linux-image \
-  --linux-flavours amd64
+  --linux-flavours amd64 \
+  --compression gzip
 
 # Brand both BIOS and UEFI boot menus as LightNAS.
 # live-build ships known-good bootloader templates for the installed version;
@@ -168,6 +169,11 @@ dkms
 zfs-dkms
 zfs-initramfs
 zfsutils-linux
+
+# Preinstall the App Store engine and RAW helper so first boot does not wait
+# for package downloads before the LightNAS control center becomes useful.
+docker.io
+libraw-bin
 EOF
 
 #
@@ -183,6 +189,7 @@ cp -a \
   "${REPO_ROOT}/public" \
   "${REPO_ROOT}/scripts" \
   "${REPO_ROOT}/package.json" \
+  "${REPO_ROOT}/package-lock.json" \
   config/includes.chroot/opt/lightnas/
 
 cp \
@@ -548,10 +555,11 @@ install -m 0600 /dev/null /etc/lightnas/runtime.env
 #
 npm \
   --prefix /opt/lightnas \
-  install \
+  ci \
   --omit=dev \
   --no-audit \
-  --no-fund
+  --no-fund \
+  --prefer-offline
 
 #
 # ------------------------------------------------------------
