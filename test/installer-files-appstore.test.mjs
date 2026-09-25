@@ -89,9 +89,10 @@ test('login only reveals MFA methods that the account has enabled', async () => 
   assert.match(app, /\/api\/login\/options\?username=/);
   assert.match(app, /setLoginMethods\(\[\]\)/);
   assert.match(server, /url\.pathname === '\/api\/login\/options'/);
-  assert.match(server, /if \(account\.totpEnabled\) methods\.push\('totp'\)/);
-  assert.match(server, /account\.smsMfa\?\.enabled/);
-  assert.match(server, /Array\.isArray\(account\.passkeys\)/);
+  assert.match(server, /function enabledMfaMethods\(account\)/);
+  assert.match(server, /account\?\.totpEnabled/);
+  assert.match(server, /account\?\.smsMfa\?\.enabled/);
+  assert.match(server, /Array\.isArray\(account\?\.passkeys\)/);
   assert.match(server, /qrCodeDataUrl\(uri\)/);
   assert.match(security, /class="totp-qr"/);
   assert.match(installer, /qrencode/);
