@@ -361,9 +361,9 @@ function runtimeResourceSummary(items = [], label = 'guests') {
   const allocationPercent = hostMemory ? Math.min(100, Math.round((allocatedMemory / hostMemory) * 100)) : 0;
   return `<section class="host-monitor-grid runtime-resource-summary">
     <article class="monitor-card"><span>Total ${label}</span><strong>${items.length}</strong><small>${running.length} running</small></article>
-    <article class="monitor-card"><span>Allocated RAM</span><strong>${bytes(allocatedMemory)}</strong><div class="track"><span style="width:${allocationPercent}%"></span></div><small>${hostMemory ? `${allocationPercent}% of ${bytes(hostMemory)} host RAM` : 'Host total unavailable'}</small></article>
+    <article class="monitor-card"><span>${label === 'containers' ? 'Container memory use' : label === 'virtual machines' ? 'VM memory use' : 'Allocated RAM'}</span><strong>${bytes(allocatedMemory)}</strong><div class="track"><span style="width:${allocationPercent}%"></span></div><small>${hostMemory ? `${allocationPercent}% of ${bytes(hostMemory)} host RAM` : 'Host total unavailable'}</small></article>
     <article class="monitor-card"><span>Allocated vCPU</span><strong>${allocatedCpus}</strong><small>${host.cpu?.cores || '—'} host logical cores</small></article>
-    <article class="monitor-card"><span>Live host pressure</span><strong>${host.cpu?.loadPercent ?? '—'}% CPU</strong><small>${host.memory?.usedPercent ?? '—'}% host memory currently used</small></article>
+    <article class="monitor-card"><span>Host CPU use</span><strong>${host.cpu?.loadPercent ?? '—'}% CPU</strong><small>${host.memory?.usedPercent ?? '—'}% host memory currently used</small></article>
   </section>`;
 }
 
@@ -653,7 +653,7 @@ function moduleView(view) {
     return `${pageHead('App Store', 'Install curated open-source applications directly from LightNAS.', '<button class="secondary" data-action="refresh-runtime">Refresh apps</button>')}
       ${runtimeBanner('docker')}
       <section class="app-catalog-toolbar panel">
-        <div><span class="eyebrow">LIGHTNAS APPLICATION CATALOG</span><h2>${apps.length} one-click apps</h2><p class="muted">A broad NAS app catalog sourced from official upstream and community container images, including many apps commonly found in TrueNAS-style catalogs. LightNAS only lists entries its current one-click engine can actually launch; complex multi-service stacks will join as Compose support expands.</p></div>
+        <div><span class="eyebrow">LIGHTNAS APPLICATION CATALOG</span><h2>${apps.length} one-click apps</h2><p class="muted">A broad NAS app catalog sourced from official upstream and community container images, including many apps commonly found in TrueNAS-style catalogs. LightNAS only lists entries its current one-click engine can actually launch; complex multi-service stacks will join as Compose support expands. No Proxmox configuration or manual port forwarding is required for managed catalog apps.</p></div>
         <div class="app-filter-controls">
           <label>Search<input id="app-search" type="search" placeholder="Search apps, categories, or images…"></label>
           <label>Category<select id="app-category"><option value="">All categories</option>${categories.map(category => `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`).join('')}</select></label>
