@@ -112,7 +112,7 @@ textarea { min-height: 92px; resize: vertical; }
 
 /* Desktop sidebar collapse */
 .console { transition: grid-template-columns .2s ease; }
-.console.sidebar-collapsed { grid-template-columns: 92px 1fr; }
+.console.sidebar-collapsed { grid-template-columns: 86px 1fr; }
 .console.sidebar-collapsed .sidebar { padding-left:10px; padding-right:10px; }
 .console.sidebar-collapsed .sidebar-brand { justify-content:center; margin-left:0; margin-right:0; }
 .console.sidebar-collapsed .sidebar-brand > span:last-child,
