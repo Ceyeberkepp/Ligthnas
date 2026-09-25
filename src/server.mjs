@@ -1145,7 +1145,7 @@ async function api(req, res, url) {
     if (req.method === 'GET') {
       if (!requirePermission(res, permissions, 'files.read')) return;
       if (!path && url.searchParams.get('all') === '1') {
-        const all = await listAllFiles();
+        const all = await listAllFiles(url.searchParams.get('refresh') === '1');
         return send(res, 200, { path: '', ...all });
       }
       return send(res, 200, { path, entries: await listFiles(path), truncated: false });
