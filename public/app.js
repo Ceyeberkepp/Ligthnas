@@ -72,12 +72,12 @@ function showAuth(mode) {
 function selectLoginMethod(method) {
   const box = $('#login-mfa');
   if (!box || box.classList.contains('hidden')) return;
-  $('[data-login-method]', box).forEach(button => {
+  $$('[data-login-method]', box).forEach(button => {
     const active = button.dataset.loginMethod === method;
     button.classList.toggle('active', active);
     button.setAttribute('aria-selected', active ? 'true' : 'false');
   });
-  $('[data-login-panel]', box).forEach(panel => panel.classList.toggle('hidden', panel.dataset.loginPanel !== method));
+  $$('[data-login-panel]', box).forEach(panel => panel.classList.toggle('hidden', panel.dataset.loginPanel !== method));
   box.dataset.method = method || '';
 }
 
@@ -85,7 +85,7 @@ function setLoginMethods(methods = []) {
   const box = $('#login-mfa');
   if (!box) return;
   const enabled = new Set(methods);
-  $('[data-login-method]', box).forEach(button => button.classList.toggle('hidden', !enabled.has(button.dataset.loginMethod)));
+  $$('[data-login-method]', box).forEach(button => button.classList.toggle('hidden', !enabled.has(button.dataset.loginMethod)));
   box.classList.toggle('hidden', enabled.size === 0);
   const current = box.dataset.method;
   selectLoginMethod(enabled.has(current) ? current : (methods[0] || ''));
@@ -1062,7 +1062,7 @@ function bindViewActions() {
   $$('[data-action="new-share"]', $('#content')).forEach(button => button.addEventListener('click', () => $('#share-dialog').showModal()));
   $$('[data-view-link]', $('#content')).forEach(button => button.addEventListener('click', () => { location.hash = button.dataset.viewLink; }));
   $$('[data-action="refresh"]', $('#content')).forEach(button => button.addEventListener('click', async () => { try { state.overview = await request('/api/overview'); captureOverviewMetrics(); render(state.view); toast('Readings updated.'); } catch (error) { toast(error.message); } }));
-  $('[data-action="refresh-files"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+  $$('[data-action="refresh-files"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     if (button.disabled) return;
     const original = button.textContent;
     button.disabled = true;
@@ -1190,7 +1190,7 @@ $('#login-form input[name="username"]').addEventListener('input', () => {
   loginOptionsTimer = setTimeout(refreshLoginMethods, 220);
 });
 $('#login-form input[name="username"]').addEventListener('blur', refreshLoginMethods);
-$('[data-login-method]').forEach(button => button.addEventListener('click', () => selectLoginMethod(button.dataset.loginMethod)));
+$$('[data-login-method]').forEach(button => button.addEventListener('click', () => selectLoginMethod(button.dataset.loginMethod)));
 $('#login-send-sms')?.addEventListener('click', () => toast('SMS sign-in will appear here only after SMS MFA is configured for this account.'));
 $('#login-use-passkey')?.addEventListener('click', () => toast('Passkey sign-in will appear here only after a passkey is registered for this account.'));
 $('#logout').addEventListener('click', async () => { await request('/api/logout', { method: 'POST' }); setLoginMethods([]); showAuth('login'); });
