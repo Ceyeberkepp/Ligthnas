@@ -2,6 +2,37 @@ const q = (selector, root = document) => root.querySelector(selector);
 const qa = (selector, root = document) => [...root.querySelectorAll(selector)];
 const escapeText = value => String(value).replace(/[&<>'"]/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' })[ch]);
 
+function b64urlBytes(value) {
+  const base64 = String(value || '').replace(/-/g, '+').replace(/_/g, '/');
+  const padded = base64 + '='.repeat((4 - base64.length % 4) % 4);
+  const raw = atob(padded);
+  return Uint8Array.from(raw, char => char.charCodeAt(0));
+}
+
+function bytesB64url(value) {
+  const bytes = new Uint8Array(value);
+  let raw = '';
+  for (const byte of bytes) raw += String.fromCharCode(byte);
+  return btoa(raw).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function serializePasskeyRegistration(credential) {
+  const response = credential?.response;
+  const authenticatorData = response?.getAuthenticatorData?.();
+  const publicKey = response?.getPublicKey?.();
+  const algorithm = response?.getPublicKeyAlgorithm?.();
+  if (!credential?.id || !response?.clientDataJSON || !authenticatorData || !publicKey || !Number.isInteger(algorithm)) {
+    throw new Error('This browser cannot export the passkey registration data LightNAS needs. Update the browser and try again.');
+  }
+  return {
+    id: credential.id,
+    clientDataJSON: bytesB64url(response.clientDataJSON),
+    authenticatorData: bytesB64url(authenticatorData),
+    publicKey: bytesB64url(publicKey),
+    algorithm
+  };
+}
+
 const permissionNames = {
   'overview.view':'View overview',
   'files.read':'Read / preview files',
@@ -115,12 +146,59 @@ async function renderTotp() {
   if (location.hash !== '#settings') return;
   const content = q('#content');
   if (!content || q('.totp-admin', content)) return;
-  let status;
-  try { status = await api('/api/security/totp'); } catch { return; }
+
+  let totp, sms, passkeys;
+  try {
+    [totp, sms, passkeys] = await Promise.all([
+      api('/api/security/totp'),
+      api('/api/security/sms'),
+      api('/api/security/passkeys')
+    ]);
+  } catch { return; }
+
+  const keys = passkeys.passkeys || [];
+  const securePasskeys = Boolean(window.isSecureContext && navigator.credentials && window.PublicKeyCredential);
   const section = document.createElement('section');
   section.className = 'panel totp-admin';
-  section.innerHTML = `<div class="admin-section-head"><div><span class="eyebrow">MULTI-FACTOR AUTHENTICATION</span><h2>Authenticator app</h2><p class="muted">Use any RFC 6238 TOTP app such as Microsoft Authenticator, Google Authenticator, 1Password or Authy.</p></div><span class="volume-state ${status.enabled ? 'writable' : 'readonly'}">${status.enabled ? 'ENABLED' : 'DISABLED'}</span></div>
-    ${status.enabled ? `<form data-totp-disable class="security-inline-form"><label>Current password<input name="currentPassword" type="password" required autocomplete="current-password"></label><label>Current 6-digit code<input name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required></label><button class="secondary danger-button" type="submit">Disable 2FA</button><div class="form-error"></div></form>` : `<form data-totp-setup class="security-inline-form"><label>Current password<input name="currentPassword" type="password" required autocomplete="current-password"></label><button class="primary" type="submit">Set up authenticator</button><div class="form-error"></div></form><div data-totp-enrollment></div>`}`;
+  section.innerHTML = `
+    <div class="admin-section-head">
+      <div><span class="eyebrow">MULTI-FACTOR AUTHENTICATION</span><h2>Sign-in verification</h2><p class="muted">Enable an authenticator app, SMS verification, passkeys/security keys, or a combination. At sign-in, choose any enabled method.</p></div>
+    </div>
+    <div class="mfa-method-grid">
+      <article class="panel mfa-method ${totp.enabled ? 'active' : ''}"><span class="mfa-icon">TOTP</span><div><h3>Authenticator</h3><p>Time-based 6-digit codes from Microsoft Authenticator, Google Authenticator, 1Password, Authy, and compatible apps.</p></div><span class="volume-state ${totp.enabled ? 'writable' : 'readonly'}">${totp.enabled ? 'ENABLED' : 'DISABLED'}</span></article>
+      <article class="panel mfa-method ${sms.enabled ? 'active' : ''}"><span class="mfa-icon">SMS</span><div><h3>SMS code</h3><p>Send a one-time verification code through your Twilio account to the configured phone.</p></div><span class="volume-state ${sms.enabled ? 'writable' : 'readonly'}">${sms.enabled ? 'ENABLED' : 'DISABLED'}</span></article>
+      <article class="panel mfa-method ${keys.length ? 'active' : ''}"><span class="mfa-icon">FIDO</span><div><h3>Passkeys & security keys</h3><p>Use WebAuthn/FIDO2 passkeys, Windows Hello, Touch ID, phone passkeys, or hardware security keys.</p></div><span class="volume-state ${keys.length ? 'writable' : 'readonly'}">${keys.length ? `${keys.length} REGISTERED` : 'DISABLED'}</span></article>
+    </div>
+
+    <div class="mfa-config-grid">
+      <section class="mfa-config panel">
+        <h3>Authenticator app</h3>
+        ${totp.enabled
+          ? `<form data-totp-disable class="security-stack-form"><label>Current password<input name="currentPassword" type="password" required autocomplete="current-password"></label><label>Current 6-digit code<input name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autocomplete="one-time-code"></label><button class="secondary danger-button" type="submit">Disable authenticator</button><div class="form-error"></div></form>`
+          : `<form data-totp-setup class="security-stack-form"><label>Current password<input name="currentPassword" type="password" required autocomplete="current-password"></label><button class="primary" type="submit">Set up authenticator</button><div class="form-error"></div></form><div data-totp-enrollment></div>`}
+      </section>
+
+      <section class="mfa-config panel">
+        <h3>SMS verification</h3>
+        ${sms.enabled
+          ? `<p class="muted">Twilio · destination ${escapeText(sms.phone || 'configured')}</p><form data-sms-disable class="security-stack-form"><label>Current password<input name="currentPassword" type="password" required autocomplete="current-password"></label><button class="secondary danger-button" type="submit">Disable SMS verification</button><div class="form-error"></div></form>`
+          : `<form data-sms-setup class="security-stack-form"><label>Twilio Account SID<input name="accountSid" required autocomplete="off" placeholder="AC…"></label><label>Twilio Auth Token<input name="authToken" type="password" required autocomplete="new-password"></label><label>Twilio From number<input name="fromNumber" required placeholder="+15551234567"></label><label>Your verification phone<input name="phone" required placeholder="+15557654321"></label><label>Current LightNAS password<input name="currentPassword" type="password" required autocomplete="current-password"></label><button class="primary" type="submit">Send setup code</button><div class="form-error"></div></form><div data-sms-enrollment></div>`}
+      </section>
+
+      <section class="mfa-config panel">
+        <h3>Passkeys & security keys</h3>
+        <p class="muted">${securePasskeys ? 'This browser is ready for WebAuthn.' : 'Passkeys require HTTPS (or localhost) and a WebAuthn-capable browser. Open LightNAS through HTTPS to register or use a passkey.'}</p>
+        <form data-passkey-register class="security-stack-form">
+          <label>Passkey name<input name="name" maxlength="64" value="My passkey" required></label>
+          <label>Current password<input name="currentPassword" type="password" required autocomplete="current-password"></label>
+          <button class="primary" type="submit" ${securePasskeys ? '' : 'disabled'}>Register passkey / security key</button>
+          <div class="form-error"></div>
+        </form>
+        <div class="security-key-list">
+          ${keys.map(key => `<div><span><b>${escapeText(key.name)}</b><small>Created ${escapeText(key.createdAt || 'unknown')}${key.lastUsedAt ? ` · Last used ${escapeText(key.lastUsedAt)}` : ''}</small></span><button class="secondary danger-button" type="button" data-passkey-remove="${escapeText(key.id)}">Remove</button></div>`).join('') || '<p class="muted">No passkeys registered yet.</p>'}
+        </div>
+      </section>
+    </div>`;
   q('#settings-form', content)?.insertAdjacentElement('afterend', section);
 }
 
