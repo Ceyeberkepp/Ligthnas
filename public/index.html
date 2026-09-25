@@ -49,10 +49,7 @@
         <label>Username<input name="username" required autocomplete="username"></label>
         <label>Password<input name="password" type="password" required autocomplete="current-password"></label>
         <label>Authenticator code <span class="muted">(when enabled)</span><input name="totp" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" placeholder="6-digit code"></label>
-        <label id="sms-code-field" class="hidden">SMS code<input name="smsCode" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" placeholder="6-digit text code"></label>
-        <input name="fido" type="hidden">
         <button class="primary wide" type="submit">Sign in</button>
-        <div class="auth-alternatives"><button id="sms-login-button" class="secondary" type="button">Send SMS code</button><button id="fido-login-button" class="secondary" type="button">Use passkey / security key</button></div>
         <div class="form-error" role="alert"></div>
       </form>
     </section>
@@ -83,11 +80,12 @@
           <a href="#integrations" data-view="integrations"><span>⊞</span>Integrations</a>
         </details>
         <details class="nav-group"><summary>Administration</summary>
-          <a href="#users" data-view="users"><span>◉</span>Users & groups</a>
+          <a href="#users" data-view="users"><span>◉</span>Users</a>
+          <a href="#permissions" data-view="permissions"><span>⌘</span>Permissions</a>
+          <a href="#shell" data-view="shell"><span>›_</span>Node Shell</a>
           <a href="#smtp" data-view="smtp"><span>✉</span>Email / SMTP</a>
           <a href="#settings" data-view="settings"><span>☷</span>Settings & security</a>
           <a href="#monitoring" data-view="monitoring"><span>⌁</span>Monitoring</a>
-          <a href="#assistant" data-view="assistant"><span>✦</span>AI helper</a>
           <a href="#capabilities" data-view="capabilities"><span>◇</span>Capabilities</a>
         </details>
       </nav>
@@ -99,8 +97,8 @@
     </aside>
 
     <header class="topbar">
-      <button id="menu" class="icon-button menu-button" aria-label="Open navigation">☰</button>
-      <div class="top-actions"><button id="node-shell-button" class="secondary shell-button" type="button" title="Open the LightNAS node shell"><span>›_</span> Shell</button><button id="theme-toggle" class="icon-button" type="button" aria-label="Change appearance" title="Appearance">◐</button><label class="avatar" id="avatar" title="Upload profile picture"><span id="avatar-initial">A</span><input id="avatar-upload" type="file" accept="image/*" hidden></label></div>
+      <button id="menu" class="icon-button menu-button" aria-label="Toggle navigation" title="Collapse / expand navigation">☰</button>
+      <div class="top-actions"><button id="theme-toggle" class="icon-button" type="button" aria-label="Change appearance" title="Appearance">◐</button><button class="avatar" id="avatar" type="button" aria-label="Open profile" title="Profile">A</button></div>
     </header>
 
     <main id="content" class="content" tabindex="-1"></main>
@@ -117,12 +115,11 @@
   <dialog id="share-dialog">
     <form id="share-form">
       <div class="dialog-head"><div><span class="eyebrow">NEW RESOURCE</span><h2>Create shared folder</h2></div><button type="button" class="close-dialog" aria-label="Close">×</button></div>
-      <p>LightNAS creates the folder and applies the selected access service immediately.</p>
+      <p>Save a proposed share configuration. This does not create a folder or enable SMB, NFS, or SFTP.</p>
       <label>Share name<input name="name" required minlength="2" maxlength="64" placeholder="Team Files"></label>
-      <label>Protocol<select name="protocol"><option>SMB</option><option>SFTP</option></select></label>
-      <label>Access<select name="readOnly"><option value="false">Read and write</option><option value="true">Read only</option></select></label>
+      <label>Protocol<select name="protocol"><option>SMB</option><option>NFS</option><option>SFTP</option></select></label>
       <label>Description<textarea name="description" maxlength="160" placeholder="What belongs in this share?"></textarea></label>
-      <div class="dialog-actions"><button type="button" class="secondary close-dialog">Cancel</button><button class="primary" type="submit">Create share</button></div>
+      <div class="dialog-actions"><button type="button" class="secondary close-dialog">Cancel</button><button class="primary" type="submit">Save plan</button></div>
       <div class="form-error" role="alert"></div>
     </form>
   </dialog>
