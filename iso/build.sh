@@ -412,8 +412,9 @@ export HOME=/var/lib/lightnas-ui
 export USER=lightnas-ui
 export LOGNAME=lightnas-ui
 xsetroot -solid '#08111f' >/dev/null 2>&1 || true
+xhost +SI:localuser:lightnas-ui >/dev/null 2>&1 || true
 openbox >/var/log/lightnas-openbox.log 2>&1 &
-exec runuser -u lightnas-ui -- /usr/local/bin/lightnas-kiosk
+exec runuser -u lightnas-ui -- env DISPLAY="${DISPLAY:-:0}" /usr/local/bin/lightnas-kiosk
 XSESSION
 chmod 0755 /usr/local/bin/lightnas-xsession
 
