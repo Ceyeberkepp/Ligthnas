@@ -675,7 +675,7 @@ function adminView() {
         <span class="eyebrow">APPLIANCE</span>
         <h2>${escapeHtml(appliance.deviceName)}</h2>
         <p>Owner: ${escapeHtml(appliance.username)} · ${escapeHtml(appliance.timezone || 'UTC')}</p>
-        <div class="head-actions"><button class="secondary" data-view-link="settings">Settings</button><button class="secondary" data-view-link="shell">Node shell</button></div>
+        <div class="head-actions"><button class="secondary" data-view-link="settings">Settings</button></div>
       </article>
       <article class="admin-overview-card">
         <span class="eyebrow">ACCESS</span>
@@ -807,7 +807,7 @@ function networkView() {
         ${interfaceRows.map(({ device, profile, ipv4, role }) => `<div class="network-table-row" role="row">
           <strong>${escapeHtml(device.name)}</strong>
           <span>${escapeHtml(device.type || 'interface')}<small>${escapeHtml(role)}</small></span>
-          <span><b class="volume-state ${/connected|up/i.test(device.state || '') ? 'writable' : ''}">${escapeHtml(String(device.state || 'unknown').toUpperCase())}</b></span>
+          <span><b class="network-state-badge ${/connected|up/i.test(device.state || '') ? 'online' : 'neutral'}">${escapeHtml(String(device.state || 'unknown').toUpperCase())}</b></span>
           <span class="mono-cell">${escapeHtml(ipv4)}</span>
           <span>${escapeHtml(profile?.name || device.connection || '—')}<small>${profile ? `autostart ${profile.autoconnect ? 'yes' : 'no'}` : ''}</small></span>
           <div class="runtime-actions">
@@ -831,7 +831,7 @@ function networkView() {
       </section>
     </div>
 
-    ${wifiDevices.length ? `<section class="panel"><div class="panel-head"><h2>Wi-Fi</h2><span class="muted">Available wireless networks</span></div><div class="inventory-grid">${(control?.wifi || []).map(item => `<article class="inventory-card"><div class="volume-title"><h3>${escapeHtml(item.ssid)}</h3><span class="volume-state ${item.connected ? 'writable' : ''}">${item.connected ? 'CONNECTED' : `${item.signal}%`}</span></div><p>${escapeHtml(item.security || 'Open')}</p><button class="secondary" data-wifi-connect="${escapeHtml(item.ssid)}">${item.connected ? 'Prefer' : 'Connect'}</button></article>`).join('') || '<div class="empty">No Wi-Fi networks currently in range.</div>'}</div></section>` : ''}
+    ${wifiDevices.length ? `<section class="panel"><div class="panel-head"><h2>Wi-Fi</h2><span class="muted">Available wireless networks</span></div><div class="inventory-grid">${(control?.wifi || []).map(item => `<article class="inventory-card"><div class="volume-title"><h3>${escapeHtml(item.ssid)}</h3><span class="network-state-badge ${item.connected ? 'online' : 'neutral'}">${item.connected ? 'CONNECTED' : `${item.signal}%`}</span></div><p>${escapeHtml(item.security || 'Open')}</p><button class="secondary" data-wifi-connect="${escapeHtml(item.ssid)}">${item.connected ? 'Prefer' : 'Connect'}</button></article>`).join('') || '<div class="empty">No Wi-Fi networks currently in range.</div>'}</div></section>` : ''}
 
     <div class="module-note"><b>Safe apply model:</b> Creating a bridge, VLAN, bond or route writes configuration without intentionally dropping the current management connection. Activating a modified management profile can interrupt this browser session, so LightNAS asks before applying it.</div>`;
 }
@@ -1297,6 +1297,9 @@ $('#login-use-passkey')?.addEventListener('click', async () => {
   } finally {
     button.disabled = false;
   }
+});
+$('#node-shell-top')?.addEventListener('click', () => {
+  window.open(`/node-shell.html?v=${Date.now()}`, '_blank', 'noopener,width=1200,height=800');
 });
 $('#logout').addEventListener('click', async () => { await request('/api/logout', { method: 'POST' }); setLoginMethods([]); showAuth('login'); });
 function applySidebarPreference() {
