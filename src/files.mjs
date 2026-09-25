@@ -89,7 +89,31 @@ async function directoryEntries(path) {
   }));
 }
 
-export async function listFiles(relative = '') {
+async function recursiveFileEntries(path, prefix = '', results = [], limit = 5000) {
+  if (results.length >= limit) return results;
+  let names = [];
+  try { names = await readdir(path); } catch { return results; }
+  for (const name of names.sort((a, b) => a.localeCompare(b))) {
+    if (results.length >= limit) break;
+    const full = join(path, name);
+    let info;
+    try { info = await lstat(full); } catch { continue; }
+    if (info.isSymbolicLink()) continue;
+    const relativePath = prefix ? `${prefix}/${name}` : name;
+    if (info.isDirectory()) await recursiveFileEntries(full, relativePath, results, limit);
+    else if (info.isFile()) results.push({
+      name,
+      relativePath,
+      directory: false,
+      sizeBytes: info.size,
+      modifiedAt: info.mtime.toISOString(),
+      supported: true
+    });
+  }
+  return results;
+}
+
+export async function listFiles(relative = '', options = {}) {
   const segments = parts(relative);
   const volumes = await attachedVolumes();
 
@@ -99,15 +123,42 @@ export async function listFiles(relative = '') {
 
   const path = await checked(relative);
   if (!(await lstat(path)).isDirectory()) throw Object.assign(new Error('Not a folder.'), { status: 400 });
+  if (options.recursive && !segments.length) {
+    // "All files" intentionally flattens the managed LightNAS library. Do not
+    // recurse into Attached storage here because a mounted NAS volume may
+    // contain millions of files; users can browse those mounts explicitly.
+    return (await recursiveFileEntries(path)).sort((a, b) => a.relativePath.localeCompare(b.relativePath));
+  }
   const entries = await directoryEntries(path);
   if (!segments.length && volumes.length) entries.push({ name: ATTACHED_ROOT, directory: true, sizeBytes: null, modifiedAt: null, supported: true, attached: true });
   return entries.sort((a, b) => Number(b.directory) - Number(a.directory) || a.name.localeCompare(b.name));
 }
 
-export async function createFolder(relative) {
+export async function createFolder(relative, options = {}) {
   const segments = parts(relative);
   if (!segments.length || (segments.length <= 2 && segments[0] === ATTACHED_ROOT)) throw Object.assign(new Error('Enter a folder name inside a writable location.'), { status: 400 });
-  await mkdir(await checked(relative, false), { mode: 0o700 });
+  if (!options.recursive) {
+    await mkdir(await checked(relative, false), { mode: 0o700 });
+    return;
+  }
+  // Folder uploads can contain nested paths. Validate every path component
+  // through parts(), then create each missing directory in order.
+  if (segments[0] === ATTACHED_ROOT) {
+    const volume = (await attachedVolumes()).find(item => item.name === segments[1]);
+    if (!volume || volume.readOnly) throw Object.assign(new Error('Attached storage is not writable.'), { status: 403 });
+    let current = volume.mountPoint;
+    for (const segment of segments.slice(2)) {
+      current = join(current, segment);
+      await mkdir(current, { recursive: false, mode: 0o700 }).catch(error => { if (error.code !== 'EEXIST') throw error; });
+    }
+    return;
+  }
+  await mkdir(root, { recursive: true, mode: 0o700 });
+  let current = root;
+  for (const segment of segments) {
+    current = join(current, segment);
+    await mkdir(current, { recursive: false, mode: 0o700 }).catch(error => { if (error.code !== 'EEXIST') throw error; });
+  }
 }
 
 export async function uploadFile(relative, req) {
