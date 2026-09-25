@@ -167,7 +167,7 @@ async function renderManageStorage(poolId,activeType=null) {
     ${selectedType&&fileTypes.includes(selectedType)?`<div class="storage-library-head"><div><h3>${sEsc((data.contentTypes||[]).find(item=>item.id===selectedType)?.label||selectedType)}</h3><p class="muted">Files stored only on ${sEsc(pool.name)}.</p></div></div>
 ${selectedType==='vztmpl'? `<div class="head-actions"><button class="primary" type="button" data-template-browse data-template-storage="${sEsc(pool.id)}">Browse templates</button><button class="secondary" type="button" data-template-upload data-template-storage="${sEsc(pool.id)}">Upload template</button><button class="secondary" type="button" data-template-url data-template-storage="${sEsc(pool.id)}">Import URL</button></div><p class="muted">Choose a template from the upstream catalog, upload an archive from your computer, or import a public URL into this storage.</p>` : ''}
       <form data-storage-upload-form data-storage-id="${sEsc(pool.id)}" data-storage-type="${sEsc(selectedType)}">
-        ${selectedType==='iso'?'<p class="module-note">ISO uploads up to 50 GiB stream directly to storage in resumable chunks. Large ISO files use a larger transfer window to reduce round-trip overhead.</p>':''}
+        ${selectedType==='iso'?'<p class="module-note">ISO uploads stream directly to storage in resumable chunks. LightNAS does not impose an application-level file-size ceiling; available storage is the limit.</p>':''}
         <label>Upload ${sEsc((data.contentTypes||[]).find(item=>item.id===selectedType)?.label||selectedType)}<input name="file" type="file" required ${selectedType==='iso'?'accept=".iso"':selectedType==='vztmpl'?'accept=".tar.zst,.tar.xz,.tar.gz,.tgz"':''}></label>
         <button class="secondary" type="submit">Upload</button>
       </form>
@@ -237,8 +237,6 @@ document.addEventListener('submit',async event=>{
     error.textContent=`Uploading ${file.name}…`;
     const progress=window.LightNASProgress?.open(type==='iso'?'Uploading VM installer image':'Uploading storage image',file.name);
     try{
-      const maximum=50*1024**3;
-      if(file.size>maximum) throw new Error('ISO and storage image uploads are limited to 50 GiB.');
       // Blob.slice() is lazy, so a larger chunk reduces HTTP round trips
       // without buffering the whole ISO in browser or server memory.
       const chunkSize=(type==='iso'?64:32)*1024**2;
@@ -287,13 +285,43 @@ document.addEventListener('submit',async event=>{
   }
 },true);
 
-function maybeStorageManager(){
+let storageAutoRefreshTimer=null;
+let storageSignature='';
+
+function storageInventorySignature(data){
+  return JSON.stringify({
+    pools:(data?.pools||[]).map(item=>[item.id,item.mountPoint,item.totalBytes,item.availableBytes,item.online,item.writable]),
+    sources:(data?.availableSources||[]).map(item=>[item.id,item.mountPoint,item.device,item.totalBytes,item.availableBytes,item.configured])
+  });
+}
+
+async function autoRefreshStorageManager(){
   if(location.hash!=='#storage'||!document.querySelector('#storage-manager')) return;
+  const dialog=document.querySelector('#lightnas-storage-dialog');
+  if(dialog?.open) return;
+  try{
+    const data=await loadStoragePools();
+    const next=storageInventorySignature(data);
+    if(next!==storageSignature){
+      storageSignature=next;
+      renderStorageManager();
+    }
+  }catch{}
+}
+
+function maybeStorageManager(){
+  const active=location.hash==='#storage'&&document.querySelector('#storage-manager');
+  clearInterval(storageAutoRefreshTimer);
+  storageAutoRefreshTimer=null;
+  if(!active) return;
   const slot=document.querySelector('#storage-manager');
-  if(slot.dataset.loaded==='1') return;
-  slot.dataset.loaded='1';
-  refreshStorageManager();
+  if(slot.dataset.loaded!=='1'){
+    slot.dataset.loaded='1';
+    refreshStorageManager().then(()=>{storageSignature=storageInventorySignature(storageUi.data);});
+  }
+  storageAutoRefreshTimer=setInterval(autoRefreshStorageManager,8000);
 }
 new MutationObserver(maybeStorageManager).observe(document.documentElement,{childList:true,subtree:true});
 window.addEventListener('hashchange',maybeStorageManager);
+window.addEventListener('focus',autoRefreshStorageManager);
 maybeStorageManager();
