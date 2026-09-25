@@ -784,7 +784,7 @@ function integrationsView() {
 function render(view) {
   if (view === 'media') view = 'files';
   state.view = ['home', 'storage', 'pools', 'files', 'users', 'permissions', 'shell', 'smtp', 'admin', 'shares', 'capabilities', 'apps', 'containers', 'vms', 'monitoring', 'settings', 'network', 'firewall', 'integrations'].includes(view) ? view : 'home';
-  if (state.overview.appliance.role !== 'administrator' && !['home', 'files', 'media'].includes(state.view)) state.view = 'home';
+  if (!canView(state.view)) state.view = canView('home') ? 'home' : 'files';
   const content = $('#content');
   content.innerHTML = state.view === 'home' ? homeView() : state.view === 'storage' ? storageView() : state.view === 'pools' ? poolsView() : state.view === 'files' ? filesView() : state.view === 'media' ? mediaView() : state.view === 'users' ? usersView() : state.view === 'permissions' ? permissionsView() : state.view === 'shell' ? shellView() : state.view === 'smtp' ? smtpView() : state.view === 'admin' ? adminView() : state.view === 'shares' ? sharesView() : state.view === 'containers' ? containersView() : state.view === 'vms' ? vmsView() : state.view === 'settings' ? settingsView() : state.view === 'capabilities' ? capabilitiesView() : state.view === 'network' ? networkView() : state.view === 'firewall' ? firewallView() : state.view === 'integrations' ? integrationsView() : moduleView(state.view);
   $$('[data-view]').forEach(link => link.classList.toggle('active', link.dataset.view === state.view));

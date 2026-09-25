@@ -3,22 +3,41 @@ const qa = (selector, root = document) => [...root.querySelectorAll(selector)];
 const escapeText = value => String(value).replace(/[&<>'"]/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' })[ch]);
 
 const permissionNames = {
+  'overview.view':'View overview',
   'files.read':'Read / preview files',
   'files.write':'Upload / create files',
   'files.download':'Download files & folders',
   'files.delete':'Delete files & folders',
   'media.convert':'Convert media',
   'storage.view':'View storage',
-  'storage.manage':'Manage storage & datasets',
+  'storage.manage':'Manage storage',
+  'pools.view':'View pools & datasets',
+  'shares.view':'View shares',
   'shares.manage':'Manage shares',
+  'apps.view':'View App Store',
   'apps.manage':'Manage apps',
+  'containers.view':'View containers',
   'containers.manage':'Manage containers',
+  'containers.console':'Use container console',
+  'vms.view':'View virtual machines',
   'vms.manage':'Manage virtual machines',
+  'vms.console':'Use VM console',
   'network.view':'View networking',
-  'network.manage':'Manage interfaces, bridges & VLANs',
+  'network.manage':'Manage interfaces, bridges, VLANs & bonds',
+  'firewall.view':'View firewall',
   'firewall.manage':'Manage firewall',
+  'integrations.view':'View integrations',
+  'integrations.manage':'Manage integrations',
+  'backup.manage':'Manage backups',
+  'audit.view':'View audit activity',
   'monitoring.view':'View monitoring',
-  'system.view':'View system information'
+  'capabilities.view':'View capabilities',
+  'system.view':'View system information',
+  'system.shell':'Use privileged node shell',
+  'users.manage':'Manage users & permission groups',
+  'smtp.manage':'Manage SMTP',
+  'settings.manage':'Manage appliance settings',
+  'admin.view':'View Admin Center'
 };
 
 async function api(path, options = {}) {

@@ -216,8 +216,11 @@ cp -a \
   "${REPO_ROOT}/public" \
   "${REPO_ROOT}/scripts" \
   "${REPO_ROOT}/package.json" \
-  "${REPO_ROOT}/package-lock.json" \
   config/includes.chroot/opt/lightnas/
+
+if [[ -f "${REPO_ROOT}/package-lock.json" ]]; then
+  cp "${REPO_ROOT}/package-lock.json" config/includes.chroot/opt/lightnas/
+fi
 
 cp \
   "${REPO_ROOT}/iso/preseed.cfg" \
@@ -580,13 +583,11 @@ install -m 0600 /dev/null /etc/lightnas/runtime.env
 #
 # Install application dependencies.
 #
-npm \
-  --prefix /opt/lightnas \
-  ci \
-  --omit=dev \
-  --no-audit \
-  --no-fund \
-  --prefer-offline
+if [[ -f /opt/lightnas/package-lock.json ]]; then
+  npm --prefix /opt/lightnas ci --omit=dev --no-audit --no-fund --prefer-offline
+else
+  npm --prefix /opt/lightnas install --omit=dev --no-audit --no-fund --prefer-offline
+fi
 
 #
 # ------------------------------------------------------------

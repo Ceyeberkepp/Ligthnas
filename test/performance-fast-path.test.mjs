@@ -51,8 +51,9 @@ test('ISO favors faster installation and avoids first-boot package downloads', a
   assert.match(iso, /--compression gzip/);
   assert.match(iso, /^docker\.io$/m);
   assert.match(iso, /^libraw-bin$/m);
-  assert.match(iso, /package-lock\.json/);
-  assert.match(iso, /\bci \\\n\s+--omit=dev/);
+  assert.match(iso, /if \[\[ -f .*package-lock\.json/);
+  assert.match(iso, /npm --prefix \/opt\/lightnas ci --omit=dev/);
+  assert.match(iso, /npm --prefix \/opt\/lightnas install --omit=dev/);
 });
 
 
