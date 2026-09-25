@@ -130,6 +130,8 @@ smartmontools
 xserver-xorg
 xserver-xorg-video-all
 xserver-xorg-input-all
+xinit
+xauth
 lightdm
 openbox
 chromium
@@ -335,6 +337,15 @@ if apt-cache policy libraw-bin 2>/dev/null | awk '/Candidate:/{exit $2=="(none)"
   apt-get install -y libraw-bin || true
 fi
 
+# Install guest display/integration helpers when the Debian repository exposes
+# them. These are optional so the same ISO build remains portable.
+for guest_pkg in qemu-guest-agent spice-vdagent open-vm-tools open-vm-tools-desktop virtualbox-guest-x11; do
+  candidate="$(apt-cache policy "$guest_pkg" 2>/dev/null | awk '/Candidate:/{print $2; exit}')"
+  if [[ -n "$candidate" && "$candidate" != "(none)" ]]; then
+    apt-get install -y "$guest_pkg" || true
+  fi
+done
+
 # Debian images do not need the ubuntu-keyring package to build LightNAS, but
 # debootstrap must still be able to verify Ubuntu system-container releases.
 ubuntu_candidate="$(apt-cache policy ubuntu-keyring 2>/dev/null | awk '/Candidate:/{print $2; exit}')"
@@ -393,6 +404,54 @@ exec chromium \
   http://127.0.0.1:3080/
 KIOSK
 chmod 0755 /usr/local/bin/lightnas-kiosk
+
+cat >/usr/local/bin/lightnas-xsession <<'XSESSION'
+#!/bin/bash
+set -Eeuo pipefail
+export HOME=/var/lib/lightnas-ui
+export USER=lightnas-ui
+export LOGNAME=lightnas-ui
+xsetroot -solid '#08111f' >/dev/null 2>&1 || true
+openbox >/var/log/lightnas-openbox.log 2>&1 &
+exec runuser -u lightnas-ui -- /usr/local/bin/lightnas-kiosk
+XSESSION
+chmod 0755 /usr/local/bin/lightnas-xsession
+
+# LightDM is the normal path. Some virtual graphics adapters reach
+# graphical.target but the display manager never creates :0. This fallback
+# starts Xorg directly on VT7 after a grace period so VirtualBox, VMware, KVM
+# and bare-metal systems still reach the local LightNAS control center.
+cat >/usr/local/sbin/lightnas-display-fallback <<'DISPLAY_FALLBACK'
+#!/bin/bash
+set -Eeuo pipefail
+for _ in $(seq 1 15); do
+  if [[ -S /tmp/.X11-unix/X0 ]]; then
+    exit 0
+  fi
+  sleep 1
+done
+exec /usr/bin/xinit /usr/local/bin/lightnas-xsession -- :0 vt7 -keeptty -nolisten tcp
+DISPLAY_FALLBACK
+chmod 0755 /usr/local/sbin/lightnas-display-fallback
+
+cat >/etc/systemd/system/lightnas-display-fallback.service <<'DISPLAY_UNIT'
+[Unit]
+Description=LightNAS graphical console fallback
+After=lightdm.service lightnas.service
+Wants=lightnas.service
+Conflicts=getty@tty7.service
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/sbin/lightnas-display-fallback
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical.target
+DISPLAY_UNIT
+systemctl enable lightnas-display-fallback.service >/dev/null 2>&1 || true
 cat >/var/lib/lightnas-ui/.config/openbox/autostart <<'AUTOSTART'
 /usr/local/bin/lightnas-kiosk &
 AUTOSTART
@@ -408,12 +467,47 @@ greeter-hide-users=true
 LIGHTDM
 
 cat >/etc/issue <<'ISSUE'
-LightNAS
-Private cloud storage appliance · based on Debian GNU/Linux 13
+LightNAS 1.0
+Private cloud storage appliance · Debian 13 base
+Local control center starts automatically
 Web control center: http://<this-system-IP>:3080
 
 ISSUE
 cp /etc/issue /etc/issue.net
+
+# Keep Debian compatibility for package/tool detection while making the
+# appliance identify itself as LightNAS in the console and desktop.
+if [[ -f /etc/os-release ]]; then
+  sed -i     -e 's/^NAME=.*/NAME="LightNAS"/'     -e 's/^PRETTY_NAME=.*/PRETTY_NAME="LightNAS 1.0 (Debian 13)"/'     /etc/os-release
+fi
+printf '%s\n' 'LightNAS 1.0' 'Storage · Apps · Containers · Virtual Machines' >/etc/motd
+
+# Branded Plymouth boot splash.
+install -d -m 0755 /usr/share/plymouth/themes/lightnas
+cat >/usr/share/plymouth/themes/lightnas/lightnas.plymouth <<'PLYMOUTH'
+[Plymouth Theme]
+Name=LightNAS
+Description=LightNAS appliance boot splash
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/lightnas
+ScriptFile=/usr/share/plymouth/themes/lightnas/lightnas.script
+PLYMOUTH
+cat >/usr/share/plymouth/themes/lightnas/lightnas.script <<'PLYMOUTH_SCRIPT'
+Window.SetBackgroundTopColor(0.03, 0.07, 0.12);
+Window.SetBackgroundBottomColor(0.03, 0.07, 0.12);
+title = Image.Text("LightNAS", 0.94, 0.98, 1.0);
+subtitle = Image.Text("Storage  •  Apps  •  Containers  •  Virtual Machines", 0.36, 0.88, 0.76);
+ts = Sprite(title);
+ss = Sprite(subtitle);
+ts.SetX(Window.GetWidth()/2 - title.GetWidth()/2);
+ts.SetY(Window.GetHeight()/2 - 55);
+ss.SetX(Window.GetWidth()/2 - subtitle.GetWidth()/2);
+ss.SetY(Window.GetHeight()/2 + 10);
+PLYMOUTH_SCRIPT
+plymouth-set-default-theme lightnas || true
+
 systemctl enable lightdm.service >/dev/null 2>&1 || true
 systemctl set-default graphical.target >/dev/null 2>&1 || true
 
