@@ -102,7 +102,61 @@ function dialogEsc(value) {
   return String(value ?? '').replace(/[&<>'"]/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character]);
 }
 
-function openProgressDialog(title, detail) {
+const lightnasTasks = (() => {
+  let items = [];
+  try { items = JSON.parse(sessionStorage.getItem('lightnas-tasks') || '[]'); } catch {}
+  if (!Array.isArray(items)) items = [];
+  items = items.slice(-40);
+  const save = () => {
+    try { sessionStorage.setItem('lightnas-tasks', JSON.stringify(items.slice(-40))); } catch {}
+  };
+  const render = () => {
+    const dock = document.getElementById('task-dock');
+    const list = document.getElementById('task-dock-list');
+    const count = document.getElementById('task-dock-count');
+    const summary = document.getElementById('task-dock-summary');
+    if (!dock || !list || !count || !summary) return;
+    const active = items.filter(item => item.status === 'running').length;
+    count.textContent = String(active);
+    count.classList.toggle('active', active > 0);
+    summary.textContent = active ? `${active} active task${active === 1 ? '' : 's'}` : (items.length ? 'Recent tasks complete' : 'No active tasks');
+    list.innerHTML = items.length ? [...items].reverse().map(item => `
+      <article class="task-row">
+        <time>${dialogEsc(item.time || '')}</time>
+        <div><b>${dialogEsc(item.title)}</b><small>${dialogEsc(item.detail || '')}</small>${item.status === 'running' ? `<div class="task-mini-progress"><span style="width:${Math.max(2, Number(item.percent) || 2)}%"></span></div>` : ''}</div>
+        <span class="task-status ${item.status}">${item.status === 'success' ? 'OK' : item.status === 'error' ? 'Error' : `${Number.isFinite(item.percent) ? item.percent + '%' : 'Running'}`}</span>
+      </article>`).join('') : '<div class="task-empty">Uploads, installs, VM/container jobs, and transfers will appear here.</div>';
+  };
+  const create = (title, detail) => {
+    const task = { id: crypto.randomUUID?.() || String(Date.now() + Math.random()), title, detail, time: new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' }), status:'running', percent:null };
+    items.push(task); save(); render();
+    return {
+      update(percent, message) { task.percent = Math.max(0, Math.min(100, Number(percent) || 0)); if (message) task.detail = message; save(); render(); },
+      success(message) { task.status='success'; task.percent=100; if (message) task.detail=message; save(); render(); },
+      error(message) { task.status='error'; if (message) task.detail=message; save(); render(); }
+    };
+  };
+  addEventListener('DOMContentLoaded', () => {
+    const dock = document.getElementById('task-dock');
+    const toggle = document.getElementById('task-dock-toggle');
+    if (dock && toggle) {
+      const collapsed = localStorage.getItem('lightnas-task-dock-collapsed') !== '0';
+      dock.classList.toggle('collapsed', collapsed);
+      toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      toggle.addEventListener('click', () => {
+        const next = !dock.classList.contains('collapsed');
+        dock.classList.toggle('collapsed', next);
+        toggle.setAttribute('aria-expanded', next ? 'false' : 'true');
+        localStorage.setItem('lightnas-task-dock-collapsed', next ? '1' : '0');
+      });
+    }
+    render();
+  });
+  return { create, render };
+})();
+
+function openProgressDialog(title, detail, options = {}) {
+  const task = lightnasTasks.create(title, detail || 'Starting…');
   const dialog = document.createElement('dialog');
   dialog.className = 'lightnas-dialog transfer-dialog';
   dialog.innerHTML = `
@@ -110,17 +164,17 @@ function openProgressDialog(title, detail) {
       <div class="transfer-state is-running" data-transfer-state>
         <div class="transfer-spinner" aria-hidden="true"></div>
         <div class="transfer-result-icon" aria-hidden="true">✓</div>
-        <span class="eyebrow">TRANSFER IN PROGRESS</span>
+        <span class="eyebrow">TASK IN PROGRESS</span>
         <h2 data-transfer-title></h2>
         <p class="muted" data-transfer-detail></p>
-        <div class="transfer-progress" aria-label="Transfer in progress"><span></span></div>
+        <div class="transfer-progress" aria-label="Task in progress"><span></span></div>
         <p class="transfer-elapsed" data-transfer-elapsed>Starting…</p>
         <div class="form-error" data-transfer-error role="alert"></div>
         <div class="dialog-actions"><button class="primary hidden" type="button" data-transfer-ok>OK</button></div>
       </div>
     </div>`;
   dialog.querySelector('[data-transfer-title]').textContent = title;
-  dialog.querySelector('[data-transfer-detail]').textContent = detail || 'Please keep this page open.';
+  dialog.querySelector('[data-transfer-detail]').textContent = detail || 'Working in the background.';
   const started = Date.now();
   const timer = setInterval(() => {
     const seconds = Math.max(1, Math.floor((Date.now() - started) / 1000));
@@ -131,6 +185,7 @@ function openProgressDialog(title, detail) {
   const initialTitle = title;
   const finish = (kind, message) => {
     clearInterval(timer);
+    kind === 'success' ? task.success(message) : task.error(message);
     const state = dialog.querySelector('[data-transfer-state]');
     state.classList.remove('is-running', 'is-success', 'is-error');
     state.classList.add(kind === 'success' ? 'is-success' : 'is-error');
@@ -144,19 +199,20 @@ function openProgressDialog(title, detail) {
       : 'Operation';
     dialog.querySelector('[data-transfer-title]').textContent = kind === 'success' ? `${operation} complete` : `${operation} failed`;
     dialog.querySelector('[data-transfer-detail]').textContent = message;
-    dialog.querySelector('[data-transfer-elapsed]').textContent = kind === 'success'
-      ? (/upload|download/i.test(initialTitle) ? 'The image is ready to use.' : 'The requested changes are active.')
-      : (/upload|download/i.test(initialTitle) ? 'Nothing incomplete will be shown in the image library.' : 'The requested changes were not completed.');
+    dialog.querySelector('[data-transfer-elapsed]').textContent = kind === 'success' ? 'Completed successfully.' : 'Task failed.';
     dialog.querySelector('[data-transfer-error]').textContent = kind === 'error' ? message : '';
     dialog.querySelector('[data-transfer-ok]').classList.remove('hidden');
+    if (options.modal === false) setTimeout(() => { if (dialog.open) dialog.close(); }, kind === 'success' ? 900 : 5000);
   };
   dialog.querySelector('[data-transfer-ok]').addEventListener('click', () => dialog.close());
   dialog.addEventListener('close', () => { clearInterval(timer); dialog.remove(); }, { once: true });
   document.body.append(dialog);
-  dialog.showModal();
+  if (options.modal === false) dialog.show();
+  else dialog.showModal();
   return {
     update(percent, message = '') {
       const value = Math.max(0, Math.min(100, Number(percent) || 0));
+      task.update(value, message);
       progressBar.style.animation = 'none';
       progressBar.style.inset = '0 auto 0 0';
       progressBar.style.width = `${value}%`;

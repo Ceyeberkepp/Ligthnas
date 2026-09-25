@@ -160,6 +160,10 @@ function quickStorageSummary(filesystems = []) {
     virtualStorage: usableStorage,
     usableStorage,
     poolSummary: null,
+    configuredPools: [],
+    availableSources: [],
+    detectedDisks: [],
+    contentTypes: [],
     provisional: true
   };
 }
@@ -173,6 +177,10 @@ async function refreshOverviewStorage(force = false) {
       const [storage, storagePools] = await Promise.all([getStorageInventory(), listStoragePools()]);
       storage.usableStorage = storagePools.visibleSummary || storage.usableStorage;
       storage.poolSummary = storagePools.summary;
+      storage.configuredPools = storagePools.pools || [];
+      storage.availableSources = storagePools.availableSources || [];
+      storage.detectedDisks = storagePools.detectedDisks || storage.disks || [];
+      storage.contentTypes = storagePools.contentTypes || [];
       storage.provisional = false;
       overviewStorageCache = storage;
       overviewStorageCacheAt = Date.now();

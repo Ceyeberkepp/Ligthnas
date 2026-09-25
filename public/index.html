@@ -101,7 +101,7 @@
         <details class="nav-group"><summary>Administration</summary>
           <a href="#users" data-view="users"><span>◉</span>Users</a>
           <a href="#permissions" data-view="permissions"><span>⌘</span>Permissions</a>
-          <a href="#shell" data-view="shell"><span>›_</span>Node Shell</a>
+          <a href="#shell" data-view="shell"><span>›_</span>Bash Shell</a>
           <a href="#smtp" data-view="smtp"><span>✉</span>Email / SMTP</a>
           <a href="#settings" data-view="settings"><span>☷</span>Settings & security</a>
           <a href="#monitoring" data-view="monitoring"><span>⌁</span>Monitoring</a>
@@ -121,6 +121,18 @@
     </header>
 
     <main id="content" class="content" tabindex="-1"></main>
+
+    <section id="task-dock" class="task-dock collapsed" aria-label="Background tasks">
+      <button id="task-dock-toggle" class="task-dock-bar" type="button" aria-expanded="false">
+        <span><b>Tasks</b><small id="task-dock-summary">No active tasks</small></span>
+        <span id="task-dock-count" class="task-count">0</span>
+        <span class="task-chevron">⌃</span>
+      </button>
+      <div class="task-dock-body">
+        <div class="task-dock-head"><span>Start time</span><span>Task</span><span>Status</span></div>
+        <div id="task-dock-list" class="task-dock-list"><div class="task-empty">Uploads, installs, VM/container jobs, and transfers will appear here.</div></div>
+      </div>
+    </section>
 
     <nav class="mobile-nav" aria-label="Mobile navigation">
       <a href="#home" data-view="home" class="active"><span>⌂</span>Home</a>

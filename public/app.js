@@ -303,30 +303,37 @@ function storageView() {
 function poolsView() {
   const storage = state.overview.storage || {};
   const zfs = storage.zfs || { available: false, canManageDatasets: false, pools: [], datasets: [] };
-  const disks = storage.disks || [];
+  const disks = storage.disks || storage.detectedDisks || [];
   const configuredPools = storage.configuredPools || [];
   const availableSources = storage.availableSources || [];
   const poolOptions = [...(zfs.pools || []), ...(zfs.datasets || []).filter(item => !(zfs.pools || []).some(pool => pool.name === item.name))];
-  return `${pageHead('Pools & datasets', 'Create and manage physical storage pools, datasets, and storage providers.', '<div class="head-actions"><button class="secondary" data-action="refresh-storage">Rescan drives</button><button class="secondary" data-view-link="storage">Storage inventory</button><button class="primary" type="button" data-create-storage>+ Add storage</button></div>')}
+  const deviceCount = disks.length + availableSources.length;
+  return `${pageHead('Pools & datasets', 'Manage LightNAS storage pools, volumes and ZFS datasets from one place.', '<div class="head-actions"><button class="secondary" data-action="refresh-storage">Rescan drives</button><button class="secondary" data-view-link="storage">Storage inventory</button><button class="primary" type="button" data-create-storage>+ Add storage</button></div>')}
     <section class="pool-summary-grid">
-      <article class="panel pool-summary"><span class="eyebrow">STORAGE POOLS</span><strong>${configuredPools.length}</strong><p>configured in LightNAS</p></article>
-      <article class="panel pool-summary"><span class="eyebrow">DEVICES & VOLUMES</span><strong>${disks.length + availableSources.length}</strong><p>exposed to this installation</p></article>
-      <article class="panel pool-summary"><span class="eyebrow">DATASETS</span><strong>${zfs.datasets?.length || 0}</strong><p>${zfs.available ? 'ZFS inventory online' : 'No ZFS datasets detected'}</p></article>
+      <article class="panel pool-summary"><span class="eyebrow">STORAGE POOLS</span><strong>${configuredPools.length}</strong><p>${configuredPools.length ? 'available to LightNAS' : 'inventory is still empty'}</p></article>
+      <article class="panel pool-summary"><span class="eyebrow">DEVICES & VOLUMES</span><strong>${deviceCount}</strong><p>${deviceCount ? 'detected by the appliance' : 'none exposed by this host'}</p></article>
+      <article class="panel pool-summary"><span class="eyebrow">DATASETS</span><strong>${zfs.datasets?.length || 0}</strong><p>${zfs.available ? 'ZFS inventory online' : 'ZFS is not active on this installation'}</p></article>
     </section>
-    <div class="section-heading"><div><span class="eyebrow">POOL INVENTORY</span><h2>Storage pools</h2></div></div>
-    <div class="storage-list">${configuredPools.map(pool => `<article class="storage-row pool-inventory-row"><div><h3>${escapeHtml(pool.name)}</h3><p>${escapeHtml(pool.provider || 'directory').toUpperCase()} · ${escapeHtml(pool.mountPoint || 'not mounted')} · ${(pool.contentLabels || []).map(escapeHtml).join(', ')}</p></div><div><div class="track"><span style="width:${pool.usedPercent || 0}%"></span></div><p>${bytes(pool.availableBytes || 0)} free · ${pool.online ? 'online' : 'offline'}</p></div><div class="storage-size"><b>${bytes(pool.usedBytes || 0)}</b><br>of ${bytes(pool.totalBytes || 0)}</div></article>`).join('') || '<div class="empty"><h3>No LightNAS storage pools configured</h3><p>Use Add storage to attach an exposed volume.</p></div>'}</div>
-    <div class="section-heading"><div><span class="eyebrow">FILESYSTEM DATASETS</span><h2>Datasets</h2></div>${zfs.canManageDatasets ? '<button class="primary" type="button" data-show-dataset-form>+ Create dataset</button>' : ''}</div>
-    ${zfs.canManageDatasets ? `<form id="dataset-form" class="panel creation-form dataset-create-form" hidden>
-      <label>Parent pool or dataset<select name="parent" required>${poolOptions.map(item => `<option value="${escapeHtml(item.name)}">${escapeHtml(item.name)}</option>`).join('')}</select></label>
-      <label>Dataset name<input name="name" pattern="[a-zA-Z0-9][a-zA-Z0-9_.-]{1,63}" required placeholder="media"></label>
-      <label>Compression<select name="compression"><option value="lz4">LZ4</option><option value="zstd">Zstandard</option><option value="gzip">Gzip</option><option value="off">Off</option></select></label>
-      <label>Quota (GiB)<input name="quotaGiB" type="number" min="0" max="1048576" value="0"><small>Zero means unlimited.</small></label>
-      <button class="primary" type="submit">Create dataset</button><div class="form-error" role="alert"></div>
-    </form>` : '<div class="module-note">Dataset changes are disabled on this installation. Existing pools and datasets remain visible, but LightNAS will not pretend it can modify them.</div>'}
-    <div class="storage-list">${zfs.datasets?.map(dataset => `<article class="storage-row"><div><h3>${escapeHtml(dataset.name)}</h3><p>${escapeHtml(dataset.mountPoint || 'not mounted')} · compression ${escapeHtml(dataset.compression || 'unknown')}</p></div><div><b>${bytes(dataset.availableBytes)} available</b><p>${bytes(dataset.usedBytes)} used</p></div>${(zfs.pools || []).some(pool => pool.name === dataset.name) ? '' : `<button class="secondary" type="button" data-dataset="${escapeHtml(dataset.name)}">Edit properties</button>`}</article>`).join('') || '<div class="empty"><p>No ZFS datasets detected.</p></div>'}</div>
-    <div class="section-heading"><div><span class="eyebrow">HARDWARE INVENTORY</span><h2>Physical disks & exposed volumes</h2></div></div><div class="storage-list">${[...disks.map(disk => ({ name: disk.name || disk.path, detail: `${disk.model || 'Block device'} · ${disk.transport || 'local'}`, size: disk.sizeBytes || disk.size })), ...availableSources.map(source => ({ name: source.device || source.mountPoint, detail: `${source.type || 'volume'} · mounted at ${source.mountPoint}${source.configured ? ' · assigned to a pool' : ' · available'}`, size: source.totalBytes }))].map(item => `<article class="storage-row"><div><h3>${escapeHtml(item.name || 'Storage device')}</h3><p>${escapeHtml(item.detail)}</p></div><div class="storage-size"><b>${bytes(item.size || 0)}</b></div></article>`).join('') || `<div class="empty"><h3>No physical disks are visible</h3><p>${storage.environment?.container ? 'LightNAS is running in a container. Attach a host volume to expose storage here.' : 'No block devices were returned by the operating system.'}</p></div>`}</div>`;
+    <section class="storage-workspace">
+      <div class="section-heading"><div><span class="eyebrow">POOL INVENTORY</span><h2>Storage pools</h2></div></div>
+      <div class="storage-list compact-empty-list">${configuredPools.map(pool => `<article class="storage-row pool-inventory-row"><div><h3>${escapeHtml(pool.name)}</h3><p>${escapeHtml(pool.provider || pool.type || 'directory').toUpperCase()} · ${escapeHtml(pool.mountPoint || 'not mounted')} · ${(pool.contentLabels || []).map(escapeHtml).join(', ') || 'general storage'}</p></div><div><div class="track"><span style="width:${pool.usedPercent || 0}%"></span></div><p>${bytes(pool.availableBytes || 0)} free · ${pool.online ? 'online' : 'offline'}</p></div><div class="storage-size"><b>${bytes(pool.usedBytes || 0)}</b><br>of ${bytes(pool.totalBytes || 0)}</div></article>`).join('') || '<div class="empty compact-empty"><h3>No storage pool inventory yet</h3><p>Use Rescan drives. If LightNAS is running inside an LXC or VM, expose a host volume or disk to the guest first.</p></div>'}</div>
+    </section>
+    <section class="storage-workspace">
+      <div class="section-heading"><div><span class="eyebrow">FILESYSTEM DATASETS</span><h2>Datasets</h2></div>${zfs.canManageDatasets ? '<button class="primary" type="button" data-show-dataset-form>+ Create dataset</button>' : ''}</div>
+      ${zfs.canManageDatasets ? `<form id="dataset-form" class="panel creation-form dataset-create-form" hidden>
+        <label>Parent pool or dataset<select name="parent" required>${poolOptions.map(item => `<option value="${escapeHtml(item.name)}">${escapeHtml(item.name)}</option>`).join('')}</select></label>
+        <label>Dataset name<input name="name" pattern="[a-zA-Z0-9][a-zA-Z0-9_.-]{1,63}" required placeholder="media"></label>
+        <label>Compression<select name="compression"><option value="lz4">LZ4</option><option value="zstd">Zstandard</option><option value="gzip">Gzip</option><option value="off">Off</option></select></label>
+        <label>Quota (GiB)<input name="quotaGiB" type="number" min="0" max="1048576" value="0"><small>Zero means unlimited.</small></label>
+        <button class="primary" type="submit">Create dataset</button><div class="form-error" role="alert"></div>
+      </form>` : '<div class="module-note">ZFS dataset controls only appear when ZFS is installed and exposed to LightNAS. Other filesystems are still valid storage.</div>'}
+      <div class="storage-list compact-empty-list">${zfs.datasets?.map(dataset => `<article class="storage-row"><div><h3>${escapeHtml(dataset.name)}</h3><p>${escapeHtml(dataset.mountPoint || 'not mounted')} · compression ${escapeHtml(dataset.compression || 'unknown')}</p></div><div><b>${bytes(dataset.availableBytes)} available</b><p>${bytes(dataset.usedBytes)} used</p></div>${(zfs.pools || []).some(pool => pool.name === dataset.name) ? '' : `<button class="secondary" type="button" data-dataset="${escapeHtml(dataset.name)}">Edit properties</button>`}</article>`).join('') || '<div class="empty compact-empty"><h3>No ZFS datasets</h3><p>This installation is not currently reporting any ZFS datasets.</p></div>'}</div>
+    </section>
+    <section class="storage-workspace">
+      <div class="section-heading"><div><span class="eyebrow">HARDWARE INVENTORY</span><h2>Physical disks & exposed volumes</h2></div></div>
+      <div class="storage-list compact-empty-list">${[...disks.map(disk => ({ name: disk.name || disk.path, detail: `${disk.model || 'Block device'} · ${disk.transport || 'local'}`, size: disk.sizeBytes || disk.size })), ...availableSources.map(source => ({ name: source.device || source.mountPoint, detail: `${source.type || 'volume'} · mounted at ${source.mountPoint}${source.configured ? ' · assigned to a pool' : ' · available'}`, size: source.totalBytes }))].map(item => `<article class="storage-row"><div><h3>${escapeHtml(item.name || 'Storage device')}</h3><p>${escapeHtml(item.detail)}</p></div><div class="storage-size"><b>${bytes(item.size || 0)}</b></div></article>`).join('') || `<div class="empty compact-empty"><h3>No additional disks are exposed</h3><p>${storage.environment?.container ? 'This LightNAS instance is running in a container. Pass a host mount or block device into it to make additional storage visible.' : 'The OS has not reported an additional data disk.'}</p></div>`}</div>
+    </section>`;
 }
-
 async function loadSpaces() {
   try { state.spaces = (await request('/api/spaces')).spaces; if (['pools', 'storage'].includes(state.view)) render(state.view); } catch (error) { toast(error.message); }
 }
@@ -353,13 +360,13 @@ function permissionsView() {
 }
 
 function shellView() {
-  return `${pageHead('Node Shell', 'Open an interactive root terminal for the LightNAS operating system.')}
+  return `${pageHead('Bash Shell', 'Open an interactive Bash terminal for the LightNAS operating system.')}
     <section class="panel node-shell-launch">
-      <span class="eyebrow">PRIVILEGED NODE ACCESS</span>
-      <h2>LightNAS root shell</h2>
-      <p class="muted">This is a real root terminal on the LightNAS node. Commands can change networking, storage, services, packages, and the operating system. Access is restricted to the interactive appliance owner session.</p>
-      <div class="module-note"><b>Use with care.</b> A command entered here can disconnect the web interface or damage data just like an SSH root session.</div>
-      <div class="head-actions"><button class="primary" type="button" data-open-node-shell>Open node shell</button></div>
+      <span class="eyebrow">SYSTEM SHELL</span>
+      <h2>LightNAS Bash shell</h2>
+      <p class="muted">This opens the appliance Bash terminal in a separate window. Commands can change networking, storage, services, packages, and the operating system.</p>
+      <div class="module-note"><b>Use with care.</b> Shell commands can disconnect the web interface or modify system data.</div>
+      <div class="head-actions"><button class="primary" type="button" data-open-node-shell>Open Bash shell</button></div>
     </section>`;
 }
 
@@ -437,31 +444,32 @@ function containersView() {
   const containers = runtime?.containers || [];
   const ready = runtime?.available && runtime?.enabled && runtime.images?.length && runtime.networks?.length;
   const containerList = !runtime
-    ? '<div class="empty"><p>Loading existing system containers…</p></div>'
+    ? '<div class="empty compact-empty"><p>Loading existing system containers…</p></div>'
     : containers.length
-      ? containers.map(item => `<article class="storage-row"><div><h3>${escapeHtml(item.name)}</h3><p>Native LXC · ${escapeHtml(item.status)} · ${item.cpus || '—'} vCPU · ${bytes(item.memory || 0)} RAM${item.ipv4 ? ` · ${escapeHtml(item.ipv4)}` : ''}</p></div><div class="storage-size">${escapeHtml(item.id || item.name)}</div></article>`).join('')
-      : '<div class="empty"><p>No native system containers are visible.</p></div>';
+      ? `<div class="compute-table"><div class="compute-table-head"><span>Status</span><span>Name / ID</span><span>CPU</span><span>Memory</span><span>Network</span><span></span></div>${containers.map(item => `<article class="compute-row"><span class="compute-status"><i class="${/running|active/i.test(String(item.status || '')) ? 'online' : 'offline'}"></i>${escapeHtml(item.status || 'unknown')}</span><div><h3>${escapeHtml(item.name || item.id)}</h3><small>LXC · ID ${escapeHtml(item.id || item.name)}</small></div><span>${item.cpus || '—'} vCPU</span><span>${bytes(item.memory || 0)}</span><span>${escapeHtml(item.ipv4 || 'No IP')}</span><button class="secondary" type="button" data-container-edit="${escapeHtml(item.id || item.name)}">Manage</button></article>`).join('')}</div>`
+      : '<div class="empty compact-empty"><p>No native system containers are visible.</p></div>';
   return `${pageHead('System containers', 'Create, monitor and manage native Linux system containers.', '<div class="head-actions"><button class="secondary" data-action="refresh-runtime">Refresh</button><button class="primary" data-action="create-container">+ Create container</button></div>')}
     ${runtimeBanner('containers')}
     ${runtimeResourceSummary(containers, 'containers')}
-    ${runtime?.available && runtime?.enabled && !ready ? '<div class="module-hero"><h2>Container resources needed</h2><p>LightNAS needs a usable container image and network before a new container can be created. Low-level runtime diagnostics remain available through Admin Center health checks.</p></div>' : ''}
-    ${ready ? '<div class="module-note"><b>Ready to create.</b> New containers use the configured LightNAS LAN automatically.</div>' : ''}
-    <h2>Existing system containers</h2><div class="storage-list">${containerList}</div>`;
+    ${runtime?.available && runtime?.enabled && !ready ? '<div class="module-hero"><h2>Container resources needed</h2><p>LightNAS needs a usable container image and network before a new container can be created.</p></div>' : ''}
+    <div class="compute-section-head"><div><span class="eyebrow">SYSTEM CONTAINERS</span><h2>Inventory</h2></div><small>${containers.length} total</small></div>
+    <div class="compute-table-wrap">${containerList}</div>`;
 }
-
 function vmsView() {
   const runtime = state.runtimes?.virtualization;
   const machines = runtime?.machineDetails || [];
   const ready = runtime?.available && runtime?.enabled && runtime.pools?.length && runtime.networks?.length;
+  const rows = machines.length
+    ? `<div class="compute-table"><div class="compute-table-head"><span>Status</span><span>Name</span><span>CPU</span><span>Memory</span><span>Provider</span><span></span></div>${machines.map(item => `<article class="compute-row"><span class="compute-status"><i class="${/running|active/i.test(String(item.status || '')) ? 'online' : 'offline'}"></i>${escapeHtml(item.status || 'unknown')}</span><div><h3>${escapeHtml(item.name)}</h3><small>${item.disk ? `${bytes(item.disk)} disk` : 'Virtual machine'}</small></div><span>${item.cpus || '—'} vCPU</span><span>${bytes(item.memory || 0)}</span><span>${escapeHtml(runtime?.provider || 'libvirt')}</span><button class="secondary" type="button" data-vm-edit="${escapeHtml(item.id || item.name)}">Manage</button></article>`).join('')}</div>`
+    : '<div class="empty compact-empty"><p>No local virtual machines are visible.</p></div>';
   return `${pageHead('Virtual machines', 'Create, monitor and manage QEMU/libvirt virtual machines.', '<div class="head-actions"><button class="secondary" data-action="refresh-runtime">Refresh</button><button class="primary" data-action="create-vm">+ Create VM</button></div>')}
     ${runtimeBanner('virtualization')}
     ${runtimeResourceSummary(machines, 'virtual machines')}
     ${runtime?.warning ? `<div class="module-note"><b>Virtualization note:</b> ${escapeHtml(runtime.warning)}</div>` : ''}
-    ${runtime?.available && runtime?.enabled && !ready ? '<div class="module-hero"><h2>VM resources needed</h2><p>LightNAS needs an active VM storage location and network before a VM can be created. Engine diagnostics remain available through Admin Center health checks.</p></div>' : ''}
-    ${ready ? '<div class="module-note"><b>Ready to create.</b> Use the + Create VM button to open the guided setup wizard.</div>' : ''}
-    <h2>Existing VMs</h2><div class="storage-list">${machines.map(item => `<article class="storage-row"><div><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.status)} · ${item.cpus || '—'} vCPU · ${bytes(item.memory || 0)} RAM${item.disk ? ` · ${bytes(item.disk)} disk` : ''}</p></div><div class="storage-size">${escapeHtml(runtime?.provider || 'libvirt')}</div></article>`).join('') || '<div class="empty"><p>No local virtual machines are visible.</p></div>'}</div>`;
+    ${runtime?.available && runtime?.enabled && !ready ? '<div class="module-hero"><h2>VM resources needed</h2><p>LightNAS needs an active VM storage location and network before a VM can be created.</p></div>' : ''}
+    <div class="compute-section-head"><div><span class="eyebrow">VIRTUAL MACHINES</span><h2>Inventory</h2></div><small>${machines.length} total</small></div>
+    <div class="compute-table-wrap">${rows}</div>`;
 }
-
 function sharesView() {
   const { shares } = state.overview;
   return `${pageHead('Share plans', 'Saved configurations only. No SMB, NFS, or SFTP service is changed.', '<button class="primary" data-action="new-share">+ New plan</button>')}
@@ -473,8 +481,7 @@ const librarySections = [
   ['Documents', 'Documents'],
   ['Photos', 'Photos'],
   ['Videos', 'Videos'],
-  ['Audio', 'Audio'],
-  ['Attached storage', 'Attached storage']
+  ['Audio', 'Audio']
 ];
 
 function fileEntryPath(entry) {
@@ -523,7 +530,7 @@ function filesView() {
         <button class="secondary ${state.fileView === 'grid' ? 'active' : ''}" type="button" data-file-view="grid" aria-pressed="${state.fileView === 'grid'}">▦ Grid</button>
       </div>
       <button class="secondary" data-action="new-folder">+ Folder</button>
-      <label class="primary upload-button">Upload files<input id="file-upload" type="file" multiple hidden></label>
+      <label class="primary upload-button">Upload<input id="file-upload" type="file" multiple hidden></label>
       <label class="secondary upload-button">Upload folder<input id="folder-upload" type="file" webkitdirectory directory multiple hidden></label>
     </div></div>
     <div class="file-drop-zone" data-file-drop tabindex="0"><b>Drop files here</b><span>Multiple files and ZIP archives are supported. Use “Upload folder” to preserve a whole folder tree.</span></div>
@@ -598,7 +605,7 @@ async function uploadFilesWithProgress(fileList, folderMode = false) {
   const loadedByFile = new Array(targets.length).fill(0);
   let completedCount = 0;
   let nextIndex = 0;
-  const progress = window.LightNASProgress?.open(folderMode ? 'Uploading folder' : 'Uploading files', `${targets.length} item${targets.length === 1 ? '' : 's'} · ${bytes(totalBytes)}`);
+  const progress = window.LightNASProgress?.open(folderMode ? 'Uploading folder' : 'Uploading files', `${targets.length} item${targets.length === 1 ? '' : 's'} · ${bytes(totalBytes)}`, { modal:false });
 
   const updateProgress = (activeName = '') => {
     const transferred = loadedByFile.reduce((sum, value) => sum + value, 0);
@@ -1031,12 +1038,14 @@ function bindViewActions() {
     } else if (!confirm(`Install ${app.name} on this NAS? This creates a container and publishes its web port.`)) return;
     button.disabled = true;
     button.textContent = 'Installing…';
+    const progress = window.LightNASProgress?.open(`Installing ${app.name}`, 'Creating the app container and starting the service…', { modal:false });
     try {
       await request(`/api/catalog/${app.id}/install`, { method: 'POST', body: JSON.stringify(setup) });
       await loadRuntimes();
+      progress?.succeed(`${app.name} installed and started successfully.`);
       toast(`${app.name} installed. Use Open application to access it.`);
     }
-    catch (error) { toast(error.message); button.disabled = false; button.textContent = 'Install'; }
+    catch (error) { progress?.fail(error.message); toast(error.message); button.disabled = false; button.textContent = 'Install'; }
   }));
   $$('[data-app-action]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     const { appId, appAction } = button.dataset;
