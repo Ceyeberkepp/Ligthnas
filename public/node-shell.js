@@ -61,7 +61,7 @@ function connect() {
   socket.binaryType = 'arraybuffer';
   socket.addEventListener('open', () => {
     attempts = 0;
-    status.textContent = 'Connected · root shell';
+    status.textContent = 'Connected · Bash shell';
     terminal.focus();
   });
   socket.addEventListener('message', event => {
@@ -71,7 +71,7 @@ function connect() {
   socket.addEventListener('close', event => {
     socket = null;
     if (event.code === 1008 || event.code === 1003) {
-      status.textContent = 'Node shell access denied';
+      status.textContent = 'Bash shell access denied';
       status.classList.add('error');
       closing = true;
       return;
