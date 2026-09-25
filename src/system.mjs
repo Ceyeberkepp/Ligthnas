@@ -84,6 +84,15 @@ export async function getStorageInventory() {
   const rootFilesystem = filesystems.find(item => item.mountPoint === '/');
   const rootDevice = rootFilesystem?.device || null;
 
+  disks = disks.map(disk => {
+    const partitions = disk.partitions || [];
+    const system = disk.path === rootDevice || partitions.some(partition =>
+      partition.path === rootDevice || ['/', '/boot', '/boot/efi'].includes(partition.mountPoint)
+    );
+    const blank = !system && partitions.length === 0;
+    return { ...disk, system, blank };
+  });
+
   let proxmoxStorage = null;
   try {
     const parsed = JSON.parse(proxmoxManifestText || 'null');
