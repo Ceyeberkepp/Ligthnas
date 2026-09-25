@@ -142,9 +142,9 @@ async function recursiveFileEntries(path, prefix = '', output = [], limits = { c
   return output;
 }
 
-export async function listAllFiles() {
+export async function listAllFiles(forceRefresh = false) {
   const now = Date.now();
-  if (allFilesCache.value && allFilesCache.expiresAt > now) return allFilesCache.value;
+  if (!forceRefresh && allFilesCache.value && allFilesCache.expiresAt > now) return allFilesCache.value;
 
   await mkdir(root, { recursive: true, mode: 0o700 });
   const limits = { count: 0, max: 10000 };
