@@ -54,3 +54,21 @@ test('ISO favors faster installation and avoids first-boot package downloads', a
   assert.match(iso, /package-lock\.json/);
   assert.match(iso, /\bci \\\n\s+--omit=dev/);
 });
+
+
+test('All Files scan is bounded, cached and manually refreshable', async () => {
+  const [files, app, server] = await Promise.all([read('src/files.mjs'), read('public/app.js'), read('src/server.mjs')]);
+  assert.match(files, /offset \+= 48/);
+  assert.match(files, /Promise\.all\(batch\.map/);
+  assert.match(files, /allFilesCache = \{ expiresAt: now \+ 5000, value \}/);
+  assert.match(files, /listAllFiles\(forceRefresh = false\)/);
+  assert.match(server, /listAllFiles\(url\.searchParams\.get\('refresh'\) === '1'\)/);
+  assert.match(app, /loadFiles\(true\)/);
+});
+
+test('folder uploads use bounded parallel streams with aggregate progress', async () => {
+  const app = await read('public/app.js');
+  assert.match(app, /const concurrency = Math\.min\(3, targets\.length\)/);
+  assert.match(app, /Promise\.all\(Array\.from\(\{ length: concurrency \}/);
+  assert.match(app, /loadedByFile\.reduce/);
+});
