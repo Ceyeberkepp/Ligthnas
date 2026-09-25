@@ -246,7 +246,7 @@ document.addEventListener('submit', async event => {
     const enrollment = q('[data-totp-enrollment]');
     try {
       const result = await api('/api/security/totp/setup', { method:'POST', body:JSON.stringify(Object.fromEntries(new FormData(form))) });
-      enrollment.innerHTML = `<div class="security-enrollment"><p>Add this account to your authenticator app using the secret below, then enter the current code.</p><pre>${escapeText(result.secret)}</pre><details><summary>otpauth URI</summary><code>${escapeText(result.uri)}</code></details><form data-totp-verify><label>6-digit code<input name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required></label><button class="primary" type="submit">Verify & enable</button><div class="form-error"></div></form></div>`;
+      enrollment.innerHTML = `<div class="security-enrollment"><p>Scan this QR code with Microsoft Authenticator, Google Authenticator, 1Password, Authy, or another TOTP app. You can also enter the secret manually.</p>${result.qrCode ? `<img class="totp-qr" src="${escapeText(result.qrCode)}" alt="Authenticator QR code">` : ''}<pre>${escapeText(result.secret)}</pre><details><summary>Manual setup URI</summary><code>${escapeText(result.uri)}</code></details><form data-totp-verify><label>6-digit code<input name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required></label><button class="primary" type="submit">Verify & enable</button><div class="form-error"></div></form></div>`;
     } catch (error) { q('.form-error', form).textContent = error.message; }
     return;
   }
