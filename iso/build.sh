@@ -149,6 +149,7 @@ util-linux
 python3
 ffmpeg
 imagemagick
+qrencode
 acl
 novnc
 iproute2
