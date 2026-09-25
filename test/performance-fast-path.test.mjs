@@ -21,14 +21,18 @@ test('runtime provisioning does not reinstall QEMU when tools already exist', as
   assert.match(runtime, /\[\[ "\$vm_packages_ready" == "1" \]\] \|\| apt-get install/);
 });
 
-test('initial dashboard defers Docker LXC and VM runtime discovery', async () => {
+test('initial dashboard defers runtime and slow storage discovery', async () => {
   const server = await read('src/server.mjs');
   const start = server.indexOf("url.pathname === '/api/overview'");
   const end = server.indexOf("url.pathname === '/api/network'", start);
   const overview = server.slice(start, end);
   assert.ok(start >= 0 && end > start);
   assert.doesNotMatch(overview, /runtimeInventory\(/);
-  assert.match(overview, /getSystemSnapshot\(\), getFilesystems\(\), getStorageInventory\(\), listStoragePools\(\)/);
+  assert.match(overview, /getSystemSnapshot\(\), getFilesystems\(\)/);
+  assert.match(overview, /quickStorageSummary\(filesystems\)/);
+  assert.match(overview, /warmOverviewStorage\(\)/);
+  assert.doesNotMatch(overview, /await[^\n]*getStorageInventory\(/);
+  assert.doesNotMatch(overview, /await[^\n]*listStoragePools\(/);
 });
 
 test('automatic drive detection uses a lightweight storage scan', async () => {
@@ -48,7 +52,7 @@ test('static JS and CSS can be cached briefly while HTML revalidates', async () 
 
 test('ISO favors faster installation and avoids first-boot package downloads', async () => {
   const iso = await read('iso/build.sh');
-  assert.match(iso, /--compression gzip/);
+  assert.match(iso, /--compression zstd/);
   assert.match(iso, /^docker\.io$/m);
   assert.match(iso, /^libraw-bin$/m);
   assert.match(iso, /if \[\[ -f .*package-lock\.json/);
