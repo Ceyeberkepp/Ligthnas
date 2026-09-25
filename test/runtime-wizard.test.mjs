@@ -114,7 +114,7 @@ test('files and media share one tabbed library with sequential previews', async 
   assert.doesNotMatch(app, /\['ISO', 'ISO images'\]/);
   assert.match(app, />Upload<input id="file-upload"/);
   assert.match(app, />Upload folder<input id="folder-upload"/);
-  assert.match(app, /All files is a flat view/);
+  assert.match(app, /All files shows only your Documents, Photos, Videos, and Audio libraries/);
   assert.match(enhancements, /data-viewer-previous/);
   assert.match(enhancements, /data-viewer-next/);
   assert.match(enhancements, /ArrowLeft/);
