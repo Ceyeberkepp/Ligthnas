@@ -147,6 +147,15 @@ function canView(view, appliance = state.overview?.appliance) {
   return Array.isArray(required) && (!required.length || required.some(permission => allowed.has(permission)));
 }
 
+function applyApplianceBranding(appliance = state.overview?.appliance) {
+  if (!appliance) return;
+  const logoUrl = appliance.logo ? `url("/api/branding/logo?v=${Date.now()}")` : '';
+  $('.brand-mark').forEach(mark => {
+    mark.classList.toggle('custom-logo', Boolean(appliance.logo));
+    mark.style.backgroundImage = logoUrl;
+  });
+}
+
 async function showConsole() {
   $('#boot').classList.add('hidden');
   $('#auth').classList.add('hidden');
@@ -155,6 +164,7 @@ async function showConsole() {
   captureOverviewMetrics();
   const { appliance } = state.overview;
   $('#mini-name').textContent = appliance.deviceName;
+  applyApplianceBranding(appliance);
   const avatar = $('#avatar');
   avatar.textContent = appliance.avatar ? '' : appliance.username[0].toUpperCase();
   avatar.style.backgroundImage = appliance.avatar ? `url("/api/profile/avatar?v=${Date.now()}")` : '';
@@ -309,23 +319,23 @@ function poolsView() {
     <section class="pool-summary-grid">
       <article class="panel pool-summary"><span class="eyebrow">STORAGE POOLS</span><strong>${configuredPools.length}</strong><p>${configuredPools.length ? 'available to LightNAS' : 'inventory is still empty'}</p></article>
       <article class="panel pool-summary"><span class="eyebrow">DEVICES & VOLUMES</span><strong>${deviceCount}</strong><p>${deviceCount ? 'detected by the appliance' : 'none exposed by this host'}</p></article>
-      <article class="panel pool-summary"><span class="eyebrow">DATASETS</span><strong>${zfs.datasets?.length || 0}</strong><p>${zfs.available ? 'ZFS inventory online' : 'ZFS is not active on this installation'}</p></article>
+      <article class="panel pool-summary"><span class="eyebrow">DATASETS</span><strong>${zfs.datasets?.length || 0}</strong><p>${zfs.available ? 'ZFS storage objects' : 'Not configured'}</p></article>
     </section>
     <section class="storage-workspace">
       <div class="section-heading"><div><span class="eyebrow">POOL INVENTORY</span><h2>Storage pools</h2></div></div>
       <div class="storage-list compact-empty-list">${configuredPools.map(pool => `<article class="storage-row pool-inventory-row"><div><h3>${escapeHtml(pool.name)}</h3><p>${escapeHtml(pool.provider || pool.type || 'directory').toUpperCase()} · ${escapeHtml(pool.mountPoint || 'not mounted')} · ${(pool.contentLabels || []).map(escapeHtml).join(', ') || 'general storage'}</p></div><div><div class="track"><span style="width:${pool.usedPercent || 0}%"></span></div><p>${bytes(pool.availableBytes || 0)} free · ${pool.online ? 'online' : 'offline'}</p></div><div class="storage-size"><b>${bytes(pool.usedBytes || 0)}</b><br>of ${bytes(pool.totalBytes || 0)}</div></article>`).join('') || '<div class="empty compact-empty"><h3>No storage pool inventory yet</h3><p>Use Rescan drives. If LightNAS is running inside an LXC or VM, expose a host volume or disk to the guest first.</p></div>'}</div>
     </section>
-    <section class="storage-workspace">
-      <div class="section-heading"><div><span class="eyebrow">FILESYSTEM DATASETS</span><h2>Datasets</h2></div>${zfs.canManageDatasets ? '<button class="primary" type="button" data-show-dataset-form>+ Create dataset</button>' : ''}</div>
+    ${zfs.available ? `<section class="storage-workspace dataset-workspace">
+      <div class="section-heading"><div><span class="eyebrow">DATASETS</span><h2>ZFS datasets</h2></div>${zfs.canManageDatasets ? '<button class="primary" type="button" data-show-dataset-form>+ Create dataset</button>' : ''}</div>
       ${zfs.canManageDatasets ? `<form id="dataset-form" class="panel creation-form dataset-create-form" hidden>
         <label>Parent pool or dataset<select name="parent" required>${poolOptions.map(item => `<option value="${escapeHtml(item.name)}">${escapeHtml(item.name)}</option>`).join('')}</select></label>
         <label>Dataset name<input name="name" pattern="[a-zA-Z0-9][a-zA-Z0-9_.-]{1,63}" required placeholder="media"></label>
         <label>Compression<select name="compression"><option value="lz4">LZ4</option><option value="zstd">Zstandard</option><option value="gzip">Gzip</option><option value="off">Off</option></select></label>
         <label>Quota (GiB)<input name="quotaGiB" type="number" min="0" max="1048576" value="0"><small>Zero means unlimited.</small></label>
         <button class="primary" type="submit">Create dataset</button><div class="form-error" role="alert"></div>
-      </form>` : '<div class="module-note">ZFS dataset controls only appear when ZFS is installed and exposed to LightNAS. Other filesystems are still valid storage.</div>'}
-      <div class="storage-list compact-empty-list">${zfs.datasets?.map(dataset => `<article class="storage-row"><div><h3>${escapeHtml(dataset.name)}</h3><p>${escapeHtml(dataset.mountPoint || 'not mounted')} · compression ${escapeHtml(dataset.compression || 'unknown')}</p></div><div><b>${bytes(dataset.availableBytes)} available</b><p>${bytes(dataset.usedBytes)} used</p></div>${(zfs.pools || []).some(pool => pool.name === dataset.name) ? '' : `<button class="secondary" type="button" data-dataset="${escapeHtml(dataset.name)}">Edit properties</button>`}</article>`).join('') || '<div class="empty compact-empty"><h3>No ZFS datasets</h3><p>This installation is not currently reporting any ZFS datasets.</p></div>'}</div>
-    </section>
+      </form>` : ''}
+      <div class="dataset-grid">${zfs.datasets?.map(dataset => `<article class="panel dataset-card"><div><span class="eyebrow">DATASET</span><h3>${escapeHtml(dataset.name)}</h3><p>${escapeHtml(dataset.mountPoint || 'not mounted')}</p></div><div class="dataset-stats"><span><b>${bytes(dataset.usedBytes)}</b><small>Used</small></span><span><b>${bytes(dataset.availableBytes)}</b><small>Available</small></span><span><b>${escapeHtml(dataset.compression || 'unknown')}</b><small>Compression</small></span></div>${(zfs.pools || []).some(pool => pool.name === dataset.name) ? '' : `<button class="secondary" type="button" data-dataset="${escapeHtml(dataset.name)}">Edit</button>`}</article>`).join('') || ''}</div>
+    </section>` : ''}
     <section class="storage-workspace">
       <div class="section-heading"><div><span class="eyebrow">HARDWARE INVENTORY</span><h2>Physical disks & exposed volumes</h2></div></div>
       <div class="storage-list compact-empty-list">${[...disks.map(disk => ({ name: disk.name || disk.path, detail: `${disk.model || 'Block device'} · ${disk.transport || 'local'}`, size: disk.sizeBytes || disk.size })), ...availableSources.map(source => ({ name: source.device || source.mountPoint, detail: `${source.type || 'volume'} · mounted at ${source.mountPoint}${source.configured ? ' · assigned to a pool' : ' · available'}`, size: source.totalBytes }))].map(item => `<article class="storage-row"><div><h3>${escapeHtml(item.name || 'Storage device')}</h3><p>${escapeHtml(item.detail)}</p></div><div class="storage-size"><b>${bytes(item.size || 0)}</b></div></article>`).join('') || `<div class="empty compact-empty"><h3>No additional disks are exposed</h3><p>${storage.environment?.container ? 'This LightNAS instance is running in a container. Pass a host mount or block device into it to make additional storage visible.' : 'The OS has not reported an additional data disk.'}</p></div>`}</div>
@@ -340,12 +350,33 @@ async function loadUsers() {
 }
 
 function usersView() {
-  return `${pageHead('Administrators & users', 'Local accounts for the LightNAS browser; Linux and SMB accounts are separate.')}
-    <article class="panel"><h2>Administrator</h2><p>${escapeHtml(state.overview.appliance.username)} · appliance owner</p></article>
-    <form id="user-form" class="panel creation-form"><h2>Create local user</h2><p class="muted">Users can browse, upload and delete files. Only the appliance administrator manages settings and runtimes.</p><label>Username<input name="username" pattern="[a-zA-Z0-9._-]{3,32}" required></label><label>Password<input name="password" type="password" minlength="10" autocomplete="new-password" required></label><button class="primary" type="submit">Create user</button><div class="form-error" role="alert"></div></form>
-    <h2>Users</h2><div class="storage-list">${state.users?.map(user => `<article class="storage-row"><div><h3>${escapeHtml(user.username)}</h3><p>${user.disabled ? 'Disabled' : 'Active'}</p></div><details class="user-manager"><summary>Manage account</summary><form data-manage-user="${escapeHtml(user.username)}"><label>Administrator password<input name="currentPassword" type="password" autocomplete="current-password" required></label><label>New user password<input name="password" type="password" minlength="10" autocomplete="new-password" placeholder="At least 10 characters"></label><div class="head-actions"><button class="secondary" type="submit" value="password">Reset password</button><button class="secondary" type="submit" value="${user.disabled ? 'enable' : 'disable'}">${user.disabled ? 'Enable' : 'Disable'}</button><button class="secondary" type="button" data-remove-user="${escapeHtml(user.username)}">Remove</button></div><div class="form-error" role="alert"></div></form></details></article>`).join('') || '<div class="empty"><p>No local users yet.</p></div>'}</div>`;
+  const owner = state.overview.appliance.username;
+  const users = state.users || [];
+  const activeCount = users.filter(user => !user.disabled).length + 1;
+  return `${pageHead('Users', 'Create and manage local LightNAS accounts.', '<button class="primary" type="button" data-toggle-user-create>+ Add user</button>')}
+    <section class="user-summary-grid">
+      <article class="panel user-summary"><span class="eyebrow">OWNER</span><strong>${escapeHtml(owner)}</strong><p>Appliance administrator</p></article>
+      <article class="panel user-summary"><span class="eyebrow">ACCOUNTS</span><strong>${users.length + 1}</strong><p>${activeCount} active</p></article>
+      <article class="panel user-summary"><span class="eyebrow">LOCAL ACCESS</span><strong>LightNAS</strong><p>Separate from Linux and SMB identities</p></article>
+    </section>
+    <form id="user-form" class="panel user-create-card" hidden>
+      <div class="section-heading"><div><span class="eyebrow">NEW ACCOUNT</span><h2>Create local user</h2><p class="muted">Add a browser account, then use Permissions to choose what it can access.</p></div><button class="secondary" type="button" data-toggle-user-create>Cancel</button></div>
+      <div class="user-form-grid"><label>Username<input name="username" pattern="[a-zA-Z0-9._-]{3,32}" required placeholder="username"></label><label>Temporary password<input name="password" type="password" minlength="10" autocomplete="new-password" required placeholder="At least 10 characters"></label></div>
+      <div class="head-actions"><button class="primary" type="submit">Create user</button><button class="secondary" type="button" data-view-link="permissions">Configure permissions</button></div>
+      <div class="form-error" role="alert"></div>
+    </form>
+    <section class="user-list-section">
+      <div class="section-heading"><div><span class="eyebrow">ACCOUNTS</span><h2>Local users</h2></div><small>${users.length + 1} total</small></div>
+      <div class="user-card-grid">
+        <article class="panel user-card owner-card"><div class="user-card-avatar">${escapeHtml(owner[0]?.toUpperCase() || 'A')}</div><div class="user-card-copy"><div class="user-card-title"><h3>${escapeHtml(owner)}</h3><span class="user-status active">OWNER</span></div><p>Full appliance administration and security control.</p></div><button class="secondary" type="button" data-view-link="settings">Account settings</button></article>
+        ${users.map(user => `<article class="panel user-card ${user.disabled ? 'disabled' : ''}">
+          <div class="user-card-avatar">${escapeHtml(user.username[0]?.toUpperCase() || 'U')}</div>
+          <div class="user-card-copy"><div class="user-card-title"><h3>${escapeHtml(user.username)}</h3><span class="user-status ${user.disabled ? 'disabled' : 'active'}">${user.disabled ? 'DISABLED' : 'ACTIVE'}</span></div><p>${user.groups?.length ? `Groups: ${user.groups.map(group => escapeHtml(group.name)).join(', ')}` : 'No groups assigned'} · ${user.effectivePermissions?.length || 0} effective permissions</p></div>
+          <details class="user-manager"><summary>Manage</summary><form data-manage-user="${escapeHtml(user.username)}"><label>Administrator password<input name="currentPassword" type="password" autocomplete="current-password" required></label><label>New user password<input name="password" type="password" minlength="10" autocomplete="new-password" placeholder="Only for password reset"></label><div class="head-actions"><button class="secondary" type="submit" value="password">Reset password</button><button class="secondary" type="submit" value="${user.disabled ? 'enable' : 'disable'}">${user.disabled ? 'Enable' : 'Disable'}</button><button class="secondary" type="button" data-view-link="permissions">Permissions</button><button class="secondary danger-button" type="button" data-remove-user="${escapeHtml(user.username)}">Remove</button></div><div class="form-error" role="alert"></div></form></details>
+        </article>`).join('') || ''}
+      </div>
+    </section>`;
 }
-
 function permissionsView() {
   return `${pageHead('Permissions', 'Manage direct access scopes, groups, and inherited policy separately from account lifecycle.')}
     <section class="panel permission-intro">
@@ -705,18 +736,32 @@ function capabilitiesView() {
 function settingsView() {
   const { appliance } = state.overview;
   const zones = [['America/New_York', 'Eastern Time'], ['America/Chicago', 'Central Time'], ['America/Denver', 'Mountain Time'], ['America/Los_Angeles', 'Pacific Time'], ['UTC', 'UTC']];
-  return `${pageHead('Appliance settings', 'Update your LightNAS administrator account and display name.')}
-    <form id="settings-form" class="panel settings-form">
-      <h2>Administrator</h2><p class="muted">Signed in as ${escapeHtml(appliance.username)}. These settings apply to LightNAS only, not the Linux root account.</p>
-      <label>Device name<input name="deviceName" value="${escapeHtml(appliance.deviceName)}" required minlength="2" maxlength="32" autocomplete="off"></label>
-      <label>Display time zone<select name="timezone">${zones.map(([value, label]) => `<option value="${value}" ${appliance.timezone === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
-      <label>Current password<input name="currentPassword" type="password" required autocomplete="current-password"></label>
-      <label>New password (optional)<input name="newPassword" type="password" minlength="10" autocomplete="new-password" placeholder="Leave blank to keep current password"></label>
-      <button class="primary" type="submit">Save settings</button>
-      <div class="form-error" role="alert"></div>
-    </form>`;
-}
+  return `${pageHead('Settings & security', 'Brand the appliance, manage general settings, and control account security.')}
+    <section class="settings-dashboard">
+      <form id="settings-form" class="panel settings-general-card">
+        <div class="settings-card-head"><div><span class="eyebrow">GENERAL</span><h2>Appliance identity</h2><p class="muted">Changing the device name or time zone does not require your password.</p></div></div>
+        <div class="settings-general-grid">
+          <label>Device name<input name="deviceName" value="${escapeHtml(appliance.deviceName)}" required minlength="2" maxlength="32" autocomplete="off"></label>
+          <label>Display time zone<select name="timezone">${zones.map(([value, label]) => `<option value="${value}" ${appliance.timezone === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
+        </div>
+        <button class="primary" type="submit">Save general settings</button><div class="form-error" role="alert"></div>
+      </form>
 
+      <section class="panel branding-card">
+        <div class="settings-card-head"><div><span class="eyebrow">BRANDING</span><h2>LightNAS logo</h2><p class="muted">Upload a PNG, JPEG, or WebP logo. It will replace the default mark in the LightNAS interface.</p></div></div>
+        <div class="branding-preview"><div class="brand-logo-preview ${appliance.logo ? 'has-logo' : ''}" style="${appliance.logo ? `background-image:url('/api/branding/logo?v=${Date.now()}')` : ''}">${appliance.logo ? '' : '<span class="brand-mark small"><span></span><span></span><span></span></span>'}</div><div><b>Current appliance logo</b><p class="muted">${appliance.logo ? 'Custom logo active' : 'Using the built-in LightNAS mark'}</p></div></div>
+        <div class="head-actions"><label class="primary upload-button">Upload logo<input id="logo-upload" type="file" accept="image/png,image/jpeg,image/webp" hidden></label>${appliance.logo ? '<button class="secondary" type="button" data-remove-logo>Use default logo</button>' : ''}</div>
+        <div class="form-error" data-logo-error role="alert"></div>
+      </section>
+
+      <form id="password-form" class="panel password-card">
+        <div class="settings-card-head"><div><span class="eyebrow">PASSWORD</span><h2>Change administrator password</h2><p class="muted">Password verification is required only when changing the password.</p></div></div>
+        <label>Current password<input name="currentPassword" type="password" autocomplete="current-password" required></label>
+        <label>New password<input name="newPassword" type="password" minlength="10" autocomplete="new-password" required placeholder="At least 10 characters"></label>
+        <button class="secondary" type="submit">Change password</button><div class="form-error" role="alert"></div>
+      </form>
+    </section>`;
+}
 function adminView() {
   const { appliance } = state.overview;
   const userCount = state.users?.length ?? '—';
@@ -1042,6 +1087,12 @@ function bindViewActions() {
     catch (error) { toast(error.message); }
   }));
   $$('[data-open-space]', $('#content')).forEach(button => button.addEventListener('click', () => { state.folder = `Spaces/${button.dataset.openSpace}`; state.files = null; location.hash = 'files'; }));
+  $('[data-toggle-user-create]', $('#content')).forEach(button => button.addEventListener('click', () => {
+    const form = $('#user-form', $('#content'));
+    if (!form) return;
+    form.hidden = !form.hidden;
+    if (!form.hidden) form.querySelector('input[name="username"]')?.focus();
+  }));
   $('#user-form', $('#content'))?.addEventListener('submit', async event => {
     event.preventDefault();
     const form = event.currentTarget;
@@ -1132,12 +1183,58 @@ function bindViewActions() {
     button.disabled = true;
     try {
       const input = Object.fromEntries(new FormData(form));
-      const result = await request('/api/settings', { method: 'PATCH', body: JSON.stringify(input) });
-      form.reset();
-      if (result.signInRequired) { showAuth('login'); toast('Password changed. Sign in with the new password.'); }
-      else { state.overview = await request('/api/overview'); $('#mini-name').textContent = state.overview.appliance.deviceName; render('settings'); toast('Settings saved.'); }
+      await request('/api/settings', { method: 'PATCH', body: JSON.stringify(input) });
+      state.overview = await request('/api/overview');
+      $('#mini-name').textContent = state.overview.appliance.deviceName;
+      applyApplianceBranding(state.overview.appliance);
+      render('settings');
+      toast('General settings saved.');
     } catch (problem) { error.textContent = problem.message; }
     finally { button.disabled = false; }
+  });
+  $('#password-form', $('#content'))?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const button = $('button[type="submit"]', form);
+    const error = $('.form-error', form);
+    error.textContent = '';
+    button.disabled = true;
+    try {
+      const input = Object.fromEntries(new FormData(form));
+      const result = await request('/api/settings', { method:'PATCH', body:JSON.stringify({
+        deviceName: state.overview.appliance.deviceName,
+        timezone: state.overview.appliance.timezone,
+        currentPassword: input.currentPassword,
+        newPassword: input.newPassword
+      }) });
+      if (result.signInRequired) { showAuth('login'); toast('Password changed. Sign in with the new password.'); }
+    } catch (problem) { error.textContent = problem.message; }
+    finally { button.disabled = false; }
+  });
+  $('#logo-upload', $('#content'))?.addEventListener('change', async event => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    const error = $('[data-logo-error]', $('#content'));
+    error.textContent = '';
+    try {
+      const response = await fetch('/api/branding/logo', { method:'PUT', headers:{ 'Content-Type':file.type, 'X-LightNAS-Request':'1' }, body:file, credentials:'same-origin' });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || 'Logo upload failed.');
+      state.overview = await request('/api/overview');
+      applyApplianceBranding(state.overview.appliance);
+      render('settings');
+      toast('Logo updated.');
+    } catch (problem) { error.textContent = problem.message; }
+  });
+  $('[data-remove-logo]', $('#content'))?.addEventListener('click', async () => {
+    try {
+      await request('/api/branding/logo', { method:'DELETE' });
+      state.overview = await request('/api/overview');
+      applyApplianceBranding(state.overview.appliance);
+      render('settings');
+      toast('Default LightNAS logo restored.');
+    } catch (problem) { toast(problem.message); }
   });
   const filterApps = () => {
     const search = ($('#app-search', $('#content'))?.value || '').trim().toLowerCase();
