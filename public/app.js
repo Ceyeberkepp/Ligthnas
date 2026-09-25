@@ -605,7 +605,7 @@ async function uploadFilesWithProgress(fileList, folderMode = false) {
   const loadedByFile = new Array(targets.length).fill(0);
   let completedCount = 0;
   let nextIndex = 0;
-  const progress = window.LightNASProgress?.open(folderMode ? 'Uploading folder' : 'Uploading files', `${targets.length} item${targets.length === 1 ? '' : 's'} · ${bytes(totalBytes)}`);
+  const progress = window.LightNASProgress?.open(folderMode ? 'Uploading folder' : 'Uploading files', `${targets.length} item${targets.length === 1 ? '' : 's'} · ${bytes(totalBytes)}`, { modal:false });
 
   const updateProgress = (activeName = '') => {
     const transferred = loadedByFile.reduce((sum, value) => sum + value, 0);
@@ -1038,12 +1038,14 @@ function bindViewActions() {
     } else if (!confirm(`Install ${app.name} on this NAS? This creates a container and publishes its web port.`)) return;
     button.disabled = true;
     button.textContent = 'Installing…';
+    const progress = window.LightNASProgress?.open(`Installing ${app.name}`, 'Creating the app container and starting the service…', { modal:false });
     try {
       await request(`/api/catalog/${app.id}/install`, { method: 'POST', body: JSON.stringify(setup) });
       await loadRuntimes();
+      progress?.succeed(`${app.name} installed and started successfully.`);
       toast(`${app.name} installed. Use Open application to access it.`);
     }
-    catch (error) { toast(error.message); button.disabled = false; button.textContent = 'Install'; }
+    catch (error) { progress?.fail(error.message); toast(error.message); button.disabled = false; button.textContent = 'Install'; }
   }));
   $$('[data-app-action]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     const { appId, appAction } = button.dataset;
