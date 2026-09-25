@@ -1183,7 +1183,7 @@ async function api(req, res, url) {
       'X-Content-Type-Options': 'nosniff',
       'Content-Security-Policy': csp
     });
-    const archive = spawn('tar', ['-C', dirname(data.path), '-czf', '-', folderName], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const archive = spawn('tar', ['-czf', '-', '-C', dirname(data.path), folderName], { stdio: ['ignore', 'pipe', 'pipe'] });
     let stderr = '';
     archive.stderr.on('data', chunk => { if (stderr.length < 4096) stderr += chunk.toString('utf8'); });
     archive.on('error', error => { if (!res.destroyed) res.destroy(error); });
