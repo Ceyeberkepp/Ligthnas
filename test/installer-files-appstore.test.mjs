@@ -23,7 +23,7 @@ test('All Files is flat, includes attached storage, and folder uploads show prog
   assert.match(app, /data-file-drop/);
   assert.match(app, /event\.dataTransfer\?\.files/);
   assert.match(files, /mkdir\(await checked\(relative, false\), \{ recursive: true/);
-  assert.match(app, /allFiles \? state\.files\.filter\(entry => !entry\.directory\)/);
+  assert.match(app, /allFiles \? state\.files\.filter\(entry => !entry\.directory && !isSystemImageFile\(entry\.name\)\)/);
 });
 
 test('Files refresh and storage hot-plug detection are explicit', async () => {
