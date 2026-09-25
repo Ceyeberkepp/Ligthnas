@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, generateKeyPairSync, sign } from 'node:crypto';
-import { base64url, verifyAssertion, verifyRegistration } from '../src/mfa.mjs';
+import { base64url, smsCode, smsCodeDigest, verifySmsCode, verifyAssertion, verifyRegistration } from '../src/mfa.mjs';
 
 test('WebAuthn registration and assertion validate RP, challenge and signature', () => {
   const rpId = 'nas.example.test';
@@ -22,4 +22,15 @@ test('WebAuthn registration and assertion validate RP, challenge and signature',
   const signature = sign('sha256', signed, privateKey);
   assert.equal(verifyAssertion({ response:{ id:'credential-one', clientDataJSON:base64url(assertionClient), authenticatorData:base64url(authenticatorData), signature:base64url(signature) }, credential:registered, expectedChallenge, rpId }), true);
   assert.equal(registered.signCount, 2);
+});
+
+
+test('SMS verification codes are six digits and digest verification is constant-time compatible', () => {
+  const code = smsCode();
+  assert.match(code, /^[0-9]{6}$/);
+  const nonce = 'test-nonce';
+  const digest = smsCodeDigest(code, nonce);
+  assert.equal(verifySmsCode(code, nonce, digest), true);
+  assert.equal(verifySmsCode(code === '999999' ? '888888' : '999999', nonce, digest), false);
+  assert.equal(verifySmsCode(code, 'different-nonce', digest), false);
 });
