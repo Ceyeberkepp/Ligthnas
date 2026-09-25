@@ -1,9 +1,8 @@
-const state = { overview: null, view: 'home', folder: '', files: null, fileError: null, fileLayout: localStorage.getItem('lightnas-file-layout') === 'grid' ? 'grid' : 'list', overviewMetric: localStorage.getItem('lightnas-overview-metric') || 'cpu', lastNetworkSample: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, smtp: undefined, media: null, network: null, metricHistory: { cpu: [], load: [], memory: [], storage: [], networkIn: [], networkOut: [] } };
+const state = { overview: null, view: 'home', folder: '', files: null, fileError: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, smtp: undefined, media: null, network: null, fileView: localStorage.getItem('lightnas-file-view') === 'grid' ? 'grid' : 'list', fileTruncated: false };
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
 const themeChoices = ['system', 'light', 'dark'];
 let theme = themeChoices.includes(localStorage.getItem('lightnas-theme')) ? localStorage.getItem('lightnas-theme') : 'system';
-let overviewTimer = null;
 const systemTheme = matchMedia('(prefers-color-scheme: dark)');
 function applyTheme() {
   document.documentElement.dataset.theme = theme === 'system' ? (systemTheme.matches ? 'dark' : 'light') : theme;
@@ -69,44 +68,56 @@ function showAuth(mode) {
   setTimeout(() => $(`#${mode}-form input`)?.focus(), 0);
 }
 
-function canView(view, appliance = state.overview?.appliance) {
-  if (!appliance) return false;
-  if (appliance.role === 'administrator') return true;
-  const allowed = new Set(appliance.permissions || []);
-  const required = {
-    home: ['overview.view'], files: ['files.read'], media: ['files.read'], storage: ['storage.view'], pools: ['pools.view', 'storage.manage'], shares: ['shares.view', 'shares.manage'],
-    apps: ['apps.view', 'apps.manage'], containers: ['containers.view', 'containers.manage', 'containers.console'], vms: ['vms.view', 'vms.manage', 'vms.console'],
-    network: ['network.view'], firewall: ['firewall.view', 'firewall.manage', 'network.manage'], monitoring: ['monitoring.view', 'system.view'], capabilities: ['capabilities.view', 'system.view'],
-    integrations: ['integrations.view', 'integrations.manage'], assistant: ['admin.view', 'system.view'], users: ['users.manage'], smtp: ['smtp.manage'], settings: ['settings.manage'], admin: ['admin.view']
-  }[view];
-  return Array.isArray(required) && (!required.length || required.some(permission => allowed.has(permission)));
-}
-
 async function showConsole() {
   $('#boot').classList.add('hidden');
   $('#auth').classList.add('hidden');
   $('#console').classList.remove('hidden');
   state.overview = await request('/api/overview');
-  captureOverviewMetrics();
   const { appliance } = state.overview;
   $('#mini-name').textContent = appliance.deviceName;
-  $('#avatar-initial').textContent = appliance.username[0].toUpperCase();
-  $('#avatar').classList.toggle('has-photo', Boolean(appliance.hasAvatar));
-  $('#avatar').style.backgroundImage = appliance.hasAvatar ? `url(/api/profile/avatar?v=${Date.now()})` : '';
-  $('#node-shell-button').classList.toggle('hidden', appliance.role !== 'administrator' && !(appliance.permissions || []).includes('system.shell'));
-  $$('[data-view]').forEach(link => link.classList.toggle('hidden', !canView(link.dataset.view, appliance)));
+  const avatar = $('#avatar');
+  avatar.textContent = appliance.avatar ? '' : appliance.username[0].toUpperCase();
+  avatar.style.backgroundImage = appliance.avatar ? `url("/api/profile/avatar?v=${Date.now()}")` : '';
+  avatar.classList.toggle('has-photo', Boolean(appliance.avatar));
+  $$('[data-view]').forEach(link => link.classList.toggle('hidden', appliance.role !== 'administrator' && !['home', 'files', 'media'].includes(link.dataset.view)));
   $$('.nav-group').forEach(group => group.classList.toggle('hidden', !group.querySelector('[data-view]:not(.hidden)')));
   render(location.hash.slice(1) || 'home');
-  clearInterval(overviewTimer);
-  overviewTimer = setInterval(async () => {
-    if (state.view !== 'home' || $('#console').classList.contains('hidden')) return;
-    try {
-      state.overview = await request('/api/overview');
-      captureOverviewMetrics();
-      render('home');
-    } catch {}
-  }, 15000);
+  $('#nav a[data-view], .foot-admin[data-view]').forEach(link => {
+    const label = link.textContent.replace(/\s+/g, ' ').trim();
+    if (label) link.title = label;
+  });
+  rememberStorageSignature();
 }
+
+function storageInventorySignature(overview = state.overview) {
+  const storage = overview?.storage || {};
+  const disks = (storage.disks || []).map(item => [item.path, item.sizeBytes, item.system, item.blank].join(':')).sort();
+  const volumes = (storage.attachedVolumes || []).map(item => [item.device, item.mountPoint, item.totalBytes].join(':')).sort();
+  return JSON.stringify({ disks, volumes });
+}
+
+let lastStorageSignature = '';
+function rememberStorageSignature() {
+  lastStorageSignature = storageInventorySignature();
+}
+
+async function autoDetectStorage() {
+  if (!state.overview || document.hidden || $('#console')?.classList.contains('hidden')) return;
+  try {
+    const fresh = await request('/api/overview');
+    const signature = storageInventorySignature(fresh);
+    const changed = Boolean(lastStorageSignature && signature !== lastStorageSignature);
+    state.overview = fresh;
+    lastStorageSignature = signature;
+    if (changed) {
+      if (['home', 'storage', 'pools'].includes(state.view)) render(state.view);
+      toast('New or changed storage detected.');
+    }
+  } catch {}
+}
+
+setInterval(autoDetectStorage, 8000);
+addEventListener('focus', () => { if (['home', 'storage', 'pools'].includes(state.view)) autoDetectStorage(); });
 
 function pageHead(title, description, action = '') {
   return `<div class="page-head"><div><span class="eyebrow">LIGHTNAS CONTROL CENTER</span><h1>${title}</h1><p>${description}</p></div>${action}</div>`;
@@ -116,45 +127,6 @@ function metric(label, value, percent, detail) {
   return `<article class="metric"><div class="metric-head"><span>${label}</span><span>${percent}%</span></div><strong>${value}</strong><div class="track"><span style="width:${Math.min(100, percent)}%"></span></div><small>${detail}</small></article>`;
 }
 
-function captureOverviewMetrics() {
-  if (!state.overview) return;
-  const system = state.overview.system || {};
-  const storage = state.overview.storage?.usableStorage || state.overview.storage?.virtualStorage || state.overview.storage?.local || {};
-  const currentNetwork = system.network || {};
-  const now = Date.now();
-  const elapsed = state.lastNetworkSample ? Math.max(.001, (now - state.lastNetworkSample.time) / 1000) : 0;
-  const receivedRate = elapsed ? Math.max(0, (Number(currentNetwork.receivedBytes || 0) - state.lastNetworkSample.receivedBytes) / elapsed) : 0;
-  const transmittedRate = elapsed ? Math.max(0, (Number(currentNetwork.transmittedBytes || 0) - state.lastNetworkSample.transmittedBytes) / elapsed) : 0;
-  state.lastNetworkSample = { time: now, receivedBytes: Number(currentNetwork.receivedBytes || 0), transmittedBytes: Number(currentNetwork.transmittedBytes || 0) };
-  const sample = {
-    cpu: Number(system.cpu?.loadPercent) || 0,
-    load: Number(system.cpu?.loadAverage?.[0]) || 0,
-    memory: Number(system.memory?.usedPercent) || 0,
-    storage: Number(storage.usedPercent) || 0,
-    networkIn: receivedRate,
-    networkOut: transmittedRate
-  };
-  for (const [key, value] of Object.entries(sample)) {
-    state.metricHistory[key].push(value);
-    if (state.metricHistory[key].length > 60) state.metricHistory[key].shift();
-  }
-}
-
-function overviewChart(label, value, suffix, history, maximum = 100) {
-  const points = history.length > 1 ? history : [history[0] || 0, history[0] || 0];
-  const ceiling = Math.max(maximum, ...points, 1);
-  const coordinates = points.map((item, index) => `${(index / Math.max(points.length - 1, 1)) * 100},${38 - (Math.min(ceiling, item) / ceiling) * 34}`).join(' ');
-  return `<article class="overview-chart panel"><div class="overview-chart-head"><div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}${escapeHtml(suffix)}</strong></div><small>Live · last ${points.length} sample${points.length === 1 ? '' : 's'}</small></div><svg viewBox="0 0 100 40" preserveAspectRatio="none" role="img" aria-label="${escapeHtml(label)} history"><defs><linearGradient id="chart-${escapeHtml(label.replace(/\W/g, ''))}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--accent)" stop-opacity=".52"/><stop offset="1" stop-color="var(--accent)" stop-opacity=".04"/></linearGradient></defs><polygon points="0,40 ${coordinates} 100,40" fill="url(#chart-${escapeHtml(label.replace(/\W/g, ''))})"/><polyline points="${coordinates}" fill="none" stroke="var(--accent)" stroke-width="1.2" vector-effect="non-scaling-stroke"/></svg></article>`;
-}
-
-function overviewNetworkChart(system) {
-  const received = state.metricHistory.networkIn.length > 1 ? state.metricHistory.networkIn : [0, 0];
-  const transmitted = state.metricHistory.networkOut.length > 1 ? state.metricHistory.networkOut : [0, 0];
-  const ceiling = Math.max(...received, ...transmitted, 1024);
-  const points = values => values.map((item, index) => `${(index / Math.max(values.length - 1, 1)) * 100},${38 - (Math.min(ceiling, item) / ceiling) * 34}`).join(' ');
-  return `<article class="overview-chart panel"><div class="overview-chart-head"><div><span>Network throughput</span><strong>↓ ${bytes(received.at(-1) || 0)}/s · ↑ ${bytes(transmitted.at(-1) || 0)}/s</strong></div><small>${system.network?.interfaces || 0} active interface${system.network?.interfaces === 1 ? '' : 's'}</small></div><svg viewBox="0 0 100 40" preserveAspectRatio="none" role="img" aria-label="Network receive and transmit history"><polyline points="${points(received)}" fill="none" stroke="var(--accent)" stroke-width="1.4" vector-effect="non-scaling-stroke"/><polyline points="${points(transmitted)}" fill="none" stroke="#6f7cff" stroke-width="1.4" vector-effect="non-scaling-stroke"/></svg><div class="chart-legend"><span><i></i>Received</span><span><i class="sent"></i>Sent</span></div></article>`;
-}
-
 function homeView() {
   const { system, filesystems, storage, shares, activity, appliance } = state.overview;
   const visibleStorage = storage.usableStorage || storage.virtualStorage || storage.local || { totalBytes: 0, usedBytes: 0, availableBytes: 0, usedPercent: 0, count: 0 };
@@ -162,60 +134,46 @@ function homeView() {
   const used = visibleStorage.usedBytes || 0;
   const available = visibleStorage.availableBytes ?? Math.max(0, total - used);
   const storagePercent = visibleStorage.usedPercent ?? (total ? Math.round((used / total) * 100) : 0);
-  const loadAverage = system.cpu.loadAverage || [0, 0, 0];
-  const graphButtons = [['cpu','CPU'],['load','Load'],['memory','Memory'],['storage','Storage'],['network','Network']].map(([id, label]) => `<button type="button" class="${state.overviewMetric === id ? 'active' : ''}" data-overview-metric="${id}" aria-pressed="${state.overviewMetric === id}">${label}</button>`).join('');
-  const graph = state.overviewMetric === 'network' ? overviewNetworkChart(system)
-    : state.overviewMetric === 'load' ? overviewChart('System load', `${loadAverage[0]}`, '', state.metricHistory.load, Math.max(2, system.cpu.cores))
-    : state.overviewMetric === 'memory' ? overviewChart('Memory usage', `${system.memory.usedPercent}`, '%', state.metricHistory.memory)
-    : state.overviewMetric === 'storage' ? overviewChart('Storage usage', `${storagePercent}`, '%', state.metricHistory.storage)
-    : overviewChart('CPU usage', `${system.cpu.loadPercent}`, '%', state.metricHistory.cpu);
-  return `${pageHead('Overview', 'Live system health and storage at a glance.', '<button class="secondary" data-action="refresh">Refresh</button>')}
-    <section class="node-overview-grid">
-      <article class="panel node-summary-card"><div class="panel-head"><div><span class="eyebrow">${escapeHtml(appliance.deviceName)}</span><h2>System status</h2></div><span class="volume-state writable">ONLINE</span></div>
-        <div class="node-usage-row"><span>CPU usage</span><div class="track"><span style="width:${system.cpu.loadPercent}%"></span></div><b>${system.cpu.loadPercent}% of ${system.cpu.cores} CPU(s)</b></div>
-        <div class="node-usage-row"><span>Load average</span><div class="track"><span style="width:${Math.min(100, (loadAverage[0] / Math.max(system.cpu.cores, 1)) * 100)}%"></span></div><b>${loadAverage.join(', ')}</b></div>
-        <div class="node-usage-row"><span>RAM usage</span><div class="track"><span style="width:${system.memory.usedPercent}%"></span></div><b>${system.memory.usedPercent}% · ${bytes(system.memory.usedBytes)} of ${bytes(system.memory.totalBytes)}</b></div>
-        <div class="node-usage-row"><span>Storage</span><div class="track"><span style="width:${storagePercent}%"></span></div><b>${storagePercent}% · ${bytes(used)} of ${bytes(total)}</b></div>
-        <dl class="node-facts"><div><dt>CPU</dt><dd>${escapeHtml(system.cpu.model)}</dd></div><div><dt>Kernel</dt><dd>${escapeHtml(system.kernel)}</dd></div><div><dt>Architecture</dt><dd>${escapeHtml(system.architecture)}</dd></div><div><dt>Mounted filesystems</dt><dd>${filesystems.length}</dd></div><div><dt>Available storage</dt><dd>${bytes(available)}</dd></div></dl>
-      </article>
-      <section class="overview-graph-panel"><nav class="overview-graph-tabs" aria-label="Performance graph">${graphButtons}</nav>${graph}</section>
+  return `${pageHead(`Good day, ${escapeHtml(appliance.username)}`, `Here’s what is happening on ${escapeHtml(appliance.deviceName)}.`)}
+    <section class="hero">
+      <div><span class="eyebrow">LIVE HOST INVENTORY</span><h2>Storage visible to this system</h2><p>Showing current host mounts and disks. An LXC may only expose its virtual storage.</p><div class="hero-actions"><button class="secondary" data-view-link="storage">Review storage</button></div></div>
+      <div class="hero-stat"><strong>${total ? bytes(total) : '—'}</strong><span>total usable storage · ${bytes(available)} free</span></div>
     </section>
-    <section class="dashboard-grid overview-bottom-grid">
-      <article class="panel"><div class="panel-head"><h2>Shares</h2><button class="panel-link" data-view-link="shares">Open shares</button></div>${shares.length ? `<div class="share-list">${shares.slice(0, 4).map(share => `<div class="share-row"><div><h3>${escapeHtml(share.name)}</h3><p>${escapeHtml(share.protocol)} · ${escapeHtml(share.description || 'No description')}</p></div></div>`).join('')}</div>` : '<p class="muted">No shares configured.</p>'}</article>
-      <article class="panel"><div class="panel-head"><h2>Recent activity</h2><button class="panel-link" data-view-link="monitoring">View all</button></div><div class="activity-list">${activity.length ? activity.slice(0, 5).map(item => `<div class="activity"><span class="activity-icon">${item.type === 'setup' ? '✓' : '↗'}</span><div><b>${escapeHtml(item.message)}</b><time>${relativeTime(item.timestamp)}</time></div></div>`).join('') : '<p class="muted">No recent activity.</p>'}</div></article>
+    <section class="metric-grid">
+      ${metric('Storage', bytes(used), storagePercent, `${bytes(available)} available of ${bytes(total)}`)}
+      ${metric('Memory', bytes(system.memory.usedBytes), system.memory.usedPercent, `${bytes(system.memory.totalBytes)} installed`)}
+      ${metric('CPU load', `${system.cpu.loadPercent}%`, system.cpu.loadPercent, `${system.cpu.cores} logical cores`)}
+      ${metric('Mounts', filesystems.length, 0, 'Readable mounted filesystems')}
+    </section>
+    <section class="dashboard-grid">
+      <article class="panel"><div class="panel-head"><h2>Planned shares</h2><button class="panel-link" data-action="new-share">+ Save plan</button></div>${shares.length ? `<div class="share-list">${shares.slice(0, 4).map(share => `<div class="share-row"><div><h3>${escapeHtml(share.name)}</h3><p>${escapeHtml(share.protocol)} · ${escapeHtml(share.description || 'No description')} · Configuration only</p></div></div>`).join('')}</div>` : `<div class="empty"><div><h3>No share plans saved</h3><p>SMB and NFS provisioning are not available yet.</p></div></div>`}</article>
+      <article class="panel"><div class="panel-head"><h2>Recent activity</h2><button class="panel-link" data-view-link="monitoring">View all</button></div><div class="activity-list">${activity.length ? activity.map(item => `<div class="activity"><span class="activity-icon">${item.type === 'setup' ? '✓' : item.type === 'share' ? '□' : '↗'}</span><div><b>${escapeHtml(item.message)}</b><time>${relativeTime(item.timestamp)}</time></div></div>`).join('') : '<p class="muted">No recent activity.</p>'}</div></article>
     </section>`;
 }
 
 function storageView() {
-  return `${pageHead('Storage', 'Configure storage targets and manage the content stored on each one.')}
-    <div id="storage-manager"></div>`;
+  const { filesystems } = state.overview;
+  return `${pageHead('Storage', 'LightNAS storage pools, capacity and content libraries.', '<div class="head-actions"><button class="secondary" data-action="refresh-storage">Rescan drives</button><button class="primary" data-view-link="pools">Manage storage</button></div>')}
+    <div id="storage-manager"></div>
+    <h2>LightNAS storage spaces</h2>
+    <div class="storage-list">${state.spaces?.map(space => `<article class="storage-row"><div><h3>${escapeHtml(space.label)}</h3><p>Spaces/${escapeHtml(space.name)}</p></div><button class="secondary" data-open-space="${escapeHtml(space.name)}">Open</button></article>`).join('') || '<div class="empty"><p>No file spaces yet.</p></div>'}</div>
+    <details class="panel"><summary><b>Advanced mounted filesystems</b></summary>
+      <div class="storage-list">${filesystems.map(fs => `<article class="storage-row"><div><h3>${escapeHtml(fs.mountPoint)}</h3><p>${escapeHtml(fs.device)} · ${escapeHtml(fs.type)}${fs.readOnly ? ' · Read only' : ''}</p></div><div><div class="track"><span style="width:${fs.usedPercent}%"></span></div><p>${fs.usedPercent}% used</p></div><div class="storage-size"><b>${bytes(fs.usedBytes)}</b><br>of ${bytes(fs.totalBytes)}</div></article>`).join('') || '<div class="empty"><p>No readable mounted filesystems.</p></div>'}</div>
+    </details>`;
 }
 
 function poolsView() {
-  const storage = state.overview.storage || {};
-  const zfs = storage.zfs || { available: false, canManageDatasets: false, pools: [], datasets: [] };
-  const disks = storage.disks || [];
-  const configuredPools = storage.configuredPools || [];
-  const availableSources = storage.availableSources || [];
-  const poolOptions = [...(zfs.pools || []), ...(zfs.datasets || []).filter(item => !(zfs.pools || []).some(pool => pool.name === item.name))];
-  return `${pageHead('Pools & datasets', 'Create and manage physical storage pools, datasets, and storage providers.', '<div class="head-actions"><button class="secondary" data-view-link="storage">Storage inventory</button><button class="primary" type="button" data-create-storage>+ Add storage</button></div>')}
-    <section class="pool-summary-grid">
-      <article class="panel pool-summary"><span class="eyebrow">STORAGE POOLS</span><strong>${configuredPools.length}</strong><p>configured in LightNAS</p></article>
-      <article class="panel pool-summary"><span class="eyebrow">DEVICES & VOLUMES</span><strong>${disks.length + availableSources.length}</strong><p>exposed to this installation</p></article>
-      <article class="panel pool-summary"><span class="eyebrow">DATASETS</span><strong>${zfs.datasets?.length || 0}</strong><p>${zfs.available ? 'ZFS inventory online' : 'No ZFS datasets detected'}</p></article>
-    </section>
-    <div class="section-heading"><div><span class="eyebrow">POOL INVENTORY</span><h2>Storage pools</h2></div></div>
-    <div class="storage-list">${configuredPools.map(pool => `<article class="storage-row pool-inventory-row"><div><h3>${escapeHtml(pool.name)}</h3><p>${escapeHtml(pool.provider || 'directory').toUpperCase()} · ${escapeHtml(pool.mountPoint || 'not mounted')} · ${(pool.contentLabels || []).map(escapeHtml).join(', ')}</p></div><div><div class="track"><span style="width:${pool.usedPercent || 0}%"></span></div><p>${bytes(pool.availableBytes || 0)} free · ${pool.online ? 'online' : 'offline'}</p></div><div class="storage-size"><b>${bytes(pool.usedBytes || 0)}</b><br>of ${bytes(pool.totalBytes || 0)}</div></article>`).join('') || '<div class="empty"><h3>No LightNAS storage pools configured</h3><p>Use Add storage to attach an exposed volume.</p></div>'}</div>
-    <div class="section-heading"><div><span class="eyebrow">FILESYSTEM DATASETS</span><h2>Datasets</h2></div>${zfs.canManageDatasets ? '<button class="primary" type="button" data-show-dataset-form>+ Create dataset</button>' : ''}</div>
-    ${zfs.canManageDatasets ? `<form id="dataset-form" class="panel creation-form dataset-create-form" hidden>
-      <label>Parent pool or dataset<select name="parent" required>${poolOptions.map(item => `<option value="${escapeHtml(item.name)}">${escapeHtml(item.name)}</option>`).join('')}</select></label>
-      <label>Dataset name<input name="name" pattern="[a-zA-Z0-9][a-zA-Z0-9_.-]{1,63}" required placeholder="media"></label>
-      <label>Compression<select name="compression"><option value="lz4">LZ4</option><option value="zstd">Zstandard</option><option value="gzip">Gzip</option><option value="off">Off</option></select></label>
-      <label>Quota (GiB)<input name="quotaGiB" type="number" min="0" max="1048576" value="0"><small>Zero means unlimited.</small></label>
-      <button class="primary" type="submit">Create dataset</button><div class="form-error" role="alert"></div>
-    </form>` : '<div class="module-note">Dataset changes are disabled on this installation. Existing pools and datasets remain visible, but LightNAS will not pretend it can modify them.</div>'}
-    <div class="storage-list">${zfs.datasets?.map(dataset => `<article class="storage-row"><div><h3>${escapeHtml(dataset.name)}</h3><p>${escapeHtml(dataset.mountPoint || 'not mounted')} · compression ${escapeHtml(dataset.compression || 'unknown')}</p></div><div><b>${bytes(dataset.availableBytes)} available</b><p>${bytes(dataset.usedBytes)} used</p></div>${(zfs.pools || []).some(pool => pool.name === dataset.name) ? '' : `<button class="secondary" type="button" data-dataset="${escapeHtml(dataset.name)}">Edit properties</button>`}</article>`).join('') || '<div class="empty"><p>No ZFS datasets detected.</p></div>'}</div>
-    <div class="section-heading"><div><span class="eyebrow">HARDWARE INVENTORY</span><h2>Physical disks & exposed volumes</h2></div></div><div class="storage-list">${[...disks.map(disk => ({ name: disk.name || disk.path, detail: `${disk.model || 'Block device'} · ${disk.transport || 'local'}`, size: disk.sizeBytes || disk.size })), ...availableSources.map(source => ({ name: source.device || source.mountPoint, detail: `${source.type || 'volume'} · mounted at ${source.mountPoint}${source.configured ? ' · assigned to a pool' : ' · available'}`, size: source.totalBytes }))].map(item => `<article class="storage-row"><div><h3>${escapeHtml(item.name || 'Storage device')}</h3><p>${escapeHtml(item.detail)}</p></div><div class="storage-size"><b>${bytes(item.size || 0)}</b></div></article>`).join('') || `<div class="empty"><h3>No physical disks are visible</h3><p>${storage.environment?.container ? 'LightNAS is running in a container. Attach a host volume to expose storage here.' : 'No block devices were returned by the operating system.'}</p></div>`}</div>`;
+  return `${pageHead('Storage pools', 'Create and manage LightNAS storage from local space and attached virtual volumes.', '<button class="secondary" data-action="refresh-storage">Rescan drives</button>')}
+    <div id="storage-manager"></div>
+    <div id="container-template-library"></div>
+    <h2>Storage spaces</h2>
+    <p class="muted">Storage spaces are folders managed by LightNAS. VM ISO images, container templates, VM disks and backups are managed inside the storage pools above.</p>
+    <form id="space-form" class="panel creation-form">
+      <label>Folder name<input name="name" pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{1,39}" required placeholder="archive"></label>
+      <label>Display label<input name="label" maxlength="80" required placeholder="Team archive"></label>
+      <button class="primary" type="submit">Create storage space</button><div class="form-error" role="alert"></div>
+    </form>
+    <div class="storage-list">${state.spaces?.map(space => `<article class="storage-row"><div><h3>${escapeHtml(space.label)}</h3><p>Spaces/${escapeHtml(space.name)}</p></div><button class="secondary" data-edit-space="${escapeHtml(space.name)}">Edit label</button><button class="secondary" data-open-space="${escapeHtml(space.name)}">Open files</button></article>`).join('') || '<div class="empty"><p>No storage spaces created yet.</p></div>'}</div>`;
 }
 
 async function loadSpaces() {
@@ -223,17 +181,34 @@ async function loadSpaces() {
 }
 
 async function loadUsers() {
-  try { const data = await request('/api/users'); state.users = data.users; state.groups = data.groups || []; if (state.view === 'users') render(state.view); } catch (error) { toast(error.message); }
+  try { state.users = (await request('/api/users')).users; if (['users', 'permissions'].includes(state.view)) render(state.view); } catch (error) { toast(error.message); }
 }
 
 function usersView() {
-  const groupChoices = state.groups?.map(group => `<label><input type="checkbox" name="groups" value="${escapeHtml(group.id)}"> <span><b>${escapeHtml(group.name)}</b><small>${escapeHtml(group.description || 'Group policy')}</small></span></label>`).join('') || '<p class="muted">Create a group below, then assign users to it.</p>';
-  return `${pageHead('Users & groups', 'Create local accounts and assign all access through reusable group policies.')}
-    <section class="identity-summary"><article class="panel identity-stat"><span class="identity-icon">A</span><div><b>${escapeHtml(state.overview.appliance.username)}</b><small>Appliance owner · full access</small></div></article><article class="panel identity-stat"><strong>${state.users?.length || 0}</strong><div><b>Local users</b><small>${state.groups?.length || 0} permission groups</small></div></article></section>
-    <div id="groups-admin-mount"><div class="panel groups-loading">Loading group policies…</div></div>
-    <section class="identity-layout">
-      <form id="user-form" class="panel user-create-card"><span class="eyebrow">NEW ACCOUNT</span><h2>Create local user</h2><p class="muted">Users receive access from the groups selected here. Permissions are edited on the group, not on individual accounts.</p><div class="identity-form-grid"><label>Username<input name="username" pattern="[a-zA-Z0-9._-]{3,32}" required></label><label>Password<input name="password" type="password" minlength="10" autocomplete="new-password" required></label></div><fieldset class="group-choice-list"><legend>Group membership</legend>${groupChoices}</fieldset><button class="primary" type="submit">Create user</button><div class="form-error" role="alert"></div></form>
-      <section class="user-directory"><div class="section-heading"><div><span class="eyebrow">LOCAL ACCOUNTS</span><h2>Users</h2></div><span class="content-badge">${state.users?.length || 0}</span></div><div class="user-card-list">${state.users?.map(user => `<article class="panel user-card"><div class="user-card-head"><span class="user-avatar">${escapeHtml(user.username[0].toUpperCase())}</span><div><h3>${escapeHtml(user.username)}</h3><p>${user.disabled ? 'Disabled' : 'Active'} · ${(user.groups || []).map(group => escapeHtml(group.name)).join(', ') || 'No group'}</p></div><span class="volume-state ${user.disabled ? 'readonly' : 'writable'}">${user.disabled ? 'DISABLED' : 'ACTIVE'}</span></div><details class="user-manager"><summary>Manage account & groups</summary><form data-manage-user="${escapeHtml(user.username)}"><label>Current account password<input name="currentPassword" type="password" autocomplete="current-password" required></label><label>New user password<input name="password" type="password" minlength="10" autocomplete="new-password" placeholder="At least 10 characters"></label><div class="head-actions"><button class="secondary" type="submit" value="password">Reset password</button><button class="secondary" type="submit" value="${user.disabled ? 'enable' : 'disable'}">${user.disabled ? 'Enable' : 'Disable'}</button><button class="secondary danger-button" type="button" data-remove-user="${escapeHtml(user.username)}">Remove</button></div><div class="form-error" role="alert"></div></form></details></article>`).join('') || '<div class="empty"><p>No local users yet.</p></div>'}</div></section>
+  return `${pageHead('Administrators & users', 'Local accounts for the LightNAS browser; Linux and SMB accounts are separate.')}
+    <article class="panel"><h2>Administrator</h2><p>${escapeHtml(state.overview.appliance.username)} · appliance owner</p></article>
+    <form id="user-form" class="panel creation-form"><h2>Create local user</h2><p class="muted">Users can browse, upload and delete files. Only the appliance administrator manages settings and runtimes.</p><label>Username<input name="username" pattern="[a-zA-Z0-9._-]{3,32}" required></label><label>Password<input name="password" type="password" minlength="10" autocomplete="new-password" required></label><button class="primary" type="submit">Create user</button><div class="form-error" role="alert"></div></form>
+    <h2>Users</h2><div class="storage-list">${state.users?.map(user => `<article class="storage-row"><div><h3>${escapeHtml(user.username)}</h3><p>${user.disabled ? 'Disabled' : 'Active'}</p></div><details class="user-manager"><summary>Manage account</summary><form data-manage-user="${escapeHtml(user.username)}"><label>Administrator password<input name="currentPassword" type="password" autocomplete="current-password" required></label><label>New user password<input name="password" type="password" minlength="10" autocomplete="new-password" placeholder="At least 10 characters"></label><div class="head-actions"><button class="secondary" type="submit" value="password">Reset password</button><button class="secondary" type="submit" value="${user.disabled ? 'enable' : 'disable'}">${user.disabled ? 'Enable' : 'Disable'}</button><button class="secondary" type="button" data-remove-user="${escapeHtml(user.username)}">Remove</button></div><div class="form-error" role="alert"></div></form></details></article>`).join('') || '<div class="empty"><p>No local users yet.</p></div>'}</div>`;
+}
+
+function permissionsView() {
+  return `${pageHead('Permissions', 'Manage direct access scopes, groups, and inherited policy separately from account lifecycle.')}
+    <section class="panel permission-intro">
+      <span class="eyebrow">ACCESS CONTROL</span>
+      <h2>Fine-grained LightNAS permissions</h2>
+      <p class="muted">Delegated policy covers file read/write/download/delete, media conversion, storage, shares, apps, containers, virtual machines, networking, firewall and monitoring. Owner-only security settings and the root node shell remain restricted to the appliance owner.</p>
+    </section>
+    <div data-permissions-root><div class="empty"><p>Loading permission policies…</p></div></div>`;
+}
+
+function shellView() {
+  return `${pageHead('Node Shell', 'Open an interactive root terminal for the LightNAS operating system.')}
+    <section class="panel node-shell-launch">
+      <span class="eyebrow">PRIVILEGED NODE ACCESS</span>
+      <h2>LightNAS root shell</h2>
+      <p class="muted">This is a real root terminal on the LightNAS node. Commands can change networking, storage, services, packages, and the operating system. Access is restricted to the interactive appliance owner session.</p>
+      <div class="module-note"><b>Use with care.</b> A command entered here can disconnect the web interface or damage data just like an SSH root session.</div>
+      <div class="head-actions"><button class="primary" type="button" data-open-node-shell>Open node shell</button></div>
     </section>`;
 }
 
@@ -291,72 +266,55 @@ function runtimeBanner(kind) {
   return '';
 }
 
+function runtimeResourceSummary(items = [], label = 'guests') {
+  const host = state.overview?.system || {};
+  const running = items.filter(item => /running|active/i.test(String(item.status || '')));
+  const allocatedMemory = items.reduce((total, item) => total + (Number(item.memory) || 0), 0);
+  const allocatedCpus = items.reduce((total, item) => total + (Number(item.cpus) || 0), 0);
+  const hostMemory = Number(host.memory?.totalBytes || 0);
+  const allocationPercent = hostMemory ? Math.min(100, Math.round((allocatedMemory / hostMemory) * 100)) : 0;
+  return `<section class="host-monitor-grid runtime-resource-summary">
+    <article class="monitor-card"><span>Total ${label}</span><strong>${items.length}</strong><small>${running.length} running</small></article>
+    <article class="monitor-card"><span>Allocated RAM</span><strong>${bytes(allocatedMemory)}</strong><div class="track"><span style="width:${allocationPercent}%"></span></div><small>${hostMemory ? `${allocationPercent}% of ${bytes(hostMemory)} host RAM` : 'Host total unavailable'}</small></article>
+    <article class="monitor-card"><span>Allocated vCPU</span><strong>${allocatedCpus}</strong><small>${host.cpu?.cores || '—'} host logical cores</small></article>
+    <article class="monitor-card"><span>Live host pressure</span><strong>${host.cpu?.loadPercent ?? '—'}% CPU</strong><small>${host.memory?.usedPercent ?? '—'}% host memory currently used</small></article>
+  </section>`;
+}
+
 function containersView() {
   const runtime = state.runtimes?.containers;
-  const diagnostics = runtime?.diagnostics;
-  const networks = (runtime?.networks || []).map(item => `<option value="${escapeHtml(item)}">${escapeHtml(item)}</option>`).join('');
-  const images = (runtime?.images || []).map(item => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.label)}</option>`).join('');
-  const ready = runtime?.available && runtime?.enabled && runtime.images?.length && runtime.networks?.length;
   const containers = runtime?.containers || [];
-  const running = containers.filter(item => /running/i.test(String(item.status))).length;
-  const assignedMemory = containers.reduce((total, item) => total + (Number(item.memory) || 0), 0);
-  const usedMemory = containers.reduce((total, item) => total + (Number(item.memoryUsed) || 0), 0);
-  const assignedCpus = containers.reduce((total, item) => total + (Number(item.cpus) || 0), 0);
-  const hostMemory = state.overview?.system?.memory?.totalBytes || 0;
-  const hostCpus = state.overview?.system?.cpu?.cores || 0;
-  const diagnosticPanel = runtime ? `<section class="metric-grid compute-summary">
-    ${metric('Containers', `${containers.length}`, containers.length ? Math.round((running / containers.length) * 100) : 0, `${running} running · ${containers.length - running} stopped`)}
-    ${metric('Container memory use', bytes(usedMemory), hostMemory ? Math.round((usedMemory / hostMemory) * 100) : 0, `${bytes(assignedMemory)} assigned`)}
-    ${metric('Assigned CPU', `${assignedCpus} vCPU`, hostCpus ? Math.round((assignedCpus / hostCpus) * 100) : 0, `${hostCpus} host logical cores`)}
-    ${metric('Host CPU use', `${state.overview?.system?.cpu?.loadPercent || 0}%`, state.overview?.system?.cpu?.loadPercent || 0, 'Live LightNAS host utilization')}
-  </section>${diagnostics?.errors?.length ? `<div class="module-note"><b>Runtime notice:</b> ${diagnostics.errors.map(escapeHtml).join(' · ')}</div>` : ''}` : '';
+  const ready = runtime?.available && runtime?.enabled && runtime.images?.length && runtime.networks?.length;
   const containerList = !runtime
     ? '<div class="empty"><p>Loading existing system containers…</p></div>'
-    : runtime.containers?.length
-      ? runtime.containers.map(item => `<article class="storage-row"><div><h3>${escapeHtml(item.name)}</h3><p>Native LXC · ${escapeHtml(item.status)}${item.pid ? ` · ${bytes(item.memoryUsed || 0)} RAM in use · PID ${item.pid}` : ''}</p></div><div class="storage-size">${escapeHtml(item.id || item.name)}</div></article>`).join('')
+    : containers.length
+      ? containers.map(item => `<article class="storage-row"><div><h3>${escapeHtml(item.name)}</h3><p>Native LXC · ${escapeHtml(item.status)} · ${item.cpus || '—'} vCPU · ${bytes(item.memory || 0)} RAM${item.ipv4 ? ` · ${escapeHtml(item.ipv4)}` : ''}</p></div><div class="storage-size">${escapeHtml(item.id || item.name)}</div></article>`).join('')
       : '<div class="empty"><p>No native system containers are visible.</p></div>';
-  return `${pageHead('System containers', 'Native Linux system containers powered by LXC/liblxc inside LightNAS itself.', '<div class="head-actions"><button class="secondary" data-action="refresh-runtime">Refresh</button><button class="primary" data-action="create-container">+ Create container</button></div>')}
+  return `${pageHead('System containers', 'Create, monitor and manage native Linux system containers.', '<div class="head-actions"><button class="secondary" data-action="refresh-runtime">Refresh</button><button class="primary" data-action="create-container">+ Create container</button></div>')}
     ${runtimeBanner('containers')}
-    ${diagnosticPanel}
-    ${runtime?.available && runtime?.enabled && !ready ? '<div class="module-hero"><h2>Container network unavailable</h2><p>Create or enable a local bridge/network under Connectivity before launching a system container.</p></div>' : ''}
-    ${ready ? '<div class="module-note"><b>Ready to create.</b> Use the + Create container button to open the guided setup wizard.</div>' : ''}
+    ${runtimeResourceSummary(containers, 'containers')}
+    ${runtime?.available && runtime?.enabled && !ready ? '<div class="module-hero"><h2>Container resources needed</h2><p>LightNAS needs a usable container image and network before a new container can be created. Low-level runtime diagnostics remain available through Admin Center health checks.</p></div>' : ''}
+    ${ready ? '<div class="module-note"><b>Ready to create.</b> New containers use the configured LightNAS LAN automatically.</div>' : ''}
     <h2>Existing system containers</h2><div class="storage-list">${containerList}</div>`;
 }
 
 function vmsView() {
   const runtime = state.runtimes?.virtualization;
-  const ready = runtime?.available && runtime?.enabled && runtime.pools?.length && runtime.networks?.length;
-  const choices = items => (items || []).map(item => `<option value="${escapeHtml(item)}">${escapeHtml(item)}</option>`).join('');
   const machines = runtime?.machineDetails || [];
-  const running = machines.filter(item => /running/i.test(String(item.status))).length;
-  const assignedMemory = machines.reduce((total, item) => total + (Number(item.memory) || 0), 0);
-  const usedMemory = machines.reduce((total, item) => total + (Number(item.memoryUsed) || 0), 0);
-  const assignedCpus = machines.reduce((total, item) => total + (Number(item.cpus) || 0), 0);
-  const hostMemory = state.overview?.system?.memory?.totalBytes || 0;
-  const hostCpus = state.overview?.system?.cpu?.cores || 0;
-  const nestedVmPanel = runtime ? `<section class="metric-grid compute-summary">
-    ${metric('Virtual machines', `${machines.length}`, machines.length ? Math.round((running / machines.length) * 100) : 0, `${running} running · ${machines.length - running} stopped`)}
-    ${metric('VM memory use', bytes(usedMemory), hostMemory ? Math.round((usedMemory / hostMemory) * 100) : 0, `${bytes(assignedMemory)} assigned`)}
-    ${metric('Assigned CPU', `${assignedCpus} vCPU`, hostCpus ? Math.round((assignedCpus / hostCpus) * 100) : 0, `${hostCpus} host logical cores`)}
-    ${metric('Host CPU use', `${state.overview?.system?.cpu?.loadPercent || 0}%`, state.overview?.system?.cpu?.loadPercent || 0, 'Live LightNAS host utilization')}
-  </section>` : '';
-  const isoOptions = `<option value="">No ISO — create blank VM</option>${runtime?.isoDetails?.length ? runtime.isoDetails.map(item => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)} · ${escapeHtml(item.storageName)} · ${bytes(item.sizeBytes)}</option>`).join('') : choices(runtime?.images || [])}`;
-  return `${pageHead('Virtual machines', 'QEMU/libvirt virtual machines managed directly by LightNAS.', '<div class="head-actions"><button class="secondary" data-action="refresh-runtime">Refresh</button><button class="primary" data-action="create-vm">+ Create VM</button></div>')}
+  const ready = runtime?.available && runtime?.enabled && runtime.pools?.length && runtime.networks?.length;
+  return `${pageHead('Virtual machines', 'Create, monitor and manage QEMU/libvirt virtual machines.', '<div class="head-actions"><button class="secondary" data-action="refresh-runtime">Refresh</button><button class="primary" data-action="create-vm">+ Create VM</button></div>')}
     ${runtimeBanner('virtualization')}
-    ${runtime?.warning ? `<div class="module-note"><b>Software virtualization:</b> ${escapeHtml(runtime.warning)}</div>` : ''}
-    ${nestedVmPanel}
-    ${runtime?.available && runtime?.enabled && !ready ? '<div class="module-hero"><h2>VM resources needed</h2><p>LightNAS needs an active local libvirt storage pool and network. The installer creates default resources automatically.</p></div>' : ''}
+    ${runtimeResourceSummary(machines, 'virtual machines')}
+    ${runtime?.warning ? `<div class="module-note"><b>Virtualization note:</b> ${escapeHtml(runtime.warning)}</div>` : ''}
+    ${runtime?.available && runtime?.enabled && !ready ? '<div class="module-hero"><h2>VM resources needed</h2><p>LightNAS needs an active VM storage location and network before a VM can be created. Engine diagnostics remain available through Admin Center health checks.</p></div>' : ''}
     ${ready ? '<div class="module-note"><b>Ready to create.</b> Use the + Create VM button to open the guided setup wizard.</div>' : ''}
-    <h2>Existing VMs</h2><div class="storage-list">${runtime?.machineDetails?.map(item => `<article class="storage-row"><div><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.status)} · ${item.cpus || '—'} vCPU · ${bytes(item.memoryUsed || 0)} used of ${bytes(item.memory || 0)} RAM</p></div><div class="storage-size">${escapeHtml(runtime.provider || 'libvirt')}</div></article>`).join('') || '<div class="empty"><p>No local virtual machines are visible.</p></div>'}</div>`;
+    <h2>Existing VMs</h2><div class="storage-list">${machines.map(item => `<article class="storage-row"><div><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.status)} · ${item.cpus || '—'} vCPU · ${bytes(item.memory || 0)} RAM${item.disk ? ` · ${bytes(item.disk)} disk` : ''}</p></div><div class="storage-size">${escapeHtml(runtime?.provider || 'libvirt')}</div></article>`).join('') || '<div class="empty"><p>No local virtual machines are visible.</p></div>'}</div>`;
 }
 
 function sharesView() {
-  const { shares, access = {} } = state.overview;
-  const serviceCard = (id, label, detail) => { const item = access[id] || {}; return `<article class="panel access-service"><div><span class="eyebrow">${label}</span><h2>${item.active ? 'Running' : item.installed ? 'Stopped' : 'Not installed'}</h2><p>${detail}</p></div><button class="secondary" data-access-service="${id}" data-enabled="${!item.active}" ${!item.installed ? 'disabled' : ''}>${item.active ? 'Disable' : 'Enable'}</button></article>`; };
-  return `${pageHead('Shares & access', 'Create real network shares and control file-access services on this LightNAS node.', '<button class="primary" data-action="new-share">+ Create share</button>')}
-    <section class="access-service-grid">${serviceCard('smb','SMB','Windows, macOS and Linux network file sharing on ports 445/139.')}${serviceCard('ssh','SSH / SFTP','Secure shell and file transfer access on port 22.')}</section>
-    <div class="section-heading"><div><span class="eyebrow">ACTIVE SHARES</span><h2>Shared folders</h2></div><span class="content-badge">${shares.length}</span></div>
-    <div class="share-list">${shares.map(share => `<article class="share-row"><div class="share-copy"><h3>${escapeHtml(share.name)}</h3><p>${escapeHtml(share.protocol)} · ${share.readOnly ? 'read only' : 'read/write'} · ${escapeHtml(share.path || 'managed folder')} · ${escapeHtml(share.description || 'No description')}</p></div><div class="share-actions"><span class="share-status ${share.active !== false ? 'active' : 'offline'}"><i></i>${share.active !== false ? 'Active' : 'Offline'}</span><button class="share-remove" data-delete-share="${escapeHtml(share.id)}" data-name="${escapeHtml(share.name)}" aria-label="Remove ${escapeHtml(share.name)} share">Remove</button></div></article>`).join('') || '<div class="empty"><h3>No shared folders</h3><p>Create an SMB or SFTP share. LightNAS will create its folder and start the required service.</p></div>'}</div>`;
+  const { shares } = state.overview;
+  return `${pageHead('Share plans', 'Saved configurations only. No SMB, NFS, or SFTP service is changed.', '<button class="primary" data-action="new-share">+ New plan</button>')}
+    <div class="share-list">${shares.map(share => `<article class="share-row"><div><h3>${escapeHtml(share.name)}</h3><p>${escapeHtml(share.protocol)} · ${escapeHtml(share.description || 'No description')} · ${relativeTime(share.createdAt)}</p></div><button class="secondary" data-delete-share="${escapeHtml(share.id)}" data-name="${escapeHtml(share.name)}">Remove plan</button></article>`).join('') || '<div class="empty"><p>No share plans saved.</p></div>'}</div>`;
 }
 
 const librarySections = [
@@ -364,37 +322,151 @@ const librarySections = [
   ['Documents', 'Documents'],
   ['Photos', 'Photos'],
   ['Videos', 'Videos'],
-  ['Audio', 'Audio']
+  ['Audio', 'Audio'],
+  ['Attached storage', 'Attached storage']
 ];
+
+function fileEntryPath(entry) {
+  return entry.path || [state.folder, entry.name].filter(Boolean).join('/');
+}
 
 function filesView() {
   const segments = state.folder.split('/').filter(Boolean);
   const section = librarySections.some(([folder]) => folder === (segments[0] || '')) ? (segments[0] || '') : '';
+  const allFiles = state.folder === '';
   const crumbs = [`<button class="panel-link" data-folder="">Files & media</button>`, ...segments.map((segment, index) => `<span> / </span><button class="panel-link" data-folder="${escapeHtml(segments.slice(0, index + 1).join('/'))}">${escapeHtml(segment)}</button>`)].join('');
   const entries = state.files;
   const tabs = librarySections.map(([folder, label]) => `<button type="button" class="library-tab ${section === folder ? 'active' : ''}" data-library-tab="${escapeHtml(folder)}" aria-pressed="${section === folder}">${escapeHtml(label)}</button>`).join('');
-  const layoutButtons = `<div class="view-switch" role="group" aria-label="File view"><button class="secondary ${state.fileLayout === 'list' ? 'active' : ''}" data-file-layout="list" title="List view">☷</button><button class="secondary ${state.fileLayout === 'grid' ? 'active' : ''}" data-file-layout="grid" title="Grid view">▦</button></div>`;
-  return `${pageHead('Files & media', 'Browse documents, photos, audio, video, RAW photos, and other files in one library.', `<div class="head-actions">${layoutButtons}<button class="secondary" data-action="refresh-files">Refresh</button></div>`)}
+
+  const item = entry => {
+    const path = fileEntryPath(entry);
+    const location = !entry.directory && (entry.folder || path.includes('/')) ? (entry.folder || path.split('/').slice(0, -1).join('/') || 'Root') : '';
+    const meta = entry.directory ? 'Folder' : `${bytes(entry.sizeBytes)}${location ? ` · ${escapeHtml(location)}` : ''}`;
+    return state.fileView === 'grid'
+      ? `<article class="file-card">
+          <button class="file-name file-card-open" data-open="${escapeHtml(entry.name)}" data-path="${escapeHtml(path)}" data-directory="${entry.directory}">
+            <span class="file-card-visual">${entry.directory ? '<span class="folder-glyph">▣</span>' : '<span class="file-glyph">▤</span>'}</span>
+            <span class="file-card-title">${escapeHtml(entry.name)}</span>
+          </button>
+          <span class="muted file-location">${meta}</span>
+          <div class="file-card-actions">
+            ${entry.directory ? `<button class="secondary" data-download-folder="${escapeHtml(path)}">Download folder</button>` : ''}
+            ${!entry.directory && state.media?.converterAvailable && state.overview.appliance.role === 'administrator' ? `<button class="secondary" data-convert-file="${escapeHtml(entry.name)}" data-path="${escapeHtml(path)}">Convert</button>` : ''}
+            <button class="secondary" data-delete-file="${escapeHtml(entry.name)}" data-path="${escapeHtml(path)}">Delete</button>
+          </div>
+        </article>`
+      : `<article class="file-row">
+          <button class="file-name" data-open="${escapeHtml(entry.name)}" data-path="${escapeHtml(path)}" data-directory="${entry.directory}">${entry.directory ? '▣' : '▤'} ${escapeHtml(entry.name)}${location ? `<small>${escapeHtml(location)}</small>` : ''}</button>
+          <span class="muted">${entry.directory ? 'Folder' : bytes(entry.sizeBytes)}</span>
+          ${entry.directory ? `<button class="secondary" data-download-folder="${escapeHtml(path)}">Download</button>` : ''}
+          ${!entry.directory && state.media?.converterAvailable && state.overview.appliance.role === 'administrator' ? `<button class="secondary" data-convert-file="${escapeHtml(entry.name)}" data-path="${escapeHtml(path)}">Convert</button>` : ''}
+          <button class="secondary" data-delete-file="${escapeHtml(entry.name)}" data-path="${escapeHtml(path)}">Delete</button>
+        </article>`;
+  };
+
+  return `${pageHead('Files & media', 'Browse and manage the actual files stored in LightNAS.', '<button class="secondary" data-action="refresh-files">Refresh</button>')}
     <nav class="library-tabs" aria-label="File library sections">${tabs}</nav>
-    <div class="file-toolbar"><div class="breadcrumbs">${crumbs}</div><div><button class="secondary" data-action="new-folder">+ Folder</button> <label class="primary upload-button">Upload<input id="file-upload" type="file" multiple hidden></label></div></div>
-    <p class="muted">Select a tab to open that library. Previewable items open in the viewer; use its arrows to move through multiple files.</p>
-    <div class="storage-list file-browser ${state.fileLayout === 'grid' ? 'file-grid' : 'file-list'}">${state.fileError ? `<div class="empty error-state"><p><b>Files could not be loaded.</b></p><p>${escapeHtml(state.fileError)}</p><button class="secondary" data-action="refresh-files">Try again</button></div>` : entries === null ? '<div class="empty"><p>Loading files…</p></div>' : entries.length ? entries.map(entry => `<article class="file-row"><button class="file-name" data-open="${escapeHtml(entry.name)}" data-directory="${entry.directory}"><span class="file-icon">${entry.directory ? '▣' : '▤'}</span><span class="file-label">${escapeHtml(entry.name)}</span></button><span class="muted">${entry.directory ? 'Folder' : bytes(entry.sizeBytes)}</span><div class="file-actions">${entry.directory ? `<button class="secondary" data-download-folder="${escapeHtml(entry.name)}">Download</button>` : state.media?.converterAvailable && state.overview.appliance.role === 'administrator' ? `<button class="secondary" data-convert-file="${escapeHtml(entry.name)}">Convert</button>` : ''}<button class="secondary" data-delete-file="${escapeHtml(entry.name)}">Delete</button></div></article>`).join('') : '<div class="empty"><p>This section is empty. Create a folder or upload files here.</p></div>'}</div>`;
+    <div class="file-toolbar"><div class="breadcrumbs">${crumbs}</div><div class="file-toolbar-actions">
+      <div class="view-toggle" role="group" aria-label="File view">
+        <button class="secondary ${state.fileView === 'list' ? 'active' : ''}" type="button" data-file-view="list" aria-pressed="${state.fileView === 'list'}">☷ List</button>
+        <button class="secondary ${state.fileView === 'grid' ? 'active' : ''}" type="button" data-file-view="grid" aria-pressed="${state.fileView === 'grid'}">▦ Grid</button>
+      </div>
+      <button class="secondary" data-action="new-folder">+ Folder</button>
+      <label class="primary upload-button">Upload files<input id="file-upload" type="file" multiple hidden></label>
+      <label class="secondary upload-button">Upload folder<input id="folder-upload" type="file" webkitdirectory directory multiple hidden></label>
+    </div></div>
+    <p class="muted">${allFiles ? 'All files is a flat view of your real library files, including files inside Documents, Photos, Videos, Audio and other folders.' : 'Open folders normally or switch back to All files for a flat library view.'} ZIP and other file types are accepted, uploads have visible progress, and LightNAS does not impose an application-level file-size ceiling.</p>
+    ${state.fileTruncated && allFiles ? '<div class="module-note">Showing the newest 10,000 files. Open a category or folder to browse beyond that safety limit.</div>' : ''}
+    <div class="${state.fileView === 'grid' ? 'file-browser-grid' : 'storage-list'}">${state.fileError ? `<div class="empty error-state"><p><b>Files could not be loaded.</b></p><p>${escapeHtml(state.fileError)}</p><button class="secondary" data-action="refresh-files">Try again</button></div>` : entries === null ? '<div class="empty"><p>Loading files…</p></div>' : entries.length ? entries.map(item).join('') : `<div class="empty"><p>${allFiles ? 'No files have been uploaded yet.' : 'This folder is empty.'}</p></div>`}</div>`;
 }
 
 async function loadFiles() {
   state.fileError = null;
   try {
-    const result = await request(`/api/files?path=${encodeURIComponent(state.folder)}`);
-    state.files = Array.isArray(result.entries)
-      ? result.entries.filter(entry => entry.supported && !(state.folder === '' && entry.directory && entry.name === 'ISO'))
-      : [];
+    const endpoint = state.folder === ''
+      ? '/api/files?all=1'
+      : `/api/files?path=${encodeURIComponent(state.folder)}`;
+    const result = await request(endpoint);
+    state.files = Array.isArray(result.entries) ? result.entries.filter(entry => entry.supported) : [];
+    state.fileTruncated = Boolean(result.truncated);
   } catch (error) {
     state.files = [];
+    state.fileTruncated = false;
     state.fileError = error.message || 'The file service did not return a valid response.';
     toast(state.fileError);
   }
   if (state.view === 'files') render('files');
 }
+
+function uploadRequest(path, file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', `/api/files?path=${encodeURIComponent(path)}`);
+    xhr.withCredentials = true;
+    xhr.setRequestHeader('X-LightNAS-Request', '1');
+    xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+    xhr.upload.addEventListener('progress', event => {
+      if (event.lengthComputable) onProgress?.(event.loaded, event.total);
+    });
+    xhr.addEventListener('load', () => {
+      if (xhr.status >= 200 && xhr.status < 300) return resolve();
+      let message = 'Upload failed.';
+      try { message = JSON.parse(xhr.responseText || '{}').error || message; } catch {}
+      reject(new Error(message));
+    });
+    xhr.addEventListener('error', () => reject(new Error('The upload connection failed.')));
+    xhr.addEventListener('abort', () => reject(new Error('The upload was cancelled.')));
+    xhr.send(file);
+  });
+}
+
+async function ensureUploadDirectories(paths) {
+  const folders = new Set();
+  for (const path of paths) {
+    const parts = String(path || '').split('/').filter(Boolean);
+    for (let index = 1; index < parts.length; index += 1) folders.add(parts.slice(0, index).join('/'));
+  }
+  for (const folder of [...folders].sort((a, b) => a.split('/').length - b.split('/').length)) {
+    try { await request(`/api/files?path=${encodeURIComponent(folder)}`, { method: 'POST', body: '{}' }); }
+    catch (error) { if (error.status !== 409) throw error; }
+  }
+}
+
+async function uploadFilesWithProgress(fileList, folderMode = false) {
+  const files = [...fileList];
+  if (!files.length) return;
+  const targets = files.map(file => {
+    const relative = folderMode ? (file.webkitRelativePath || file.name) : file.name;
+    const clean = relative.split('/').filter(part => part && part !== '.' && part !== '..').join('/');
+    return { file, path: [state.folder, clean].filter(Boolean).join('/') };
+  });
+  await ensureUploadDirectories(targets.map(item => item.path));
+
+  const totalBytes = targets.reduce((sum, item) => sum + Number(item.file.size || 0), 0);
+  let completedBytes = 0;
+  const progress = window.LightNASProgress?.open(folderMode ? 'Uploading folder' : 'Uploading files', `${targets.length} item${targets.length === 1 ? '' : 's'} · ${bytes(totalBytes)}`);
+  try {
+    for (let index = 0; index < targets.length; index += 1) {
+      const { file, path } = targets[index];
+      await uploadRequest(path, file, loaded => {
+        const current = completedBytes + loaded;
+        const percent = totalBytes ? Math.round((current / totalBytes) * 100) : Math.round(((index + 1) / targets.length) * 100);
+        progress?.update(percent, `${index + 1} of ${targets.length} · ${file.name} · ${bytes(current)} of ${bytes(totalBytes)}`);
+      });
+      completedBytes += Number(file.size || 0);
+      const percent = totalBytes ? Math.round((completedBytes / totalBytes) * 100) : Math.round(((index + 1) / targets.length) * 100);
+      progress?.update(percent, `${index + 1} of ${targets.length} complete`);
+    }
+    progress?.succeed(`${targets.length} item${targets.length === 1 ? '' : 's'} uploaded successfully.`);
+    toast(`${targets.length} item${targets.length === 1 ? '' : 's'} uploaded.`);
+  } catch (error) {
+    progress?.fail(error.message);
+    toast(error.message);
+  } finally {
+    await loadFiles();
+  }
+}
+
 
 function capabilitiesView() {
   const { system } = state.overview;
@@ -405,13 +477,13 @@ function capabilitiesView() {
 function settingsView() {
   const { appliance } = state.overview;
   const zones = [['America/New_York', 'Eastern Time'], ['America/Chicago', 'Central Time'], ['America/Denver', 'Mountain Time'], ['America/Los_Angeles', 'Pacific Time'], ['UTC', 'UTC']];
-  return `${pageHead('Appliance settings', 'Update the LightNAS device name, time zone, and account security.')}
+  return `${pageHead('Appliance settings', 'Update your LightNAS administrator account and display name.')}
     <form id="settings-form" class="panel settings-form">
-      <h2>Appliance identity</h2><p class="muted">Signed in as ${escapeHtml(appliance.username)}. These settings apply to LightNAS only, not the Linux root account.</p>
+      <h2>Administrator</h2><p class="muted">Signed in as ${escapeHtml(appliance.username)}. These settings apply to LightNAS only, not the Linux root account.</p>
       <label>Device name<input name="deviceName" value="${escapeHtml(appliance.deviceName)}" required minlength="2" maxlength="32" autocomplete="off"></label>
       <label>Display time zone<select name="timezone">${zones.map(([value, label]) => `<option value="${value}" ${appliance.timezone === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
       <label>Current password<input name="currentPassword" type="password" required autocomplete="current-password"></label>
-      ${appliance.role === 'administrator' ? '<label>New owner password (optional)<input name="newPassword" type="password" minlength="10" autocomplete="new-password" placeholder="Leave blank to keep current password"></label>' : ''}
+      <label>New password (optional)<input name="newPassword" type="password" minlength="10" autocomplete="new-password" placeholder="Leave blank to keep current password"></label>
       <button class="primary" type="submit">Save settings</button>
       <div class="form-error" role="alert"></div>
     </form>`;
@@ -419,40 +491,79 @@ function settingsView() {
 
 function adminView() {
   const { appliance } = state.overview;
-  return `${pageHead('Admin Center', `Manage ${escapeHtml(appliance.deviceName)} as a complete LightNAS appliance.`)}
+  const userCount = state.users?.length ?? '—';
+  const networkName = state.network?.control?.currentUplink?.name || state.network?.routes?.find(item => item.destination === 'default')?.device || '—';
+  return `${pageHead('Admin Center', `Operate ${escapeHtml(appliance.deviceName)} from one focused administration workspace.`)}
+    <section class="admin-overview-grid">
+      <article class="admin-overview-card accent-card">
+        <span class="eyebrow">APPLIANCE</span>
+        <h2>${escapeHtml(appliance.deviceName)}</h2>
+        <p>Owner: ${escapeHtml(appliance.username)} · ${escapeHtml(appliance.timezone || 'UTC')}</p>
+        <div class="head-actions"><button class="secondary" data-view-link="settings">Settings</button><button class="secondary" data-view-link="shell">Node shell</button></div>
+      </article>
+      <article class="admin-overview-card">
+        <span class="eyebrow">ACCESS</span>
+        <h2>${userCount} local users</h2>
+        <p>Users, groups, inherited scopes, authentication and identity policy.</p>
+        <div class="head-actions"><button class="secondary" data-view-link="permissions">Permissions</button><button class="secondary" data-view-link="users">Users</button></div>
+      </article>
+      <article class="admin-overview-card">
+        <span class="eyebrow">NETWORK</span>
+        <h2>${escapeHtml(networkName)}</h2>
+        <p>Interfaces, bridges, VLANs, bonds, routes, DNS and host firewall.</p>
+        <div class="head-actions"><button class="secondary" data-view-link="network">Networking</button><button class="secondary" data-view-link="firewall">Firewall</button></div>
+      </article>
+      <article class="admin-overview-card">
+        <span class="eyebrow">OPERATIONS</span>
+        <h2>Health & monitoring</h2>
+        <p>Live system pressure, appliance diagnostics and managed-service repair.</p>
+        <div class="head-actions"><button class="secondary" data-view-link="monitoring">Monitoring</button><button class="secondary" data-view-link="capabilities">Diagnostics</button></div>
+      </article>
+    </section>
+
     <section class="panel" id="appliance-health-panel">
-      <div data-appliance-health-result>
-        <span class="eyebrow">APPLIANCE HEALTH</span>
-        <h2>LightNAS self-management</h2>
-        <p class="muted">Check storage, container, VM, application and core service readiness, or let LightNAS repair its own managed services.</p>
-      </div>
-      <div class="head-actions">
-        <button class="secondary" type="button" data-appliance-health>Check health</button>
-        <button class="primary" type="button" data-appliance-repair>Repair automatically</button>
+      <div class="admin-section-head">
+        <div data-appliance-health-result>
+          <span class="eyebrow">APPLIANCE HEALTH</span>
+          <h2>Self-management</h2>
+          <p class="muted">Validate storage, networking, containers, VMs, application runtime and core LightNAS services.</p>
+        </div>
+        <div class="head-actions">
+          <button class="secondary" type="button" data-appliance-health>Check health</button>
+          <button class="primary" type="button" data-appliance-repair>Repair managed services</button>
+        </div>
       </div>
     </section>
-    <section class="admin-tool-groups">
-      ${[['Identity & access',[['users','Users & groups'],['settings','Security settings']]],['Infrastructure',[['pools','Storage'],['network','Networking'],['firewall','Firewall']]],['Compute & operations',[['apps','Applications'],['containers','Containers'],['vms','Virtual machines'],['monitoring','Monitoring']]]].map(([title, tools]) => `<div class="admin-group"><h2>${title}</h2><div class="admin-group-grid">${tools.map(([view,label]) => `<button class="admin-tool-card" type="button" data-view-link="${view}"><b>${label}</b><span>Open ${label.toLowerCase()}</span></button>`).join('')}</div></div>`).join('')}
+
+    <section class="panel admin-service-links">
+      <div><span class="eyebrow">SERVICES</span><h2>Notifications & integrations</h2><p class="muted">Configure SMTP, identity providers, API automation and external integrations without duplicating the full navigation tree.</p></div>
+      <div class="head-actions"><button class="secondary" data-view-link="smtp">SMTP</button><button class="secondary" data-view-link="integrations">Integrations</button></div>
     </section>`;
 }
 
-function shellView() {
-  return `${pageHead('Node shell', 'Open an authenticated root terminal on the LightNAS node.')}
-    <section class="module-hero"><span class="eyebrow">PRIVILEGED NODE ACCESS</span><h2>LightNAS host terminal</h2><p>Commands run directly on this LightNAS installation. Access requires the dedicated Node shell permission.</p><button class="primary" data-open-node-shell>Open node shell</button></section>`;
-}
 
 function moduleView(view) {
   if (view === 'apps') {
     const docker = state.runtimes?.docker;
-    return `${pageHead('App Store', 'Choose an app and install it directly from LightNAS.', '<button class="secondary" data-action="refresh-runtime">Refresh apps</button>')}
+    const apps = state.runtimes?.catalog || [];
+    const categories = [...new Set(apps.map(app => app.category).filter(Boolean))].sort();
+    return `${pageHead('App Store', 'Install curated open-source applications directly from LightNAS.', '<button class="secondary" data-action="refresh-runtime">Refresh apps</button>')}
       ${runtimeBanner('docker')}
-      <div class="tool-grid">${state.runtimes?.catalog?.map(app => {
+      <section class="app-catalog-toolbar panel">
+        <div><span class="eyebrow">LIGHTNAS APPLICATION CATALOG</span><h2>${apps.length} one-click apps</h2><p class="muted">A broad NAS app catalog sourced from official upstream and community container images, including many apps commonly found in TrueNAS-style catalogs. LightNAS only lists entries its current one-click engine can actually launch; complex multi-service stacks will join as Compose support expands.</p></div>
+        <div class="app-filter-controls">
+          <label>Search<input id="app-search" type="search" placeholder="Search apps, categories, or images…"></label>
+          <label>Category<select id="app-category"><option value="">All categories</option>${categories.map(category => `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`).join('')}</select></label>
+        </div>
+      </section>
+      <div class="tool-grid app-catalog-grid">${apps.map(app => {
         const instance = docker?.containers?.find(container => container.name === `lightnas-app-${app.id}`);
         const appUrl = `http://${location.hostname}:${app.port}/`;
         const running = instance?.state === 'running';
-        return `<article class="panel"><span class="eyebrow">${escapeHtml(app.category)}</span><h2>${escapeHtml(app.name)}</h2><p class="muted">${escapeHtml(app.description)}</p><p class="muted">${escapeHtml(app.image)} · Port ${app.port}</p>${instance ? `<p class="muted">${escapeHtml(instance.status || instance.state)}</p><div class="head-actions">${running ? `<a class="primary" href="${escapeHtml(appUrl)}" target="_blank" rel="noopener">Open application</a>` : ''}<button class="secondary" data-app-action="${running ? 'stop' : 'start'}" data-app-id="${app.id}">${running ? 'Stop' : 'Start'}</button><button class="secondary" data-app-action="restart" data-app-id="${app.id}">Restart</button><button class="secondary" data-app-action="remove" data-app-id="${app.id}">Remove</button></div>` : `<button class="primary" data-install="${app.id}">Install app</button>`}</article>`;
+        const searchText = `${app.name} ${app.category} ${app.description} ${app.image} ${app.source || ''}`.toLowerCase();
+        return `<article class="panel app-card" data-app-card data-category="${escapeHtml(app.category)}" data-search="${escapeHtml(searchText)}"><span class="eyebrow">${escapeHtml(app.category)}</span><h2>${escapeHtml(app.name)}</h2><p class="muted">${escapeHtml(app.description)}</p><p class="muted app-source">${escapeHtml(app.source || 'Open source')} · ${escapeHtml(app.image)} · Port ${app.port}</p>${instance ? `<p class="muted">${escapeHtml(instance.status || instance.state)}</p><div class="head-actions">${running ? `<a class="primary" href="${escapeHtml(appUrl)}" target="_blank" rel="noopener">Open application</a>` : ''}<button class="secondary" data-app-action="${running ? 'stop' : 'start'}" data-app-id="${app.id}">${running ? 'Stop' : 'Start'}</button><button class="secondary" data-app-action="restart" data-app-id="${app.id}">Restart</button><button class="secondary" data-app-action="remove" data-app-id="${app.id}">Remove</button></div>` : `<button class="primary" data-install="${app.id}">Install app</button>`}</article>`;
       }).join('') || '<div class="empty"><p>Loading catalog…</p></div>'}</div>
-      <section class="module-hero"><h2>Managed app hosting</h2><p>LightNAS downloads each app, creates its persistent storage, publishes its web service on the LightNAS LAN address, opens the managed firewall port, starts it after reboot, and verifies that the service is reachable. No Proxmox configuration or manual port forwarding is required. ${docker?.available && docker?.enabled ? 'The integrated App Store engine is ready.' : 'Rerun the one-click LightNAS installer to provision the integrated App Store engine.'}</p></section>`;
+      <section class="module-hero"><h2>Managed app hosting</h2><p>LightNAS downloads each app, creates its persistent storage, publishes its web service on the LightNAS LAN address, starts it after reboot, and verifies that the service is reachable. ${docker?.available && docker?.enabled ? 'The integrated App Store engine is ready.' : 'Rerun the one-click LightNAS installer to provision the integrated App Store engine.'}</p></section>`;
   }
   return `${pageHead('Monitoring', 'Current readings from this host.', '<button class="secondary" data-action="refresh">Refresh readings</button>')}<section class="metric-grid">${metric('CPU load', `${state.overview.system.cpu.loadPercent}%`, state.overview.system.cpu.loadPercent, state.overview.system.cpu.model)}${metric('Memory', bytes(state.overview.system.memory.usedBytes), state.overview.system.memory.usedPercent, `${bytes(state.overview.system.memory.freeBytes)} free`)}${metric('Uptime', duration(state.overview.system.uptimeSeconds), 0, state.overview.system.kernel)}${metric('Mounts', state.overview.filesystems.length, 0, 'Currently visible')}</section><h2>Activity</h2><div class="activity-list">${state.overview.activity.map(item => `<div class="activity"><div><b>${escapeHtml(item.message)}</b><time>${relativeTime(item.timestamp)}</time></div></div>`).join('') || '<p>No activity recorded.</p>'}</div>`;
 }
@@ -462,153 +573,124 @@ async function loadNetwork() {
   catch (error) { toast(error.message); }
 }
 
-function networkViewLegacy() {
-  const info = state.network;
-  const control = info?.control;
-  if (!info) return `${pageHead('Networking', 'Manage the LightNAS appliance network.', '<button class="secondary" data-action="refresh-network">Refresh</button>')}<div class="empty">Loading network inventory…</div>`;
-
-  const defaultRoute = [...(info.routes || [])].filter(item => item.destination === 'default').sort((a, b) => (a.metric ?? 0) - (b.metric ?? 0))[0] || null;
-  const routeDevice = defaultRoute?.device || '';
-  const routeDeviceInfo = (control?.devices || []).find(item => item.name === routeDevice);
-  const current = control?.currentUplink || (routeDevice ? {
-    name: routeDevice,
-    kind: routeDeviceInfo?.type === 'wifi' ? 'Wi-Fi' : routeDeviceInfo?.type === 'bridge' ? 'Ethernet bridge' : 'Ethernet',
-    connection: routeDeviceInfo?.connection || 'Kernel / appliance managed',
-    gateway: defaultRoute?.gateway || null,
-    metric: defaultRoute?.metric ?? null,
-    active: true,
-    managed: routeDeviceInfo?.type === 'bridge'
-  } : null);
-
-  const currentInterface = current ? info.interfaces.find(item => item.name === current.name) : null;
-  const currentAddresses = currentInterface?.addresses?.filter(item => item.family === 'inet').map(item => `${item.address}/${item.prefix}`).join(', ') || 'No IPv4 address';
-  const uplinks = control?.uplinks || (current ? [current] : []);
-  const selectableUplinks = uplinks.filter(item => !item.active && item.managed !== false);
-  const wifiDevices = (control?.devices || []).filter(item => item.type === 'wifi' && !['unavailable','unmanaged'].includes(item.state));
-  const bridge = control?.bridge || null;
-
-  const applianceNetworks = (control?.devices || []).filter(item => item.type === 'bridge' || /^(virbr\d*|lightnas\d*|lxcbr\d*)$/i.test(item.name || ''));
-  const advancedInterfaces = (info.interfaces || []).filter(item => {
-    const name = item.name || '';
-    if (name === 'lo' || /^veth/i.test(name) || /^tap/i.test(name) || /^tun/i.test(name) || /^docker/i.test(name) || /^br-[A-Fa-f0-9]+$/.test(name)) return false;
-    if (bridge?.mode === 'bridge' && name === bridge.port) return false;
-    return true;
-  });
-  const advancedRoutes = (info.routes || []).filter(route => !/^docker|^veth|^tap|^tun/i.test(route.device || ''));
-
-  const purpose = item => {
-    if (item.name === bridge?.name && bridge?.mode === 'bridge') return 'Appliance LAN bridge · host + VMs + system containers';
-    if (/^lightnas/i.test(item.name || '')) return 'Fallback container NAT network';
-    if (/^virbr/i.test(item.name || '')) return 'Virtual machine network';
-    return 'Virtual network';
-  };
-
-  return `${pageHead('Networking', 'Manage physical interfaces, Linux bridges, bonds, VLANs, addresses, routes, and DNS from LightNAS.', '<div class="head-actions"><button class="secondary" data-action="refresh-network">Refresh</button><button class="primary" data-network-add-bridge>+ Bridge</button><button class="secondary" data-network-add-bond>+ Bond</button><button class="secondary" data-network-add-vlan>+ VLAN</button></div>')}
-    <section class="module-hero">
-      <span class="eyebrow">CURRENT APPLIANCE NETWORK</span>
-      <h2>${current ? `${escapeHtml(current.kind || 'Network')} · ${escapeHtml(current.name)}` : 'No active Internet connection detected'}</h2>
-      <p>${current ? `${escapeHtml(currentAddresses)}${current.gateway ? ` · gateway ${escapeHtml(current.gateway)}` : ''}${current.physicalPort ? ` · physical port ${escapeHtml(current.physicalPort)}` : ''}` : 'Connect an Ethernet or Wi-Fi uplink.'}</p>
-      ${bridge?.mode === 'bridge' ? `<p class="muted">Wired appliance mode: ${escapeHtml(bridge.port || 'physical NIC')} is a bridge port only. VMs and system containers attach directly to ${escapeHtml(bridge.name || 'virbr0')} and use the real LAN.</p>` : bridge?.mode === 'wifi-nat' ? '<p class="muted">Wi-Fi appliance mode: guests use routed/NAT networking because station-mode Wi-Fi cannot be transparently bridged.</p>' : ''}
-    </section>
-
-    ${uplinks.length ? `<h2>Internet connections</h2><div class="inventory-grid">${uplinks.map(item => `<article class="inventory-card"><div class="volume-title"><h3>${escapeHtml(item.kind || 'Network')} · ${escapeHtml(item.name)}</h3><span class="volume-state ${item.active ? 'writable' : ''}">${item.active ? 'CURRENT' : escapeHtml(String(item.state || 'AVAILABLE').toUpperCase())}</span></div><p>${escapeHtml(item.connection || (item.managed === false ? 'Kernel / hypervisor managed' : 'Available connection'))}</p>${item.physicalPort ? `<p class="muted">Physical port: ${escapeHtml(item.physicalPort)}</p>` : ''}${!item.active && item.managed !== false && selectableUplinks.length ? `<button class="secondary" data-uplink-prefer="${escapeHtml(item.name)}">Use this connection</button>` : `<small>${item.active ? 'Active default Internet route' : 'Available uplink'}</small>`}</article>`).join('')}</div>` : '<div class="module-note">No usable Ethernet or Wi-Fi Internet uplink is visible.</div>'}
-
-    ${wifiDevices.length ? `<h2>Wi-Fi</h2><p class="muted">LightNAS shows Wi-Fi only when a wireless adapter is available. Wired Ethernet is preferred for transparent VM/container LAN bridging.</p><div class="inventory-grid">${(control?.wifi || []).map(item => `<article class="inventory-card"><div class="volume-title"><h3>${escapeHtml(item.ssid)}</h3><span class="volume-state ${item.connected ? 'writable' : ''}">${item.connected ? 'CONNECTED' : `${item.signal}%`}</span></div><p>${escapeHtml(item.security || 'Open')}</p><button class="secondary" data-wifi-connect="${escapeHtml(item.ssid)}">${item.connected ? 'Use as preferred' : 'Connect'}</button></article>`).join('') || '<div class="empty">No Wi-Fi networks are currently in range.</div>'}</div>` : ''}
-
-    <h2>Appliance networks</h2>
-    <div class="storage-list">${applianceNetworks.map(item => {
-      const live = info.interfaces.find(iface => iface.name === item.name);
-      const addresses = live?.addresses?.filter(address => address.family === 'inet').map(address => `${address.address}/${address.prefix}`).join(', ') || 'No IPv4 address';
-      return `<article class="storage-row"><div><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(purpose(item))} · ${escapeHtml(addresses)}</p></div><span class="badge">${String(live?.state || item.state || '').toUpperCase() === 'UP' ? 'ACTIVE' : 'INACTIVE'}</span></article>`;
-    }).join('') || '<div class="empty">No LightNAS bridge is active.</div>'}</div>
-
-    ${(control?.connections || []).length ? `<h2>Connection profiles</h2><div class="storage-list">${control.connections.map(item => `<article class="storage-row"><div><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.type)} · ${escapeHtml(item.device || 'not active')} · autoconnect ${item.autoconnect ? 'on' : 'off'}</p></div><div class="runtime-actions"><button class="secondary" data-network-edit="${escapeHtml(item.name)}">Edit IPv4 / DNS</button><button class="secondary danger-button" data-network-delete="${escapeHtml(item.name)}">Delete</button></div></article>`).join('')}</div>` : ''}
-
-    <details class="panel"><summary><b>Advanced network details</b></summary>
-      <p class="muted">Low-level Docker, veth and tap interfaces are hidden from the normal appliance view.</p>
-      <h2>Live appliance interfaces</h2><div class="storage-list">${advancedInterfaces.map(item => `<article class="storage-row"><div><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.state || 'unknown')} · ${escapeHtml(item.mac || 'MAC unavailable')}</p></div><p>${item.addresses.map(address => `${escapeHtml(address.address)}/${address.prefix}`).join('<br>') || 'No addresses'}</p></article>`).join('') || '<div class="empty">No appliance interfaces visible.</div>'}</div>
-      <h2>Routes</h2><div class="storage-list">${advancedRoutes.map(route => `<article class="storage-row"><h3>${escapeHtml(route.destination)}</h3><p>via ${escapeHtml(route.gateway || 'on-link')} · ${escapeHtml(route.device)}${route.metric !== null ? ` · metric ${route.metric}` : ''}</p></article>`).join('') || '<div class="empty">No routes accessible.</div>'}</div>
-      <h2>DNS servers</h2><div class="panel">${info.dns.map(escapeHtml).join(', ') || 'No DNS servers found.'}</div>
-    </details>`;
-}
-
 function networkView() {
   const info = state.network;
   const control = info?.control;
-  if (!info) return `${pageHead('Networking', 'Configure this LightNAS node like a virtualization host.', '<button class="secondary" data-action="refresh-network">Refresh</button>')}<div class="empty">Loading network inventory…</div>`;
-  const liveByName = new Map((info.interfaces || []).map(item => [item.name, item]));
+  if (!info) return `${pageHead('Networking', 'Manage interfaces, bridges, VLANs, bonds, routes and DNS.', '<button class="secondary" data-action="refresh-network">Refresh</button>')}<div class="empty">Loading network inventory…</div>`;
+
+  const defaultRoute = [...(info.routes || [])].filter(item => item.destination === 'default').sort((a, b) => (a.metric ?? 0) - (b.metric ?? 0))[0] || null;
+  const bridge = control?.bridge || null;
   const connections = control?.connections || [];
-  const profilesByDevice = new Map(connections.filter(item => item.device).map(item => [item.device, item]));
-  const rows = [...(control?.devices || [])].filter(item => item.type !== 'loopback').map(item => {
-    const profile = profilesByDevice.get(item.name) || connections.find(connection => connection.name === item.connection);
-    const live = liveByName.get(item.name);
-    const address = live?.addresses?.filter(entry => entry.family === 'inet').map(entry => `${entry.address}/${entry.prefix}`).join(', ') || '—';
-    return { ...item, profile, live, address };
+  const devices = control?.devices || [];
+  const interfaces = (info.interfaces || []).filter(item => {
+    const name = item.name || '';
+    return name !== 'lo' && !/^veth|^tap|^tun|^docker|^br-[A-Fa-f0-9]+$/i.test(name);
   });
-  for (const profile of connections) if (!rows.some(row => row.profile?.name === profile.name)) rows.push({ name:profile.device || profile.name, type:profile.type, state:'disconnected', connection:profile.name, profile, live:null, address:'—' });
-  const defaultRoute = (info.routes || []).find(item => item.destination === 'default');
-  const createMenu = `<details class="create-menu"><summary class="primary">Create</summary><div><button type="button" data-network-add-bridge>Linux Bridge</button><button type="button" data-network-add-bond>Linux Bond</button><button type="button" data-network-add-vlan>Linux VLAN</button><hr><button type="button" data-network-add-ovs-bridge>OVS Bridge</button><button type="button" data-network-add-ovs-bond>OVS Bond</button><button type="button" data-network-add-ovs-port>OVS Internal Port</button></div></details>`;
-  return `${pageHead('Networking', 'Create and manage interfaces, bridges, bonds, VLANs, addressing, routes, and DNS.', `<div class="head-actions"><button class="secondary" data-action="refresh-network">Refresh</button>${createMenu}</div>`)}
-    <section class="network-summary-strip"><div><span>Connectivity</span><b>${escapeHtml(control?.connectivity || 'unknown')}</b></div><div><span>Default route</span><b>${escapeHtml(defaultRoute ? `${defaultRoute.device} · ${defaultRoute.gateway || 'on-link'}` : 'Not configured')}</b></div><div><span>DNS</span><b>${escapeHtml((info.dns || []).join(', ') || 'Not configured')}</b></div><div><span>Manager</span><b>${escapeHtml(control?.manager || 'Read only')}</b></div></section>
-    <section class="panel infrastructure-panel">
-      <div class="table-toolbar"><div><span class="eyebrow">NODE NETWORK</span><h2>Interfaces & connection profiles</h2></div><p>Select Edit to configure DHCP/static IPv4, gateway, DNS, autostart, and immediate activation.</p></div>
-      <div class="infra-table-wrap"><table class="infra-table"><thead><tr><th>Name</th><th>Type</th><th>Active</th><th>Autostart</th><th>IPv4/CIDR</th><th>Connection</th><th></th></tr></thead><tbody>${rows.map(row => `<tr><td><b>${escapeHtml(row.name)}</b></td><td>${escapeHtml(String(row.type || 'interface').replace('802-3-ethernet','Ethernet'))}</td><td><span class="table-state ${/connected|up/i.test(`${row.state} ${row.live?.state}`) ? 'on' : ''}">${/connected|up/i.test(`${row.state} ${row.live?.state}`) ? 'Yes' : 'No'}</span></td><td>${row.profile?.autoconnect ? 'Yes' : 'No'}</td><td>${escapeHtml(row.address)}</td><td>${escapeHtml(row.profile?.name || row.connection || '—')}</td><td><div class="row-actions">${row.profile ? `<button class="secondary" data-network-edit="${escapeHtml(row.profile.name)}">Edit</button><button class="secondary danger-button" data-network-delete="${escapeHtml(row.profile.name)}">Remove</button>` : ''}</div></td></tr>`).join('') || '<tr><td colspan="7">No manageable network interfaces found.</td></tr>'}</tbody></table></div>
+  const byName = new Map(interfaces.map(item => [item.name, item]));
+  const interfaceRows = devices.map(device => {
+    const live = byName.get(device.name);
+    const profile = connections.find(item => item.device === device.name || item.name === device.connection);
+    const ipv4 = live?.addresses?.filter(item => item.family === 'inet').map(item => `${item.address}/${item.prefix}`).join(', ') || '—';
+    const role = device.bridgePortOf ? `Port of ${device.bridgePortOf}`
+      : device.name === bridge?.name ? 'LightNAS LAN bridge'
+      : defaultRoute?.device === device.name ? 'Default uplink'
+      : device.type === 'bond' ? 'Bond'
+      : device.type === 'vlan' ? 'VLAN'
+      : device.type === 'wifi' ? 'Wi-Fi'
+      : 'Interface';
+    return { device, live, profile, ipv4, role };
+  });
+
+  // Include kernel-visible bridge/VLAN interfaces that NetworkManager did not
+  // report as managed devices so the table remains an honest host inventory.
+  for (const live of interfaces) {
+    if (interfaceRows.some(row => row.device.name === live.name)) continue;
+    interfaceRows.push({
+      device: { name: live.name, type: 'kernel', state: live.state || 'unknown', connection: null },
+      live, profile: null,
+      ipv4: live.addresses?.filter(item => item.family === 'inet').map(item => `${item.address}/${item.prefix}`).join(', ') || '—',
+      role: live.name === bridge?.name ? 'LightNAS LAN bridge' : 'Kernel interface'
+    });
+  }
+
+  const routes = (info.routes || []).filter(route => !/^docker|^veth|^tap|^tun/i.test(route.device || ''));
+  const wifiDevices = devices.filter(item => item.type === 'wifi' && !['unavailable','unmanaged'].includes(item.state));
+
+  return `${pageHead('Networking', 'Proxmox-style host networking for the LightNAS node. Create configuration first, then explicitly activate changes that could affect management connectivity.', '<div class="head-actions"><button class="secondary" data-action="refresh-network">Refresh</button><button class="primary" data-network-add-bridge>+ Bridge</button><button class="secondary" data-network-add-vlan>+ VLAN</button><button class="secondary" data-network-add-bond>+ Bond</button><button class="secondary" data-network-add-route>+ Route</button></div>')}
+    <section class="network-status-strip">
+      <div><span>Manager</span><strong>${escapeHtml(control?.manager || 'Kernel')}</strong></div>
+      <div><span>Connectivity</span><strong>${escapeHtml(control?.connectivity || 'unknown')}</strong></div>
+      <div><span>Default gateway</span><strong>${escapeHtml(defaultRoute?.gateway || '—')}</strong></div>
+      <div><span>Default device</span><strong>${escapeHtml(defaultRoute?.device || '—')}</strong></div>
     </section>
-    ${control?.wifiAvailable ? `<section class="panel infrastructure-panel"><div class="table-toolbar"><div><span class="eyebrow">WIRELESS</span><h2>Available Wi‑Fi networks</h2></div></div><div class="wifi-chip-grid">${(control.wifi || []).map(item => `<button class="wifi-chip" data-wifi-connect="${escapeHtml(item.ssid)}"><span><b>${escapeHtml(item.ssid)}</b><small>${escapeHtml(item.security || 'Open')}</small></span><strong>${item.connected ? 'Connected' : `${item.signal}%`}</strong></button>`).join('') || '<p class="muted">No networks in range.</p>'}</div></section>` : ''}
-    <section class="network-detail-grid">
-      <details class="panel" open><summary><b>Routes (${(info.routes || []).length})</b></summary><div class="compact-table">${(info.routes || []).map(route => `<div><b>${escapeHtml(route.destination)}</b><span>${escapeHtml(route.gateway || 'on-link')}</span><span>${escapeHtml(route.device || '—')}</span><span>${route.metric ?? '—'}</span></div>`).join('') || '<p>No routes.</p>'}</div></details>
-      <details class="panel" open><summary><b>DNS resolvers</b></summary><div class="dns-list">${(info.dns || []).map(item => `<code>${escapeHtml(item)}</code>`).join('') || '<p>No resolvers configured.</p>'}</div></details>
-    </section>`;
+
+    <section class="panel network-table-panel">
+      <div class="panel-head"><div><span class="eyebrow">NODE NETWORK</span><h2>Interfaces</h2></div><span class="muted">${interfaceRows.length} visible</span></div>
+      <div class="network-table" role="table">
+        <div class="network-table-row network-table-head" role="row"><span>Name</span><span>Type / role</span><span>State</span><span>IPv4</span><span>Profile</span><span>Actions</span></div>
+        ${interfaceRows.map(({ device, profile, ipv4, role }) => `<div class="network-table-row" role="row">
+          <strong>${escapeHtml(device.name)}</strong>
+          <span>${escapeHtml(device.type || 'interface')}<small>${escapeHtml(role)}</small></span>
+          <span><b class="volume-state ${/connected|up/i.test(device.state || '') ? 'writable' : ''}">${escapeHtml(String(device.state || 'unknown').toUpperCase())}</b></span>
+          <span class="mono-cell">${escapeHtml(ipv4)}</span>
+          <span>${escapeHtml(profile?.name || device.connection || '—')}<small>${profile ? `autostart ${profile.autoconnect ? 'yes' : 'no'}` : ''}</small></span>
+          <div class="runtime-actions">
+            ${profile ? `<button class="secondary" data-network-edit="${escapeHtml(profile.name)}">Edit</button>` : ''}
+            ${device.state === 'connected' ? `<button class="secondary" data-network-device="${escapeHtml(device.name)}" data-network-device-action="disconnect">Down</button>` : device.type !== 'kernel' ? `<button class="secondary" data-network-device="${escapeHtml(device.name)}" data-network-device-action="connect">Up</button>` : ''}
+          </div>
+        </div>`).join('') || '<div class="empty">No managed network interfaces are visible.</div>'}
+      </div>
+    </section>
+
+    <div class="dashboard-grid network-secondary-grid">
+      <section class="panel">
+        <div class="panel-head"><h2>Routes</h2><button class="secondary" data-network-add-route>+ Static route</button></div>
+        <div class="route-table">${routes.map(route => `<div class="route-row"><strong>${escapeHtml(route.destination)}</strong><span>via ${escapeHtml(route.gateway || 'on-link')}</span><span>${escapeHtml(route.device || '—')}</span><span>metric ${route.metric ?? '—'}</span></div>`).join('') || '<div class="empty">No routes visible.</div>'}</div>
+      </section>
+      <section class="panel">
+        <h2>DNS</h2>
+        <p class="muted">Active resolver servers</p>
+        <div class="dns-list">${(info.dns || []).map(item => `<code>${escapeHtml(item)}</code>`).join('') || '<span class="muted">No DNS servers detected.</span>'}</div>
+        <p class="muted">Edit DNS and IPv4 settings from an interface connection profile.</p>
+      </section>
+    </div>
+
+    ${wifiDevices.length ? `<section class="panel"><div class="panel-head"><h2>Wi-Fi</h2><span class="muted">Available wireless networks</span></div><div class="inventory-grid">${(control?.wifi || []).map(item => `<article class="inventory-card"><div class="volume-title"><h3>${escapeHtml(item.ssid)}</h3><span class="volume-state ${item.connected ? 'writable' : ''}">${item.connected ? 'CONNECTED' : `${item.signal}%`}</span></div><p>${escapeHtml(item.security || 'Open')}</p><button class="secondary" data-wifi-connect="${escapeHtml(item.ssid)}">${item.connected ? 'Prefer' : 'Connect'}</button></article>`).join('') || '<div class="empty">No Wi-Fi networks currently in range.</div>'}</div></section>` : ''}
+
+    <div class="module-note"><b>Safe apply model:</b> Creating a bridge, VLAN, bond or route writes configuration without intentionally dropping the current management connection. Activating a modified management profile can interrupt this browser session, so LightNAS asks before applying it.</div>`;
 }
 
 function firewallView() {
   const firewall = state.network?.firewall;
-  const enabled = /active|enabled/i.test(firewall?.status || '');
-  return `${pageHead('Firewall', 'Host-level traffic policy for the LightNAS management plane and published services.', '<div class="head-actions"><button class="secondary" data-action="refresh-network">Refresh</button><button class="primary" data-firewall-add>+ Add rule</button></div>')}
-    <section class="network-summary-strip"><div><span>Status</span><b class="${enabled ? 'success-text' : ''}">${escapeHtml(firewall?.status || 'Loading…')}</b></div><div><span>Backend</span><b>${escapeHtml(firewall?.backend || 'detecting')}</b></div><div><span>Rules</span><b>${firewall?.rules?.length || 0}</b></div><div><span>Tables</span><b>${firewall?.tables?.length || 0}</b></div></section>
-    <section class="panel infrastructure-panel"><div class="table-toolbar"><div><span class="eyebrow">RULES</span><h2>Traffic rules</h2></div><div class="head-actions"><button class="secondary" data-firewall-toggle="enable" ${enabled ? 'disabled' : ''}>Enable firewall</button><button class="secondary danger-button" data-firewall-toggle="disable" ${!enabled ? 'disabled' : ''}>Disable firewall</button></div></div>
-      <div class="infra-table-wrap"><table class="infra-table"><thead><tr><th>#</th><th>Enabled</th><th>Direction</th><th>Action</th><th>Destination / port</th><th>Source</th><th></th></tr></thead><tbody>${firewall?.rules?.map(item => `<tr><td>${item.number}</td><td><span class="table-state on">Yes</span></td><td>${escapeHtml(item.direction || 'IN')}</td><td><b>${escapeHtml(item.action)}</b></td><td>${escapeHtml(item.target)}</td><td>${escapeHtml(item.source)}</td><td><button class="secondary danger-button" data-firewall-delete="${item.number}">Remove</button></td></tr>`).join('') || '<tr><td colspan="7">No UFW rules. Add a rule to allow or deny a service.</td></tr>'}</tbody></table></div>
-    </section>
-    <section class="network-detail-grid"><details class="panel" open><summary><b>Firewall options</b></summary><p>Status changes are applied by the privileged LightNAS host agent. Existing SSH and LightNAS management sessions should be allowed before enabling restrictive rules.</p></details><details class="panel"><summary><b>nftables backend (${firewall?.tables?.length || 0})</b></summary><div class="dns-list">${firewall?.tables?.map(item => `<code>${escapeHtml(item)}</code>`).join('') || '<p>No visible nftables tables.</p>'}</div></details></section>`;
+  return `${pageHead('Firewall', 'Manage the firewall on this LightNAS host.', '<div class="head-actions"><button class="secondary" data-action="refresh-network">Refresh</button><button class="primary" data-firewall-add>+ Rule</button></div>')}
+    <div class="module-hero"><h2>${escapeHtml(firewall?.status || 'Loading…')}</h2><p>Backend: ${escapeHtml(firewall?.backend || 'detecting')}. Rules here protect LightNAS itself and are applied locally.</p><div class="head-actions"><button class="secondary" data-firewall-toggle="enable">Enable</button><button class="secondary danger-button" data-firewall-toggle="disable">Disable</button></div></div>
+    <h2>Rules</h2><div class="storage-list">${firewall?.rules?.map(item => `<article class="storage-row"><div><h3>${escapeHtml(item.action)} ${escapeHtml(item.target)}</h3><p>Source: ${escapeHtml(item.source)}</p></div><button class="secondary danger-button" data-firewall-delete="${item.number}">Delete</button></article>`).join('') || '<div class="empty">No numbered UFW rules visible.</div>'}</div>
+    <h2>Visible nftables tables</h2><div class="storage-list">${firewall?.tables?.map(item => `<article class="storage-row">${escapeHtml(item)}</article>`).join('') || '<div class="empty">No nftables tables visible.</div>'}</div>`;
 }
 
 function integrationsView() {
   const apps = state.runtimes?.docker, containers = state.runtimes?.containers, vm = state.runtimes?.virtualization;
-  return `${pageHead('API & integrations', 'Connect automation safely with scoped credentials, signed webhooks, identity providers, and local runtimes.', '<button class="secondary" data-action="refresh-runtime">Refresh status</button>')}
-    <div class="integration-overview-grid">
-      <article class="panel integration-status"><span class="integration-icon">▦</span><div><span class="eyebrow">SYSTEM CONTAINERS</span><h2>${containers?.available && containers?.enabled ? 'Connected' : 'Unavailable'}</h2><p>${containers?.available && containers?.enabled ? `${escapeHtml(containers.provider || 'LXC')} is ready.` : escapeHtml(containers?.reason || 'Checking provider…')}</p></div><button class="secondary" data-view-link="containers">Manage</button></article>
-      <article class="panel integration-status"><span class="integration-icon">▣</span><div><span class="eyebrow">VIRTUALIZATION</span><h2>${vm?.available && vm?.enabled ? 'Connected' : 'Unavailable'}</h2><p>${vm?.available && vm?.enabled ? `${escapeHtml(vm.provider || 'KVM')} is ready.` : escapeHtml(vm?.reason || 'Checking provider…')}</p></div><button class="secondary" data-view-link="vms">Manage</button></article>
-      <article class="panel integration-status"><span class="integration-icon">✦</span><div><span class="eyebrow">APP ENGINE</span><h2>${apps?.available && apps?.enabled ? 'Connected' : 'Optional'}</h2><p>${apps?.available && apps?.enabled ? 'Docker/OCI app hosting is ready.' : escapeHtml(apps?.reason || 'Docker/OCI is disabled.')}</p></div><button class="secondary" data-view-link="apps">Manage</button></article>
-    </div>
-    <section class="integration-directory"><div class="section-heading"><div><span class="eyebrow">POPULAR CONNECTIONS</span><h2>Connect the tools you already use</h2></div></div><div class="provider-preset-grid integration-presets">
-      <article><span>HA</span><div><b>Home Assistant</b><small>REST API and signed webhook events</small></div></article>
-      <article><span>n8n</span><div><b>n8n / Node-RED</b><small>Scoped tokens and event webhooks</small></div></article>
-      <article><span>PM</span><div><b>Prometheus & Grafana</b><small>Host monitoring integration ready</small></div></article>
-      <article><span>SL</span><div><b>Slack / Teams / Discord</b><small>Webhook-compatible notifications</small></div></article>
-      <article><span>TF</span><div><b>Terraform / Ansible</b><small>Permission-scoped REST automation</small></div></article>
-    </div></section>`;
-}
-
-function assistantView() {
-  return `${pageHead('AI helper', 'Ask the built-in LightNAS helper about this node, storage, shares, networking, containers, or virtual machines.')}
-    <section class="assistant-layout">
-      <article class="panel assistant-chat"><div class="assistant-message"><span>✦</span><div><b>LightNAS helper</b><p>I use live data from this appliance and guide you to the right control. Ask “how much storage is free?”, “is SMB running?”, or “where are my pools?”.</p></div></div><div data-assistant-answer></div><form data-assistant-form><label class="sr-only" for="assistant-question">Question</label><input id="assistant-question" name="question" maxlength="300" placeholder="Ask about this LightNAS node…" required><button class="primary" type="submit">Ask</button></form></article>
-      <aside class="panel assistant-suggestions"><span class="eyebrow">TRY A QUESTION</span>${['Storage health','Network traffic','SMB and SFTP','Containers and VMs'].map(value => `<button class="secondary" type="button" data-assistant-prompt="${value}">${value}</button>`).join('')}</aside>
-    </section>`;
+  return `${pageHead('Integrations', 'See which host services and compute providers LightNAS can actually reach.', '<button class="secondary" data-action="refresh-runtime">Refresh</button>')}
+    <div class="tool-grid">
+      <article class="panel"><h2>System containers</h2><p>${containers?.available && containers?.enabled ? `${escapeHtml(containers.provider || 'provider')} connected. System-container creation is enabled.` : escapeHtml(containers?.reason || 'Checking system-container provider…')}</p><button class="secondary" data-view-link="containers">Open containers</button></article>
+      <article class="panel"><h2>Virtualization</h2><p>${vm?.available && vm?.enabled ? `${escapeHtml(vm.provider || 'KVM')} connected.` : escapeHtml(vm?.reason || 'Checking virtualization…')}</p><button class="secondary" data-view-link="vms">Open virtual machines</button></article>
+      <article class="panel"><h2>Optional App Store engine</h2><p>${apps?.available && apps?.enabled ? 'Docker/OCI app engine connected. This is separate from System Containers.' : escapeHtml(apps?.reason || 'Docker/OCI app engine is optional and currently disabled.')}</p><button class="secondary" data-view-link="apps">Open App Store</button></article>
+    </div>`;
 }
 
 function render(view) {
   if (view === 'media') view = 'files';
-  state.view = ['home', 'storage', 'pools', 'files', 'users', 'smtp', 'admin', 'shares', 'capabilities', 'apps', 'containers', 'vms', 'monitoring', 'settings', 'network', 'firewall', 'integrations', 'assistant'].includes(view) ? view : 'home';
-  if (!canView(state.view)) state.view = $$('[data-view]', $('#nav')).find(link => canView(link.dataset.view))?.dataset.view || 'home';
+  state.view = ['home', 'storage', 'pools', 'files', 'users', 'permissions', 'shell', 'smtp', 'admin', 'shares', 'capabilities', 'apps', 'containers', 'vms', 'monitoring', 'settings', 'network', 'firewall', 'integrations'].includes(view) ? view : 'home';
+  if (state.overview.appliance.role !== 'administrator' && !['home', 'files', 'media'].includes(state.view)) state.view = 'home';
   const content = $('#content');
-  content.innerHTML = state.view === 'home' ? homeView() : state.view === 'storage' ? storageView() : state.view === 'pools' ? poolsView() : state.view === 'files' ? filesView() : state.view === 'media' ? mediaView() : state.view === 'users' ? usersView() : state.view === 'smtp' ? smtpView() : state.view === 'admin' ? adminView() : state.view === 'shares' ? sharesView() : state.view === 'containers' ? containersView() : state.view === 'vms' ? vmsView() : state.view === 'settings' ? settingsView() : state.view === 'capabilities' ? capabilitiesView() : state.view === 'network' ? networkView() : state.view === 'firewall' ? firewallView() : state.view === 'integrations' ? integrationsView() : state.view === 'assistant' ? assistantView() : moduleView(state.view);
+  content.innerHTML = state.view === 'home' ? homeView() : state.view === 'storage' ? storageView() : state.view === 'pools' ? poolsView() : state.view === 'files' ? filesView() : state.view === 'media' ? mediaView() : state.view === 'users' ? usersView() : state.view === 'permissions' ? permissionsView() : state.view === 'shell' ? shellView() : state.view === 'smtp' ? smtpView() : state.view === 'admin' ? adminView() : state.view === 'shares' ? sharesView() : state.view === 'containers' ? containersView() : state.view === 'vms' ? vmsView() : state.view === 'settings' ? settingsView() : state.view === 'capabilities' ? capabilitiesView() : state.view === 'network' ? networkView() : state.view === 'firewall' ? firewallView() : state.view === 'integrations' ? integrationsView() : moduleView(state.view);
   $$('[data-view]').forEach(link => link.classList.toggle('active', link.dataset.view === state.view));
   $(`[data-view="${state.view}"]`, $('#nav'))?.closest('details')?.setAttribute('open', '');
   content.focus({ preventScroll: true });
   bindViewActions();
   if (state.view === 'files' && state.files === null) loadFiles();
-  if (state.view === 'users' && state.users === null) loadUsers();
+  if (['pools', 'storage'].includes(state.view) && state.spaces === null) loadSpaces();
+  if (['users', 'permissions'].includes(state.view) && state.users === null) loadUsers();
   if (state.view === 'smtp' && state.smtp === undefined) loadSmtp();
   if (['files', 'media'].includes(state.view) && state.media === null) loadMedia();
   if (['network', 'firewall'].includes(state.view) && !state.network) loadNetwork();
@@ -617,40 +699,6 @@ function render(view) {
 }
 
 function bindViewActions() {
-  const answerAssistant = question => {
-    const query = String(question || '').toLowerCase();
-    const storage = state.overview.storage?.usableStorage || {};
-    const access = state.overview.access || {};
-    const pools = state.overview.storage?.configuredPools || [];
-    let answer = 'I can help with storage, pools, files, shares, SMB/SFTP, networking, containers, virtual machines, and system health.';
-    let link = '';
-    if (/storage|space|free|pool|disk/.test(query)) { answer = `${bytes(storage.availableBytes || 0)} is free of ${bytes(storage.totalBytes || 0)} across ${pools.length} configured storage pool${pools.length === 1 ? '' : 's'}.`; link = '<button class="panel-link" data-view-link="pools">Open Pools & datasets</button>'; }
-    else if (/smb|sftp|ssh|share/.test(query)) { answer = `SMB is ${access.smb?.active ? 'running' : 'stopped'} and SSH/SFTP is ${access.ssh?.active ? 'running' : 'stopped'}. There are ${state.overview.shares?.length || 0} configured shares.`; link = '<button class="panel-link" data-view-link="shares">Open Shares & access</button>'; }
-    else if (/network|traffic|bandwidth/.test(query)) { const rx = state.metricHistory.networkIn.at(-1) || 0, tx = state.metricHistory.networkOut.at(-1) || 0; answer = `Current sampled traffic is ${bytes(rx)}/s received and ${bytes(tx)}/s sent across ${state.overview.system.network?.interfaces || 0} interfaces.`; link = '<button class="panel-link" data-view-link="network">Open Networking</button>'; }
-    else if (/container/.test(query)) { answer = 'Open System containers to see live container counts, CPU, and memory usage, or to create and manage a container.'; link = '<button class="panel-link" data-view-link="containers">Open Containers</button>'; }
-    else if (/virtual|\bvm\b/.test(query)) { answer = 'Open Virtual machines to see running VMs, resource use, ISO media, and consoles.'; link = '<button class="panel-link" data-view-link="vms">Open Virtual machines</button>'; }
-    const target = $('[data-assistant-answer]', $('#content'));
-    if (target) target.innerHTML = `<div class="assistant-message answer"><span>✦</span><div><b>LightNAS helper</b><p>${escapeHtml(answer)}</p>${link}</div></div>`;
-    $$('[data-view-link]', target).forEach(button => button.addEventListener('click', () => { location.hash = button.dataset.viewLink; }));
-  };
-  $('[data-assistant-form]', $('#content'))?.addEventListener('submit', event => { event.preventDefault(); answerAssistant(new FormData(event.currentTarget).get('question')); });
-  $$('[data-assistant-prompt]', $('#content')).forEach(button => button.addEventListener('click', () => answerAssistant(button.dataset.assistantPrompt)));
-  $$('[data-overview-metric]', $('#content')).forEach(button => button.addEventListener('click', () => {
-    state.overviewMetric = button.dataset.overviewMetric;
-    localStorage.setItem('lightnas-overview-metric', state.overviewMetric);
-    render('home');
-  }));
-  $$('[data-access-service]', $('#content')).forEach(button => button.addEventListener('click', async () => {
-    button.disabled = true;
-    try { await request('/api/access', { method: 'POST', body: JSON.stringify({ service: button.dataset.accessService, enabled: button.dataset.enabled === 'true' }) }); state.overview = await request('/api/overview'); render('shares'); toast('Access service updated.'); }
-    catch (error) { toast(error.message); button.disabled = false; }
-  }));
-  $$('[data-file-layout]', $('#content')).forEach(button => button.addEventListener('click', () => {
-    state.fileLayout = button.dataset.fileLayout;
-    localStorage.setItem('lightnas-file-layout', state.fileLayout);
-    render('files');
-  }));
-  $('[data-open-node-shell]', $('#content'))?.addEventListener('click', () => window.open(`/node-console.html?v=${Date.now()}`, '_blank', 'noopener,width=1280,height=820'));
   const renderHealth = result => {
     const target = $('[data-appliance-health-result]', $('#content'));
     if (!target) return;
@@ -662,7 +710,10 @@ function bindViewActions() {
       (item.healthy ? 'writable' : 'readonly') + '">' + (item.healthy ? 'HEALTHY' : 'NEEDS ATTENTION') +
       '</span></div>').join('') + '</div>';
   };
-  $('[data-appliance-health]', $('#content'))?.addEventListener('click', async event => {
+  $('[data-open-node-shell]', $('#content'))?.addEventListener('click', () => {
+    window.open(`/node-shell.html?v=${Date.now()}`, '_blank', 'noopener,width=1200,height=800');
+  });
+    $('[data-appliance-health]', $('#content'))?.addEventListener('click', async event => {
     const button = event.currentTarget; button.disabled = true; button.textContent = 'Checking…';
     try { const result = await request('/api/appliance/health'); renderHealth(result); toast(result.healthy ? 'LightNAS appliance is healthy.' : 'Some appliance services need attention.'); }
     catch (error) { toast(error.message); }
@@ -674,13 +725,12 @@ function bindViewActions() {
     catch (error) { toast(error.message); }
     finally { button.disabled = false; button.textContent = 'Repair automatically'; }
   });
-  $('[data-show-dataset-form]', $('#content'))?.addEventListener('click', () => {
-    const form = $('#dataset-form', $('#content'));
-    if (!form) return;
-    form.hidden = false;
-    form.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    $('input[name="name"]', form)?.focus();
-  });
+  $$('[data-action="create-pool"]', $('#content')).forEach(button => button.addEventListener('click', () => {
+    const storage = state.overview.storage;
+    if (!storage.disks.length) return toast('No physical disks are exposed to this NAS. Attach data disks to a VM or install on bare metal.');
+    toast('Physical pool creation needs the disk safety agent before it can operate. Existing ZFS datasets can be created below.');
+    $('#dataset-form', $('#content'))?.scrollIntoView({ behavior: 'smooth' });
+  }));
   $$('[data-action="create-container"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     let containers = state.runtimes?.containers;
     if ((!containers?.networks?.length || !containers?.available || !containers.enabled) && containers?.inventoryAvailable !== false) {
@@ -730,7 +780,7 @@ function bindViewActions() {
     button.disabled = true;
     button.textContent = 'Converting…';
     try {
-      await request('/api/media/convert', { method: 'POST', body: JSON.stringify({ path: [state.folder, button.dataset.convertFile].filter(Boolean).join('/'), format: format.toLowerCase().trim() }) });
+      await request('/api/media/convert', { method: 'POST', body: JSON.stringify({ path: button.dataset.path || [state.folder, button.dataset.convertFile].filter(Boolean).join('/'), format: format.toLowerCase().trim() }) });
       await loadFiles(); toast('Converted file is ready in this folder.');
     } catch (error) { toast(error.message); button.disabled = false; button.textContent = 'Convert'; }
   }));
@@ -762,9 +812,7 @@ function bindViewActions() {
   $('#user-form', $('#content'))?.addEventListener('submit', async event => {
     event.preventDefault();
     const form = event.currentTarget;
-    const data = Object.fromEntries(new FormData(form));
-    data.groups = $$('input[name="groups"]:checked', form).map(input => input.value);
-    try { await request('/api/users', { method: 'POST', body: JSON.stringify(data) }); await loadUsers(); toast('User created.'); }
+    try { await request('/api/users', { method: 'POST', body: JSON.stringify(Object.fromEntries(new FormData(form))) }); await loadUsers(); toast('User created.'); }
     catch (error) { $('.form-error', form).textContent = error.message; }
   });
   $$('[data-remove-user]', $('#content')).forEach(button => button.addEventListener('click', async () => {
@@ -856,20 +904,57 @@ function bindViewActions() {
     } catch (problem) { error.textContent = problem.message; }
     finally { button.disabled = false; }
   });
+  const filterApps = () => {
+    const search = ($('#app-search', $('#content'))?.value || '').trim().toLowerCase();
+    const category = $('#app-category', $('#content'))?.value || '';
+    $$('[data-app-card]', $('#content')).forEach(card => {
+      const matchesText = !search || String(card.dataset.search || '').includes(search);
+      const matchesCategory = !category || card.dataset.category === category;
+      card.hidden = !(matchesText && matchesCategory);
+    });
+  };
+  $('#app-search', $('#content'))?.addEventListener('input', filterApps);
+  $('#app-category', $('#content'))?.addEventListener('change', filterApps);
   $$('[data-action="new-share"]', $('#content')).forEach(button => button.addEventListener('click', () => $('#share-dialog').showModal()));
   $$('[data-view-link]', $('#content')).forEach(button => button.addEventListener('click', () => { location.hash = button.dataset.viewLink; }));
-  $$('[data-action="refresh"]', $('#content')).forEach(button => button.addEventListener('click', async () => { try { state.overview = await request('/api/overview'); captureOverviewMetrics(); render(state.view); toast('Readings updated.'); } catch (error) { toast(error.message); } }));
-  $$('[data-action="refresh-files"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+  $$('[data-action="refresh"]', $('#content')).forEach(button => button.addEventListener('click', async () => { try { state.overview = await request('/api/overview'); render(state.view); toast('Readings updated.'); } catch (error) { toast(error.message); } }));
+  $('[data-action="refresh-files"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     button.disabled = true;
     button.textContent = 'Refreshing…';
+    state.files = null;
+    render('files');
     await loadFiles();
+    toast('Files refreshed.');
+  }));
+  $('[data-action="refresh-storage"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+    button.disabled = true;
+    button.textContent = 'Scanning…';
+    try {
+      state.overview = await request('/api/overview');
+      render(state.view);
+      toast('Storage rescan complete.');
+    } catch (error) { toast(error.message); }
+  }));
+  $$('[data-file-view]', $('#content')).forEach(button => button.addEventListener('click', () => {
+    state.fileView = button.dataset.fileView === 'grid' ? 'grid' : 'list';
+    localStorage.setItem('lightnas-file-view', state.fileView);
+    render('files');
+  }));
+  $$('[data-download-folder]', $('#content')).forEach(button => button.addEventListener('click', () => {
+    const path = button.dataset.downloadFolder || '';
+    const link = document.createElement('a');
+    link.href = `/api/files/archive?path=${encodeURIComponent(path)}`;
+    link.download = `${path.split('/').pop() || 'folder'}.tar.gz`;
+    document.body.append(link);
+    link.click();
+    link.remove();
   }));
   $$('[data-library-tab]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     const folder = button.dataset.libraryTab || '';
-    if (folder) {
+    if (folder && folder !== 'Attached storage') {
       try { await request(`/api/files?path=${encodeURIComponent(folder)}`); }
       catch {
-        try { await request(`/api/files?path=${encodeURIComponent(folder)}`, { method: 'POST' }); }
+        try { await request(`/api/files?path=${encodeURIComponent(folder)}`, { method: 'POST', body: '{}' }); }
         catch (error) { return toast(error.message); }
       }
     }
@@ -879,32 +964,26 @@ function bindViewActions() {
   }));
   $$('[data-folder]', $('#content')).forEach(button => button.addEventListener('click', () => { state.folder = button.dataset.folder; state.files = null; render('files'); }));
   $$('[data-open]', $('#content')).forEach(button => button.addEventListener('click', async () => {
-    const path = [state.folder, button.dataset.open].filter(Boolean).join('/');
+    const path = button.dataset.path || [state.folder, button.dataset.open].filter(Boolean).join('/');
     if (button.dataset.directory === 'true') { state.folder = path; state.files = null; render('files'); return; }
     try { const response = await fetch(`/api/files/download?path=${encodeURIComponent(path)}`); if (!response.ok) throw new Error((await response.json()).error); const object = URL.createObjectURL(await response.blob()); const link = document.createElement('a'); link.href = object; link.download = button.dataset.open; link.click(); setTimeout(() => URL.revokeObjectURL(object), 60000); } catch (error) { toast(error.message); }
   }));
-  $$('[data-download-folder]', $('#content')).forEach(button => button.addEventListener('click', () => {
-    const path = [state.folder, button.dataset.downloadFolder].filter(Boolean).join('/');
-    const link = document.createElement('a');
-    link.href = `/api/files/archive?path=${encodeURIComponent(path)}`;
-    link.download = `${button.dataset.downloadFolder}.tar.gz`;
-    link.click();
-  }));
-  $$('[data-action="new-folder"]', $('#content')).forEach(button => button.addEventListener('click', async () => { const name = prompt('New folder name'); if (name === null) return; try { await request(`/api/files?path=${encodeURIComponent([state.folder, name].filter(Boolean).join('/'))}`, { method: 'POST' }); await loadFiles(); toast('Folder created.'); } catch (error) { toast(error.message); } }));
+  $$('[data-action="new-folder"]', $('#content')).forEach(button => button.addEventListener('click', async () => { const name = prompt('New folder name'); if (name === null) return; try { await request(`/api/files?path=${encodeURIComponent([state.folder, name].filter(Boolean).join('/'))}`, { method: 'POST', body: '{}' }); await loadFiles(); toast('Folder created.'); } catch (error) { toast(error.message); } }));
   $('#file-upload', content)?.addEventListener('change', async event => {
     const files = [...event.target.files];
-    let completed = 0;
-    for (const file of files) {
-      try {
-        const response = await fetch(`/api/files?path=${encodeURIComponent([state.folder, file.name].filter(Boolean).join('/'))}`, { method: 'PUT', headers: { 'X-LightNAS-Request': '1' }, body: file });
-        if (!response.ok) throw new Error((await response.json()).error);
-        completed++;
-      } catch (error) { toast(`${file.name}: ${error.message}`); break; }
-    }
-    await loadFiles();
-    if (completed === files.length && completed) toast(`${completed} file${completed === 1 ? '' : 's'} uploaded.`);
+    event.target.value = '';
+    await uploadFilesWithProgress(files, false);
   });
-  $$('[data-delete-file]', content).forEach(button => button.addEventListener('click', async () => { if (!confirm(`Delete ${button.dataset.deleteFile}? Folders must be empty.`)) return; try { await request(`/api/files?path=${encodeURIComponent([state.folder, button.dataset.deleteFile].filter(Boolean).join('/'))}`, { method: 'DELETE' }); await loadFiles(); toast('Deleted.'); } catch (error) { toast(error.message); } }));
+  $('#folder-upload', content)?.addEventListener('change', async event => {
+    const files = [...event.target.files];
+    event.target.value = '';
+    await uploadFilesWithProgress(files, true);
+  });
+  $$('[data-delete-file]', content).forEach(button => button.addEventListener('click', async () => {
+    if (!confirm(`Delete ${button.dataset.deleteFile}? Folders must be empty.`)) return;
+    const path = button.dataset.path || [state.folder, button.dataset.deleteFile].filter(Boolean).join('/');
+    try { await request(`/api/files?path=${encodeURIComponent(path)}`, { method: 'DELETE' }); await loadFiles(); toast('Deleted.'); } catch (error) { toast(error.message); }
+  }));
   $$('[data-delete-share]', content).forEach(button => button.addEventListener('click', async () => { if (!confirm(`Remove share plan ${button.dataset.name}?`)) return; try { await request(`/api/shares/${button.dataset.deleteShare}`, { method: 'DELETE' }); state.overview = await request('/api/overview'); render(state.view); toast('Plan removed.'); } catch (error) { toast(error.message); } }));
 }
 
@@ -924,69 +1003,52 @@ async function submitAuth(form, path) {
   }
 }
 
-const authDecode64url = value => Uint8Array.from(atob(String(value).replaceAll('-', '+').replaceAll('_', '/').padEnd(Math.ceil(String(value).length / 4) * 4, '=')), character => character.charCodeAt(0));
-const authEncode64url = value => btoa(String.fromCharCode(...new Uint8Array(value))).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
-
-$('#sms-login-button').addEventListener('click', async () => {
-  const form = $('#login-form');
-  const error = $('.form-error', form);
-  const data = Object.fromEntries(new FormData(form));
-  error.textContent = '';
-  try {
-    const result = await request('/api/security/sms/challenge', { method:'POST', body:JSON.stringify({ username:data.username, password:data.password }) });
-    $('#sms-code-field').classList.remove('hidden');
-    $('#sms-code-field input').focus();
-    toast(`Verification code sent to ${result.destination}.`);
-  } catch (problem) { error.textContent = problem.message; }
-});
-
-$('#fido-login-button').addEventListener('click', async () => {
-  const form = $('#login-form');
-  const error = $('.form-error', form);
-  const data = Object.fromEntries(new FormData(form));
-  error.textContent = '';
-  try {
-    if (!window.PublicKeyCredential) throw new Error('This browser does not support passkeys or FIDO2 security keys.');
-    const options = await request('/api/security/fido/challenge', { method:'POST', body:JSON.stringify({ username:data.username, password:data.password }) });
-    const credential = await navigator.credentials.get({ publicKey:{ challenge:authDecode64url(options.challenge), rpId:options.rpId, allowCredentials:options.allowCredentials.map(item => ({ ...item, id:authDecode64url(item.id) })), timeout:60000, userVerification:'preferred' } });
-    form.elements.fido.value = JSON.stringify({ id:credential.id, clientDataJSON:authEncode64url(credential.response.clientDataJSON), authenticatorData:authEncode64url(credential.response.authenticatorData), signature:authEncode64url(credential.response.signature), userHandle:credential.response.userHandle ? authEncode64url(credential.response.userHandle) : '' });
-    await submitAuth(form, '/api/login');
-  } catch (problem) { error.textContent = problem.message || 'Security-key sign-in was cancelled.'; }
-});
-
 $('#setup-form').addEventListener('submit', event => { event.preventDefault(); submitAuth(event.currentTarget, '/api/setup'); });
 $('#login-form').addEventListener('submit', event => { event.preventDefault(); submitAuth(event.currentTarget, '/api/login'); });
 $('#logout').addEventListener('click', async () => { await request('/api/logout', { method: 'POST' }); showAuth('login'); });
-const consoleShell = $('#console');
-function syncCollapsedSidebar() {
-  if (!consoleShell.classList.contains('sidebar-collapsed')) return;
-  $$('.nav-group', $('.sidebar')).forEach(group => group.setAttribute('open', ''));
+function applySidebarPreference() {
+  const collapsed = localStorage.getItem('lightnas-sidebar-collapsed') === '1';
+  $('#console').classList.toggle('sidebar-collapsed', collapsed && innerWidth > 760);
 }
-if (localStorage.getItem('lightnas-sidebar-collapsed') === '1' && matchMedia('(min-width: 901px)').matches) {
-  consoleShell.classList.add('sidebar-collapsed');
-  syncCollapsedSidebar();
-}
+applySidebarPreference();
 $('#menu').addEventListener('click', () => {
-  if (matchMedia('(max-width: 900px)').matches) return $('.sidebar').classList.toggle('open');
-  consoleShell.classList.toggle('sidebar-collapsed');
-  syncCollapsedSidebar();
-  localStorage.setItem('lightnas-sidebar-collapsed', consoleShell.classList.contains('sidebar-collapsed') ? '1' : '0');
+  if (innerWidth <= 760) {
+    $('.sidebar').classList.toggle('open');
+    return;
+  }
+  const collapsed = !$('#console').classList.contains('sidebar-collapsed');
+  $('#console').classList.toggle('sidebar-collapsed', collapsed);
+  localStorage.setItem('lightnas-sidebar-collapsed', collapsed ? '1' : '0');
 });
-$('#node-shell-button').addEventListener('click', () => window.open(`/node-console.html?v=${Date.now()}`, '_blank', 'noopener,width=1280,height=820'));
-$('#avatar-upload').addEventListener('change', async event => {
-  const file = event.target.files?.[0];
-  if (!file) return;
-  try {
-    const response = await fetch('/api/profile/avatar', { method: 'PUT', headers: { 'X-LightNAS-Request': '1', 'Content-Type': file.type || 'application/octet-stream' }, body: file });
-    if (!response.ok) throw new Error((await response.json()).error || 'Unable to save profile picture.');
-    state.overview.appliance.hasAvatar = true;
-    $('#avatar').classList.add('has-photo');
-    $('#avatar').style.backgroundImage = `url(/api/profile/avatar?v=${Date.now()})`;
-    toast('Profile picture updated.');
-  } catch (error) { toast(error.message); }
-  event.target.value = '';
-});
+addEventListener('resize', applySidebarPreference);
 $('#theme-toggle').addEventListener('click', () => { theme = themeChoices[(themeChoices.indexOf(theme) + 1) % themeChoices.length]; localStorage.setItem('lightnas-theme', theme); applyTheme(); toast(`Appearance: ${theme}`); });
+$('#avatar').addEventListener('click', () => {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/jpeg,image/png,image/webp';
+  input.addEventListener('change', async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) return toast('Profile picture must be 8 MiB or smaller.');
+    try {
+      const response = await fetch('/api/profile/avatar', {
+        method: 'PUT',
+        headers: { 'Content-Type': file.type, 'X-LightNAS-Request': '1' },
+        body: file
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || 'Unable to upload profile picture.');
+      state.overview = await request('/api/overview');
+      const appliance = state.overview.appliance;
+      const avatar = $('#avatar');
+      avatar.textContent = '';
+      avatar.style.backgroundImage = `url("/api/profile/avatar?v=${Date.now()}")`;
+      avatar.classList.add('has-photo');
+      toast('Profile picture updated.');
+    } catch (error) { toast(error.message); }
+  }, { once: true });
+  input.click();
+});
 $('#mobile-more').addEventListener('click', () => $('.sidebar').classList.add('open'));
 $$('[data-view]').forEach(link => link.addEventListener('click', () => $('.sidebar').classList.remove('open')));
 $$('.close-dialog').forEach(button => button.addEventListener('click', () => $('#share-dialog').close()));
@@ -1001,7 +1063,7 @@ $('#share-form').addEventListener('submit', async event => {
     form.reset();
     state.overview = await request('/api/overview');
     render(state.view);
-    toast('Share created and access service applied.');
+    toast('Share plan saved. No file service was changed.');
   } catch (problem) { error.textContent = problem.message; }
 });
 
