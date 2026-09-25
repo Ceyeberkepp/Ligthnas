@@ -18,13 +18,10 @@ test('Storage and Pools & datasets have separate responsibilities', async () => 
   assert.match(poolsView, /Datasets/);
   assert.match(poolsView, /data-create-storage/);
 
-  assert.match(manager, /STORAGE_PROVIDERS/);
-  for (const label of ['Directory', 'LVM', 'LVM-Thin', 'BTRFS', 'NFS', 'SMB \/ CIFS', 'GlusterFS', 'iSCSI', 'CephFS', 'RBD', 'ZFS over iSCSI', 'ZFS', 'Proxmox Backup Server', 'VMware ESXi']) {
-    assert.match(manager, new RegExp(label));
-  }
+  assert.match(manager, /Detected drives/);
+  assert.match(manager, /data-create-storage-source/);
   assert.match(manager, /selectedType==='vztmpl'/);
   assert.match(manager, /data-template-storage/);
-  assert.doesNotMatch(manager, /name="provider"[^>]+disabled/);
   assert.match(manager, /already in use/);
   assert.match(templates, /preferredStorageId/);
 });
