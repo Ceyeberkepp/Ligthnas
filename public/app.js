@@ -150,7 +150,7 @@ function canView(view, appliance = state.overview?.appliance) {
 function applyApplianceBranding(appliance = state.overview?.appliance) {
   if (!appliance) return;
   const logoUrl = appliance.logo ? `url("/api/branding/logo?v=${Date.now()}")` : '';
-  $('.brand-mark').forEach(mark => {
+  $$('.brand-mark').forEach(mark => {
     mark.classList.toggle('custom-logo', Boolean(appliance.logo));
     mark.style.backgroundImage = logoUrl;
   });
@@ -1087,7 +1087,7 @@ function bindViewActions() {
     catch (error) { toast(error.message); }
   }));
   $$('[data-open-space]', $('#content')).forEach(button => button.addEventListener('click', () => { state.folder = `Spaces/${button.dataset.openSpace}`; state.files = null; location.hash = 'files'; }));
-  $('[data-toggle-user-create]', $('#content')).forEach(button => button.addEventListener('click', () => {
+  $$('[data-toggle-user-create]', $('#content')).forEach(button => button.addEventListener('click', () => {
     const form = $('#user-form', $('#content'));
     if (!form) return;
     form.hidden = !form.hidden;
