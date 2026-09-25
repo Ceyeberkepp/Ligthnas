@@ -964,19 +964,27 @@ async function api(req, res, url) {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/overview') {
-    const shouldLoadHost = isAdmin || ['storage.view', 'system.view', 'vms.manage'].some(permission => permissions.includes(permission));
-    const [system, filesystems, storage, storagePools, runtimes] = await Promise.all([
-      getSystemSnapshot(), getFilesystems(), getStorageInventory(), listStoragePools(),
-      shouldLoadHost ? runtimeInventory() : Promise.resolve(null)
+    // Keep the first dashboard request intentionally lightweight. Runtime
+    // discovery can invoke Docker, LXC and libvirt commands and used to delay
+    // every login even when the user only wanted Files or the home page.
+    // VM/container/app pages fetch runtimeInventory() only when opened.
+    const [system, filesystems, storage, storagePools] = await Promise.all([
+      getSystemSnapshot(), getFilesystems(), getStorageInventory(), listStoragePools()
     ]);
-    // Overview and Storage must use one authoritative capacity figure. This
-    // includes local storage once plus each unique attached virtual volume once.
     storage.usableStorage = storagePools.visibleSummary || storage.usableStorage;
     storage.poolSummary = storagePools.summary;
     return send(res, 200, {
       appliance: { deviceName: store.state.config.deviceName, username, role: isAdmin ? 'administrator' : context.apiToken ? 'api' : 'user', permissions, timezone: store.state.config.timezone, avatar: Boolean(account.avatarExt) },
-      system, filesystems, storage, host: runtimes?.virtualization?.host || null,
+      system, filesystems, storage, host: null,
       shares: store.state.shares, activity: store.state.activity.slice(0, 8)
+    });
+  }
+  if (req.method === 'GET' && url.pathname === '/api/storage/scan') {
+    if (!requirePermission(res, permissions, 'storage.view')) return;
+    const storage = await getStorageInventory();
+    return send(res, 200, {
+      disks: (storage.disks || []).map(item => ({ path: item.path, sizeBytes: item.sizeBytes, system: item.system, blank: item.blank })),
+      attachedVolumes: (storage.attachedVolumes || []).map(item => ({ device: item.device, mountPoint: item.mountPoint, totalBytes: item.totalBytes }))
     });
   }
   if (req.method === 'GET' && url.pathname === '/api/network') {
@@ -1273,7 +1281,11 @@ async function staticAsset(req, res, url) {
     const content = await readFile(path);
     res.writeHead(200, {
       'Content-Type': mimeTypes[extname(path).toLowerCase()] || 'application/octet-stream',
-      'Cache-Control': ['.js', '.mjs', '.css', '.html'].includes(extname(path).toLowerCase()) ? 'no-store, max-age=0' : 'public, max-age=300',
+      'Cache-Control': extname(path).toLowerCase() === '.html'
+        ? 'no-cache, max-age=0'
+        : ['.js', '.mjs', '.css'].includes(extname(path).toLowerCase())
+          ? 'private, max-age=120'
+          : 'public, max-age=300',
       'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': csp
     });
     res.end(content);
