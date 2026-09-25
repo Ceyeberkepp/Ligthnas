@@ -262,7 +262,7 @@ async function showRuntimeWizard(kind) {
             <label>MAC address (optional)<input name="macAddress" placeholder="02:00:00:00:00:10" pattern="[A-Fa-f0-9]{2}(:[A-Fa-f0-9]{2}){5}"></label>
           ` : `
             <label>Firmware<select name="firmware"><option value="bios">BIOS / legacy</option><option value="uefi">UEFI</option></select></label>
-            <label>Disk controller<select name="diskBus"><option value="scsi">VirtIO SCSI · Linux/performance</option><option value="virtio">VirtIO block · Linux/performance</option><option value="sata">SATA / AHCI · Windows compatible</option></select></label>
+            <label>Disk controller<select name="diskBus"><option value="scsi">VirtIO SCSI · Linux/performance</option><option value="virtio">VirtIO block · Linux/performance</option><option value="sata">SATA · Windows/Linux installer compatible</option></select></label>
             <label>Network adapter<select name="networkModel"><option value="virtio">VirtIO · Linux/performance</option><option value="e1000">Intel E1000 · Windows compatible</option><option value="rtl8139">Realtek RTL8139</option></select></label>
             <p class="module-note" data-vm-guest-profile>LightNAS automatically selects Windows-compatible hardware when a Windows installer ISO is selected.</p>
           `}
@@ -896,7 +896,7 @@ document.addEventListener('click', async event => {
     const ethernet = (info.control?.devices || []).filter(item => item.type === 'ethernet').map(item => item.name);
     if (!ethernet.length) { alert('No Ethernet interfaces are available for a bond.'); return; }
     showEditor({
-      eyebrow: 'LINUX BOND',
+      eyebrow: 'NETWORK BOND',
       title: 'Create bond',
       description: 'Create a bond profile without activating it. Review the configuration before bringing it up so the management connection is not interrupted unexpectedly.',
       fields: [
