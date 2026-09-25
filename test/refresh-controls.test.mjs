@@ -11,6 +11,6 @@ test('refresh controls bind every matching button and reload scoped data', async
   assert.match(app, /button\.textContent = 'Refreshing…'/);
   assert.match(app, /await loadContainers\(\)/);
   assert.match(app, /await loadRuntimes\(\)/);
-  assert.match(app, /state\.files = null/);
+  assert.doesNotMatch(app, /state\.files = null;\s*render\('files'\);\s*await loadFiles\(true\)/);
   assert.match(app, /await loadFiles\(true\)/);
 });

@@ -26,6 +26,7 @@ import {
   listStorageContent, uploadStorageContent, importStorageContent, deleteStorageContent
 } from './storage-pools.mjs';
 import { generateTotpSecret, totpUri, verifyTotp } from './totp.mjs';
+import { qrCodeDataUrl } from './mfa.mjs';
 import {
   normalizePermissions, effectivePermissions, groupsForUser,
   createApiTokenRecord, authenticateApiToken,
@@ -419,6 +420,18 @@ async function api(req, res, url) {
     return send(res, 201, { ok: true, readiness }, { 'Set-Cookie': `nas_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200` });
   }
 
+  if (req.method === 'GET' && url.pathname === '/api/login/options') {
+    if (!store.state.config) return send(res, 200, { configured: false, methods: [] });
+    const username = String(url.searchParams.get('username') || '').trim();
+    const account = username === store.state.config.username ? store.state.config : store.state.users.find(user => user.username === username);
+    if (!account || account.disabled) return send(res, 200, { configured: true, methods: [] });
+    const methods = [];
+    if (account.totpEnabled) methods.push('totp');
+    if (account.smsMfa?.enabled) methods.push('sms');
+    if (Array.isArray(account.passkeys) && account.passkeys.length) methods.push('passkey');
+    return send(res, 200, { configured: true, methods });
+  }
+
   if (req.method === 'POST' && url.pathname === '/api/login') {
     if (!store.state.config) return send(res, 409, { error: 'Complete setup first.' });
     const input = await bodyJson(req);
@@ -491,7 +504,9 @@ async function api(req, res, url) {
     const secret = generateTotpSecret();
     account.totpPendingSecret = secret;
     await store.save();
-    return send(res, 200, { secret, uri: totpUri({ secret, username, issuer: `LightNAS ${store.state.config.deviceName}` }) });
+    const uri = totpUri({ secret, username, issuer: `LightNAS ${store.state.config.deviceName}` });
+    const qrCode = await qrCodeDataUrl(uri);
+    return send(res, 200, { secret, uri, qrCode });
   }
   if (req.method === 'POST' && url.pathname === '/api/security/totp/verify') {
     if (context.apiToken) return send(res, 403, { error: 'TOTP settings require an interactive local account session.' });

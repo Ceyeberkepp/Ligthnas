@@ -334,3 +334,25 @@
   .node-usage-row > b { text-align:left; }
 }
 
+
+
+/* 2026-09 file/login polish */
+.login-mfa { margin: 16px 0 4px; padding: 12px; border: 1px solid var(--line); border-radius: 13px; background: var(--panel-2); }
+.auth-method-tabs { display: flex; gap: 7px; flex-wrap: wrap; margin-bottom: 10px; }
+.auth-method-tabs .secondary { flex: 1 1 120px; padding: 9px 11px; font-size: 12px; }
+.auth-method-tabs .secondary.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--button)); }
+.login-mfa-panel > p { margin: 4px 0 10px; font-size: 12px; line-height: 1.45; }
+.login-mfa-panel label { margin: 10px 0; }
+.totp-qr { display:block; width:min(240px,100%); aspect-ratio:1; object-fit:contain; margin:14px 0; padding:10px; border:1px solid var(--line); border-radius:12px; background:#fff; }
+
+.file-drop-zone { margin: 10px 0 12px; display: flex; align-items: center; justify-content: center; gap: 9px; min-height: 58px; padding: 11px 16px; border: 1px dashed var(--line-strong); border-radius: 12px; color: var(--muted); background: color-mix(in srgb, var(--panel-2) 80%, transparent); transition: border-color .15s, background .15s, transform .15s; }
+.file-drop-zone b { color: var(--text); }
+.file-drop-zone span { font-size: 11px; }
+.file-drop-zone.drag-active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, var(--panel)); transform: translateY(-1px); }
+.sidebar, .sidebar nav { scrollbar-width: none !important; -ms-overflow-style: none; }
+.sidebar::-webkit-scrollbar, .sidebar nav::-webkit-scrollbar { width: 0 !important; height: 0 !important; display: none !important; }
+
+@media (max-width:700px) {
+  .file-drop-zone { align-items: flex-start; flex-direction: column; }
+  .auth-method-tabs { display: grid; grid-template-columns: 1fr; }
+}

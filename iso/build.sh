@@ -149,6 +149,7 @@ util-linux
 python3
 ffmpeg
 imagemagick
+qrencode
 acl
 novnc
 iproute2
@@ -258,7 +259,6 @@ cat >config/includes.chroot/etc/systemd/system/lightnas-runtime-init.service <<'
 Description=Initialize LightNAS native runtime engines
 Requires=lightnas-network-bootstrap.service
 After=lightnas-network-bootstrap.service
-Before=lightnas-host-agent.service lightnas.service
 
 [Service]
 Type=oneshot
@@ -278,7 +278,7 @@ cat >config/includes.chroot/etc/systemd/system/lightnas-host-agent.service <<'EO
 [Unit]
 Description=LightNAS Privileged Local Host Agent
 Wants=network-online.target
-After=network-online.target lightnas-runtime-init.service
+After=network-online.target
 
 [Service]
 Type=simple
@@ -303,7 +303,7 @@ EOF
 cat >config/includes.chroot/etc/systemd/system/lightnas.service <<'EOF'
 [Unit]
 Description=LightNAS Management Control Plane
-Wants=network-online.target lightnas-host-agent.service
+Wants=network-online.target lightnas-host-agent.service lightnas-runtime-init.service
 After=network-online.target lightnas-host-agent.service
 
 [Service]
