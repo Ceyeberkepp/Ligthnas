@@ -3,6 +3,10 @@ name: Build LightNAS ISO
 on:
   push:
     branches: [main]
+  pull_request:
+    paths:
+      - 'iso/**'
+      - '.github/workflows/build-iso.yml'
   workflow_dispatch:
 
 jobs:
