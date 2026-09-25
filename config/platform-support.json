@@ -31,13 +31,16 @@
     }
   },
   "upload": {
-    "genericFileDefaultMaxGiB": 50,
-    "storageImageDefaultMaxGiB": 50,
-    "isoChunkMiB": 64
+    "genericFileDefaultMaxGiB": 0,
+    "storageImageDefaultMaxGiB": 0,
+    "isoChunkMiB": 64,
+    "unlimitedByDefault": true,
+    "templateDefaultMaxGiB": 0
   },
   "notes": [
     "Only amd64 is currently release-qualified as a complete LightNAS control-plane build.",
     "Other architectures are required targets and must not be marked supported until install and boot validation exists.",
-    "Native system-container creation must not hard-code amd64 or x86_64."
+    "Native system-container creation must not hard-code amd64 or x86_64.",
+    "A zero upload maximum means LightNAS imposes no application-level size ceiling; filesystem capacity and free-space safety remain authoritative."
   ]
 }

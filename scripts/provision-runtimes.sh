@@ -275,7 +275,7 @@ else
   fi
   if command -v docker >/dev/null 2>&1; then
     systemctl enable --now docker.service >/dev/null 2>&1 || true
-    for attempt in {1..10}; do
+    for attempt in {1..5}; do
       docker info >/dev/null 2>&1 && break
       sleep 1
     done
@@ -315,7 +315,11 @@ elif [[ "$(uname -m)" != 'x86_64' ]]; then
   set_flag LIGHTNAS_VM_ACCELERATION unsupported
   report VMs 'automatic x86 VM provisioning currently supports x86_64 LightNAS hosts only'
 else
-  if apt-get install -y qemu-system-x86 qemu-utils libvirt-daemon-system libvirt-clients virtinst; then
+  vm_packages_ready=1
+  for command in qemu-system-x86_64 qemu-img virsh virt-install; do
+    command -v "$command" >/dev/null 2>&1 || vm_packages_ready=0
+  done
+  if [[ "$vm_packages_ready" == "1" ]] || apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils libvirt-daemon-system libvirt-clients virtinst; then
     # Unprivileged outer LXC containers cannot write the trusted.* xattrs that
     # libvirt normally uses to remember file ownership. Disable only that
     # ownership-memory feature in nested appliance mode; libvirt still applies
@@ -339,7 +343,7 @@ else
     install -d -m 0755 /var/lib/libvirt/images
     setfacl -m u:lightnas:rwx /var/lib/libvirt/images >/dev/null 2>&1 || true
 
-    for attempt in {1..15}; do
+    for attempt in {1..6}; do
       virsh -c qemu:///system list --all >/dev/null 2>&1 && break
       sleep 1
     done
@@ -447,7 +451,7 @@ PY
     fi
     set_flag LIGHTNAS_VM_ACCELERATION "$acceleration"
 
-    for attempt in {1..10}; do
+    for attempt in {1..5}; do
       runuser -u lightnas -- virsh -c qemu:///system list --all --name >/dev/null 2>&1 && break
       sleep 1
     done

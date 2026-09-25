@@ -1,28 +1,25 @@
 const q = (selector, root = document) => root.querySelector(selector);
 const qa = (selector, root = document) => [...root.querySelectorAll(selector)];
 const escapeText = value => String(value).replace(/[&<>'"]/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' })[ch]);
-const decode64url = value => Uint8Array.from(atob(String(value).replaceAll('-', '+').replaceAll('_', '/').padEnd(Math.ceil(String(value).length / 4) * 4, '=')), character => character.charCodeAt(0));
-const encode64url = value => btoa(String.fromCharCode(...new Uint8Array(value))).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
 
 const permissionNames = {
-  'overview.view':'View overview',
-  'files.read':'Read files', 'files.write':'Write files', 'media.convert':'Convert media',
-  'storage.view':'View storage', 'storage.manage':'Manage storage', 'pools.view':'View pools & datasets', 'shares.view':'View shares', 'shares.manage':'Manage shares',
-  'apps.view':'View App Store', 'apps.manage':'Manage apps', 'containers.view':'View containers', 'containers.manage':'Manage containers', 'containers.console':'Open container terminals',
-  'vms.view':'View virtual machines', 'vms.manage':'Manage virtual machines', 'vms.console':'Open VM consoles',
-  'network.view':'View networking', 'network.manage':'Manage networking', 'firewall.view':'View firewall', 'firewall.manage':'Manage firewall', 'integrations.view':'View integrations', 'integrations.manage':'Manage integrations',
-  'monitoring.view':'View monitoring', 'capabilities.view':'View capabilities', 'system.view':'View system health', 'system.shell':'Open node shell',
-  'backup.manage':'Manage backups & snapshots', 'audit.view':'View audit history',
-  'users.manage':'Manage users & groups', 'smtp.manage':'Manage email / SMTP', 'settings.manage':'Manage settings & security', 'admin.view':'View Admin Center'
+  'files.read':'Read / preview files',
+  'files.write':'Upload / create files',
+  'files.download':'Download files & folders',
+  'files.delete':'Delete files & folders',
+  'media.convert':'Convert media',
+  'storage.view':'View storage',
+  'storage.manage':'Manage storage & datasets',
+  'shares.manage':'Manage shares',
+  'apps.manage':'Manage apps',
+  'containers.manage':'Manage containers',
+  'vms.manage':'Manage virtual machines',
+  'network.view':'View networking',
+  'network.manage':'Manage interfaces, bridges & VLANs',
+  'firewall.manage':'Manage firewall',
+  'monitoring.view':'View monitoring',
+  'system.view':'View system information'
 };
-
-const permissionSections = [
-  ['Overview', ['overview.view']],
-  ['Storage & files', ['storage.view','storage.manage','pools.view','files.read','files.write','media.convert','shares.view','shares.manage']],
-  ['Apps & compute', ['apps.view','apps.manage','containers.view','containers.manage','containers.console','vms.view','vms.manage','vms.console']],
-  ['Network', ['network.view','network.manage','firewall.view','firewall.manage','integrations.view','integrations.manage']],
-  ['Administration', ['users.manage','smtp.manage','settings.manage','monitoring.view','capabilities.view','system.view','system.shell','backup.manage','audit.view','admin.view']]
-];
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -36,12 +33,7 @@ async function api(path, options = {}) {
 
 function checkboxes(options, selected = [], prefix = '') {
   const chosen = new Set(selected);
-  const available = new Set(options);
-  const known = new Set(permissionSections.flatMap(([, values]) => values));
-  const sections = permissionSections.map(([title, values]) => [title, values.filter(value => available.has(value))]);
-  const additional = options.filter(value => !known.has(value));
-  if (additional.length) sections.push(['Additional access', additional]);
-  return `<div class="permission-sections">${sections.filter(([, values]) => values.length).map(([title, values]) => `<fieldset class="permission-section"><legend>${escapeText(title)}</legend><div class="security-check-grid">${values.map(value => `<label><input type="checkbox" ${prefix ? `name="${prefix}"` : ''} value="${escapeText(value)}" ${chosen.has(value) ? 'checked' : ''}><span>${escapeText(permissionNames[value] || value)}</span></label>`).join('')}</div></fieldset>`).join('')}</div>`;
+  return `<div class="security-check-grid">${options.map(value => `<label><input type="checkbox" ${prefix ? `name="${prefix}"` : ''} value="${escapeText(value)}" ${chosen.has(value) ? 'checked' : ''}><span>${escapeText(permissionNames[value] || value)}</span></label>`).join('')}</div>`;
 }
 
 function memberCheckboxes(users, selected = []) {
@@ -50,7 +42,7 @@ function memberCheckboxes(users, selected = []) {
 }
 
 async function renderGroups() {
-  if (location.hash !== '#users') return;
+  if (location.hash !== '#permissions') return;
   const content = q('#content');
   if (!content || q('.groups-admin', content)) return;
   let data;
@@ -62,7 +54,19 @@ async function renderGroups() {
   const section = document.createElement('section');
   section.className = 'groups-admin';
   section.innerHTML = `
-    <div class="admin-section-head"><div><span class="eyebrow">GROUP POLICY</span><h2>Groups & permissions</h2><p class="muted">Choose exactly which LightNAS pages and actions each group can access, then add members.</p></div><button class="primary" type="button" data-create-group>+ Create group</button></div>
+    <div class="admin-section-head"><div><span class="eyebrow">USER POLICY</span><h2>Direct permissions</h2><p class="muted">Set permissions directly on an account. Effective access is the union of direct permissions and group permissions.</p></div></div>
+    <div class="group-grid user-policy-grid">${users.map(user => `<article class="panel group-card">
+      <div class="volume-title"><div><h3>${escapeText(user.username)}</h3><p>${user.disabled ? 'Disabled account' : 'Active account'} · ${(user.groups || []).map(group => escapeText(group.name)).join(', ') || 'No groups'}</p></div><span class="content-badge">${(user.effectivePermissions || []).length} effective</span></div>
+      <details><summary>Manage direct policy</summary><form data-user-policy="${escapeText(user.username)}">
+        <h4>Direct permissions</h4>${checkboxes(permissions, user.permissions || [], 'permissions')}
+        <h4>Group memberships</h4>${groups.map(group => `<label class="security-member"><input type="checkbox" name="groups" value="${group.id}" ${(user.groups || []).some(item => item.id === group.id) ? 'checked' : ''}> <span>${escapeText(group.name)}</span></label>`).join('') || '<p class="muted">No groups created yet.</p>'}
+        <label>Administrator password<input name="currentPassword" type="password" required autocomplete="current-password"></label>
+        <button class="primary" type="submit">Save user policy</button>
+        <div class="form-error" role="alert"></div>
+      </form></details>
+    </article>`).join('') || '<div class="empty"><p>No local users. Create accounts under Users first.</p></div>'}</div>
+
+    <div class="admin-section-head"><div><span class="eyebrow">GROUP POLICY</span><h2>Groups & inherited permissions</h2><p class="muted">Users receive their direct permissions plus every permission granted by groups they belong to.</p></div><button class="primary" type="button" data-create-group>+ Create group</button></div>
     <div class="group-grid">${groups.map(group => `<article class="panel group-card" data-group-id="${group.id}">
       <div class="volume-title"><div><h3>${escapeText(group.name)}</h3><p>${escapeText(group.description || 'No description')}</p></div><span class="content-badge">${group.members.length} members</span></div>
       <details><summary>Manage group</summary><form data-group-form="${group.id}">
@@ -83,17 +87,9 @@ async function renderGroups() {
       <div class="form-error" role="alert"></div>
       <div class="dialog-actions"><button class="secondary" type="button" data-close-group>Cancel</button><button class="primary" type="submit">Create group</button></div>
     </form></dialog>`;
-  const mount = q('#groups-admin-mount', content);
-  if (mount) mount.replaceWith(section); else q('.page-head', content)?.insertAdjacentElement('afterend', section);
-
-  // Add group membership controls to each existing user management form.
-  for (const user of users) {
-    const form = q(`form[data-manage-user="${CSS.escape(user.username)}"]`, content);
-    if (!form || q('.membership-policy', form)) continue;
-    const selected = new Set((user.groups || []).map(group => group.id));
-    const markup = `<fieldset class="membership-policy"><legend>Group memberships</legend>${groups.map(group => `<label><input type="checkbox" value="${group.id}" ${selected.has(group.id) ? 'checked' : ''}> ${escapeText(group.name)}</label>`).join('') || '<p class="muted">No groups have been created.</p>'}</fieldset><button class="secondary" type="button" data-save-memberships="${escapeText(user.username)}">Save group memberships</button>`;
-    q('.form-error', form)?.insertAdjacentHTML('beforebegin', markup);
-  }
+  const root = q('[data-permissions-root]', content);
+  if (root) root.replaceWith(section);
+  else q('.page-head', content)?.insertAdjacentElement('afterend', section);
 }
 
 async function renderTotp() {
@@ -103,18 +99,9 @@ async function renderTotp() {
   let status;
   try { status = await api('/api/security/totp'); } catch { return; }
   const section = document.createElement('section');
-  section.className = 'totp-admin';
-  section.innerHTML = `<div class="admin-section-head"><div><span class="eyebrow">MULTI-FACTOR AUTHENTICATION</span><h2>Sign-in verification</h2><p class="muted">Protect the appliance owner with a second verification method.</p></div></div>
-    <div class="mfa-method-grid">
-      <article class="panel mfa-method active"><span class="mfa-icon">123</span><div><h3>Authenticator app</h3><p>Time-based codes from Microsoft Authenticator, Google Authenticator, 1Password, Authy, and compatible apps.</p></div><span class="volume-state ${status.enabled ? 'writable' : 'readonly'}">${status.enabled ? 'ENABLED' : 'AVAILABLE'}</span></article>
-      <article class="panel mfa-method ${status.sms.enabled ? 'active' : ''}"><span class="mfa-icon">SMS</span><div><h3>Phone message</h3><p>Send a one-time sign-in code through your Twilio account. Credentials stay on this appliance.</p></div><span class="volume-state ${status.sms.enabled ? 'writable' : 'readonly'}">${status.sms.enabled ? 'ENABLED' : 'AVAILABLE'}</span></article>
-      <article class="panel mfa-method ${status.fido.enabled ? 'active' : ''}"><span class="mfa-icon">◆</span><div><h3>Passkey / security key</h3><p>WebAuthn supports FIDO2 hardware keys, platform passkeys, Windows Hello, Touch ID, and Android devices.</p></div><span class="volume-state ${status.fido.enabled ? 'writable' : 'readonly'}">${status.fido.enabled ? `${status.fido.credentials.length} ENROLLED` : 'AVAILABLE'}</span></article>
-    </div>
-    <div class="mfa-config-grid">
-      <section class="panel mfa-config"><div class="admin-section-head"><div><h3>Authenticator app</h3><p class="muted">Scan a QR code with any standards-compatible authenticator.</p></div></div>${status.enabled ? `<form data-totp-disable class="security-inline-form"><label>Current password<input name="currentPassword" type="password" required autocomplete="current-password"></label><label>Current 6-digit code<input name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required></label><button class="secondary danger-button" type="submit">Disable authenticator</button><div class="form-error"></div></form>` : `<form data-totp-setup class="security-inline-form"><label>Current password<input name="currentPassword" type="password" required autocomplete="current-password"></label><button class="primary" type="submit">Set up authenticator</button><div class="form-error"></div></form><div data-totp-enrollment></div>`}</section>
-      <section class="panel mfa-config"><div class="admin-section-head"><div><h3>Phone message</h3><p class="muted">Twilio sends the enrollment and sign-in codes directly to the verified number.</p></div></div>${status.sms.enabled ? `<p class="security-success">Verified number: ${escapeText(status.sms.phone)}</p><form data-sms-disable class="security-inline-form"><label>Current password<input name="currentPassword" type="password" required></label><button class="secondary danger-button" type="submit">Disable SMS</button><div class="form-error"></div></form>` : `<form data-sms-setup class="security-stack-form"><label>Phone number (E.164)<input name="phone" type="tel" placeholder="+15551234567" required></label><label>Twilio sending number<input name="fromNumber" type="tel" placeholder="+15557654321" required></label><label>Twilio Account SID<input name="accountSid" placeholder="AC…" required></label><label>Twilio auth token<input name="authToken" type="password" required></label><label>Current password<input name="currentPassword" type="password" required></label><button class="primary" type="submit">Send verification code</button><div class="form-error"></div></form><div data-sms-enrollment></div>`}</section>
-      <section class="panel mfa-config"><div class="admin-section-head"><div><h3>Passkeys & FIDO2 keys</h3><p class="muted">Registration is bound to this HTTPS hostname. Your private key never leaves the authenticator.</p></div></div><form data-fido-setup class="security-stack-form"><label>Key name<input name="label" value="My security key" maxlength="64" required></label><label>Current password<input name="currentPassword" type="password" required></label><button class="primary" type="submit" ${!window.PublicKeyCredential ? 'disabled' : ''}>Register passkey or key</button><div class="form-error"></div></form><div class="security-key-list">${status.fido.credentials.map(item => `<div><span><b>${escapeText(item.label)}</b><small>Added ${escapeText(new Date(item.createdAt).toLocaleDateString())}</small></span><button class="secondary danger-button" type="button" data-fido-remove="${escapeText(item.id)}">Remove</button></div>`).join('') || '<p class="muted">No passkeys or FIDO2 keys are enrolled.</p>'}</div></section>
-    </div>`;
+  section.className = 'panel totp-admin';
+  section.innerHTML = `<div class="admin-section-head"><div><span class="eyebrow">MULTI-FACTOR AUTHENTICATION</span><h2>Authenticator app</h2><p class="muted">Use any RFC 6238 TOTP app such as Microsoft Authenticator, Google Authenticator, 1Password or Authy.</p></div><span class="volume-state ${status.enabled ? 'writable' : 'readonly'}">${status.enabled ? 'ENABLED' : 'DISABLED'}</span></div>
+    ${status.enabled ? `<form data-totp-disable class="security-inline-form"><label>Current password<input name="currentPassword" type="password" required autocomplete="current-password"></label><label>Current 6-digit code<input name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required></label><button class="secondary danger-button" type="submit">Disable 2FA</button><div class="form-error"></div></form>` : `<form data-totp-setup class="security-inline-form"><label>Current password<input name="currentPassword" type="password" required autocomplete="current-password"></label><button class="primary" type="submit">Set up authenticator</button><div class="form-error"></div></form><div data-totp-enrollment></div>`}`;
   q('#settings-form', content)?.insertAdjacentElement('afterend', section);
 }
 
@@ -178,7 +165,7 @@ document.addEventListener('click', async event => {
 
   const deleteGroup = event.target.closest('[data-delete-group]');
   if (deleteGroup) {
-    if (!confirm('Delete this group? Members will lose all access inherited from it.')) return;
+    if (!confirm('Delete this group? Users keep their direct permissions.')) return;
     try { await api(`/api/groups/${deleteGroup.dataset.deleteGroup}`, { method:'DELETE' }); refreshCurrent(); } catch (error) { alert(error.message); }
     return;
   }
@@ -199,20 +186,26 @@ document.addEventListener('click', async event => {
   const deleteHook = event.target.closest('[data-delete-webhook]');
   if (deleteHook) { if (confirm('Delete this webhook?')) { try { await api(`/api/security/webhooks/${deleteHook.dataset.deleteWebhook}`, { method:'DELETE' }); refreshCurrent(); } catch (error) { alert(error.message); } } return; }
 
-  const removeFido = event.target.closest('[data-fido-remove]');
-  if (removeFido) {
-    const currentPassword = prompt('Enter your current LightNAS password to remove this key:');
-    if (currentPassword === null) return;
-    try { await api(`/api/security/fido/${encodeURIComponent(removeFido.dataset.fidoRemove)}`, { method:'DELETE', body:JSON.stringify({ currentPassword }) }); refreshCurrent(); }
-    catch (error) { alert(error.message); }
-    return;
-  }
-
 
 }, true);
 
 document.addEventListener('submit', async event => {
   const form = event.target;
+  if (form.matches('[data-user-policy]')) {
+    event.preventDefault();
+    const permissions = qa('input[name="permissions"]:checked', form).map(input => input.value);
+    const groups = qa('input[name="groups"]:checked', form).map(input => input.value);
+    const currentPassword = q('input[name="currentPassword"]', form)?.value || '';
+    try {
+      await api(`/api/users/${encodeURIComponent(form.dataset.userPolicy)}`, {
+        method:'PATCH',
+        body:JSON.stringify({ currentPassword, permissions, groups })
+      });
+      alert('User permission policy saved. Existing sessions for that user were ended.');
+      refreshCurrent();
+    } catch (error) { q('.form-error', form).textContent = error.message; }
+    return;
+  }
   if (form.matches('[data-new-group-form]')) {
     event.preventDefault();
     const data = new FormData(form);
@@ -234,7 +227,7 @@ document.addEventListener('submit', async event => {
     const enrollment = q('[data-totp-enrollment]');
     try {
       const result = await api('/api/security/totp/setup', { method:'POST', body:JSON.stringify(Object.fromEntries(new FormData(form))) });
-      enrollment.innerHTML = `<div class="security-enrollment"><p>Scan this QR code, or enter the secret manually, then confirm the current code.</p>${result.qrDataUrl ? `<img class="totp-qr" src="${result.qrDataUrl}" alt="Authenticator enrollment QR code">` : '<p class="muted">QR generator is unavailable; use the manual secret.</p>'}<pre>${escapeText(result.secret)}</pre><details><summary>Manual setup URI</summary><code>${escapeText(result.uri)}</code></details><form data-totp-verify><label>6-digit code<input name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required></label><button class="primary" type="submit">Verify & enable</button><div class="form-error"></div></form></div>`;
+      enrollment.innerHTML = `<div class="security-enrollment"><p>Add this account to your authenticator app using the secret below, then enter the current code.</p><pre>${escapeText(result.secret)}</pre><details><summary>otpauth URI</summary><code>${escapeText(result.uri)}</code></details><form data-totp-verify><label>6-digit code<input name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required></label><button class="primary" type="submit">Verify & enable</button><div class="form-error"></div></form></div>`;
     } catch (error) { q('.form-error', form).textContent = error.message; }
     return;
   }
@@ -246,37 +239,6 @@ document.addEventListener('submit', async event => {
   if (form.matches('[data-totp-disable]')) {
     event.preventDefault();
     try { await api('/api/security/totp/disable', { method:'POST', body:JSON.stringify(Object.fromEntries(new FormData(form))) }); alert('Authenticator 2FA disabled.'); refreshCurrent(); } catch (error) { q('.form-error', form).textContent = error.message; }
-    return;
-  }
-  if (form.matches('[data-sms-setup]')) {
-    event.preventDefault();
-    try {
-      await api('/api/security/sms/setup', { method:'POST', body:JSON.stringify(Object.fromEntries(new FormData(form))) });
-      q('[data-sms-enrollment]').innerHTML = `<form data-sms-verify class="security-inline-form"><label>6-digit SMS code<input name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required></label><button class="primary" type="submit">Verify & enable</button><div class="form-error"></div></form>`;
-    } catch (error) { q('.form-error', form).textContent = error.message; }
-    return;
-  }
-  if (form.matches('[data-sms-verify]')) {
-    event.preventDefault();
-    try { await api('/api/security/sms/verify', { method:'POST', body:JSON.stringify(Object.fromEntries(new FormData(form))) }); alert('SMS verification is enabled.'); refreshCurrent(); } catch (error) { q('.form-error', form).textContent = error.message; }
-    return;
-  }
-  if (form.matches('[data-sms-disable]')) {
-    event.preventDefault();
-    try { await api('/api/security/sms/disable', { method:'POST', body:JSON.stringify(Object.fromEntries(new FormData(form))) }); refreshCurrent(); } catch (error) { q('.form-error', form).textContent = error.message; }
-    return;
-  }
-  if (form.matches('[data-fido-setup]')) {
-    event.preventDefault();
-    const data = Object.fromEntries(new FormData(form));
-    try {
-      const options = await api('/api/security/fido/options', { method:'POST', body:JSON.stringify({ currentPassword:data.currentPassword }) });
-      const credential = await navigator.credentials.create({ publicKey: { challenge:decode64url(options.challenge), rp:{ id:options.rpId, name:options.rpName }, user:{ ...options.user, id:decode64url(options.user.id) }, pubKeyCredParams:[{ type:'public-key', alg:-7 }, { type:'public-key', alg:-257 }], timeout:60000, authenticatorSelection:{ residentKey:'preferred', userVerification:'preferred' }, attestation:'none', excludeCredentials:options.excludeCredentials.map(item => ({ ...item, id:decode64url(item.id) })) } });
-      const response = credential.response;
-      if (!response.getPublicKey || !response.getAuthenticatorData) throw new Error('This browser does not expose the WebAuthn registration data LightNAS needs. Update the browser and try again.');
-      await api('/api/security/fido/register', { method:'POST', body:JSON.stringify({ label:data.label, response:{ id:credential.id, clientDataJSON:encode64url(response.clientDataJSON), authenticatorData:encode64url(response.getAuthenticatorData()), publicKey:encode64url(response.getPublicKey()), algorithm:response.getPublicKeyAlgorithm() } }) });
-      alert('Security key registered.'); refreshCurrent();
-    } catch (error) { q('.form-error', form).textContent = error.message || 'Security-key registration was cancelled.'; }
     return;
   }
   if (form.matches('[data-token-form]')) {

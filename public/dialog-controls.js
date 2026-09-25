@@ -176,6 +176,11 @@ function wizardOption(value, label, selected = false) {
   return `<option value="${dialogEsc(value)}" ${selected ? 'selected' : ''}>${dialogEsc(label)}</option>`;
 }
 
+function looksLikeWindowsMedia(value) {
+  const text = String(value || '').toLowerCase();
+  return /(?:windows|win[-_. ]?(?:10|11)|win10|win11|windows10|windows11|windows[_ -]?server)/i.test(text);
+}
+
 async function showRuntimeWizard(kind) {
   const isContainer = kind === 'containers';
   const loading = openProgressDialog(isContainer ? 'Opening container wizard' : 'Opening VM wizard', 'Loading live storage, image, network, and runtime choices…');
@@ -257,8 +262,9 @@ async function showRuntimeWizard(kind) {
             <label>MAC address (optional)<input name="macAddress" placeholder="02:00:00:00:00:10" pattern="[A-Fa-f0-9]{2}(:[A-Fa-f0-9]{2}){5}"></label>
           ` : `
             <label>Firmware<select name="firmware"><option value="bios">BIOS / legacy</option><option value="uefi">UEFI</option></select></label>
-            <label>Disk controller<select name="diskBus"><option value="sata">SATA · works without extra installer drivers</option><option value="scsi">VirtIO SCSI · requires guest driver</option><option value="virtio">VirtIO block · requires guest driver</option></select></label>
-            <label>Network adapter<select name="networkModel"><option value="e1000">Intel E1000 · works without extra installer drivers</option><option value="virtio">VirtIO · requires guest driver</option><option value="rtl8139">Realtek RTL8139</option></select></label>
+            <label>Disk controller<select name="diskBus"><option value="scsi">VirtIO SCSI · Linux/performance</option><option value="virtio">VirtIO block · Linux/performance</option><option value="sata">SATA · Windows/Linux installer compatible</option></select></label>
+            <label>Network adapter<select name="networkModel"><option value="virtio">VirtIO · Linux/performance</option><option value="e1000">Intel E1000 · Windows compatible</option><option value="rtl8139">Realtek RTL8139</option></select></label>
+            <p class="module-note" data-vm-guest-profile>LightNAS automatically selects Windows-compatible hardware when a Windows installer ISO is selected.</p>
           `}
           <label class="wizard-check"><input name="startOnBoot" type="checkbox" checked> <span>Start automatically when LightNAS boots</span></label>
         </div>
@@ -324,6 +330,22 @@ async function showRuntimeWizard(kind) {
     }
     return true;
   };
+
+  if (!isContainer && form.elements.iso) {
+    const applyVmGuestProfile = () => {
+      const selected = images.find(item => item.value === form.elements.iso.value);
+      const windows = looksLikeWindowsMedia(selected?.label || form.elements.iso.value);
+      form.elements.firmware.value = windows ? 'uefi' : 'bios';
+      form.elements.diskBus.value = windows ? 'sata' : 'scsi';
+      form.elements.networkModel.value = windows ? 'e1000' : 'virtio';
+      const note = form.querySelector('[data-vm-guest-profile]');
+      if (note) note.textContent = windows
+        ? 'Windows installer detected: LightNAS selected UEFI, SATA/AHCI storage, and Intel E1000 networking so Setup works without VirtIO drivers.'
+        : 'Linux/generic installer profile: LightNAS uses VirtIO hardware for better performance.';
+    };
+    form.elements.iso.addEventListener('change', applyVmGuestProfile);
+    applyVmGuestProfile();
+  }
 
   dialog.querySelectorAll('[data-dialog-close]').forEach(button => button.addEventListener('click', () => dialog.close()));
   dialog.addEventListener('close', () => dialog.remove(), { once: true });
@@ -685,6 +707,9 @@ document.addEventListener('click', async event => {
       ...(virtualization.isoDetails || []).map(iso => ({ value: iso.id, label: `${iso.name} · ${iso.storageName}` }))
     ];
     const recommendedDisplay = item.installationMediaId && item.displayModel === 'virtio' ? 'vga' : (item.displayModel || 'vga');
+    const windowsMedia = looksLikeWindowsMedia(item.installationMediaName || '');
+    const recommendedDiskBus = windowsMedia && ['scsi', 'virtio'].includes(item.diskBus) ? 'sata' : (item.diskBus || 'scsi');
+    const recommendedNetworkModel = windowsMedia && item.networkModel === 'virtio' ? 'e1000' : (item.networkModel || 'virtio');
     showEditor({
       eyebrow: 'VIRTUAL MACHINE SETTINGS',
       title: `Edit ${vmEdit.dataset.vmName || id}`,
@@ -697,8 +722,8 @@ document.addEventListener('click', async event => {
         { name: 'machineInfo', label: 'Machine type', value: item.machineType || 'Default', readonly: true },
         { name: 'displayModel', label: 'Display adapter', type: 'select', value: recommendedDisplay, options: [{ value: 'vga', label: 'Standard VGA · recommended for installers' }, { value: 'qxl', label: 'QXL display' }, { value: 'virtio', label: 'VirtIO GPU · requires guest drivers' }] },
         { name: 'scsiController', label: 'SCSI controller', type: 'select', value: item.scsiController || 'virtio-scsi', options: [{ value: 'virtio-scsi', label: 'VirtIO SCSI' }, { value: 'virtio-scsi-single', label: 'VirtIO SCSI single' }, { value: 'lsilogic', label: 'LSI Logic' }] },
-        { name: 'diskBus', label: 'Virtual disk bus', type: 'select', value: item.diskBus || 'sata', options: [{ value: 'sata', label: 'SATA · Windows/Linux installer compatible' }, { value: 'scsi', label: 'VirtIO SCSI · requires guest driver' }, { value: 'virtio', label: 'VirtIO block · requires guest driver' }] },
-        { name: 'networkModel', label: 'Network adapter model', type: 'select', value: item.networkModel || 'virtio', options: [{ value: 'virtio', label: 'VirtIO · recommended' }, { value: 'e1000', label: 'Intel E1000' }, { value: 'rtl8139', label: 'Realtek RTL8139' }] },
+        { name: 'diskBus', label: 'Virtual disk bus', type: 'select', value: recommendedDiskBus, options: [{ value: 'sata', label: 'SATA / AHCI · Windows compatible' }, { value: 'scsi', label: 'VirtIO SCSI · Linux/performance' }, { value: 'virtio', label: 'VirtIO block · Linux/performance' }] },
+        { name: 'networkModel', label: 'Network adapter model', type: 'select', value: recommendedNetworkModel, options: [{ value: 'e1000', label: 'Intel E1000 · Windows compatible' }, { value: 'virtio', label: 'VirtIO · Linux/performance' }, { value: 'rtl8139', label: 'Realtek RTL8139' }] },
         { name: 'iso', label: 'CD/DVD drive · installer ISO', type: 'select', value: item.installationMediaId || '', options: isoOptions },
         { name: 'bootOrder', label: 'First boot drive', type: 'select', value: item.bootOrder || (item.installationMediaId ? 'iso' : 'disk'), options: [{ value: 'iso', label: 'CD/DVD installer ISO' }, { value: 'disk', label: 'Virtual hard disk' }] },
         { name: 'startOnBoot', label: 'Start automatically with LightNAS', type: 'select', value: String(item.startOnBoot !== false), options: [{ value: 'true', label: 'Enabled' }, { value: 'false', label: 'Disabled' }] }
@@ -836,33 +861,6 @@ document.addEventListener('click', async event => {
     return;
   }
 
-  const addBond = event.target.closest('[data-network-add-bond]');
-  if (addBond) {
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    let info;
-    try { info = await dialogApi('/api/network'); } catch (problem) { alert(problem.message); return; }
-    const devices = (info.control?.devices || []).filter(item => item.type === 'ethernet').map(item => item.name);
-    if (devices.length < 2) { alert('At least two Ethernet interfaces are required to create a bond.'); return; }
-    showEditor({
-      eyebrow: 'NETWORK BOND',
-      title: 'Create Linux bond',
-      description: `Available Ethernet interfaces: ${devices.join(', ')}. Enter two or more comma-separated member names.`,
-      fields: [
-        { name: 'name', label: 'Bond name', value: 'bond0', required: true },
-        { name: 'members', label: 'Member interfaces', value: devices.slice(0, 2).join(', '), required: true },
-        { name: 'mode', label: 'Bond mode', type: 'select', value: 'active-backup', options: [{ value:'active-backup', label:'Active / backup' }, { value:'802.3ad', label:'802.3ad LACP' }, { value:'balance-xor', label:'Balance XOR' }, { value:'balance-rr', label:'Round robin' }] }
-      ],
-      submitLabel: 'Create bond',
-      onSubmit: async values => {
-        const members = values.members.split(',').map(item => item.trim()).filter(Boolean);
-        await dialogApi('/api/network', { method: 'POST', body: JSON.stringify({ action:'bond-create', name:values.name, members, mode:values.mode }) });
-        location.reload();
-      }
-    });
-    return;
-  }
-
   const addVlan = event.target.closest('[data-network-add-vlan]');
   if (addVlan) {
     event.preventDefault();
@@ -889,31 +887,70 @@ document.addEventListener('click', async event => {
     return;
   }
 
-  const addOvsBridge = event.target.closest('[data-network-add-ovs-bridge]');
-  if (addOvsBridge) {
-    event.preventDefault(); event.stopImmediatePropagation();
-    showEditor({ eyebrow:'OPEN VSWITCH', title:'Create OVS bridge', description:'Create an Open vSwitch bridge for advanced VM and container switching.', fields:[{ name:'name', label:'OVS bridge name', value:'ovsbr0', required:true }], submitLabel:'Create OVS bridge', onSubmit:async values => { await dialogApi('/api/network', { method:'POST', body:JSON.stringify({ action:'ovs-bridge-create', name:values.name }) }); location.reload(); } });
+  const addBond = event.target.closest('[data-network-add-bond]');
+  if (addBond) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    let info;
+    try { info = await dialogApi('/api/network'); } catch (problem) { alert(problem.message); return; }
+    const ethernet = (info.control?.devices || []).filter(item => item.type === 'ethernet').map(item => item.name);
+    if (!ethernet.length) { alert('No Ethernet interfaces are available for a bond.'); return; }
+    showEditor({
+      eyebrow: 'NETWORK BOND',
+      title: 'Create bond',
+      description: 'Create a bond profile without activating it. Review the configuration before bringing it up so the management connection is not interrupted unexpectedly.',
+      fields: [
+        { name: 'name', label: 'Bond interface name', value: 'bond0', required: true },
+        { name: 'mode', label: 'Bond mode', type: 'select', value: 'active-backup', options: [
+          { value: 'active-backup', label: 'Active backup · safest default' },
+          { value: '802.3ad', label: '802.3ad / LACP' },
+          { value: 'balance-xor', label: 'Balance XOR' },
+          { value: 'balance-rr', label: 'Round robin' }
+        ] },
+        { name: 'members', label: 'Member interfaces (comma separated)', value: ethernet.join(','), placeholder: 'enp1s0,enp2s0', required: true }
+      ],
+      submitLabel: 'Create bond profile',
+      onSubmit: async values => {
+        const members = String(values.members || '').split(',').map(item => item.trim()).filter(Boolean);
+        await dialogApi('/api/network', { method: 'POST', body: JSON.stringify({ action: 'bond-create', name: values.name, mode: values.mode, members }) });
+        location.reload();
+      }
+    });
     return;
   }
 
-  const addOvsPort = event.target.closest('[data-network-add-ovs-port]');
-  if (addOvsPort) {
-    event.preventDefault(); event.stopImmediatePropagation();
-    let info; try { info = await dialogApi('/api/network'); } catch (problem) { alert(problem.message); return; }
-    const bridges = (info.control?.connections || []).filter(item => /ovs-bridge/i.test(item.type)).map(item => ({ value:item.name, label:item.name }));
-    if (!bridges.length) { alert('Create an OVS bridge first.'); return; }
-    showEditor({ eyebrow:'OPEN VSWITCH', title:'Create OVS internal port', description:'Add a host-visible internal interface to an OVS bridge.', fields:[{ name:'name', label:'Interface name', value:'ovsint0', required:true },{ name:'bridge', label:'OVS bridge', type:'select', options:bridges, required:true }], submitLabel:'Create internal port', onSubmit:async values => { await dialogApi('/api/network', { method:'POST', body:JSON.stringify({ action:'ovs-port-create', ...values }) }); location.reload(); } });
-    return;
-  }
-
-  const addOvsBond = event.target.closest('[data-network-add-ovs-bond]');
-  if (addOvsBond) {
-    event.preventDefault(); event.stopImmediatePropagation();
-    let info; try { info = await dialogApi('/api/network'); } catch (problem) { alert(problem.message); return; }
-    const bridges = (info.control?.connections || []).filter(item => /ovs-bridge/i.test(item.type)).map(item => ({ value:item.name, label:item.name }));
-    const devices = (info.control?.devices || []).filter(item => item.type === 'ethernet').map(item => item.name);
-    if (!bridges.length || devices.length < 2) { alert('An OVS bridge and at least two Ethernet interfaces are required.'); return; }
-    showEditor({ eyebrow:'OPEN VSWITCH', title:'Create OVS bond', description:`Available Ethernet interfaces: ${devices.join(', ')}.`, fields:[{ name:'name', label:'Bond name', value:'ovsbond0', required:true },{ name:'bridge', label:'OVS bridge', type:'select', options:bridges, required:true },{ name:'members', label:'Member interfaces', value:devices.slice(0,2).join(', '), required:true },{ name:'mode', label:'Bond mode', type:'select', value:'active-backup', options:['active-backup','balance-slb','balance-tcp'] }], submitLabel:'Create OVS bond', onSubmit:async values => { await dialogApi('/api/network', { method:'POST', body:JSON.stringify({ action:'ovs-bond-create', name:values.name, bridge:values.bridge, members:values.members.split(',').map(item => item.trim()).filter(Boolean), mode:values.mode }) }); location.reload(); } });
+  const addRoute = event.target.closest('[data-network-add-route]');
+  if (addRoute) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    let info;
+    try { info = await dialogApi('/api/network'); } catch (problem) { alert(problem.message); return; }
+    const connections = (info.control?.connections || []).map(item => ({ value: item.name, label: `${item.name} · ${item.device || item.type}` }));
+    if (!connections.length) { alert('Create or activate a NetworkManager connection profile before adding a persistent route.'); return; }
+    showEditor({
+      eyebrow: 'STATIC ROUTE',
+      title: 'Add IPv4 route',
+      description: 'Save a persistent route on a NetworkManager profile. Choose Save only to avoid interrupting the active management connection.',
+      fields: [
+        { name: 'connection', label: 'Connection profile', type: 'select', options: connections, required: true },
+        { name: 'destination', label: 'Destination', placeholder: '10.20.0.0/16 or default', required: true },
+        { name: 'gateway', label: 'Gateway', placeholder: '10.5.5.1', required: true },
+        { name: 'metric', label: 'Metric', type: 'number', min: 0, max: 65535, value: '100', required: true },
+        { name: 'activate', label: 'Apply immediately', type: 'select', value: 'no', options: [{ value: 'no', label: 'Save only' }, { value: 'yes', label: 'Save and activate profile now' }] }
+      ],
+      submitLabel: 'Add route',
+      onSubmit: async values => {
+        await dialogApi('/api/network', { method: 'POST', body: JSON.stringify({
+          action: 'route-create',
+          connection: values.connection,
+          destination: values.destination,
+          gateway: values.gateway,
+          metric: Number(values.metric),
+          activate: values.activate === 'yes'
+        }) });
+        location.reload();
+      }
+    });
     return;
   }
 
@@ -924,20 +961,16 @@ document.addEventListener('click', async event => {
     showEditor({
       eyebrow: 'FIREWALL RULE',
       title: 'Add firewall rule',
-      description: 'Create an ordered host rule with Proxmox-style direction, action, interface, source, destination, protocol, and port controls.',
+      description: 'Add a local UFW rule to the LightNAS host.',
       fields: [
-        { name: 'direction', label: 'Direction', type: 'select', value: 'in', options: [{ value:'in', label:'IN · traffic entering LightNAS' }, { value:'out', label:'OUT · traffic leaving LightNAS' }] },
-        { name: 'decision', label: 'Action', type: 'select', value: 'allow', options: ['allow', 'deny', 'reject', 'limit'] },
-        { name: 'interface', label: 'Interface (optional)', placeholder: 'eth0 or vmbr0' },
-        { name: 'protocol', label: 'Protocol', type: 'select', value: 'tcp', options: ['tcp', 'udp', 'any'] },
+        { name: 'decision', label: 'Action', type: 'select', value: 'allow', options: ['allow', 'deny'] },
+        { name: 'protocol', label: 'Protocol', type: 'select', value: 'tcp', options: ['tcp', 'udp'] },
         { name: 'port', label: 'Port', type: 'number', min: 1, max: 65535, required: true },
-        { name: 'source', label: 'Source IP/CIDR (optional)', placeholder: '10.0.0.0/24' },
-        { name: 'destination', label: 'Destination IP/CIDR (optional)', placeholder: '192.168.1.10' },
-        { name: 'comment', label: 'Comment', placeholder: 'Allow administration from trusted LAN' }
+        { name: 'source', label: 'Source IP/CIDR (optional)', placeholder: '10.0.0.0/24' }
       ],
       submitLabel: 'Add rule',
       onSubmit: async values => {
-        await dialogApi('/api/network', { method: 'POST', body: JSON.stringify({ action: 'firewall-add', decision: values.decision, direction: values.direction, interface: values.interface || '', protocol: values.protocol, port: Number(values.port), source: values.source || '', destination: values.destination || '', comment: values.comment || '' }) });
+        await dialogApi('/api/network', { method: 'POST', body: JSON.stringify({ action: 'firewall-add', decision: values.decision, protocol: values.protocol, port: Number(values.port), source: values.source || '' }) });
         location.reload();
       }
     });

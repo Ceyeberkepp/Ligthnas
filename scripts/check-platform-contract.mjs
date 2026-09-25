@@ -13,7 +13,8 @@ const [
   isoBuilder,
   isoWorkflow,
   packageJsonText,
-  readme
+  readme,
+  templates
 ] = await Promise.all([
   read('scripts/lightnas-host-agent.py'),
   read('src/files.mjs'),
@@ -23,7 +24,8 @@ const [
   read('iso/build.sh'),
   read('.github/workflows/build-iso.yml'),
   read('package.json'),
-  read('README.md')
+  read('README.md'),
+  read('src/templates.mjs')
 ]);
 
 const packageJson = JSON.parse(packageJsonText);
@@ -55,12 +57,16 @@ assert.match(hostAgent, /"aarch64": "arm64"/);
 assert.match(hostAgent, /"riscv64": "riscv64"/);
 assert.match(hostAgent, /ports\.ubuntu\.com\/ubuntu-ports/);
 
-// General NAS files stream directly to their destination with no application
-// size ceiling. Storage images retain their separate resumable safety limit.
-assert.match(files, /await pipeline\(req, file\.createWriteStream\(\)\)/);
-assert.doesNotMatch(files, /LIGHTNAS_FILE_UPLOAD_MAX_BYTES/);
+// Large NAS/ISO transfers must stay streaming and above the historical 1 GiB
+// limit. Storage images must preserve Content-Range resume support.
+assert.equal(contract.upload.unlimitedByDefault, true, 'LightNAS uploads must be unlimited by default');
+assert.equal(contract.upload.genericFileDefaultMaxGiB, 0);
+assert.equal(contract.upload.storageImageDefaultMaxGiB, 0);
+assert.equal(contract.upload.templateDefaultMaxGiB, 0);
+assert.match(files, /LIGHTNAS_FILE_UPLOAD_MAX_BYTES \|\| 0/);
 assert.doesNotMatch(files, /1 GB upload limit/);
-assert.match(storagePools, /LIGHTNAS_STORAGE_UPLOAD_MAX_BYTES \|\| 50 \* 1024 \*\* 3/);
+assert.match(storagePools, /LIGHTNAS_STORAGE_UPLOAD_MAX_BYTES \|\| 0/);
+assert.match(templates, /LIGHTNAS_TEMPLATE_MAX_BYTES \|\| 0/);
 assert.match(storagePools, /parseContentRange/);
 assert.match(storagePools, /Content-Range/);
 assert.match(storageManager, /\(type==='iso'\?64:32\)\*1024\*\*2/);

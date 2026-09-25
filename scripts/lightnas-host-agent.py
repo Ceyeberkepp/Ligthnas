@@ -32,7 +32,6 @@ NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9-]{1,39}$")
 IFACE_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,32}$")
 CONNECTION_RE = re.compile(r"^[A-Za-z0-9 _.:@+-]{1,80}$")
 CIDR_RE = re.compile(r"^(?:[0-9A-Fa-f:.]+)/(?:[0-9]{1,3})$")
-SHARE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.-]{1,63}$")
 
 IMAGES = [
     {"id": "debian-13", "label": "Debian 13", "dist": "debian", "release": "trixie", "builder": "debootstrap", "mirror": "https://deb.debian.org/debian", "nested": True},
@@ -53,87 +52,6 @@ def run(args: list[str], timeout: int = 30, check: bool = True) -> str:
 
 def available(program: str) -> bool:
     return shutil.which(program) is not None
-
-
-def access_status() -> dict:
-    return {
-        "ssh": {"installed": available("sshd"), "active": service_active("ssh.service") or service_active("sshd.service"), "port": 22},
-        "smb": {"installed": available("smbd"), "active": service_active("smbd.service"), "ports": [445, 139]},
-    }
-
-
-def access_action(data: dict) -> dict:
-    service = str(data.get("service") or "").lower()
-    enabled = bool(data.get("enabled"))
-    units = {"ssh": "ssh.service", "smb": "smbd.service"}
-    if service not in units:
-        raise ValueError("unsupported access service")
-    executable = "sshd" if service == "ssh" else "smbd"
-    if not available(executable):
-        raise ValueError(f"{service.upper()} is not installed; rerun the LightNAS installer")
-    run(["systemctl", "enable" if enabled else "disable", "--now", units[service]], timeout=60)
-    return access_status()
-
-
-def apply_share(data: dict) -> dict:
-    share_id = str(data.get("id") or "")
-    name = str(data.get("name") or "").strip()
-    protocol = str(data.get("protocol") or "SMB").upper()
-    read_only = bool(data.get("readOnly"))
-    if not re.fullmatch(r"[0-9a-f-]{36}", share_id) or not SHARE_RE.fullmatch(name):
-        raise ValueError("invalid share definition")
-    root = Path("/var/lib/lightnas/files/Shares") / name
-    root.mkdir(parents=True, exist_ok=True)
-    try:
-        shutil.chown(root, user="lightnas", group="lightnas")
-    except LookupError:
-        pass
-    root.chmod(0o2775)
-    if protocol == "SFTP":
-        if not available("sshd"):
-            raise ValueError("OpenSSH is not installed; rerun the LightNAS installer")
-        subprocess.run(["systemctl", "enable", "--now", "ssh.service"], timeout=60, check=True)
-        return {"id": share_id, "path": str(root), "protocol": protocol, "active": True}
-    if protocol != "SMB":
-        raise ValueError("only SMB and SFTP shares are supported")
-    if not available("smbd"):
-        raise ValueError("Samba is not installed; rerun the LightNAS installer")
-    config_dir = Path("/etc/samba/smb.conf.d")
-    config_dir.mkdir(parents=True, exist_ok=True)
-    config_file = config_dir / f"lightnas-{share_id}.conf"
-    config_file.write_text(
-        f"[{name}]\npath = {root}\nbrowseable = yes\nguest ok = yes\n"
-        f"read only = {'yes' if read_only else 'no'}\nforce user = lightnas\n"
-        "create mask = 0664\ndirectory mask = 2775\n",
-        encoding="utf-8",
-    )
-    main_config = Path("/etc/samba/smb.conf")
-    include = f"include = {config_file}"
-    current = main_config.read_text(encoding="utf-8") if main_config.exists() else "[global]\nmap to guest = Bad User\n"
-    if not main_config.exists():
-        main_config.write_text(current, encoding="utf-8")
-    if include not in current:
-        with main_config.open("a", encoding="utf-8") as stream:
-            stream.write(f"\n{include}\n")
-    run(["testparm", "-s"], timeout=20)
-    subprocess.run(["systemctl", "enable", "--now", "smbd.service"], timeout=60, check=True)
-    subprocess.run(["systemctl", "reload", "smbd.service"], timeout=30, check=False)
-    return {"id": share_id, "path": str(root), "protocol": protocol, "active": True}
-
-
-def remove_share(data: dict) -> dict:
-    share_id = str(data.get("id") or "")
-    if not re.fullmatch(r"[0-9a-f-]{36}", share_id):
-        raise ValueError("invalid share id")
-    config_file = Path("/etc/samba/smb.conf.d") / f"lightnas-{share_id}.conf"
-    config_file.unlink(missing_ok=True)
-    main_config = Path("/etc/samba/smb.conf")
-    if main_config.exists():
-        include = f"include = {config_file}"
-        lines = [line for line in main_config.read_text(encoding="utf-8").splitlines() if line.strip() != include]
-        main_config.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    subprocess.run(["systemctl", "reload", "smbd.service"], timeout=30, check=False)
-    return {"id": share_id, "removed": True, "filesPreserved": True}
 
 
 def native_debian_arch() -> str:
@@ -422,16 +340,9 @@ def container_records(fast: bool = False) -> list[dict]:
                 pass
         memory, cpus = container_limits(name)
         addresses = [] if fast else container_addresses(name)
-        memory_used = 0
-        if pid:
-            try:
-                cgroup = next((line.split(":", 2)[2] for line in Path(f"/proc/{pid}/cgroup").read_text().splitlines() if line.startswith("0::")), "")
-                memory_used = int((Path("/sys/fs/cgroup") / cgroup.lstrip("/") / "memory.current").read_text().strip())
-            except (OSError, ValueError):
-                memory_used = 0
         containers.append({
             "id": name, "name": name, "status": state, "pid": pid,
-            "memory": memory, "memoryUsed": memory_used, "cpus": cpus, "provider": "local-lxc",
+            "memory": memory, "cpus": cpus, "provider": "local-lxc",
             "addresses": addresses,
             "ipv4": next((value for value in addresses if ":" not in value), None),
             **container_settings(name),
@@ -1272,10 +1183,7 @@ def network_inventory() -> dict:
         name = item["name"]
         if internal_device(name):
             continue
-        if bridge_mode and name == bridge_port:
-            # The physical NIC is now only a port of the appliance LAN bridge.
-            continue
-        devices.append(item)
+        devices.append({**item, **({"bridgePortOf": bridge_name} if bridge_mode and name == bridge_port else {})})
 
     connections = []
     for item in raw_connections:
@@ -1283,8 +1191,8 @@ def network_inventory() -> dict:
         device = item.get("device") or ""
         if internal_device(device) or internal_device(name):
             continue
-        if bridge_mode and (device == bridge_port or name == f"{bridge_name}-uplink"):
-            continue
+        # Keep the appliance bridge slave visible so the Networking page can
+        # present physical-port membership like Proxmox does.
         # Hide stale auto-generated wired profiles with no active device.
         if not device and item["type"] in {"802-3-ethernet", "ethernet"}:
             continue
@@ -1330,15 +1238,6 @@ def network_inventory() -> dict:
             seen.add(ssid)
             wifi.append({"ssid": ssid, "connected": row[0] == "*", "signal": int(row[2] or 0), "security": row[3] or "Open"})
 
-    firewall_status = run(["ufw", "status"], timeout=15, check=False) if available("ufw") else ""
-    firewall_numbered = run(["ufw", "status", "numbered"], timeout=15, check=False) if available("ufw") else ""
-    firewall_rules = []
-    for line in firewall_numbered.splitlines():
-        match = re.match(r"^\[\s*(\d+)\]\s+(.+?)\s{2,}(ALLOW|DENY|REJECT|LIMIT)(?:\s+(IN|OUT))?\s{2,}(.+)$", line, re.I)
-        if match:
-            firewall_rules.append({"number": int(match.group(1)), "target": match.group(2).strip(), "action": match.group(3).upper(), "direction": (match.group(4) or "IN").upper(), "source": match.group(5).strip()})
-    nft_tables = run(["nft", "list", "tables"], timeout=15, check=False).splitlines()[:30] if available("nft") else []
-
     return {
         "editable": True,
         "manager": "NetworkManager",
@@ -1354,13 +1253,6 @@ def network_inventory() -> dict:
             "mode": state.get("LIGHTNAS_NETWORK_MODE") or None,
             "name": bridge_name or None,
             "port": bridge_port or None,
-        },
-        "firewall": {
-            "backend": "ufw" if available("ufw") else ("nftables" if available("nft") else "unavailable"),
-            "editable": available("ufw"),
-            "status": (re.search(r"^Status:\s*(.+)$", firewall_status, re.M).group(1) if re.search(r"^Status:\s*(.+)$", firewall_status, re.M) else "unknown"),
-            "rules": firewall_rules,
-            "tables": [line for line in nft_tables if line.startswith("table ")],
         },
     }
 
@@ -1426,52 +1318,22 @@ def network_action(data: dict) -> dict:
         except (TypeError, ValueError) as exc:
             raise ValueError("invalid firewall port") from exc
         source = str(data.get("source") or "").strip()
-        destination = str(data.get("destination") or "").strip()
-        direction = str(data.get("direction") or "in").lower()
-        interface = str(data.get("interface") or "").strip()
-        comment = str(data.get("comment") or "").strip()[:120]
-        if decision not in {"allow", "deny", "reject", "limit"} or protocol not in {"tcp", "udp", "any"} or direction not in {"in", "out"} or not (1 <= port <= 65535):
+        if decision not in {"allow", "deny"} or protocol not in {"tcp", "udp"} or not (1 <= port <= 65535):
             raise ValueError("invalid firewall rule")
-        if interface and not IFACE_RE.fullmatch(interface):
-            raise ValueError("invalid firewall interface")
+        args = ["ufw", decision]
         if source:
             if not re.fullmatch(r"[A-Fa-f0-9:.]+(?:/[0-9]{1,3})?", source):
                 raise ValueError("invalid firewall source address")
-        if destination and not re.fullmatch(r"[A-Fa-f0-9:.]+(?:/[0-9]{1,3})?", destination):
-            raise ValueError("invalid firewall destination address")
-        if direction == "in" and not interface and not source and not destination:
-            # Keep the minimal UFW form for automatic app publication.
-            args = ["ufw", decision]
-            args += ["to", "any"]
-            args += ["port", str(port)]
+            args += ["from", source, "to", "any"]
         else:
-            args = ["ufw", decision, direction]
-            if interface:
-                args += ["on", interface]
-            args += ["from", source or "any", "to", destination or "any", "port", str(port)]
-        if protocol != "any":
-            args += ["proto", protocol]
-        if comment:
-            args += ["comment", comment]
+            # UFW's long rule form requires an explicit destination.  Using
+            # ``allow port 8443 proto tcp`` makes UFW reject the request with
+            # "Need 'to' or 'from' clause", which used to make container app
+            # publishing look like an image-download failure in the UI.
+            args += ["to", "any"]
+        args += ["port", str(port), "proto", protocol]
         run(args, timeout=30)
-        return {"action": action, "decision": decision, "direction": direction, "interface": interface, "protocol": protocol, "port": port, "source": source or "any", "destination": destination or "any", "comment": comment}
-    if action == "firewall-policy":
-        if not available("ufw"):
-            raise RuntimeError("UFW is not installed on this LightNAS host")
-        policy = str(data.get("policy") or "").lower()
-        direction = str(data.get("direction") or "").lower()
-        if policy not in {"allow", "deny", "reject"} or direction not in {"incoming", "outgoing", "routed"}:
-            raise ValueError("invalid firewall default policy")
-        run(["ufw", "default", policy, direction], timeout=30)
-        return {"action": action, "policy": policy, "direction": direction}
-    if action == "firewall-logging":
-        if not available("ufw"):
-            raise RuntimeError("UFW is not installed on this LightNAS host")
-        level = str(data.get("level") or "").lower()
-        if level not in {"off", "low", "medium", "high", "full"}:
-            raise ValueError("invalid firewall logging level")
-        run(["ufw", "logging", level], timeout=30)
-        return {"action": action, "level": level}
+        return {"action": action, "decision": decision, "protocol": protocol, "port": port, "source": source or "any"}
     if action == "firewall-delete":
         if not available("ufw"):
             raise RuntimeError("UFW is not installed on this LightNAS host")
@@ -1533,6 +1395,64 @@ def network_action(data: dict) -> dict:
             raise ValueError("invalid network device")
         run(["nmcli", "device", "disconnect", device], timeout=30)
         return {"action": action, "device": device}
+    if action == "bond-create":
+        name = str(data.get("name") or "")
+        mode = str(data.get("mode") or "active-backup")
+        members = [str(item) for item in (data.get("members") or [])]
+        allowed_modes = {"active-backup", "802.3ad", "balance-xor", "balance-rr"}
+        if not IFACE_RE.fullmatch(name) or mode not in allowed_modes:
+            raise ValueError("invalid bond settings")
+        if len(members) < 1 or len(set(members)) != len(members) or any(not IFACE_RE.fullmatch(item) for item in members):
+            raise ValueError("select one or more valid bond member interfaces")
+        # Create the profiles without bringing them up. This mirrors the safe
+        # Proxmox workflow: configuration can be reviewed before the operator
+        # activates a change that may affect management connectivity.
+        run(["nmcli", "connection", "add", "type", "bond", "ifname", name, "con-name", name, "bond.options", f"mode={mode}"], timeout=30)
+        created = []
+        try:
+            for member in members:
+                profile = f"{name}-{member}"
+                run(["nmcli", "connection", "add", "type", "ethernet", "ifname", member, "con-name", profile, "master", name, "slave-type", "bond"], timeout=30)
+                created.append(profile)
+        except Exception:
+            for profile in created:
+                run(["nmcli", "connection", "delete", profile], timeout=20, check=False)
+            run(["nmcli", "connection", "delete", name], timeout=20, check=False)
+            raise
+        return {"action": action, "name": name, "mode": mode, "members": members, "activated": False}
+    if action == "route-create":
+        name = str(data.get("connection") or "")
+        destination = str(data.get("destination") or "").strip()
+        gateway = str(data.get("gateway") or "").strip()
+        try:
+            metric = int(data.get("metric") or 100)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("invalid route metric") from exc
+        if not CONNECTION_RE.fullmatch(name) or not (0 <= metric <= 65535):
+            raise ValueError("invalid route settings")
+        if destination == "default":
+            destination = "0.0.0.0/0"
+        if not CIDR_RE.fullmatch(destination):
+            raise ValueError("route destination must be an IPv4 network in CIDR form or default")
+        if not re.fullmatch(r"(?:\d{1,3}\.){3}\d{1,3}", gateway):
+            raise ValueError("route gateway must be an IPv4 address")
+        octets = [int(part) for part in gateway.split(".")]
+        if any(part > 255 for part in octets):
+            raise ValueError("route gateway must be an IPv4 address")
+        route = f"{destination} {gateway} {metric}"
+        run(["nmcli", "connection", "modify", name, "+ipv4.routes", route], timeout=30)
+        if bool(data.get("activate")):
+            run(["nmcli", "connection", "up", name], timeout=45)
+        return {"action": action, "connection": name, "destination": destination, "gateway": gateway, "metric": metric, "activated": bool(data.get("activate"))}
+    if action == "route-delete":
+        name = str(data.get("connection") or "")
+        route = str(data.get("route") or "").strip()
+        if not CONNECTION_RE.fullmatch(name) or not route or len(route) > 256 or any(ch in route for ch in "\r\n\x00"):
+            raise ValueError("invalid route removal request")
+        run(["nmcli", "connection", "modify", name, "-ipv4.routes", route], timeout=30)
+        if bool(data.get("activate")):
+            run(["nmcli", "connection", "up", name], timeout=45)
+        return {"action": action, "connection": name, "route": route, "activated": bool(data.get("activate"))}
     if action == "connection-delete":
         name = str(data.get("name") or "")
         if not CONNECTION_RE.fullmatch(name):
@@ -1570,22 +1490,6 @@ def network_action(data: dict) -> dict:
         run(["nmcli", "connection", "add", "type", "bridge", "ifname", name, "con-name", name], timeout=30)
         run(["nmcli", "connection", "add", "type", "bridge-slave", "ifname", uplink, "master", name, "con-name", f"{name}-{uplink}"], timeout=30)
         return {"action": action, "name": name, "uplink": uplink}
-    if action == "bond-create":
-        name = str(data.get("name") or "bond0")
-        members = [str(item) for item in (data.get("members") or [])]
-        mode = str(data.get("mode") or "active-backup")
-        if not IFACE_RE.fullmatch(name) or len(members) < 2 or any(not IFACE_RE.fullmatch(item) for item in members):
-            raise ValueError("select at least two valid bond member interfaces")
-        if mode not in {"active-backup", "balance-rr", "balance-xor", "802.3ad", "balance-tlb", "balance-alb"}:
-            raise ValueError("invalid bond mode")
-        run(["nmcli", "connection", "add", "type", "bond", "ifname", name, "con-name", name, "bond.options", f"mode={mode}"], timeout=30)
-        try:
-            for member in members:
-                run(["nmcli", "connection", "add", "type", "ethernet", "ifname", member, "master", name, "con-name", f"{name}-{member}"], timeout=30)
-        except Exception:
-            run(["nmcli", "connection", "delete", name], timeout=15, check=False)
-            raise
-        return {"action": action, "name": name, "members": members, "mode": mode}
     if action == "vlan-create":
         name = str(data.get("name") or "")
         parent = str(data.get("parent") or "")
@@ -1594,46 +1498,6 @@ def network_action(data: dict) -> dict:
             raise ValueError("invalid VLAN settings")
         run(["nmcli", "connection", "add", "type", "vlan", "con-name", name, "ifname", name, "dev", parent, "id", str(vlan_id)], timeout=30)
         return {"action": action, "name": name, "parent": parent, "vlanId": vlan_id}
-    if action == "ovs-bridge-create":
-        name = str(data.get("name") or "ovsbr0")
-        if not IFACE_RE.fullmatch(name):
-            raise ValueError("invalid OVS bridge name")
-        if not available("ovs-vsctl"):
-            raise RuntimeError("Open vSwitch is not installed; rerun the LightNAS installer")
-        run(["nmcli", "connection", "add", "type", "ovs-bridge", "con-name", name, "ifname", name], timeout=30)
-        return {"action": action, "name": name}
-    if action == "ovs-port-create":
-        name = str(data.get("name") or "ovsint0")
-        bridge = str(data.get("bridge") or "")
-        if not IFACE_RE.fullmatch(name) or not IFACE_RE.fullmatch(bridge):
-            raise ValueError("invalid OVS internal port or bridge name")
-        if not available("ovs-vsctl"):
-            raise RuntimeError("Open vSwitch is not installed; rerun the LightNAS installer")
-        port_profile = f"{name}-port"
-        run(["nmcli", "connection", "add", "type", "ovs-port", "con-name", port_profile, "ifname", name, "master", bridge], timeout=30)
-        try:
-            run(["nmcli", "connection", "add", "type", "ovs-interface", "con-name", name, "ifname", name, "master", port_profile, "ipv4.method", "disabled", "ipv6.method", "disabled"], timeout=30)
-        except Exception:
-            run(["nmcli", "connection", "delete", port_profile], timeout=15, check=False)
-            raise
-        return {"action": action, "name": name, "bridge": bridge}
-    if action == "ovs-bond-create":
-        name = str(data.get("name") or "ovsbond0")
-        bridge = str(data.get("bridge") or "")
-        members = [str(item) for item in (data.get("members") or [])]
-        mode = str(data.get("mode") or "active-backup")
-        if not IFACE_RE.fullmatch(name) or not IFACE_RE.fullmatch(bridge) or len(members) < 2 or any(not IFACE_RE.fullmatch(item) for item in members) or mode not in {"active-backup", "balance-slb", "balance-tcp"}:
-            raise ValueError("invalid OVS bond settings")
-        if not available("ovs-vsctl"):
-            raise RuntimeError("Open vSwitch is not installed; rerun the LightNAS installer")
-        run(["nmcli", "connection", "add", "type", "ovs-port", "con-name", name, "ifname", name, "master", bridge, "ovs-port.bond-mode", mode], timeout=30)
-        try:
-            for member in members:
-                run(["nmcli", "connection", "add", "type", "ethernet", "con-name", f"{name}-{member}", "ifname", member, "master", name], timeout=30)
-        except Exception:
-            run(["nmcli", "connection", "delete", name], timeout=15, check=False)
-            raise
-        return {"action": action, "name": name, "bridge": bridge, "members": members, "mode": mode}
     raise ValueError("unsupported network action")
 
 
@@ -1718,31 +1582,21 @@ def stream_vm_console(connection, backend) -> None:
         backend.close()
         feeder.join(timeout=1)
 
-def stream_container(connection, data: dict) -> None:
-    name = str(data.get("id") or data.get("name") or "")
-    if not NAME_RE.fullmatch(name):
-        raise ValueError("invalid container name")
-    if lxc_state(name) != "running":
-        raise ValueError("start the container before opening its terminal")
+def stream_node_shell(connection) -> None:
+    """Open an interactive root shell on the LightNAS node for the web console."""
     master, slave = pty.openpty()
     env = os.environ.copy()
-    env["TERM"] = "xterm-256color"
-    # Give the attached shell a real session and controlling terminal. Without
-    # this, the PTY echoes browser input but an interactive shell may never
-    # consume Enter or display its prompt when LightNAS runs under systemd.
+    env.update({"TERM": "xterm-256color", "HOME": "/root", "USER": "root", "LOGNAME": "root"})
+
     def child_setup():
         os.setsid()
         fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
 
-    terminal_shell = (
-        "export HOME=/root USER=root LOGNAME=root; "
-        "cd /root 2>/dev/null || cd /; "
-        f'if [ -x /bin/bash ]; then export PS1="root@{name}:\\w# "; '
-        "exec /bin/bash --noprofile --norc -i; "
-        f'else export PS1="root@{name}:# "; exec /bin/sh -i; fi'
-    )
+    shell = "/bin/bash" if Path("/bin/bash").exists() else "/bin/sh"
+    args = [shell, "--noprofile", "--norc", "-i"] if shell.endswith("bash") else [shell, "-i"]
     process = subprocess.Popen(
-        ["lxc-attach", "-n", name, "--", "/bin/sh", "-c", terminal_shell],
+        args,
+        cwd="/root" if Path("/root").is_dir() else "/",
         stdin=slave,
         stdout=slave,
         stderr=slave,
@@ -1782,19 +1636,38 @@ def stream_container(connection, data: dict) -> None:
         feeder.join(timeout=1)
 
 
-def stream_node(connection) -> None:
+def stream_container(connection, data: dict) -> None:
+    name = str(data.get("id") or data.get("name") or "")
+    if not NAME_RE.fullmatch(name):
+        raise ValueError("invalid container name")
+    if lxc_state(name) != "running":
+        raise ValueError("start the container before opening its terminal")
     master, slave = pty.openpty()
     env = os.environ.copy()
-    node_name = re.sub(r"[^A-Za-z0-9.-]", "-", socket.gethostname().split(".")[0]) or "lightnas"
-    env.update({"TERM": "xterm-256color", "HOME": "/root", "USER": "root", "LOGNAME": "root", "PS1": f"root@{node_name}:\\w# "})
-
+    env["TERM"] = "xterm-256color"
+    # Give the attached shell a real session and controlling terminal. Without
+    # this, the PTY echoes browser input but an interactive shell may never
+    # consume Enter or display its prompt when LightNAS runs under systemd.
     def child_setup():
         os.setsid()
         fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
 
-    shell = "/bin/bash" if Path("/bin/bash").exists() else "/bin/sh"
-    args = [shell, "--noprofile", "--norc", "-i"] if shell.endswith("bash") else [shell, "-i"]
-    process = subprocess.Popen(args, cwd="/root", stdin=slave, stdout=slave, stderr=slave, close_fds=True, env=env, preexec_fn=child_setup)
+    terminal_shell = (
+        "export HOME=/root USER=root LOGNAME=root; "
+        "cd /root 2>/dev/null || cd /; "
+        f'if [ -x /bin/bash ]; then export PS1="root@{name}:\\w# "; '
+        "exec /bin/bash --noprofile --norc -i; "
+        f'else export PS1="root@{name}:# "; exec /bin/sh -i; fi'
+    )
+    process = subprocess.Popen(
+        ["lxc-attach", "-n", name, "--", "/bin/sh", "-c", terminal_shell],
+        stdin=slave,
+        stdout=slave,
+        stderr=slave,
+        close_fds=True,
+        env=env,
+        preexec_fn=child_setup,
+    )
     os.close(slave)
 
     def input_loop():
@@ -1992,14 +1865,6 @@ def dispatch(request: dict) -> dict:
         return network_inventory()
     if action == "network-action":
         return network_action(data)
-    if action == "access-status":
-        return access_status()
-    if action == "access-action":
-        return access_action(data)
-    if action == "share-apply":
-        return apply_share(data)
-    if action == "share-remove":
-        return remove_share(data)
     if action == "appliance-health":
         return appliance_health()
     if action == "appliance-repair":
@@ -2016,15 +1881,15 @@ class Handler(socketserver.StreamRequestHandler):
             request = json.loads(raw.decode("utf-8"))
             if not isinstance(request, dict):
                 raise ValueError("request must be an object")
+            if request.get("action") == "node-console":
+                self.wfile.write(b'{"ok":true,"data":{"mode":"pty","privileged":true}}\n')
+                self.wfile.flush()
+                stream_node_shell(self.connection)
+                return
             if request.get("action") == "container-console":
                 self.wfile.write(b'{"ok":true,"data":{"mode":"pty"}}\n')
                 self.wfile.flush()
                 stream_container(self.connection, request.get("data") or {})
-                return
-            if request.get("action") == "node-console":
-                self.wfile.write(b'{"ok":true,"data":{"mode":"pty"}}\n')
-                self.wfile.flush()
-                stream_node(self.connection)
                 return
             if request.get("action") == "vm-console":
                 # Establish the QEMU connection before reporting success. This
