@@ -25,7 +25,7 @@ test('dashboard does not block on cold storage discovery', async () => {
   assert.doesNotMatch(block, /await Promise\.all\(\[\s*getSystemSnapshot\(\), getFilesystems\(\), getStorageInventory\(\), listStoragePools\(\)/);
 });
 
-test('current Files UI supports true All Files and multi/folder uploads with progress', async () => {
+test('current Files UI scopes All Files to library folders and supports multi/folder uploads with progress', async () => {
   const [app, files, server] = await Promise.all([
     read('public/app.js'),
     read('src/files.mjs'),
@@ -35,9 +35,9 @@ test('current Files UI supports true All Files and multi/folder uploads with pro
   assert.match(app, /Upload folder<input id="folder-upload" type="file" webkitdirectory directory multiple/);
   assert.match(app, /uploadFilesWithProgress/);
   assert.match(app, /XMLHttpRequest/);
-  assert.match(app, /All files is a flat view/);
+  assert.match(app, /All files shows only your Documents, Photos, Videos, and Audio libraries/);
   assert.match(files, /export async function listAllFiles/);
-  assert.match(files, /for \(const volume of await attachedVolumes\(\)\)/);
+  assert.match(files, /for \(const folder of MEDIA_LIBRARY_ROOTS\)/);
   assert.match(server, /url\.searchParams\.get\('all'\) === '1'/);
   assert.match(server, /url\.searchParams\.get\('refresh'\) === '1'/);
 });
