@@ -47,7 +47,7 @@ export DEBIAN_FRONTEND=noninteractive
 
 echo "[1/6] Checking system requirements..."
 install_missing_packages \
-  ca-certificates curl git gnupg python3 ffmpeg imagemagick acl novnc iproute2 nftables ufw \
+  ca-certificates curl git gnupg python3 ffmpeg imagemagick qrencode acl novnc iproute2 nftables ufw \
   tar gzip xz-utils zstd
 
 if ! command -v node >/dev/null 2>&1 || \
