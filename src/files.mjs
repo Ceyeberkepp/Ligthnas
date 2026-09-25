@@ -7,7 +7,16 @@ const root = join(dirname(process.env.NAS_DATA_FILE || 'data/state.json'), 'file
 const configuredUploadLimit = Number(process.env.LIGHTNAS_FILE_UPLOAD_MAX_BYTES || 0);
 const MAX_UPLOAD = Number.isFinite(configuredUploadLimit) && configuredUploadLimit > 0 ? configuredUploadLimit : 0;
 const ATTACHED_ROOT = 'Attached storage';
+const infrastructureImageSuffixes = [
+  '.iso', '.img', '.qcow', '.qcow2', '.vmdk', '.vhd', '.vhdx', '.ova', '.ovf',
+  '.vma', '.vma.zst', '.vma.gz', '.tar.zst', '.tar.xz', '.tgz'
+];
 let allFilesCache = { expiresAt: 0, value: null };
+
+function infrastructureFile(name) {
+  const value = String(name || '').toLowerCase();
+  return infrastructureImageSuffixes.some(suffix => value.endsWith(suffix));
+}
 
 function invalidateAllFilesCache() {
   allFilesCache = { expiresAt: 0, value: null };
@@ -118,10 +127,14 @@ async function recursiveFileEntries(path, prefix = '', output = [], limits = { c
       if (!item || limits.count >= limits.max || item.info.isSymbolicLink()) continue;
       const relativePath = [prefix, item.name].filter(Boolean).join('/');
       if (item.info.isDirectory()) {
+        // Attached storage can contain LightNAS-managed VM disks, ISOs,
+        // templates and container root files under .lightnas/. They belong to
+        // Storage, VM and Container workflows, not Files & media.
+        if (item.name === '.lightnas') continue;
         directories.push({ absolute: item.absolute, relativePath });
         continue;
       }
-      if (!item.info.isFile()) continue;
+      if (!item.info.isFile() || infrastructureFile(item.name)) continue;
       output.push({
         name: item.name,
         path: relativePath,
@@ -183,7 +196,7 @@ export async function listFiles(relative = '') {
 
   const path = await checked(relative);
   if (!(await lstat(path)).isDirectory()) throw Object.assign(new Error('Not a folder.'), { status: 400 });
-  const entries = await directoryEntries(path);
+  const entries = (await directoryEntries(path)).filter(entry => entry.directory || !infrastructureFile(entry.name));
   if (!segments.length && volumes.length) entries.push({ name: ATTACHED_ROOT, directory: true, sizeBytes: null, modifiedAt: null, supported: true, attached: true });
   return entries.sort((a, b) => Number(b.directory) - Number(a.directory) || a.name.localeCompare(b.name));
 }
