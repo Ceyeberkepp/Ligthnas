@@ -353,13 +353,13 @@ function permissionsView() {
 }
 
 function shellView() {
-  return `${pageHead('Node Shell', 'Open an interactive root terminal for the LightNAS operating system.')}
+  return `${pageHead('Bash Shell', 'Open an interactive Bash terminal for the LightNAS operating system.')}
     <section class="panel node-shell-launch">
-      <span class="eyebrow">PRIVILEGED NODE ACCESS</span>
-      <h2>LightNAS root shell</h2>
-      <p class="muted">This is a real root terminal on the LightNAS node. Commands can change networking, storage, services, packages, and the operating system. Access is restricted to the interactive appliance owner session.</p>
-      <div class="module-note"><b>Use with care.</b> A command entered here can disconnect the web interface or damage data just like an SSH root session.</div>
-      <div class="head-actions"><button class="primary" type="button" data-open-node-shell>Open node shell</button></div>
+      <span class="eyebrow">SYSTEM SHELL</span>
+      <h2>LightNAS Bash shell</h2>
+      <p class="muted">This opens the appliance Bash terminal in a separate window. Commands can change networking, storage, services, packages, and the operating system.</p>
+      <div class="module-note"><b>Use with care.</b> Shell commands can disconnect the web interface or modify system data.</div>
+      <div class="head-actions"><button class="primary" type="button" data-open-node-shell>Open Bash shell</button></div>
     </section>`;
 }
 
@@ -473,8 +473,7 @@ const librarySections = [
   ['Documents', 'Documents'],
   ['Photos', 'Photos'],
   ['Videos', 'Videos'],
-  ['Audio', 'Audio'],
-  ['Attached storage', 'Attached storage']
+  ['Audio', 'Audio']
 ];
 
 function fileEntryPath(entry) {
@@ -523,7 +522,7 @@ function filesView() {
         <button class="secondary ${state.fileView === 'grid' ? 'active' : ''}" type="button" data-file-view="grid" aria-pressed="${state.fileView === 'grid'}">▦ Grid</button>
       </div>
       <button class="secondary" data-action="new-folder">+ Folder</button>
-      <label class="primary upload-button">Upload files<input id="file-upload" type="file" multiple hidden></label>
+      <label class="primary upload-button">Upload<input id="file-upload" type="file" multiple hidden></label>
       <label class="secondary upload-button">Upload folder<input id="folder-upload" type="file" webkitdirectory directory multiple hidden></label>
     </div></div>
     <div class="file-drop-zone" data-file-drop tabindex="0"><b>Drop files here</b><span>Multiple files and ZIP archives are supported. Use “Upload folder” to preserve a whole folder tree.</span></div>
