@@ -78,6 +78,7 @@ jobs:
       - name: Validate shell syntax
         run: |
           bash -n install.sh
+          bash -n iso/build.sh
           bash -n scripts/bootstrap.sh
           bash -n scripts/proxmox-lxc-install.sh
           bash -n scripts/configure-proxmox.sh
