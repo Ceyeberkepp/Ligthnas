@@ -20,6 +20,10 @@ test('All Files is flat, includes attached storage, and folder uploads show prog
   assert.match(app, /XMLHttpRequest/);
   assert.match(app, /ZIP and other file types are accepted/);
   assert.match(app, /All files is a flat view/);
+  assert.match(app, /data-file-drop/);
+  assert.match(app, /event\.dataTransfer\?\.files/);
+  assert.match(files, /mkdir\(await checked\(relative, false\), \{ recursive: true/);
+  assert.match(app, /allFiles \? state\.files\.filter\(entry => !entry\.directory\)/);
 });
 
 test('Files refresh and storage hot-plug detection are explicit', async () => {
@@ -50,6 +54,14 @@ test('App Store is substantially expanded and supports multi-port one-click apps
   }
   assert.match(runtime, /app\.extraPorts \|\| \[\]/);
   assert.match(runtime, /0\.0\.0\.0:\$\{hostPort\}:\$\{containerPort\}\/\$\{protocol\}/);
+
+  const ports = [...runtime.matchAll(/\bid:\s*'([^']+)'[\s\S]*?\bport:\s*(\d+),\s*containerPort:/g)]
+    .map(match => [match[1], Number(match[2])]);
+  const seen = new Map();
+  for (const [id, port] of ports) {
+    assert.equal(seen.has(port), false, `duplicate App Store host port ${port}: ${seen.get(port)} and ${id}`);
+    seen.set(port, id);
+  }
 });
 
 test('collapsed sidebar hides its scrollbar and secondary clutter', async () => {
@@ -58,4 +70,39 @@ test('collapsed sidebar hides its scrollbar and secondary clutter', async () => 
   assert.match(styles, /sidebar nav::-webkit-scrollbar/);
   assert.match(styles, /sidebar-collapsed .*data-view="pools"/s);
   assert.match(styles, /content: attr\(title\)/);
+});
+
+
+test('login only reveals MFA methods that the account has enabled', async () => {
+  const [html, app, server, security, installer, iso] = await Promise.all([
+    read('public/index.html'),
+    read('public/app.js'),
+    read('src/server.mjs'),
+    read('public/admin-security.js'),
+    read('install.sh'),
+    read('iso/build.sh')
+  ]);
+  assert.match(html, /id="login-mfa" class="login-mfa hidden"/);
+  assert.match(html, /data-login-method="totp"/);
+  assert.match(html, /data-login-method="sms"/);
+  assert.match(html, /data-login-method="passkey"/);
+  assert.match(app, /\/api\/login\/options\?username=/);
+  assert.match(app, /setLoginMethods\(\[\]\)/);
+  assert.match(server, /url\.pathname === '\/api\/login\/options'/);
+  assert.match(server, /if \(account\.totpEnabled\) methods\.push\('totp'\)/);
+  assert.match(server, /account\.smsMfa\?\.enabled/);
+  assert.match(server, /Array\.isArray\(account\.passkeys\)/);
+  assert.match(server, /qrCodeDataUrl\(uri\)/);
+  assert.match(security, /class="totp-qr"/);
+  assert.match(installer, /qrencode/);
+  assert.match(iso, /^qrencode$/m);
+});
+
+test('first install starts the control panel before slow runtime provisioning completes', async () => {
+  const [installer, iso] = await Promise.all([read('install.sh'), read('iso/build.sh')]);
+  assert.match(installer, /systemd-run --unit=lightnas-runtime-bootstrap/);
+  assert.match(installer, /--no-block/);
+  assert.match(installer, /Runtime engines will finish provisioning in the background/);
+  assert.doesNotMatch(iso, /After=network-online\.target lightnas-runtime-init\.service/);
+  assert.match(iso, /Wants=network-online\.target lightnas-host-agent\.service lightnas-runtime-init\.service/);
 });
