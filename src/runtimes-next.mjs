@@ -98,7 +98,7 @@ export const catalog = Object.freeze([
   { id: 'dashy', name: 'Dashy', category: 'Dashboard', image: 'lissy93/dashy:latest', port: 8102, containerPort: 8080, memory: '768m', description: 'Customizable dashboard for homelab and NAS services.', source: 'Dashy', volumes: [] },
   { id: 'it-tools', name: 'IT-Tools', category: 'Utility', image: 'corentinth/it-tools:latest', port: 8100, containerPort: 80, memory: '512m', description: 'Collection of browser-based tools for developers and IT administrators.', source: 'IT-Tools', volumes: [] },
   { id: 'whoogle', name: 'Whoogle', category: 'Search', image: 'benbusby/whoogle-search:latest', port: 5001, containerPort: 5000, memory: '512m', description: 'Privacy-focused search frontend.', source: 'Whoogle', volumes: [] },
-  { id: 'glances', name: 'Glances', category: 'Monitoring', image: 'nicolargo/glances:latest-full', port: 61208, containerPort: 61208, memory: '512m', description: 'System monitoring dashboard and metrics viewer.', source: 'Glances', volumes: [], command: ['glances', '-w'] }
+  { id: 'glances', name: 'Glances', category: 'Monitoring', image: 'nicolargo/glances:latest-full', port: 61208, containerPort: 61208, memory: '512m', description: 'System monitoring dashboard and metrics viewer.', source: 'Glances', volumes: [], environment: [['GLANCES_OPT', '-w']] }
 ]);
 
 async function command(program, args, timeout = 4000) {
