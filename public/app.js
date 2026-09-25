@@ -291,14 +291,10 @@ function homeView() {
 }
 
 function storageView() {
-  const { filesystems } = state.overview;
+  const spaces = Array.isArray(state.spaces) ? state.spaces : [];
   return `${pageHead('Storage', 'LightNAS storage pools, capacity and content libraries.', '<div class="head-actions"><button class="secondary" data-action="refresh-storage">Rescan drives</button><button class="primary" data-view-link="pools">Manage storage</button></div>')}
     <div id="storage-manager"></div>
-    <h2>LightNAS storage spaces</h2>
-    <div class="storage-list">${state.spaces?.map(space => `<article class="storage-row"><div><h3>${escapeHtml(space.label)}</h3><p>Spaces/${escapeHtml(space.name)}</p></div><button class="secondary" data-open-space="${escapeHtml(space.name)}">Open</button></article>`).join('') || '<div class="empty"><p>No file spaces yet.</p></div>'}</div>
-    <details class="panel"><summary><b>Advanced mounted filesystems</b></summary>
-      <div class="storage-list">${filesystems.map(fs => `<article class="storage-row"><div><h3>${escapeHtml(fs.mountPoint)}</h3><p>${escapeHtml(fs.device)} · ${escapeHtml(fs.type)}${fs.readOnly ? ' · Read only' : ''}</p></div><div><div class="track"><span style="width:${fs.usedPercent}%"></span></div><p>${fs.usedPercent}% used</p></div><div class="storage-size"><b>${bytes(fs.usedBytes)}</b><br>of ${bytes(fs.totalBytes)}</div></article>`).join('') || '<div class="empty"><p>No readable mounted filesystems.</p></div>'}</div>
-    </details>`;
+    ${spaces.length ? `<section class="storage-spaces-section"><div class="section-heading"><div><span class="eyebrow">FILE STORAGE</span><h2>LightNAS storage spaces</h2></div></div><div class="storage-list">${spaces.map(space => `<article class="storage-row"><div><h3>${escapeHtml(space.label)}</h3><p>Spaces/${escapeHtml(space.name)}</p></div><button class="secondary" data-open-space="${escapeHtml(space.name)}">Open</button></article>`).join('')}</div></section>` : ''}`;
 }
 
 function poolsView() {
@@ -447,7 +443,15 @@ function containersView() {
   const containerList = !runtime
     ? '<div class="empty compact-empty"><p>Loading existing system containers…</p></div>'
     : containers.length
-      ? `<div class="compute-table"><div class="compute-table-head"><span>Status</span><span>Name / ID</span><span>CPU</span><span>Memory</span><span>Network</span><span></span></div>${containers.map(item => `<article class="compute-row"><span class="compute-status"><i class="${/running|active/i.test(String(item.status || '')) ? 'online' : 'offline'}"></i>${escapeHtml(item.status || 'unknown')}</span><div><h3>${escapeHtml(item.name || item.id)}</h3><small>LXC · ID ${escapeHtml(item.id || item.name)}</small></div><span>${item.cpus || '—'} vCPU</span><span>${bytes(item.memory || 0)}</span><span>${escapeHtml(item.ipv4 || 'No IP')}</span><button class="secondary" type="button" data-container-edit="${escapeHtml(item.id || item.name)}">Manage</button></article>`).join('')}</div>`
+      ? `<div class="compute-table"><div class="compute-table-head"><span>Status</span><span>Name / ID</span><span>CPU</span><span>Memory</span><span>Network</span><span></span></div>${containers.map(item => `<article class="compute-row"><span class="compute-status"><i class="${/running|active/i.test(String(item.status || '')) ? 'online' : 'offline'}"></i>${escapeHtml(item.status || 'unknown')}</span><div><h3>${escapeHtml(item.name || item.id)}</h3><small>LXC · ID ${escapeHtml(item.id || item.name)}</small></div><span>${item.cpus || '—'} vCPU</span><span>${bytes(item.memory || 0)}</span><span>${escapeHtml(item.ipv4 || 'No IP')}</span><div class="runtime-actions compute-actions">
+  <button class="primary ${/running|active/i.test(String(item.status || '')) ? '' : 'hidden'}" type="button" data-container-console="${escapeHtml(item.id || item.name)}" data-container-name="${escapeHtml(item.name || item.id)}">Terminal</button>
+  <button class="primary ${/running|active/i.test(String(item.status || '')) ? 'hidden' : ''}" type="button" data-container-action="start" data-container-id="${escapeHtml(item.id || item.name)}">Start</button>
+  <button class="secondary ${/running|active/i.test(String(item.status || '')) ? '' : 'hidden'}" type="button" data-container-action="shutdown" data-container-id="${escapeHtml(item.id || item.name)}">Shutdown</button>
+  <button class="secondary ${/running|active/i.test(String(item.status || '')) ? '' : 'hidden'}" type="button" data-container-action="reboot" data-container-id="${escapeHtml(item.id || item.name)}">Reboot</button>
+  <button class="secondary ${/running|active/i.test(String(item.status || '')) ? '' : 'hidden'}" type="button" data-container-action="stop" data-container-id="${escapeHtml(item.id || item.name)}">Stop</button>
+  <button class="secondary" type="button" data-container-edit="${escapeHtml(item.id || item.name)}" data-container-name="${escapeHtml(item.name || item.id)}" data-container-memory="${Math.max(256, Math.round((Number(item.memory) || 0) / 1048576) || 2048)}" data-container-cpus="${item.cpus || 2}">Edit</button>
+  <button class="secondary danger-button" type="button" data-container-action="delete" data-container-id="${escapeHtml(item.id || item.name)}">Delete</button>
+</div></article>`).join('')}</div>`
       : '<div class="empty compact-empty"><p>No native system containers are visible.</p></div>';
   return `${pageHead('System containers', 'Create, monitor and manage native Linux system containers.', '<div class="head-actions"><button class="secondary" data-action="refresh-runtime">Refresh</button><button class="primary" data-action="create-container">+ Create container</button></div>')}
     ${runtimeBanner('containers')}
@@ -461,7 +465,16 @@ function vmsView() {
   const machines = runtime?.machineDetails || [];
   const ready = runtime?.available && runtime?.enabled && runtime.pools?.length && runtime.networks?.length;
   const rows = machines.length
-    ? `<div class="compute-table"><div class="compute-table-head"><span>Status</span><span>Name</span><span>CPU</span><span>Memory</span><span>Provider</span><span></span></div>${machines.map(item => `<article class="compute-row"><span class="compute-status"><i class="${/running|active/i.test(String(item.status || '')) ? 'online' : 'offline'}"></i>${escapeHtml(item.status || 'unknown')}</span><div><h3>${escapeHtml(item.name)}</h3><small>${item.disk ? `${bytes(item.disk)} disk` : 'Virtual machine'}</small></div><span>${item.cpus || '—'} vCPU</span><span>${bytes(item.memory || 0)}</span><span>${escapeHtml(runtime?.provider || 'libvirt')}</span><button class="secondary" type="button" data-vm-edit="${escapeHtml(item.id || item.name)}">Manage</button></article>`).join('')}</div>`
+    ? `<div class="compute-table"><div class="compute-table-head"><span>Status</span><span>Name</span><span>CPU</span><span>Memory</span><span>Provider</span><span></span></div>${machines.map(item => `<article class="compute-row"><span class="compute-status"><i class="${/running|active/i.test(String(item.status || '')) ? 'online' : 'offline'}"></i>${escapeHtml(item.status || 'unknown')}</span><div><h3>${escapeHtml(item.name)}</h3><small>${item.disk ? `${bytes(item.disk)} disk` : 'Virtual machine'}</small></div><span>${item.cpus || '—'} vCPU</span><span>${bytes(item.memory || 0)}</span><span>${escapeHtml(runtime?.provider || 'libvirt')}</span><div class="runtime-actions compute-actions">
+  <button class="primary ${/running|active/i.test(String(item.status || '')) ? '' : 'hidden'}" type="button" data-vm-console="${escapeHtml(item.id || item.name)}" data-vm-name="${escapeHtml(item.name)}">noVNC Console</button>
+  <button class="primary ${/running|active/i.test(String(item.status || '')) ? 'hidden' : ''}" type="button" data-vm-action="start" data-vm-id="${escapeHtml(item.id || item.name)}">Start</button>
+  <button class="secondary ${/running|active/i.test(String(item.status || '')) ? '' : 'hidden'}" type="button" data-vm-action="shutdown" data-vm-id="${escapeHtml(item.id || item.name)}">Shutdown</button>
+  <button class="secondary ${/running|active/i.test(String(item.status || '')) ? '' : 'hidden'}" type="button" data-vm-action="reboot" data-vm-id="${escapeHtml(item.id || item.name)}">Reboot</button>
+  <button class="secondary ${/running|active/i.test(String(item.status || '')) ? '' : 'hidden'}" type="button" data-vm-action="stop" data-vm-id="${escapeHtml(item.id || item.name)}">Stop</button>
+  <button class="secondary" type="button" data-vm-edit="${escapeHtml(item.id || item.name)}" data-vm-name="${escapeHtml(item.name)}" data-vm-memory="${Math.max(512, Math.round((Number(item.memory) || 0) / 1048576) || 2048)}" data-vm-cpus="${item.cpus || 2}">Edit</button>
+  <button class="secondary" type="button" data-vm-action="reset" data-vm-id="${escapeHtml(item.id || item.name)}">Reset</button>
+  <button class="secondary danger-button" type="button" data-vm-action="delete" data-vm-id="${escapeHtml(item.id || item.name)}">Delete</button>
+</div></article>`).join('')}</div>`
     : '<div class="empty compact-empty"><p>No local virtual machines are visible.</p></div>';
   return `${pageHead('Virtual machines', 'Create, monitor and manage QEMU/libvirt virtual machines.', '<div class="head-actions"><button class="secondary" data-action="refresh-runtime">Refresh</button><button class="primary" data-action="create-vm">+ Create VM</button></div>')}
     ${runtimeBanner('virtualization')}
@@ -485,6 +498,39 @@ const librarySections = [
   ['Audio', 'Audio']
 ];
 
+const libraryExtensions = {
+  Photos: new Set(['jpg','jpeg','png','gif','webp','bmp','svg','avif','heic','heif','dng','cr2','cr3','nef','nrw','arw','srf','sr2','raf','orf','rw2','pef','srw','x3f']),
+  Videos: new Set(['mp4','webm','mov','m4v','ogv','mkv','avi','wmv','flv','mpeg','mpg','m2v','mts','m2ts','ts','3gp','3g2','vob']),
+  Audio: new Set(['mp3','wav','ogg','m4a','aac','flac','opus','wma','aiff','aif']),
+  Documents: new Set(['pdf','txt','md','rtf','doc','docx','odt','xls','xlsx','ods','ppt','pptx','odp','csv','json','xml','yaml','yml','ini','conf','log','zip','7z','rar','epub','mobi','html','css','js','mjs','py','sh'])
+};
+const systemImageExtensions = ['iso','img','qcow','qcow2','vmdk','vhd','vhdx','ova','ovf','vma','vma.zst','vma.gz','tar.zst','tar.xz','tgz'];
+
+function fileExtension(name) {
+  const lower = String(name || '').toLowerCase();
+  const special = systemImageExtensions.find(ext => lower.endsWith('.' + ext));
+  if (special) return special;
+  const part = lower.split('.').pop();
+  return part === lower ? '' : part;
+}
+
+function isSystemImageFile(name) {
+  return systemImageExtensions.includes(fileExtension(name));
+}
+
+function libraryCategoryForName(name) {
+  const ext = fileExtension(name);
+  for (const [category, values] of Object.entries(libraryExtensions)) {
+    if (values.has(ext)) return category;
+  }
+  return 'Documents';
+}
+
+function libraryKindForName(name) {
+  const category = libraryCategoryForName(name);
+  return category === 'Photos' ? 'Photo' : category === 'Videos' ? 'Video' : category === 'Audio' ? 'Audio' : 'Document';
+}
+
 function fileEntryPath(entry) {
   return entry.path || [state.folder, entry.name].filter(Boolean).join('/');
 }
@@ -494,17 +540,18 @@ function filesView() {
   const section = librarySections.some(([folder]) => folder === (segments[0] || '')) ? (segments[0] || '') : '';
   const allFiles = state.folder === '';
   const crumbs = [`<button class="panel-link" data-folder="">Files & media</button>`, ...segments.map((segment, index) => `<span> / </span><button class="panel-link" data-folder="${escapeHtml(segments.slice(0, index + 1).join('/'))}">${escapeHtml(segment)}</button>`)].join('');
-  const entries = Array.isArray(state.files) ? (allFiles ? state.files.filter(entry => !entry.directory) : state.files) : state.files;
+  const entries = Array.isArray(state.files) ? (allFiles ? state.files.filter(entry => !entry.directory && !isSystemImageFile(entry.name)) : state.files.filter(entry => entry.directory || !isSystemImageFile(entry.name))) : state.files;
   const tabs = librarySections.map(([folder, label]) => `<button type="button" class="library-tab ${section === folder ? 'active' : ''}" data-library-tab="${escapeHtml(folder)}" aria-pressed="${section === folder}">${escapeHtml(label)}</button>`).join('');
 
   const item = entry => {
     const path = fileEntryPath(entry);
     const location = !entry.directory && (entry.folder || path.includes('/')) ? (entry.folder || path.split('/').slice(0, -1).join('/') || 'Root') : '';
-    const meta = entry.directory ? 'Folder' : `${bytes(entry.sizeBytes)}${location ? ` · ${escapeHtml(location)}` : ''}`;
+    const kind = entry.directory ? 'Folder' : libraryKindForName(entry.name);
+    const meta = entry.directory ? 'Folder' : `${kind} · ${bytes(entry.sizeBytes)}${location ? ` · ${escapeHtml(location)}` : ''}`;
     return state.fileView === 'grid'
       ? `<article class="file-card">
           <button class="file-name file-card-open" data-open="${escapeHtml(entry.name)}" data-path="${escapeHtml(path)}" data-directory="${entry.directory}">
-            <span class="file-card-visual">${entry.directory ? '<span class="folder-glyph">▣</span>' : '<span class="file-glyph">▤</span>'}</span>
+            <span class="file-card-visual">${entry.directory ? '<span class="folder-glyph">▣</span>' : `<span class="file-glyph file-kind-${kind.toLowerCase()}">${kind === 'Photo' ? '▧' : kind === 'Video' ? '▷' : kind === 'Audio' ? '♪' : '▤'}</span>`}</span>
             <span class="file-card-title">${escapeHtml(entry.name)}</span>
           </button>
           <span class="muted file-location">${meta}</span>
@@ -598,7 +645,11 @@ async function uploadFilesWithProgress(fileList, folderMode = false) {
   const targets = files.map(file => {
     const relative = folderMode ? (file.webkitRelativePath || file.name) : file.name;
     const clean = relative.split('/').filter(part => part && part !== '.' && part !== '..').join('/');
-    return { file, path: [state.folder, clean].filter(Boolean).join('/') };
+    if (!folderMode && state.folder === '' && isSystemImageFile(file.name)) {
+      throw new Error(file.name + ' is VM/container storage media. Upload it from Storage > Manage storage so it stays on the selected storage pool instead of Files & media.');
+    }
+    const destination = !folderMode && state.folder === '' ? libraryCategoryForName(file.name) : state.folder;
+    return { file, path: [destination, clean].filter(Boolean).join('/') };
   });
   await ensureUploadDirectories(targets.map(item => item.path));
 
@@ -808,7 +859,7 @@ function networkView() {
         ${interfaceRows.map(({ device, profile, ipv4, role }) => `<div class="network-table-row" role="row">
           <strong>${escapeHtml(device.name)}</strong>
           <span>${escapeHtml(device.type || 'interface')}<small>${escapeHtml(role)}</small></span>
-          <span><b class="network-state-badge ${/connected|up/i.test(device.state || '') ? 'online' : 'neutral'}">${escapeHtml(String(device.state || 'unknown').toUpperCase())}</b></span>
+          <span><b class="network-state-badge ${/connected|up/i.test(device.state || '') ? 'online' : 'neutral'}" title="${escapeHtml(String(device.state || 'unknown'))}">${/connected/i.test(String(device.state || '')) ? 'CONNECTED' : escapeHtml(String(device.state || 'unknown').toUpperCase())}</b></span>
           <span class="mono-cell">${escapeHtml(ipv4)}</span>
           <span>${escapeHtml(profile?.name || device.connection || '—')}<small>${profile ? `autostart ${profile.autoconnect ? 'yes' : 'no'}` : ''}</small></span>
           <div class="runtime-actions">

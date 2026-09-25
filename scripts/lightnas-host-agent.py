@@ -339,13 +339,32 @@ def container_records(fast: bool = False) -> list[dict]:
             except Exception:
                 pass
         memory, cpus = container_limits(name)
-        addresses = [] if fast else container_addresses(name)
+        if fast and state == "running":
+            # The summary endpoint powers the main Containers page, so it
+            # still needs the live guest IP. Query only running guests and do
+            # not repeat the slower state lookup performed by container_addresses().
+            addresses = []
+            try:
+                values = run(["lxc-info", "-n", name, "-iH"], timeout=2, check=False).splitlines()
+                for value in values:
+                    value = value.strip()
+                    try:
+                        address = ipaddress.ip_address(value)
+                    except ValueError:
+                        continue
+                    if not address.is_loopback and not address.is_link_local:
+                        addresses.append(value)
+            except Exception:
+                addresses = []
+        else:
+            addresses = [] if fast else container_addresses(name)
+        settings = container_settings(name)
         containers.append({
             "id": name, "name": name, "status": state, "pid": pid,
             "memory": memory, "cpus": cpus, "provider": "local-lxc",
             "addresses": addresses,
-            "ipv4": next((value for value in addresses if ":" not in value), None),
-            **container_settings(name),
+            "ipv4": next((value for value in addresses if ":" not in value), None) or str(settings.get("ipv4Address") or "").split("/", 1)[0] or None,
+            **settings,
         })
     return containers
 
