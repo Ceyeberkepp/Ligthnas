@@ -48,7 +48,25 @@
         <p>Manage storage, apps, and system health from one place.</p>
         <label>Username<input name="username" required autocomplete="username"></label>
         <label>Password<input name="password" type="password" required autocomplete="current-password"></label>
-        <label>Authenticator code <span class="muted">(when enabled)</span><input name="totp" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" placeholder="6-digit code"></label>
+        <section id="login-mfa" class="login-mfa hidden" aria-live="polite">
+          <div class="auth-method-tabs" role="tablist" aria-label="Sign-in verification method">
+            <button class="secondary hidden" type="button" role="tab" data-login-method="totp">Authenticator</button>
+            <button class="secondary hidden" type="button" role="tab" data-login-method="sms">SMS code</button>
+            <button class="secondary hidden" type="button" role="tab" data-login-method="passkey">Passkey / security key</button>
+          </div>
+          <div class="login-mfa-panel hidden" data-login-panel="totp">
+            <label>Authenticator code<input name="totp" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" placeholder="6-digit code"></label>
+          </div>
+          <div class="login-mfa-panel hidden" data-login-panel="sms">
+            <p class="muted">A verification code can be sent to the phone configured for this account.</p>
+            <button class="secondary wide" type="button" id="login-send-sms">Send SMS code</button>
+            <label>SMS code<input name="smsCode" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" placeholder="6-digit code"></label>
+          </div>
+          <div class="login-mfa-panel hidden" data-login-panel="passkey">
+            <p class="muted">Use a registered passkey or hardware security key for this account.</p>
+            <button class="secondary wide" type="button" id="login-use-passkey">Use passkey / security key</button>
+          </div>
+        </section>
         <button class="primary wide" type="submit">Sign in</button>
         <div class="form-error" role="alert"></div>
       </form>
