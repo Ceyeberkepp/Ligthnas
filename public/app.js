@@ -82,7 +82,42 @@ async function showConsole() {
   $$('[data-view]').forEach(link => link.classList.toggle('hidden', appliance.role !== 'administrator' && !['home', 'files', 'media'].includes(link.dataset.view)));
   $$('.nav-group').forEach(group => group.classList.toggle('hidden', !group.querySelector('[data-view]:not(.hidden)')));
   render(location.hash.slice(1) || 'home');
+  $('#nav a[data-view], .foot-admin[data-view]').forEach(link => {
+    const label = link.textContent.replace(/\s+/g, ' ').trim();
+    if (label) link.title = label;
+  });
+  rememberStorageSignature();
 }
+
+function storageInventorySignature(overview = state.overview) {
+  const storage = overview?.storage || {};
+  const disks = (storage.disks || []).map(item => [item.path, item.sizeBytes, item.system, item.blank].join(':')).sort();
+  const volumes = (storage.attachedVolumes || []).map(item => [item.device, item.mountPoint, item.totalBytes].join(':')).sort();
+  return JSON.stringify({ disks, volumes });
+}
+
+let lastStorageSignature = '';
+function rememberStorageSignature() {
+  lastStorageSignature = storageInventorySignature();
+}
+
+async function autoDetectStorage() {
+  if (!state.overview || document.hidden || $('#console')?.classList.contains('hidden')) return;
+  try {
+    const fresh = await request('/api/overview');
+    const signature = storageInventorySignature(fresh);
+    const changed = Boolean(lastStorageSignature && signature !== lastStorageSignature);
+    state.overview = fresh;
+    lastStorageSignature = signature;
+    if (changed) {
+      if (['home', 'storage', 'pools'].includes(state.view)) render(state.view);
+      toast('New or changed storage detected.');
+    }
+  } catch {}
+}
+
+setInterval(autoDetectStorage, 8000);
+addEventListener('focus', () => { if (['home', 'storage', 'pools'].includes(state.view)) autoDetectStorage(); });
 
 function pageHead(title, description, action = '') {
   return `<div class="page-head"><div><span class="eyebrow">LIGHTNAS CONTROL CENTER</span><h1>${title}</h1><p>${description}</p></div>${action}</div>`;
@@ -118,7 +153,7 @@ function homeView() {
 
 function storageView() {
   const { filesystems } = state.overview;
-  return `${pageHead('Storage', 'LightNAS storage pools, capacity and content libraries.', '<button class="primary" data-view-link="pools">Manage storage</button>')}
+  return `${pageHead('Storage', 'LightNAS storage pools, capacity and content libraries.', '<div class="head-actions"><button class="secondary" data-action="refresh-storage">Rescan drives</button><button class="primary" data-view-link="pools">Manage storage</button></div>')}
     <div id="storage-manager"></div>
     <h2>LightNAS storage spaces</h2>
     <div class="storage-list">${state.spaces?.map(space => `<article class="storage-row"><div><h3>${escapeHtml(space.label)}</h3><p>Spaces/${escapeHtml(space.name)}</p></div><button class="secondary" data-open-space="${escapeHtml(space.name)}">Open</button></article>`).join('') || '<div class="empty"><p>No file spaces yet.</p></div>'}</div>
@@ -128,7 +163,7 @@ function storageView() {
 }
 
 function poolsView() {
-  return `${pageHead('Storage pools', 'Create and manage LightNAS storage from local space and attached virtual volumes.')}
+  return `${pageHead('Storage pools', 'Create and manage LightNAS storage from local space and attached virtual volumes.', '<button class="secondary" data-action="refresh-storage">Rescan drives</button>')}
     <div id="storage-manager"></div>
     <div id="container-template-library"></div>
     <h2>Storage spaces</h2>
@@ -883,18 +918,22 @@ function bindViewActions() {
   $$('[data-action="new-share"]', $('#content')).forEach(button => button.addEventListener('click', () => $('#share-dialog').showModal()));
   $$('[data-view-link]', $('#content')).forEach(button => button.addEventListener('click', () => { location.hash = button.dataset.viewLink; }));
   $$('[data-action="refresh"]', $('#content')).forEach(button => button.addEventListener('click', async () => { try { state.overview = await request('/api/overview'); render(state.view); toast('Readings updated.'); } catch (error) { toast(error.message); } }));
-  $$('[data-action="refresh-files"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
-    const original = button.textContent;
+  $('[data-action="refresh-files"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     button.disabled = true;
     button.textContent = 'Refreshing…';
+    state.files = null;
+    render('files');
+    await loadFiles();
+    toast('Files refreshed.');
+  }));
+  $('[data-action="refresh-storage"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+    button.disabled = true;
+    button.textContent = 'Scanning…';
     try {
-      state.files = null;
-      await loadFiles();
-      toast('Files refreshed.');
-    } finally {
-      button.disabled = false;
-      button.textContent = original;
-    }
+      state.overview = await request('/api/overview');
+      render(state.view);
+      toast('Storage rescan complete.');
+    } catch (error) { toast(error.message); }
   }));
   $$('[data-file-view]', $('#content')).forEach(button => button.addEventListener('click', () => {
     state.fileView = button.dataset.fileView === 'grid' ? 'grid' : 'list';
