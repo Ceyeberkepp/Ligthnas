@@ -88,33 +88,6 @@ SVG
       -e 's/splash\.svg/splash.png/g' \
       "$menu"
   done < <(find config/bootloaders -type f \( -name '*.cfg' -o -name '*.conf' \) -print0)
-
-  # Make the graphical installer the default BIOS/Syslinux choice instead of
-  # silently entering the Debian live session. Live/Recovery remains in the
-  # menu for troubleshooting.
-  while IFS= read -r -d '' cfg; do
-    if grep -Eq '^[[:space:]]*label[[:space:]]+installgui([[:space:]]|$)' "$cfg"; then
-      sed -i '/^[[:space:]]*menu[[:space:]]\+default[[:space:]]*$/d' "$cfg"
-      awk '
-        { print }
-        /^[[:space:]]*label[[:space:]]+installgui([[:space:]]|$)/ { print "  menu default" }
-      ' "$cfg" >"${cfg}.tmp"
-      mv "${cfg}.tmp" "$cfg"
-    fi
-  done < <(find config/bootloaders -type f -name '*.cfg' -print0)
-
-  # GRUB normally uses the first menu entry. Prefer the renamed graphical
-  # installer by title when that entry is available; if the template differs,
-  # GRUB simply falls back to its normal first-entry behavior.
-  while IFS= read -r -d '' grubcfg; do
-    if grep -q 'Install LightNAS (Graphical)' "$grubcfg"; then
-      if grep -q '^set default=' "$grubcfg"; then
-        sed -i 's/^set default=.*/set default="Install LightNAS (Graphical)"/' "$grubcfg"
-      else
-        sed -i '1iset default="Install LightNAS (Graphical)"' "$grubcfg"
-      fi
-    fi
-  done < <(find config/bootloaders -type f \( -name 'grub.cfg' -o -name 'grub*.cfg' \) -print0)
 fi
 
 mkdir -p \
