@@ -89,8 +89,8 @@ async function showConsole() {
   rememberStorageSignature();
 }
 
-function storageInventorySignature(overview = state.overview) {
-  const storage = overview?.storage || {};
+function storageInventorySignature(source = state.overview) {
+  const storage = source?.storage || source || {};
   const disks = (storage.disks || []).map(item => [item.path, item.sizeBytes, item.system, item.blank].join(':')).sort();
   const volumes = (storage.attachedVolumes || []).map(item => [item.device, item.mountPoint, item.totalBytes].join(':')).sort();
   return JSON.stringify({ disks, volumes });
@@ -104,19 +104,22 @@ function rememberStorageSignature() {
 async function autoDetectStorage() {
   if (!state.overview || document.hidden || $('#console')?.classList.contains('hidden')) return;
   try {
-    const fresh = await request('/api/overview');
-    const signature = storageInventorySignature(fresh);
+    const scan = await request('/api/storage/scan');
+    const signature = storageInventorySignature(scan);
     const changed = Boolean(lastStorageSignature && signature !== lastStorageSignature);
-    state.overview = fresh;
-    lastStorageSignature = signature;
+    if (!lastStorageSignature) lastStorageSignature = signature;
     if (changed) {
+      // Only pay for a full overview refresh when the lightweight disk scan
+      // actually sees a topology/capacity change.
+      state.overview = await request('/api/overview');
+      lastStorageSignature = storageInventorySignature();
       if (['home', 'storage', 'pools'].includes(state.view)) render(state.view);
       toast('New or changed storage detected.');
     }
   } catch {}
 }
 
-setInterval(autoDetectStorage, 8000);
+setInterval(autoDetectStorage, 12000);
 addEventListener('focus', () => { if (['home', 'storage', 'pools'].includes(state.view)) autoDetectStorage(); });
 
 function pageHead(title, description, action = '') {
