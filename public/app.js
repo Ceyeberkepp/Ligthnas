@@ -52,6 +52,34 @@ function escapeHtml(value) {
   return String(value).replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character]);
 }
 
+function b64urlBytes(value) {
+  const base64 = String(value || '').replace(/-/g, '+').replace(/_/g, '/');
+  const padded = base64 + '='.repeat((4 - base64.length % 4) % 4);
+  const raw = atob(padded);
+  return Uint8Array.from(raw, char => char.charCodeAt(0));
+}
+
+function bytesB64url(value) {
+  const bytes = new Uint8Array(value);
+  let raw = '';
+  for (const byte of bytes) raw += String.fromCharCode(byte);
+  return btoa(raw).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function serializePasskeyAssertion(credential) {
+  const response = credential?.response;
+  if (!credential?.id || !response?.clientDataJSON || !response?.authenticatorData || !response?.signature) {
+    throw new Error('The passkey response was incomplete.');
+  }
+  return {
+    id: credential.id,
+    clientDataJSON: bytesB64url(response.clientDataJSON),
+    authenticatorData: bytesB64url(response.authenticatorData),
+    signature: bytesB64url(response.signature),
+    userHandle: response.userHandle ? bytesB64url(response.userHandle) : null
+  };
+}
+
 function toast(message) {
   const element = $('#toast');
   element.textContent = message;
@@ -99,6 +127,8 @@ async function refreshLoginMethods() {
   try {
     const options = await request(`/api/login/options?username=${encodeURIComponent(username)}`);
     setLoginMethods(Array.isArray(options.methods) ? options.methods : []);
+    const smsStatus = $('#login-sms-status');
+    if (smsStatus) smsStatus.textContent = options.smsDestination ? `Codes will be sent to ${options.smsDestination}.` : '';
   } catch {
     setLoginMethods([]);
   }
@@ -1168,13 +1198,17 @@ async function submitAuth(form, path) {
   button.disabled = true;
   try {
     const data = Object.fromEntries(new FormData(form));
+    if (path === '/api/login') data.mfaMethod = $('#login-mfa')?.dataset.method || '';
     await request(path, { method: 'POST', body: JSON.stringify(data) });
     await showConsole();
   } catch (problem) {
-    if (path === '/api/login' && problem.payload?.totpRequired) {
-      setLoginMethods(['totp']);
-      selectLoginMethod('totp');
-      $('#login-form input[name="totp"]')?.focus();
+    if (path === '/api/login' && problem.payload?.mfaRequired) {
+      const methods = Array.isArray(problem.payload.methods) ? problem.payload.methods : [];
+      setLoginMethods(methods);
+      const selected = $('#login-mfa')?.dataset.method || methods[0] || '';
+      selectLoginMethod(selected);
+      const selector = selected === 'totp' ? 'input[name="totp"]' : selected === 'sms' ? 'input[name="smsCode"]' : null;
+      if (selector) $(`#login-form ${selector}`)?.focus();
     }
     error.textContent = problem.message;
   } finally {
@@ -1191,8 +1225,70 @@ $('#login-form input[name="username"]').addEventListener('input', () => {
 });
 $('#login-form input[name="username"]').addEventListener('blur', refreshLoginMethods);
 $$('[data-login-method]').forEach(button => button.addEventListener('click', () => selectLoginMethod(button.dataset.loginMethod)));
-$('#login-send-sms')?.addEventListener('click', () => toast('SMS sign-in will appear here only after SMS MFA is configured for this account.'));
-$('#login-use-passkey')?.addEventListener('click', () => toast('Passkey sign-in will appear here only after a passkey is registered for this account.'));
+$('#login-send-sms')?.addEventListener('click', async () => {
+  const form = $('#login-form');
+  const error = $('.form-error', form);
+  const username = form.elements.username.value.trim();
+  const password = form.elements.password.value;
+  if (!username || !password) {
+    error.textContent = 'Enter your username and password before requesting an SMS code.';
+    return;
+  }
+  const button = $('#login-send-sms');
+  button.disabled = true;
+  error.textContent = '';
+  try {
+    const result = await request('/api/login/sms/send', { method:'POST', body:JSON.stringify({ username, password }) });
+    const status = $('#login-sms-status');
+    if (status) status.textContent = `Code sent to ${result.sentTo}. It expires in 5 minutes.`;
+    form.elements.smsCode?.focus();
+    toast('SMS verification code sent.');
+  } catch (problem) {
+    error.textContent = problem.message;
+  } finally {
+    button.disabled = false;
+  }
+});
+
+$('#login-use-passkey')?.addEventListener('click', async () => {
+  const form = $('#login-form');
+  const error = $('.form-error', form);
+  const username = form.elements.username.value.trim();
+  const password = form.elements.password.value;
+  if (!username || !password) {
+    error.textContent = 'Enter your username and password before using your passkey.';
+    return;
+  }
+  if (!window.isSecureContext || !navigator.credentials || !window.PublicKeyCredential) {
+    error.textContent = 'Passkeys require HTTPS (or localhost) and a WebAuthn-capable browser.';
+    return;
+  }
+  const button = $('#login-use-passkey');
+  button.disabled = true;
+  error.textContent = '';
+  try {
+    const options = await request('/api/login/passkey/options', { method:'POST', body:JSON.stringify({ username, password }) });
+    const credential = await navigator.credentials.get({
+      publicKey: {
+        challenge: b64urlBytes(options.challenge),
+        rpId: options.rpId,
+        timeout: options.timeout || 60000,
+        userVerification: 'preferred',
+        allowCredentials: (options.allowCredentials || []).map(item => ({ ...item, id:b64urlBytes(item.id) }))
+      }
+    });
+    if (!credential) throw new Error('Passkey sign-in was cancelled.');
+    await request('/api/login/passkey/verify', {
+      method:'POST',
+      body:JSON.stringify({ username, response:serializePasskeyAssertion(credential) })
+    });
+    await showConsole();
+  } catch (problem) {
+    error.textContent = problem.message || 'Passkey sign-in failed.';
+  } finally {
+    button.disabled = false;
+  }
+});
 $('#logout').addEventListener('click', async () => { await request('/api/logout', { method: 'POST' }); setLoginMethods([]); showAuth('login'); });
 function applySidebarPreference() {
   const collapsed = localStorage.getItem('lightnas-sidebar-collapsed') === '1';
