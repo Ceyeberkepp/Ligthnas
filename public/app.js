@@ -19,7 +19,7 @@ async function request(path, options = {}) {
     headers: { 'Content-Type': 'application/json', 'X-LightNAS-Request': '1', ...(options.headers || {}) }
   });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw Object.assign(new Error(body.error || 'Request failed.'), { status: response.status });
+  if (!response.ok) throw Object.assign(new Error(body.error || 'Request failed.'), { status: response.status, payload: body });
   return body;
 }
 
@@ -67,6 +67,41 @@ function showAuth(mode) {
   $('#setup-form').classList.toggle('hidden', mode !== 'setup');
   $('#login-form').classList.toggle('hidden', mode !== 'login');
   setTimeout(() => $(`#${mode}-form input`)?.focus(), 0);
+}
+
+function selectLoginMethod(method) {
+  const box = $('#login-mfa');
+  if (!box || box.classList.contains('hidden')) return;
+  $('[data-login-method]', box).forEach(button => {
+    const active = button.dataset.loginMethod === method;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+  $('[data-login-panel]', box).forEach(panel => panel.classList.toggle('hidden', panel.dataset.loginPanel !== method));
+  box.dataset.method = method || '';
+}
+
+function setLoginMethods(methods = []) {
+  const box = $('#login-mfa');
+  if (!box) return;
+  const enabled = new Set(methods);
+  $('[data-login-method]', box).forEach(button => button.classList.toggle('hidden', !enabled.has(button.dataset.loginMethod)));
+  box.classList.toggle('hidden', enabled.size === 0);
+  const current = box.dataset.method;
+  selectLoginMethod(enabled.has(current) ? current : (methods[0] || ''));
+}
+
+let loginOptionsTimer = null;
+async function refreshLoginMethods() {
+  clearTimeout(loginOptionsTimer);
+  const username = $('#login-form input[name="username"]')?.value.trim() || '';
+  if (!username) return setLoginMethods([]);
+  try {
+    const options = await request(`/api/login/options?username=${encodeURIComponent(username)}`);
+    setLoginMethods(Array.isArray(options.methods) ? options.methods : []);
+  } catch {
+    setLoginMethods([]);
+  }
 }
 
 function canView(view, appliance = state.overview?.appliance) {
@@ -421,7 +456,7 @@ function filesView() {
   const section = librarySections.some(([folder]) => folder === (segments[0] || '')) ? (segments[0] || '') : '';
   const allFiles = state.folder === '';
   const crumbs = [`<button class="panel-link" data-folder="">Files & media</button>`, ...segments.map((segment, index) => `<span> / </span><button class="panel-link" data-folder="${escapeHtml(segments.slice(0, index + 1).join('/'))}">${escapeHtml(segment)}</button>`)].join('');
-  const entries = state.files;
+  const entries = Array.isArray(state.files) ? (allFiles ? state.files.filter(entry => !entry.directory) : state.files) : state.files;
   const tabs = librarySections.map(([folder, label]) => `<button type="button" class="library-tab ${section === folder ? 'active' : ''}" data-library-tab="${escapeHtml(folder)}" aria-pressed="${section === folder}">${escapeHtml(label)}</button>`).join('');
 
   const item = entry => {
@@ -461,6 +496,7 @@ function filesView() {
       <label class="primary upload-button">Upload files<input id="file-upload" type="file" multiple hidden></label>
       <label class="secondary upload-button">Upload folder<input id="folder-upload" type="file" webkitdirectory directory multiple hidden></label>
     </div></div>
+    <div class="file-drop-zone" data-file-drop tabindex="0"><b>Drop files here</b><span>Multiple files and ZIP archives are supported. Use “Upload folder” to preserve a whole folder tree.</span></div>
     <p class="muted">${allFiles ? 'All files is a flat view of your real library files, including files inside Documents, Photos, Videos, Audio and other folders.' : 'Open folders normally or switch back to All files for a flat library view.'} ZIP and other file types are accepted, uploads have visible progress, and LightNAS does not impose an application-level file-size ceiling.</p>
     ${state.fileTruncated && allFiles ? '<div class="module-note">Showing the newest 10,000 files. Open a category or folder to browse beyond that safety limit.</div>' : ''}
     <div class="${state.fileView === 'grid' ? 'file-browser-grid' : 'storage-list'}">${state.fileError ? `<div class="empty error-state"><p><b>Files could not be loaded.</b></p><p>${escapeHtml(state.fileError)}</p><button class="secondary" data-action="refresh-files">Try again</button></div>` : entries === null ? '<div class="empty"><p>Loading files…</p></div>' : entries.length ? entries.map(item).join('') : `<div class="empty"><p>${allFiles ? 'No files have been uploaded yet.' : 'This folder is empty.'}</p></div>`}</div>`;
@@ -1026,13 +1062,24 @@ function bindViewActions() {
   $$('[data-action="new-share"]', $('#content')).forEach(button => button.addEventListener('click', () => $('#share-dialog').showModal()));
   $$('[data-view-link]', $('#content')).forEach(button => button.addEventListener('click', () => { location.hash = button.dataset.viewLink; }));
   $$('[data-action="refresh"]', $('#content')).forEach(button => button.addEventListener('click', async () => { try { state.overview = await request('/api/overview'); captureOverviewMetrics(); render(state.view); toast('Readings updated.'); } catch (error) { toast(error.message); } }));
-  $$('[data-action="refresh-files"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+  $('[data-action="refresh-files"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+    if (button.disabled) return;
+    const original = button.textContent;
     button.disabled = true;
     button.textContent = 'Refreshing…';
-    state.files = null;
-    render('files');
-    await loadFiles(true);
-    toast('Files refreshed.');
+    try {
+      state.fileError = null;
+      await loadFiles(true);
+      toast('Files refreshed.');
+    } catch (error) {
+      toast(error.message || 'Unable to refresh files.');
+    } finally {
+      const liveButton = $('#content [data-action="refresh-files"]');
+      if (liveButton) {
+        liveButton.disabled = false;
+        liveButton.textContent = original || 'Refresh';
+      }
+    }
   }));
   $$('[data-action="refresh-storage"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     button.disabled = true;
@@ -1089,6 +1136,22 @@ function bindViewActions() {
     event.target.value = '';
     await uploadFilesWithProgress(files, true);
   });
+  const dropZone = $('[data-file-drop]', content);
+  if (dropZone) {
+    for (const type of ['dragenter', 'dragover']) dropZone.addEventListener(type, event => {
+      event.preventDefault();
+      dropZone.classList.add('drag-active');
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+    });
+    for (const type of ['dragleave', 'drop']) dropZone.addEventListener(type, event => {
+      event.preventDefault();
+      dropZone.classList.remove('drag-active');
+    });
+    dropZone.addEventListener('drop', async event => {
+      const files = [...(event.dataTransfer?.files || [])];
+      await uploadFilesWithProgress(files, false);
+    });
+  }
   $$('[data-delete-file]', content).forEach(button => button.addEventListener('click', async () => {
     if (!confirm(`Delete ${button.dataset.deleteFile}? Folders must be empty.`)) return;
     const path = button.dataset.path || [state.folder, button.dataset.deleteFile].filter(Boolean).join('/');
@@ -1107,6 +1170,11 @@ async function submitAuth(form, path) {
     await request(path, { method: 'POST', body: JSON.stringify(data) });
     await showConsole();
   } catch (problem) {
+    if (path === '/api/login' && problem.payload?.totpRequired) {
+      setLoginMethods(['totp']);
+      selectLoginMethod('totp');
+      $('#login-form input[name="totp"]')?.focus();
+    }
     error.textContent = problem.message;
   } finally {
     button.disabled = false;
@@ -1115,7 +1183,16 @@ async function submitAuth(form, path) {
 
 $('#setup-form').addEventListener('submit', event => { event.preventDefault(); submitAuth(event.currentTarget, '/api/setup'); });
 $('#login-form').addEventListener('submit', event => { event.preventDefault(); submitAuth(event.currentTarget, '/api/login'); });
-$('#logout').addEventListener('click', async () => { await request('/api/logout', { method: 'POST' }); showAuth('login'); });
+$('#login-form input[name="username"]').addEventListener('input', () => {
+  setLoginMethods([]);
+  clearTimeout(loginOptionsTimer);
+  loginOptionsTimer = setTimeout(refreshLoginMethods, 220);
+});
+$('#login-form input[name="username"]').addEventListener('blur', refreshLoginMethods);
+$('[data-login-method]').forEach(button => button.addEventListener('click', () => selectLoginMethod(button.dataset.loginMethod)));
+$('#login-send-sms')?.addEventListener('click', () => toast('SMS sign-in will appear here only after SMS MFA is configured for this account.'));
+$('#login-use-passkey')?.addEventListener('click', () => toast('Passkey sign-in will appear here only after a passkey is registered for this account.'));
+$('#logout').addEventListener('click', async () => { await request('/api/logout', { method: 'POST' }); setLoginMethods([]); showAuth('login'); });
 function applySidebarPreference() {
   const collapsed = localStorage.getItem('lightnas-sidebar-collapsed') === '1';
   $('#console').classList.toggle('sidebar-collapsed', collapsed && innerWidth > 760);
