@@ -972,7 +972,7 @@ async function api(req, res, url) {
     // Keep the first dashboard request intentionally lightweight. Runtime
     // discovery can invoke Docker, LXC and libvirt commands and used to delay
     // every login even when the user only wanted Files or the home page.
-    // VM/container/app pages fetch runtimeInventory() only when opened.
+    // VM/container/app pages fetch their runtime inventory only when opened.
     const [system, filesystems, storage, storagePools] = await Promise.all([
       getSystemSnapshot(), getFilesystems(), getStorageInventory(), listStoragePools()
     ]);
