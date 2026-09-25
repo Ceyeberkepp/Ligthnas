@@ -124,11 +124,27 @@ async function recursiveFileEntries(path, prefix = '', output = [], limits = { c
 
 export async function listAllFiles() {
   await mkdir(root, { recursive: true, mode: 0o700 });
-  const entries = await recursiveFileEntries(root);
+  const limits = { count: 0, max: 10000 };
+  const entries = [];
+  await recursiveFileEntries(root, '', entries, limits);
+
+  // "All files" means all files LightNAS can currently see, including
+  // attached NAS volumes. Keep one global safety cap so a very large mount
+  // cannot lock the browser or the control-plane process.
+  for (const volume of await attachedVolumes()) {
+    if (limits.count >= limits.max) break;
+    await recursiveFileEntries(
+      volume.mountPoint,
+      `${ATTACHED_ROOT}/${volume.name}`,
+      entries,
+      limits
+    );
+  }
+
   return {
     entries: entries.sort((a, b) => new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime() || a.path.localeCompare(b.path)),
-    truncated: entries.length >= 10000,
-    limit: 10000
+    truncated: limits.count >= limits.max,
+    limit: limits.max
   };
 }
 
