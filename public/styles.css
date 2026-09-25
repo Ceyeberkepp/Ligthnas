@@ -87,7 +87,7 @@ textarea { min-height: 92px; resize: vertical; }
 .console { min-height: 100vh; display: grid; grid-template: 72px 1fr / 250px 1fr; }
 .sidebar { grid-row: 1 / -1; border-right: 1px solid var(--line); background: var(--sidebar); padding: 23px 17px 18px; display: flex; flex-direction: column; position: sticky; height: 100vh; top: 0; z-index: 10; }
 .sidebar-brand { margin: 0 9px 27px; }
-.sidebar nav { display: grid; align-content: start; gap: 4px; overflow-y: auto; min-height: 0; padding-right: 4px; scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--muted) 34%, transparent) transparent; }
+.sidebar nav { display: grid; align-content: start; gap: 4px; overflow-y: auto; min-height: 0; padding-right: 2px; scrollbar-width: none; overscroll-behavior: contain; }
 .sidebar nav::-webkit-scrollbar { width: 6px; }
 .sidebar nav::-webkit-scrollbar-track { background: transparent; }
 .sidebar nav::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--muted) 30%, transparent); border-radius: 999px; }
@@ -488,3 +488,5 @@ dialog::backdrop { background: rgba(1,7,13,.76); backdrop-filter: blur(5px); }
   white-space: nowrap;
   pointer-events: none;
 }
+
+.sidebar nav::-webkit-scrollbar { width: 0; height: 0; }
