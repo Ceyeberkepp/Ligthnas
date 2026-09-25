@@ -283,6 +283,20 @@ document.addEventListener('click', async event => {
   const deleteHook = event.target.closest('[data-delete-webhook]');
   if (deleteHook) { if (confirm('Delete this webhook?')) { try { await api(`/api/security/webhooks/${deleteHook.dataset.deleteWebhook}`, { method:'DELETE' }); refreshCurrent(); } catch (error) { alert(error.message); } } return; }
 
+  const removePasskey = event.target.closest('[data-passkey-remove]');
+  if (removePasskey) {
+    const currentPassword = prompt('Enter your current LightNAS password to remove this passkey:');
+    if (currentPassword === null) return;
+    try {
+      await api('/api/security/passkeys/remove', {
+        method:'POST',
+        body:JSON.stringify({ id:removePasskey.dataset.passkeyRemove, currentPassword })
+      });
+      alert('Passkey removed.');
+      refreshCurrent();
+    } catch (error) { alert(error.message); }
+    return;
+  }
 
 }, true);
 
@@ -338,6 +352,69 @@ document.addEventListener('submit', async event => {
     try { await api('/api/security/totp/disable', { method:'POST', body:JSON.stringify(Object.fromEntries(new FormData(form))) }); alert('Authenticator 2FA disabled.'); refreshCurrent(); } catch (error) { q('.form-error', form).textContent = error.message; }
     return;
   }
+  if (form.matches('[data-sms-setup]')) {
+    event.preventDefault();
+    const enrollment = q('[data-sms-enrollment]');
+    const error = q('.form-error', form);
+    error.textContent = '';
+    try {
+      const result = await api('/api/security/sms/setup', { method:'POST', body:JSON.stringify(Object.fromEntries(new FormData(form))) });
+      enrollment.innerHTML = `<div class="security-enrollment"><p>A 6-digit setup code was sent to ${escapeText(result.sentTo || 'your phone')}. Enter it below within 5 minutes.</p><form data-sms-verify class="security-stack-form"><label>SMS setup code<input name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autocomplete="one-time-code"></label><button class="primary" type="submit">Verify & enable SMS</button><div class="form-error"></div></form></div>`;
+    } catch (errorValue) { error.textContent = errorValue.message; }
+    return;
+  }
+  if (form.matches('[data-sms-verify]')) {
+    event.preventDefault();
+    try {
+      await api('/api/security/sms/verify', { method:'POST', body:JSON.stringify(Object.fromEntries(new FormData(form))) });
+      alert('SMS verification is enabled.');
+      refreshCurrent();
+    } catch (error) { q('.form-error', form).textContent = error.message; }
+    return;
+  }
+  if (form.matches('[data-sms-disable]')) {
+    event.preventDefault();
+    try {
+      await api('/api/security/sms/disable', { method:'POST', body:JSON.stringify(Object.fromEntries(new FormData(form))) });
+      alert('SMS verification disabled.');
+      refreshCurrent();
+    } catch (error) { q('.form-error', form).textContent = error.message; }
+    return;
+  }
+  if (form.matches('[data-passkey-register]')) {
+    event.preventDefault();
+    const error = q('.form-error', form);
+    error.textContent = '';
+    if (!window.isSecureContext || !navigator.credentials || !window.PublicKeyCredential) {
+      error.textContent = 'Passkeys require HTTPS (or localhost) and a WebAuthn-capable browser.';
+      return;
+    }
+    try {
+      const input = Object.fromEntries(new FormData(form));
+      const options = await api('/api/security/passkeys/register/options', { method:'POST', body:JSON.stringify(input) });
+      const credential = await navigator.credentials.create({
+        publicKey: {
+          challenge: b64urlBytes(options.challenge),
+          rp: options.rp,
+          user: { ...options.user, id: b64urlBytes(options.user.id) },
+          pubKeyCredParams: options.pubKeyCredParams,
+          timeout: options.timeout || 60000,
+          authenticatorSelection: { residentKey:'preferred', userVerification:'preferred' },
+          attestation: 'none',
+          excludeCredentials: (options.excludeCredentials || []).map(item => ({ ...item, id:b64urlBytes(item.id) }))
+        }
+      });
+      if (!credential) throw new Error('Passkey registration was cancelled.');
+      await api('/api/security/passkeys/register/verify', {
+        method:'POST',
+        body:JSON.stringify({ response:serializePasskeyRegistration(credential) })
+      });
+      alert('Passkey registered successfully.');
+      refreshCurrent();
+    } catch (errorValue) { error.textContent = errorValue.message || 'Passkey registration failed.'; }
+    return;
+  }
+
   if (form.matches('[data-token-form]')) {
     event.preventDefault();
     const data = new FormData(form);
