@@ -343,6 +343,7 @@
 .auth-method-tabs .secondary.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--button)); }
 .login-mfa-panel > p { margin: 4px 0 10px; font-size: 12px; line-height: 1.45; }
 .login-mfa-panel label { margin: 10px 0; }
+.totp-qr { display:block; width:min(240px,100%); aspect-ratio:1; object-fit:contain; margin:14px 0; padding:10px; border:1px solid var(--line); border-radius:12px; background:#fff; }
 
 .file-drop-zone { margin: 10px 0 12px; display: flex; align-items: center; justify-content: center; gap: 9px; min-height: 58px; padding: 11px 16px; border: 1px dashed var(--line-strong); border-radius: 12px; color: var(--muted); background: color-mix(in srgb, var(--panel-2) 80%, transparent); transition: border-color .15s, background .15s, transform .15s; }
 .file-drop-zone b { color: var(--text); }
