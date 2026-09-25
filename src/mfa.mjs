@@ -1,4 +1,4 @@
-import { createHash, randomBytes, verify as verifySignature } from 'node:crypto';
+import { createHash, randomBytes, randomInt, timingSafeEqual, verify as verifySignature } from 'node:crypto';
 import { spawn } from 'node:child_process';
 
 export const base64url = value => Buffer.from(value).toString('base64url');
@@ -88,5 +88,15 @@ export async function sendTwilioSms(settings, message) {
 }
 
 export function smsCode() {
-  return String(Math.floor(100000 + Math.random() * 900000));
+  return String(randomInt(100000, 1000000));
+}
+
+export function smsCodeDigest(code, nonce) {
+  return createHash('sha256').update(`${String(nonce || '')}:${String(code || '')}`).digest('base64url');
+}
+
+export function verifySmsCode(code, nonce, digest) {
+  const actual = Buffer.from(smsCodeDigest(code, nonce));
+  const expected = Buffer.from(String(digest || ''));
+  return actual.length === expected.length && actual.length > 0 && timingSafeEqual(actual, expected);
 }
