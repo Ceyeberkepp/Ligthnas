@@ -204,6 +204,53 @@ function send(res, status, body, headers = {}) {
   res.end(payload);
 }
 
+function runCaptured(program, args, { timeout = 30000, maxBytes = 2 * 1024 * 1024 } = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(program, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const stdout = [];
+    const stderr = [];
+    let size = 0;
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      reject(Object.assign(new Error(`${program} timed out.`), { status: 504 }));
+    }, timeout);
+    child.stdout.on('data', chunk => {
+      size += chunk.length;
+      if (size <= maxBytes) stdout.push(chunk);
+      else child.kill('SIGKILL');
+    });
+    child.stderr.on('data', chunk => { if (Buffer.concat(stderr).length < 64 * 1024) stderr.push(chunk); });
+    child.on('error', error => { clearTimeout(timer); reject(error); });
+    child.on('close', code => {
+      clearTimeout(timer);
+      if (size > maxBytes) return reject(Object.assign(new Error('Archive file list is too large.'), { status: 413 }));
+      if (code !== 0) return reject(Object.assign(new Error(Buffer.concat(stderr).toString('utf8').trim() || `${program} failed.`), { status: 409 }));
+      resolve(Buffer.concat(stdout).toString('utf8'));
+    });
+  });
+}
+
+async function extractZipArchive(relative) {
+  if (!/\.zip$/i.test(relative)) throw Object.assign(new Error('Choose a .zip archive.'), { status: 400 });
+  const source = await downloadFile(relative);
+  const list = await runCaptured('unzip', ['-Z1', source.path], { timeout: 20000 });
+  const entries = list.split(/\r?\n/).filter(Boolean);
+  if (!entries.length) throw Object.assign(new Error('The ZIP archive is empty.'), { status: 409 });
+  for (const entry of entries) {
+    const normalized = entry.replaceAll('\\', '/');
+    if (normalized.startsWith('/') || normalized.includes('\0') || normalized.split('/').some(part => part === '..')) {
+      throw Object.assign(new Error('The ZIP archive contains an unsafe path and was not extracted.'), { status: 400 });
+    }
+  }
+  const folderName = basename(relative).replace(/\.zip$/i, '') || 'archive';
+  const destination = join(dirname(source.path), folderName);
+  await mkdir(destination, { recursive: false }).catch(error => {
+    if (error.code !== 'EEXIST') throw error;
+  });
+  await runCaptured('unzip', ['-o', '-q', source.path, '-d', destination], { timeout: 30 * 60 * 1000, maxBytes: 128 * 1024 });
+  return { folderName, entries: entries.length };
+}
+
 async function bodyJson(req) {
   const chunks = [];
   let size = 0;
@@ -1230,12 +1277,20 @@ async function api(req, res, url) {
     const path = url.searchParams.get('path') || '';
     if (req.method === 'GET') {
       if (!requirePermission(res, permissions, 'files.read')) return;
-      return send(res, 200, { path, entries: await listFiles(path) });
+      return send(res, 200, { path, entries: await listFiles(path, { recursive: url.searchParams.get('recursive') === '1' }) });
     }
     if (!requirePermission(res, permissions, 'files.write')) return;
-    if (req.method === 'POST') { await createFolder(path); store.addActivity('file', `Folder ${path} was created.`); await store.save(); return send(res, 201, { ok: true }); }
+    if (req.method === 'POST') { await createFolder(path, { recursive: url.searchParams.get('recursive') === '1' }); store.addActivity('file', `Folder ${path} was created.`); await store.save(); return send(res, 201, { ok: true }); }
     if (req.method === 'PUT') { await uploadFile(path, req); store.addActivity('file', `File ${path} was uploaded.`); await store.save(); return send(res, 201, { ok: true }); }
     if (req.method === 'DELETE') { await deleteEntry(path); store.addActivity('file', `File entry ${path} was deleted.`); await store.save(); return send(res, 200, { ok: true }); }
+  }
+  if (req.method === 'POST' && url.pathname === '/api/files/extract') {
+    if (!requirePermission(res, permissions, 'files.write')) return;
+    const input = await bodyJson(req);
+    const result = await extractZipArchive(String(input.path || ''));
+    store.addActivity('file', `ZIP archive ${input.path} was extracted to ${result.folderName}.`);
+    await store.save();
+    return send(res, 201, result);
   }
   if (req.method === 'GET' && url.pathname === '/api/files/thumbnail') {
     if (!requirePermission(res, permissions, 'files.read')) return;
