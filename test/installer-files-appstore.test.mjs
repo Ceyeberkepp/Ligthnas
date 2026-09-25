@@ -35,6 +35,9 @@ test('Files refresh and storage hot-plug detection are explicit', async () => {
 test('ISO has a branded graphical fallback instead of relying only on LightDM', async () => {
   const iso = await read('iso/build.sh');
   assert.match(iso, /Install LightNAS \(Graphical\)/);
+  assert.match(iso, /label\[\[:space:\]\]\+installgui/);
+  assert.match(iso, /menu default/);
+  assert.match(iso, /set default="Install LightNAS \(Graphical\)"/);
   assert.match(iso, /xinit/);
   assert.match(iso, /lightnas-display-fallback\.service/);
   assert.match(iso, /\/usr\/bin\/xinit \/usr\/local\/bin\/lightnas-xsession/);
