@@ -78,7 +78,7 @@ test('Permissions has its own tab with expanded enforceable scopes', async () =>
   assert.doesNotMatch(server, /'shell\.access'/);
 });
 
-test('node shell is a real owner-only root PTY exposed through the GUI', async () => {
+test('node shell is a real permission-controlled root PTY exposed through the GUI', async () => {
   const [agent, local, server, index, app, shell] = await Promise.all([
     read('scripts/lightnas-host-agent.py'),
     read('src/local-host.mjs'),
@@ -92,7 +92,7 @@ test('node shell is a real owner-only root PTY exposed through the GUI', async (
   assert.match(agent, /cwd="\/root"/);
   assert.match(local, /localNodeConsoleSocket/);
   assert.match(server, /url\.pathname === '\/api\/console\/node'/);
-  assert.match(server, /!context\.isAdmin \|\| context\.apiToken/);
+  assert.match(server, /context\.permissions\.includes\('system\.shell'\)/);
   assert.match(index, /href="#shell"/);
   assert.match(app, /data-open-node-shell/);
   assert.match(shell, /\/api\/console\/node/);
@@ -162,18 +162,17 @@ test('All Files is flat and file/folder uploads expose real progress', async () 
 });
 
 test('Storage inventory automatically exposes and refreshes newly detected drives', async () => {
-  const [system, pools, manager] = await Promise.all([
+  const [system, app, server] = await Promise.all([
     read('src/system.mjs'),
-    read('src/storage-pools.mjs'),
-    read('public/storage-manager.js')
+    read('public/app.js'),
+    read('src/server.mjs')
   ]);
   assert.match(system, /system:/);
   assert.match(system, /blank:/);
-  assert.match(pools, /detectedDisks: inventory\.disks/);
-  assert.match(manager, /Detected drives/);
-  assert.match(manager, /setInterval\(async\(\)=>/);
-  assert.match(manager, /8000/);
-  assert.match(manager, /never formats a drive automatically/);
+  assert.match(server, /\/api\/storage\/scan/);
+  assert.match(app, /autoDetectStorage/);
+  assert.match(app, /setInterval\(autoDetectStorage, 12000\)/);
+  assert.match(app, /New or changed storage detected/);
 });
 
 test('App Store contains a broad searchable one-click catalog', async () => {
@@ -206,9 +205,9 @@ test('ISO is branded, graphical, hybrid BIOS-UEFI, and provides a local web kios
   assert.match(preseed, /netcfg\/get_hostname string lightnas/);
 });
 
-test('collapsed sidebar uses a wider clean icon rail without visible scrollbar', async () => {
+test('collapsed sidebar uses a clean icon rail without visible scrollbar', async () => {
   const styles = await read('public/styles.css');
-  assert.match(styles, /sidebar-collapsed \{ grid-template-columns: 92px 1fr/);
-  assert.match(styles, /sidebar-collapsed \.sidebar nav::\-webkit-scrollbar \{ display:none/);
-  assert.match(styles, /scrollbar-width:none/);
+  assert.match(styles, /sidebar-collapsed \{ grid-template-columns: 86px 1fr/);
+  assert.match(styles, /sidebar nav::\-webkit-scrollbar \{ width: 0; height: 0/);
+  assert.match(styles, /scrollbar-width: none/);
 });
