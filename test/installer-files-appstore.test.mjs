@@ -28,7 +28,7 @@ test('Files refresh and storage hot-plug detection are explicit', async () => {
   assert.match(app, /Files refreshed\./);
   assert.match(app, /data-action="refresh-storage"/);
   assert.match(app, /autoDetectStorage/);
-  assert.match(app, /setInterval\(autoDetectStorage, 8000\)/);
+  assert.match(app, /setInterval\(autoDetectStorage, 12000\)/);
   assert.match(app, /New or changed storage detected\./);
 });
 
