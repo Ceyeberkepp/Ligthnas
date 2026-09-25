@@ -374,19 +374,47 @@ function filesView() {
   const entries = state.files;
   const tabs = librarySections.map(([folder, label]) => `<button type="button" class="library-tab ${section === folder ? 'active' : ''}" data-library-tab="${escapeHtml(folder)}" aria-pressed="${section === folder}">${escapeHtml(label)}</button>`).join('');
   const layoutButtons = `<div class="view-switch" role="group" aria-label="File view"><button class="secondary ${state.fileLayout === 'list' ? 'active' : ''}" data-file-layout="list" title="List view">☷</button><button class="secondary ${state.fileLayout === 'grid' ? 'active' : ''}" data-file-layout="grid" title="Grid view">▦</button></div>`;
-  return `${pageHead('Files & media', 'Browse documents, photos, audio, video, RAW photos, and other files in one library.', `<div class="head-actions">${layoutButtons}<button class="secondary" data-action="refresh-files">Refresh</button></div>`)}
+  const renderEntry = entry => {
+    const fullPath = entry.relativePath || [state.folder, entry.name].filter(Boolean).join('/');
+    const label = entry.relativePath || entry.name;
+    const lower = entry.name.toLowerCase();
+    const zip = !entry.directory && lower.endsWith('.zip');
+    return `<article class="file-row">
+      <button class="file-name" data-open="${escapeHtml(entry.name)}" data-open-path="${escapeHtml(fullPath)}" data-directory="${entry.directory}">
+        <span class="file-icon">${entry.directory ? '▣' : '▤'}</span>
+        <span class="file-label">${escapeHtml(label)}</span>
+      </button>
+      <span class="muted">${entry.directory ? 'Folder' : bytes(entry.sizeBytes)}</span>
+      <div class="file-actions">
+        ${entry.directory ? `<button class="secondary" data-download-folder="${escapeHtml(entry.name)}">Download</button>` : ''}
+        ${zip ? `<button class="secondary" data-extract-zip="${escapeHtml(fullPath)}">Extract ZIP</button>` : ''}
+        ${!entry.directory && state.media?.converterAvailable && state.overview.appliance.role === 'administrator' ? `<button class="secondary" data-convert-path="${escapeHtml(fullPath)}">Convert</button>` : ''}
+        <button class="secondary" data-delete-path="${escapeHtml(fullPath)}">Delete</button>
+      </div>
+    </article>`;
+  };
+  return `${pageHead('Files & media', 'Browse and manage every file on LightNAS. All files is a flattened view of your managed library.', `<div class="head-actions">${layoutButtons}<button class="secondary" data-action="refresh-files">Refresh</button></div>`)}
     <nav class="library-tabs" aria-label="File library sections">${tabs}</nav>
-    <div class="file-toolbar"><div class="breadcrumbs">${crumbs}</div><div><button class="secondary" data-action="new-folder">+ Folder</button> <label class="primary upload-button">Upload<input id="file-upload" type="file" multiple hidden></label></div></div>
-    <p class="muted">Select a tab to open that library. Previewable items open in the viewer; use its arrows to move through multiple files.</p>
-    <div class="storage-list file-browser ${state.fileLayout === 'grid' ? 'file-grid' : 'file-list'}">${state.fileError ? `<div class="empty error-state"><p><b>Files could not be loaded.</b></p><p>${escapeHtml(state.fileError)}</p><button class="secondary" data-action="refresh-files">Try again</button></div>` : entries === null ? '<div class="empty"><p>Loading files…</p></div>' : entries.length ? entries.map(entry => `<article class="file-row"><button class="file-name" data-open="${escapeHtml(entry.name)}" data-directory="${entry.directory}"><span class="file-icon">${entry.directory ? '▣' : '▤'}</span><span class="file-label">${escapeHtml(entry.name)}</span></button><span class="muted">${entry.directory ? 'Folder' : bytes(entry.sizeBytes)}</span><div class="file-actions">${entry.directory ? `<button class="secondary" data-download-folder="${escapeHtml(entry.name)}">Download</button>` : state.media?.converterAvailable && state.overview.appliance.role === 'administrator' ? `<button class="secondary" data-convert-file="${escapeHtml(entry.name)}">Convert</button>` : ''}<button class="secondary" data-delete-file="${escapeHtml(entry.name)}">Delete</button></div></article>`).join('') : '<div class="empty"><p>This section is empty. Create a folder or upload files here.</p></div>'}</div>`;
+    <div class="file-toolbar">
+      <div class="breadcrumbs">${crumbs}</div>
+      <div class="file-upload-actions">
+        <button class="secondary" data-action="new-folder">+ Folder</button>
+        <label class="secondary upload-button">Upload folder<input id="folder-upload" type="file" webkitdirectory directory multiple hidden></label>
+        <label class="primary upload-button">Upload files<input id="file-upload" type="file" multiple hidden></label>
+      </div>
+    </div>
+    <div id="upload-queue" class="upload-queue hidden" aria-live="polite"></div>
+    <p class="muted">${state.folder ? 'Files and folders in this location.' : 'All files shows files recursively across the managed LightNAS library. Open a category tab to browse its folders normally.'}</p>
+    <div class="storage-list file-browser ${state.fileLayout === 'grid' ? 'file-grid' : 'file-list'}">${state.fileError ? `<div class="empty error-state"><p><b>Files could not be loaded.</b></p><p>${escapeHtml(state.fileError)}</p><button class="secondary" data-action="refresh-files">Try again</button></div>` : entries === null ? '<div class="empty"><p>Loading files…</p></div>' : entries.length ? entries.map(renderEntry).join('') : '<div class="empty"><p>No files here yet. Upload files or a complete folder.</p></div>'}</div>`;
 }
 
 async function loadFiles() {
   state.fileError = null;
   try {
-    const result = await request(`/api/files?path=${encodeURIComponent(state.folder)}`);
+    const recursive = state.folder === '' ? '&recursive=1' : '';
+    const result = await request(`/api/files?path=${encodeURIComponent(state.folder)}${recursive}`);
     state.files = Array.isArray(result.entries)
-      ? result.entries.filter(entry => entry.supported && !(state.folder === '' && entry.directory && entry.name === 'ISO'))
+      ? result.entries.filter(entry => entry.supported && !(state.folder === '' && entry.directory))
       : [];
   } catch (error) {
     state.files = [];
@@ -878,8 +906,8 @@ function bindViewActions() {
     render('files');
   }));
   $$('[data-folder]', $('#content')).forEach(button => button.addEventListener('click', () => { state.folder = button.dataset.folder; state.files = null; render('files'); }));
-  $$('[data-open]', $('#content')).forEach(button => button.addEventListener('click', async () => {
-    const path = [state.folder, button.dataset.open].filter(Boolean).join('/');
+  $('[data-open]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+    const path = button.dataset.openPath || [state.folder, button.dataset.open].filter(Boolean).join('/');
     if (button.dataset.directory === 'true') { state.folder = path; state.files = null; render('files'); return; }
     try { const response = await fetch(`/api/files/download?path=${encodeURIComponent(path)}`); if (!response.ok) throw new Error((await response.json()).error); const object = URL.createObjectURL(await response.blob()); const link = document.createElement('a'); link.href = object; link.download = button.dataset.open; link.click(); setTimeout(() => URL.revokeObjectURL(object), 60000); } catch (error) { toast(error.message); }
   }));
@@ -891,21 +919,94 @@ function bindViewActions() {
     link.click();
   }));
   $$('[data-action="new-folder"]', $('#content')).forEach(button => button.addEventListener('click', async () => { const name = prompt('New folder name'); if (name === null) return; try { await request(`/api/files?path=${encodeURIComponent([state.folder, name].filter(Boolean).join('/'))}`, { method: 'POST' }); await loadFiles(); toast('Folder created.'); } catch (error) { toast(error.message); } }));
-  $('#file-upload', content)?.addEventListener('change', async event => {
-    const files = [...event.target.files];
+  const uploadSelection = async (files, folderMode = false) => {
+    const queue = $('#upload-queue', content);
+    if (!files.length || !queue) return;
+    queue.classList.remove('hidden');
+    queue.innerHTML = `<div class="upload-queue-head"><b>Uploading</b><span data-upload-summary>0 / ${files.length}</span></div><div data-upload-items></div>`;
+    const items = $('[data-upload-items]', queue);
+    const summary = $('[data-upload-summary]', queue);
     let completed = 0;
+    const ensureDirectory = async path => {
+      if (!path) return;
+      try { await request(`/api/files?path=${encodeURIComponent(path)}&recursive=1`, { method:'POST', body:'{}' }); }
+      catch (error) { if (error.status !== 409) throw error; }
+    };
     for (const file of files) {
+      const relative = folderMode && file.webkitRelativePath ? file.webkitRelativePath : file.name;
+      const destination = [state.folder, relative].filter(Boolean).join('/');
+      const parent = destination.split('/').slice(0,-1).join('/');
+      const row = document.createElement('div');
+      row.className = 'upload-item';
+      row.innerHTML = `<div><b>${escapeHtml(relative)}</b><small data-upload-state>Waiting…</small></div><div class="upload-progress"><span></span></div>`;
+      items.append(row);
+      const stateLabel = $('[data-upload-state]', row);
+      const bar = $('.upload-progress span', row);
       try {
-        const response = await fetch(`/api/files?path=${encodeURIComponent([state.folder, file.name].filter(Boolean).join('/'))}`, { method: 'PUT', headers: { 'X-LightNAS-Request': '1' }, body: file });
-        if (!response.ok) throw new Error((await response.json()).error);
-        completed++;
-      } catch (error) { toast(`${file.name}: ${error.message}`); break; }
+        await ensureDirectory(parent);
+        await new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open('PUT', `/api/files?path=${encodeURIComponent(destination)}`);
+          xhr.setRequestHeader('X-LightNAS-Request', '1');
+          xhr.upload.onprogress = event => {
+            if (!event.lengthComputable) return;
+            const percent = Math.max(0, Math.min(100, Math.round((event.loaded / event.total) * 100)));
+            bar.style.width = `${percent}%`;
+            stateLabel.textContent = `${percent}% · ${bytes(event.loaded)} / ${bytes(event.total)}`;
+          };
+          xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) resolve();
+            else {
+              let message = 'Upload failed.';
+              try { message = JSON.parse(xhr.responseText).error || message; } catch {}
+              reject(new Error(message));
+            }
+          };
+          xhr.onerror = () => reject(new Error('Network error during upload.'));
+          xhr.send(file);
+        });
+        completed += 1;
+        bar.style.width = '100%';
+        stateLabel.textContent = 'Complete';
+        row.classList.add('complete');
+      } catch (error) {
+        stateLabel.textContent = error.message;
+        row.classList.add('failed');
+      }
+      summary.textContent = `${completed} / ${files.length}`;
     }
     await loadFiles();
-    if (completed === files.length && completed) toast(`${completed} file${completed === 1 ? '' : 's'} uploaded.`);
+    if (completed === files.length) toast(`${completed} item${completed === 1 ? '' : 's'} uploaded.`);
+  };
+  $('#file-upload', content)?.addEventListener('change', async event => {
+    const files = [...event.target.files];
+    event.target.value = '';
+    await uploadSelection(files, false);
   });
-  $$('[data-delete-file]', content).forEach(button => button.addEventListener('click', async () => { if (!confirm(`Delete ${button.dataset.deleteFile}? Folders must be empty.`)) return; try { await request(`/api/files?path=${encodeURIComponent([state.folder, button.dataset.deleteFile].filter(Boolean).join('/'))}`, { method: 'DELETE' }); await loadFiles(); toast('Deleted.'); } catch (error) { toast(error.message); } }));
-  $$('[data-delete-share]', content).forEach(button => button.addEventListener('click', async () => { if (!confirm(`Remove share plan ${button.dataset.name}?`)) return; try { await request(`/api/shares/${button.dataset.deleteShare}`, { method: 'DELETE' }); state.overview = await request('/api/overview'); render(state.view); toast('Plan removed.'); } catch (error) { toast(error.message); } }));
+  $('#folder-upload', content)?.addEventListener('change', async event => {
+    const files = [...event.target.files];
+    event.target.value = '';
+    await uploadSelection(files, true);
+  });
+  $$('[data-extract-zip]', content).forEach(button => button.addEventListener('click', async () => {
+    button.disabled = true;
+    button.textContent = 'Extracting…';
+    try {
+      const result = await request('/api/files/extract', { method:'POST', body:JSON.stringify({ path:button.dataset.extractZip }) });
+      await loadFiles();
+      toast(`Extracted ${result.entries} archive entries to ${result.folderName}.`);
+    } catch (error) {
+      toast(error.message);
+      button.disabled = false;
+      button.textContent = 'Extract ZIP';
+    }
+  }));
+  $$('[data-delete-path]', content).forEach(button => button.addEventListener('click', async () => {
+    if (!confirm(`Delete ${button.dataset.deletePath}?`)) return;
+    try { await request(`/api/files?path=${encodeURIComponent(button.dataset.deletePath)}`, { method:'DELETE' }); await loadFiles(); toast('Deleted.'); }
+    catch (error) { toast(error.message); }
+  }));
+  $('[data-delete-share]', content).forEach(button => button.addEventListener('click', async () => { if (!confirm(`Remove share plan ${button.dataset.name}?`)) return; try { await request(`/api/shares/${button.dataset.deleteShare}`, { method: 'DELETE' }); state.overview = await request('/api/overview'); render(state.view); toast('Plan removed.'); } catch (error) { toast(error.message); } }));
 }
 
 async function submitAuth(form, path) {
