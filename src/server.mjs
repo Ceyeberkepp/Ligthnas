@@ -26,6 +26,7 @@ import {
   listStorageContent, uploadStorageContent, importStorageContent, deleteStorageContent
 } from './storage-pools.mjs';
 import { generateTotpSecret, totpUri, verifyTotp } from './totp.mjs';
+import { qrCodeDataUrl } from './mfa.mjs';
 import {
   normalizePermissions, effectivePermissions, groupsForUser,
   createApiTokenRecord, authenticateApiToken,
@@ -503,7 +504,9 @@ async function api(req, res, url) {
     const secret = generateTotpSecret();
     account.totpPendingSecret = secret;
     await store.save();
-    return send(res, 200, { secret, uri: totpUri({ secret, username, issuer: `LightNAS ${store.state.config.deviceName}` }) });
+    const uri = totpUri({ secret, username, issuer: `LightNAS ${store.state.config.deviceName}` });
+    const qrCode = await qrCodeDataUrl(uri);
+    return send(res, 200, { secret, uri, qrCode });
   }
   if (req.method === 'POST' && url.pathname === '/api/security/totp/verify') {
     if (context.apiToken) return send(res, 403, { error: 'TOTP settings require an interactive local account session.' });
