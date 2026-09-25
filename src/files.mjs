@@ -1,8 +1,11 @@
 import { access, constants, mkdir, readdir, lstat, unlink, rmdir, open, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
+import { Transform } from 'node:stream';
 
 const root = join(dirname(process.env.NAS_DATA_FILE || 'data/state.json'), 'files');
+const configuredUploadLimit = Number(process.env.LIGHTNAS_FILE_UPLOAD_MAX_BYTES || 0);
+const MAX_UPLOAD = Number.isFinite(configuredUploadLimit) && configuredUploadLimit > 0 ? configuredUploadLimit : 0;
 const ATTACHED_ROOT = 'Attached storage';
 
 function parts(relative) {
@@ -89,6 +92,62 @@ async function directoryEntries(path) {
   }));
 }
 
+async function recursiveFileEntries(path, prefix = '', output = [], limits = { count: 0, max: 10000 }) {
+  if (limits.count >= limits.max) return output;
+  let names = [];
+  try { names = await readdir(path); } catch { return output; }
+  for (const name of names) {
+    if (limits.count >= limits.max) break;
+    const absolute = join(path, name);
+    let info;
+    try { info = await lstat(absolute); } catch { continue; }
+    if (info.isSymbolicLink()) continue;
+    const relativePath = [prefix, name].filter(Boolean).join('/');
+    if (info.isDirectory()) {
+      await recursiveFileEntries(absolute, relativePath, output, limits);
+      continue;
+    }
+    if (!info.isFile()) continue;
+    output.push({
+      name,
+      path: relativePath,
+      folder: prefix,
+      directory: false,
+      sizeBytes: info.size,
+      modifiedAt: info.mtime.toISOString(),
+      supported: true
+    });
+    limits.count += 1;
+  }
+  return output;
+}
+
+export async function listAllFiles() {
+  await mkdir(root, { recursive: true, mode: 0o700 });
+  const limits = { count: 0, max: 10000 };
+  const entries = [];
+  await recursiveFileEntries(root, '', entries, limits);
+
+  // "All files" means all files LightNAS can currently see, including
+  // attached NAS volumes. Keep one global safety cap so a very large mount
+  // cannot lock the browser or the control-plane process.
+  for (const volume of await attachedVolumes()) {
+    if (limits.count >= limits.max) break;
+    await recursiveFileEntries(
+      volume.mountPoint,
+      `${ATTACHED_ROOT}/${volume.name}`,
+      entries,
+      limits
+    );
+  }
+
+  return {
+    entries: entries.sort((a, b) => new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime() || a.path.localeCompare(b.path)),
+    truncated: limits.count >= limits.max,
+    limit: limits.max
+  };
+}
+
 export async function listFiles(relative = '') {
   const segments = parts(relative);
   const volumes = await attachedVolumes();
@@ -115,24 +174,16 @@ export async function uploadFile(relative, req) {
   if (!segments.length || (segments.length <= 2 && segments[0] === ATTACHED_ROOT)) throw Object.assign(new Error('Enter a file name inside a writable location.'), { status: 400 });
   const path = await checked(relative, false);
   const file = await open(path, 'wx', 0o600);
+  let size = 0;
   try {
-    // Stream directly to disk. LightNAS intentionally does not impose an
-    // application-level file-size ceiling; the destination filesystem is the
-    // authoritative limit and the upload is never buffered in memory.
-    await pipeline(req, file.createWriteStream());
+    await pipeline(req, new Transform({ transform(chunk, encoding, callback) {
+      size += chunk.length;
+      callback(MAX_UPLOAD > 0 && size > MAX_UPLOAD ? Object.assign(new Error('File exceeds the configured upload limit.'), { status: 413 }) : null, chunk);
+    } }), file.createWriteStream());
   } catch (error) {
     await unlink(path).catch(() => {});
     throw error;
   }
-}
-
-export async function downloadFolder(relative) {
-  const segments = parts(relative);
-  if (!segments.length) throw Object.assign(new Error('Select a folder.'), { status: 400 });
-  const path = await checked(relative);
-  const info = await lstat(path);
-  if (!info.isDirectory()) throw Object.assign(new Error('Not a folder.'), { status: 400 });
-  return { path, name: segments.at(-1) };
 }
 
 export async function downloadFile(relative) {
@@ -141,6 +192,14 @@ export async function downloadFile(relative) {
   const info = await lstat(path);
   if (!info.isFile()) throw Object.assign(new Error('Not a file.'), { status: 400 });
   return { path, size: info.size };
+}
+
+export async function downloadEntry(relative) {
+  if (!parts(relative).length) throw Object.assign(new Error('Select a file or folder.'), { status: 400 });
+  const path = await checked(relative);
+  const info = await lstat(path);
+  if (!info.isFile() && !info.isDirectory()) throw Object.assign(new Error('Unsupported file entry.'), { status: 400 });
+  return { path, size: info.isFile() ? info.size : null, directory: info.isDirectory() };
 }
 
 export async function mediaPaths(relative, format) {
