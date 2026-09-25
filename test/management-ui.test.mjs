@@ -10,11 +10,11 @@ test('Files and Media supports grid view, streamed folder downloads and broad pr
     readFile(new URL('../src/server.mjs', import.meta.url), 'utf8'),
     readFile(new URL('../src/thumbnails.mjs', import.meta.url), 'utf8')
   ]);
-  assert.match(app, /data-file-layout="grid"/);
+  assert.match(app, /data-file-view="grid"/);
   assert.match(app, /data-download-folder/);
   assert.match(server, /\/api\/files\/archive/);
   assert.match(server, /tar', \['-czf', '-'/);
-  assert.doesNotMatch(files, /MAX_UPLOAD/);
+  assert.match(files, /LIGHTNAS_FILE_UPLOAD_MAX_BYTES \|\| 0/);
   assert.match(enhancements, /video-preview/);
   assert.match(enhancements, /\bcr3\b/);
   assert.match(thumbnails, /\bnef\b/);
@@ -38,22 +38,21 @@ test('node shell, profile pictures, expanded permissions and collapsible navigat
     readFile(new URL('../src/server.mjs', import.meta.url), 'utf8'),
     readFile(new URL('../src/local-host.mjs', import.meta.url), 'utf8'),
     readFile(new URL('../scripts/lightnas-host-agent.py', import.meta.url), 'utf8'),
-    readFile(new URL('../public/node-console.js', import.meta.url), 'utf8')
+    readFile(new URL('../public/node-shell.js', import.meta.url), 'utf8')
   ]);
-  assert.doesNotMatch(page, /#permissions/);
-  assert.doesNotMatch(page, /#shell/);
-  assert.match(page, /node-shell-button/);
-  assert.match(page, /avatar-upload/);
-  assert.match(page, /avatar-initial/);
+  assert.match(page, /#permissions/);
+  assert.match(page, /#shell/);
+  assert.match(page, /id="avatar"/);
+  assert.match(app, /\/api\/profile\/avatar/);
   assert.match(app, /sidebar-collapsed/);
-  assert.match(groups, /Groups & permissions/);
+  assert.match(groups, /GROUP POLICY|Direct permissions/);
   assert.match(server, /system\.shell/);
   assert.match(server, /overview\.view/);
   assert.match(server, /\/api\/profile\/avatar/);
   assert.match(server, /\/api\/console\/node/);
   assert.match(localHost, /localNodeConsoleSocket/);
   assert.match(agent, /def stream_node/);
-  assert.match(agent, /root@\{node_name\}/);
+  assert.match(agent, /def stream_node_shell/);
   assert.match(terminal, /api\/console\/node/);
 });
 
