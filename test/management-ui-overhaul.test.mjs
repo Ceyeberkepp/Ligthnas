@@ -154,7 +154,8 @@ test('All Files is flat and file/folder uploads expose real progress', async () 
   assert.match(files, /recursiveFileEntries/);
   assert.match(server, /url\.searchParams\.get\('all'\) === '1'/);
   assert.match(app, /\/api\/files\?all=1/);
-  assert.match(app, /id="file-upload" type="file" multiple/);
+  assert.match(app, /id="file-upload" type="file"/);
+  assert.match(app, /multiple hidden/);
   assert.match(app, /id="folder-upload" type="file" webkitdirectory directory multiple/);
   assert.match(app, /new XMLHttpRequest\(\)/);
   assert.match(app, /xhr\.upload\.addEventListener\('progress'/);
