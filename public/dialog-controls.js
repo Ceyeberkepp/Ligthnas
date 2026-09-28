@@ -1052,19 +1052,31 @@ document.addEventListener('click', async event => {
   if (editRoute) {
     event.preventDefault();
     event.stopImmediatePropagation();
+    const runtimeOnly = editRoute.dataset.routeRuntime === 'true';
     showEditor({
-      eyebrow: 'STATIC ROUTE',
+      eyebrow: runtimeOnly ? 'ACTIVE ROUTE' : 'STATIC ROUTE',
       title: 'Edit IPv4 route',
-      description: 'Update this persistent NetworkManager route. Save only is safest; applying immediately can interrupt management connectivity.',
+      description: runtimeOnly
+        ? 'This route comes from the live system/DHCP table. Changes apply immediately and last until the owning connection refreshes or the system reboots.'
+        : 'Update this persistent NetworkManager route. Save only is safest; applying immediately can interrupt management connectivity.',
       fields: [
         { name: 'destination', label: 'Destination', value: editRoute.dataset.routeDestination || '', placeholder: '10.20.0.0/16 or default', required: true },
         { name: 'gateway', label: 'Gateway', value: editRoute.dataset.routeGateway || '', placeholder: '10.5.5.1', required: true },
         { name: 'metric', label: 'Metric', type: 'number', min: 0, max: 65535, value: editRoute.dataset.routeMetric || '100', required: true },
-        { name: 'activate', label: 'Apply immediately', type: 'select', value: 'no', options: [{ value: 'no', label: 'Save only' }, { value: 'yes', label: 'Save and activate profile now' }] }
+        ...(runtimeOnly ? [] : [{ name: 'activate', label: 'Apply immediately', type: 'select', value: 'no', options: [{ value: 'no', label: 'Save only' }, { value: 'yes', label: 'Save and activate profile now' }] }])
       ],
-      submitLabel: 'Save route',
+      submitLabel: runtimeOnly ? 'Apply route' : 'Save route',
       onSubmit: async values => {
-        await dialogApi('/api/network', { method: 'POST', body: JSON.stringify({
+        await dialogApi('/api/network', { method: 'POST', body: JSON.stringify(runtimeOnly ? {
+          action: 'route-runtime-update',
+          oldDestination: editRoute.dataset.routeDestination,
+          oldGateway: editRoute.dataset.routeGateway,
+          oldMetric: Number(editRoute.dataset.routeMetric || 0),
+          device: editRoute.dataset.routeDevice,
+          destination: values.destination,
+          gateway: values.gateway,
+          metric: Number(values.metric)
+        } : {
           action: 'route-update',
           connection: editRoute.dataset.routeConnection,
           oldRoute: editRoute.dataset.routeOld,
