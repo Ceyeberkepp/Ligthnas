@@ -911,6 +911,44 @@ def kick_container_dhcp(name: str) -> None:
             pass
 
 
+def clear_managed_automatic_address(config: Path) -> None:
+    """Remove LightNAS host-injected automatic IPv4 fallback settings."""
+    if not config.exists():
+        return
+    current = config.read_text(encoding="utf-8")
+    kept = [
+        row for row in current.splitlines()
+        if row.split("=", 1)[0].strip() not in {
+            "lxc.net.0.ipv4.address",
+            "lxc.net.0.ipv4.gateway",
+        }
+    ]
+    config.write_text("\n".join(kept) + "\n", encoding="utf-8")
+
+
+def apply_managed_automatic_address(name: str, config: Path) -> str:
+    """Keep DHCP as the user-selected mode but guarantee an address on lightnas0.
+
+    Some nested LXC environments allow veth networking but drop DHCP broadcasts.
+    In that case LightNAS injects an address from its managed automatic pool at
+    the LXC layer. The user still sees DHCP/Automatic and can switch to Static.
+    """
+    address = next_managed_container_ipv4(name)
+    clear_managed_automatic_address(config)
+    append_unique(config, f"lxc.net.0.ipv4.address = {address}")
+    append_unique(config, "lxc.net.0.ipv4.gateway = 10.77.0.1")
+    if lxc_state(name) == "running":
+        run(["lxc-stop", "-n", name, "-t", "20"], timeout=35, check=False)
+    run(["lxc-start", "-n", name, "-d"], timeout=60)
+    bare = address.split("/", 1)[0]
+    try:
+        run(["lxc-attach", "-n", name, "--", "ip", "addr", "replace", address, "dev", "eth0"], timeout=10, check=False)
+        run(["lxc-attach", "-n", name, "--", "ip", "route", "replace", "default", "via", "10.77.0.1", "dev", "eth0"], timeout=10, check=False)
+    except Exception:
+        pass
+    return bare
+
+
 def create_container(data: dict) -> dict:
     ok, reason, _diagnostics = container_capability()
     if not ok:
@@ -1023,6 +1061,8 @@ def create_container(data: dict) -> dict:
         # Proxmox/LXC environments even when namespaces/cgroups are delegated.
         append_unique(config, "lxc.apparmor.profile = unconfined")
 
+    clear_managed_automatic_address(config)
+
     try:
         run(["lxc-start", "-n", name, "-d"], timeout=60)
     except Exception:
@@ -1035,9 +1075,13 @@ def create_container(data: dict) -> dict:
 
     ipv4 = ""
     default_route = ""
-    # DHCP is the default for every new container. Wait for the guest to
-    # acquire both an address and a default route before reporting success.
-    for _attempt in range(60):
+    automatic_fallback = False
+    # DHCP is always attempted first. Nested hypervisors can occasionally pass
+    # veth traffic while dropping DHCP broadcasts; LightNAS then guarantees an
+    # automatic address from its own managed pool without changing the user's
+    # IPv4 mode to Static.
+    dhcp_mode = str(data.get("ipv4Mode") or "dhcp") == "dhcp"
+    for _attempt in range(20 if dhcp_mode else 30):
         addresses = [address for address in container_addresses(name) if ":" not in address]
         ipv4 = next((address for address in addresses if not direct_macvlan or not address.startswith("10.77.0.")), "")
         if ipv4:
@@ -1052,13 +1096,29 @@ def create_container(data: dict) -> dict:
             if default_route:
                 break
         time.sleep(1)
+
+    if not ipv4 and dhcp_mode and network_state.get("LIGHTNAS_NETWORK_MODE") == "lxc-nat":
+        ipv4 = apply_managed_automatic_address(name, config)
+        automatic_fallback = True
+        for _attempt in range(10):
+            addresses = [address for address in container_addresses(name) if ":" not in address]
+            ipv4 = next((address for address in addresses if address.startswith("10.77.0.")), ipv4)
+            try:
+                default_route = run(
+                    ["lxc-attach", "-n", name, "--", "ip", "-4", "route", "show", "default"],
+                    timeout=5,
+                    check=False,
+                ).strip()
+            except Exception:
+                default_route = ""
+            if ipv4 and default_route:
+                break
+            time.sleep(1)
+
     if not ipv4:
-        raise RuntimeError(
-            f"container {name} started but did not receive an IPv4 address; "
-            "use Repair network or check the LightNAS container bridge"
-        )
+        raise RuntimeError(f"container {name} started but automatic IPv4 configuration failed")
     if not default_route:
-        raise RuntimeError(f"container {name} received {ipv4} but has no IPv4 default route")
+        raise RuntimeError(f"container {name} received {ipv4} but automatic default-route configuration failed")
 
     return {
         "id": name,
@@ -1076,6 +1136,7 @@ def create_container(data: dict) -> dict:
         "ipv4": ipv4 or (container_addresses(name)[0] if container_addresses(name) else ""),
         "defaultRoute": default_route,
         "networkMode": "direct-lan" if direct_macvlan else "managed",
+        "automaticFallback": automatic_fallback,
     }
 
 
@@ -1148,6 +1209,9 @@ def repair_container_network(name: str) -> dict:
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
     )
 
+    if mode == "dhcp":
+        clear_managed_automatic_address(config)
+
     if lxc_state(name) == "running":
         run(["lxc-stop", "-n", name, "-t", "20"], timeout=35, check=False)
     run(["lxc-start", "-n", name, "-d"], timeout=60)
@@ -1156,7 +1220,8 @@ def repair_container_network(name: str) -> dict:
 
     ipv4 = ""
     default_route = ""
-    for _attempt in range(60):
+    automatic_fallback = False
+    for _attempt in range(20 if mode == "dhcp" else 30):
         ipv4 = next((value for value in container_addresses(name) if ":" not in value), "")
         if ipv4:
             try:
@@ -1170,11 +1235,32 @@ def repair_container_network(name: str) -> dict:
             if default_route:
                 break
         time.sleep(1)
+    if not ipv4 and mode == "dhcp" and state.get("LIGHTNAS_NETWORK_MODE") == "lxc-nat":
+        ipv4 = apply_managed_automatic_address(name, config)
+        automatic_fallback = True
+        for _attempt in range(10):
+            ipv4 = next((value for value in container_addresses(name) if value.startswith("10.77.0.")), ipv4)
+            try:
+                default_route = run(
+                    ["lxc-attach", "-n", name, "--", "ip", "-4", "route", "show", "default"],
+                    timeout=5,
+                    check=False,
+                ).strip()
+            except Exception:
+                default_route = ""
+            if ipv4 and default_route:
+                break
+            time.sleep(1)
+
     if not ipv4:
-        raise RuntimeError(f"container {name} restarted in {mode.upper()} mode but did not receive an IPv4 address")
+        raise RuntimeError(f"container {name} automatic IPv4 configuration failed")
     if not default_route:
-        raise RuntimeError(f"container {name} received {ipv4} but has no IPv4 default route")
-    return {"id": name, "action": "repair-network", "status": "running", "ipv4": ipv4, "ipv4Mode": mode, "defaultRoute": default_route}
+        raise RuntimeError(f"container {name} received {ipv4} but automatic default-route configuration failed")
+    return {
+        "id": name, "action": "repair-network", "status": "running",
+        "ipv4": ipv4, "ipv4Mode": mode, "defaultRoute": default_route,
+        "automaticFallback": automatic_fallback,
+    }
 
 
 def container_action(data: dict) -> dict:
@@ -1260,6 +1346,7 @@ def update_container(data: dict) -> dict:
         raise RuntimeError("container root filesystem is unavailable")
     network_dir = rootfs / "etc" / "systemd" / "network"
     network_dir.mkdir(parents=True, exist_ok=True)
+    clear_managed_automatic_address(config)
     for existing in network_dir.glob("*.network"):
         if existing.is_file() or existing.is_symlink():
             existing.unlink()
@@ -1305,11 +1392,24 @@ def update_container(data: dict) -> dict:
         )
         if mode == "dhcp":
             kick_container_dhcp(current)
+    live_ipv4 = next((value for value in container_addresses(current) if ":" not in value), "")
+    automatic_fallback = False
+    if mode == "dhcp" and lxc_state(current) == "running" and not live_ipv4:
+        for _attempt in range(12):
+            time.sleep(1)
+            live_ipv4 = next((value for value in container_addresses(current) if ":" not in value), "")
+            if live_ipv4:
+                break
+        if not live_ipv4 and lightnas_network_state().get("LIGHTNAS_NETWORK_MODE") == "lxc-nat":
+            live_ipv4 = apply_managed_automatic_address(current, config)
+            automatic_fallback = True
+
     return {
         "id": current, "name": current, "memoryMiB": memory, "cpus": cpus,
         "network": requested_network, "ipv4Mode": mode, "ipv4Address": address,
         "gateway": gateway, "dns": ", ".join(dns_values),
         "startOnBoot": bool(data.get("startOnBoot", True)), "status": "updated",
+        "ipv4": live_ipv4, "automaticFallback": automatic_fallback,
     }
 
 
