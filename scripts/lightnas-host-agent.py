@@ -1024,34 +1024,31 @@ def create_container(data: dict) -> dict:
 
     ipv4 = ""
     default_route = ""
-    if direct_macvlan:
-        # Do not tell the UI creation succeeded until upstream DHCP has had a
-        # chance to provide a real LAN address and default route.
-        for _attempt in range(30):
-            addresses = [address for address in container_addresses(name) if ":" not in address]
-            ipv4 = next((address for address in addresses if not address.startswith("10.77.0.")), "")
-            if ipv4:
-                try:
-                    route = run(
-                        ["lxc-attach", "-n", name, "--", "ip", "-4", "route", "show", "default"],
-                        timeout=5,
-                        check=False,
-                    ).strip()
-                except Exception:
-                    route = ""
-                if route:
-                    default_route = route
-                    break
-            time.sleep(1)
-        if not ipv4:
-            raise RuntimeError(
-                f"container {name} started but did not receive a LAN DHCP address; "
-                "check the upstream DHCP server and Proxmox bridge MAC filtering"
-            )
-        if not default_route:
-            raise RuntimeError(
-                f"container {name} received {ipv4} but has no IPv4 default route"
-            )
+    # Do not report a successful container creation until the guest has a real
+    # IPv4 address. Managed NAT addresses are normally static and appear very
+    # quickly; direct-LAN/macvlan mode may wait on upstream DHCP.
+    for _attempt in range(30):
+        addresses = [address for address in container_addresses(name) if ":" not in address]
+        ipv4 = next((address for address in addresses if not direct_macvlan or not address.startswith("10.77.0.")), "")
+        if ipv4:
+            try:
+                default_route = run(
+                    ["lxc-attach", "-n", name, "--", "ip", "-4", "route", "show", "default"],
+                    timeout=5,
+                    check=False,
+                ).strip()
+            except Exception:
+                default_route = ""
+            if default_route:
+                break
+        time.sleep(1)
+    if not ipv4:
+        raise RuntimeError(
+            f"container {name} started but did not receive an IPv4 address; "
+            "use Repair network or check the LightNAS container bridge"
+        )
+    if not default_route:
+        raise RuntimeError(f"container {name} received {ipv4} but has no IPv4 default route")
 
     return {
         "id": name,
