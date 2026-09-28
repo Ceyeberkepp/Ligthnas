@@ -1090,10 +1090,37 @@ def create_container(data: dict) -> dict:
 
     try:
         run(["lxc-start", "-n", name, "-d"], timeout=60)
-    except Exception:
+    except Exception as start_error:
         # Keep a completely built rootfs for troubleshooting rather than
-        # deleting user data after an image was successfully created.
-        raise RuntimeError(f"container {name} was built but could not start; inspect lxc-start -n {name} -F -l DEBUG")
+        # deleting user data after an image was successfully created. Capture
+        # an LXC debug log automatically so the web UI shows the real boot
+        # blocker instead of only the generic "ABORTING" wrapper.
+        log_path = Path("/run/lightnas") / f"lxc-{name}-start.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(
+            ["lxc-start", "-n", name, "-F", "-l", "DEBUG", "-o", str(log_path)],
+            text=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=20,
+            check=False,
+        )
+        detail = ""
+        try:
+            lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+            useful = [
+                line.strip() for line in lines
+                if re.search(r"(ERROR|Failed|Permission denied|Operation not permitted|No such file|exec|mount|apparmor|cgroup|hook)", line, re.IGNORECASE)
+            ]
+            detail = " | ".join(useful[-5:])[:1200]
+        except OSError:
+            pass
+        message = f"container {name} was built but could not start"
+        if detail:
+            message += f": {detail}"
+        else:
+            message += f": {start_error}"
+        raise RuntimeError(message) from start_error
 
     if str(data.get("ipv4Mode") or "dhcp") == "dhcp":
         kick_container_dhcp(name)
