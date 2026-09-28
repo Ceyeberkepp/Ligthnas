@@ -493,6 +493,29 @@ def unique_container_mac() -> str:
     raise RuntimeError("could not allocate a unique container MAC address")
 
 
+def next_managed_container_ipv4(exclude: str = "") -> str:
+    """Allocate a stable address on LightNAS' private 10.77.0.0/24 container network."""
+    used = set()
+    try:
+        for config in Path("/var/lib/lxc").glob("*/config"):
+            if exclude and config.parent.name == exclude:
+                continue
+            settings = container_settings(config.parent.name)
+            raw = str(settings.get("ipv4Address") or "").split("/", 1)[0]
+            if raw:
+                used.add(raw)
+            for address in container_addresses(config.parent.name):
+                if ":" not in address:
+                    used.add(address)
+    except Exception:
+        pass
+    for host in range(20, 251):
+        candidate = f"10.77.0.{host}"
+        if candidate not in used:
+            return candidate + "/24"
+    raise RuntimeError("LightNAS private container network has no free IPv4 addresses")
+
+
 def managed_container_storage_root(value: str) -> Path:
     path = Path(value or "/var/lib/lightnas/storage/local/rootdir").resolve()
     text = str(path)
@@ -938,6 +961,15 @@ def create_container(data: dict) -> dict:
     else:
         config = bootstrap_template_container(name, image, storage_root_value)
 
+    if network_state.get("LIGHTNAS_NETWORK_MODE") == "lxc-nat" and str(data.get("ipv4Mode") or "dhcp") == "dhcp":
+        data = {
+            **data,
+            "ipv4Mode": "manual",
+            "ipv4Address": next_managed_container_ipv4(name),
+            "gateway": "10.77.0.1",
+            "dns": "10.77.0.1",
+        }
+
     try:
         configure_container_guest(config, data)
         installed_guest = verify_container_installation(config, image, template_path)
@@ -1048,15 +1080,29 @@ def repair_container_network(name: str) -> dict:
     if not rootfs or not rootfs.is_dir():
         raise RuntimeError("container root filesystem is unavailable")
 
-    settings = container_settings(name)
-    if settings.get("ipv4Mode") == "dhcp":
+    state = lightnas_network_state()
+    network_dir = rootfs / "etc" / "systemd" / "network"
+    network_dir.mkdir(parents=True, exist_ok=True)
+
+    if state.get("LIGHTNAS_NETWORK_MODE") == "lxc-nat":
+        # Private LightNAS networking must work even if DHCP/dnsmasq is slow or
+        # unavailable. Assign an unused address from the managed subnet.
+        append_unique(config, "lxc.net.0.type = veth")
+        append_unique(config, "lxc.net.0.link = lightnas0")
+        new_address = next_managed_container_ipv4(name)
+        lines = [
+            "[Match]", "Name=eth0", "", "[Network]",
+            f"Address={new_address}", "Gateway=10.77.0.1", "DNS=10.77.0.1",
+        ]
+        (network_dir / "10-lightnas-eth0.network").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    else:
         append_unique(config, f"lxc.net.0.hwaddr = {unique_container_mac()}")
         machine_id = os.urandom(16).hex()
         (rootfs / "etc" / "machine-id").write_text(machine_id + "\n", encoding="utf-8")
         dbus_machine_id = rootfs / "var" / "lib" / "dbus" / "machine-id"
         if dbus_machine_id.parent.exists() and not dbus_machine_id.is_symlink():
             dbus_machine_id.write_text(machine_id + "\n", encoding="utf-8")
-        network_file = rootfs / "etc" / "systemd" / "network" / "10-lightnas-eth0.network"
+        network_file = network_dir / "10-lightnas-eth0.network"
         if network_file.exists():
             network_text = network_file.read_text(encoding="utf-8")
             if "[DHCPv4]" not in network_text:
@@ -1065,8 +1111,7 @@ def repair_container_network(name: str) -> dict:
                 network_text = network_text.rstrip() + "\nClientIdentifier=mac\n"
             network_file.write_text(network_text, encoding="utf-8")
 
-    was_running = lxc_state(name) == "running"
-    if was_running:
+    if lxc_state(name) == "running":
         run(["lxc-stop", "-n", name, "-t", "20"], timeout=35, check=False)
     run(["lxc-start", "-n", name, "-d"], timeout=60)
 
