@@ -1684,6 +1684,59 @@ def network_action(data: dict) -> dict:
         if bool(data.get("activate")):
             run(["nmcli", "connection", "up", name], timeout=45)
         return {"action": action, "connection": name, "oldRoute": old_route, "route": new_route, "activated": bool(data.get("activate"))}
+    if action == "route-runtime-update":
+        old_destination = str(data.get("oldDestination") or "").strip()
+        old_gateway = str(data.get("oldGateway") or "").strip()
+        destination = str(data.get("destination") or "").strip()
+        gateway = str(data.get("gateway") or "").strip()
+        device = str(data.get("device") or "").strip()
+        try:
+            old_metric = int(data.get("oldMetric") or 0)
+            metric = int(data.get("metric") or 0)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("invalid route metric") from exc
+        if not IFACE_RE.fullmatch(device) or not Path("/sys/class/net", device).exists():
+            raise ValueError("route device is unavailable")
+        if old_destination == "default":
+            old_destination = "default"
+        elif not CIDR_RE.fullmatch(old_destination):
+            raise ValueError("existing route destination is invalid")
+        if destination == "default":
+            destination = "default"
+        elif not CIDR_RE.fullmatch(destination):
+            raise ValueError("route destination must be an IPv4 network in CIDR form or default")
+        try:
+            ipaddress.ip_address(old_gateway)
+            ipaddress.ip_address(gateway)
+        except ValueError as exc:
+            raise ValueError("route gateway must be an IPv4 address") from exc
+        if not (0 <= metric <= 65535 and 0 <= old_metric <= 65535):
+            raise ValueError("invalid route metric")
+
+        old_args = ["ip", "-4", "route", "del", old_destination, "via", old_gateway, "dev", device]
+        if old_metric:
+            old_args += ["metric", str(old_metric)]
+        new_args = ["ip", "-4", "route", "replace", destination, "via", gateway, "dev", device]
+        if metric:
+            new_args += ["metric", str(metric)]
+
+        run(old_args, timeout=20, check=False)
+        try:
+            run(new_args, timeout=20)
+        except Exception:
+            restore = ["ip", "-4", "route", "replace", old_destination, "via", old_gateway, "dev", device]
+            if old_metric:
+                restore += ["metric", str(old_metric)]
+            run(restore, timeout=20, check=False)
+            raise
+        return {
+            "action": action,
+            "destination": destination,
+            "gateway": gateway,
+            "device": device,
+            "metric": metric,
+            "persistent": False,
+        }
     if action == "connection-delete":
         name = str(data.get("name") or "")
         if not CONNECTION_RE.fullmatch(name):
