@@ -1164,7 +1164,7 @@ function bindViewActions() {
       (item.healthy ? 'writable' : 'readonly') + '">' + (item.healthy ? 'HEALTHY' : 'NEEDS ATTENTION') +
       '</span></div>').join('') + '</div>';
   };
-  $('[data-feature-toggle]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+  document.querySelectorAll('#content [data-feature-toggle]').forEach(button => button.addEventListener('click', async () => {
     const key = button.dataset.featureToggle;
     const enabled = button.dataset.featureEnabled !== 'true';
     button.disabled = true;
@@ -1173,7 +1173,7 @@ function bindViewActions() {
     try {
       const result = await request('/api/capabilities/config', { method:'PATCH', body:JSON.stringify({ key, enabled }) });
       state.overview.appliance.features = result.features;
-      $('[data-view]').forEach(link => link.classList.toggle('hidden', !canView(link.dataset.view, state.overview.appliance)));
+      document.querySelectorAll('[data-view]').forEach(link => link.classList.toggle('hidden', !canView(link.dataset.view, state.overview.appliance)));
       render('capabilities');
       toast(`${key} ${enabled ? 'enabled' : 'disabled'}.`);
     } catch (error) {
@@ -1182,7 +1182,7 @@ function bindViewActions() {
       toast(error.message);
     }
   }));
-  $('[data-overview-metric]', $('#content')).forEach(button => button.addEventListener('click', () => {
+  document.querySelectorAll('#content [data-overview-metric]').forEach(button => button.addEventListener('click', () => {
     state.overviewMetric = button.dataset.overviewMetric;
     localStorage.setItem('lightnas-overview-metric', state.overviewMetric);
     render('home');
