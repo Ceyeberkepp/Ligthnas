@@ -417,11 +417,21 @@ function enhanceFileThumbnails() {
   const folder = currentFolder();
   const browserNativeImages = new Set(['jpg','jpeg','png','gif','webp','bmp','svg','avif']);
   for (const button of [...document.querySelectorAll('#content .file-name[data-directory="false"]')]) {
-    if (button.querySelector('.file-thumb')) continue;
     const name = button.dataset.open || '';
     const kind = previewKind(name);
     if (!['image', 'video'].includes(kind)) continue;
     const path = button.dataset.path || joinPath(folder, name);
+    const existing = button.querySelector('.file-thumb');
+    if (existing) {
+      // Mobile browsers can occasionally discard a decoded gallery image
+      // after the full-screen viewer opens. If the tile comes back broken,
+      // force a fresh cached thumbnail request instead of leaving a dead tile.
+      if (button.classList.contains('file-gallery-open') && existing.complete && existing.naturalWidth === 0) {
+        existing.dataset.fallback = '';
+        existing.src = `/api/files/thumbnail?path=${encodeURIComponent(path)}&v=${Date.now()}`;
+      }
+      continue;
+    }
     const extension = name.toLowerCase().split('.').pop();
     const media = document.createElement('img');
     media.className = 'file-thumb';
