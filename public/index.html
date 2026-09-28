@@ -131,7 +131,11 @@
         <span class="task-chevron">⌃</span>
       </button>
       <div class="task-dock-body">
-        <div class="task-dock-head"><span>Start time</span><span>Task</span><span>Status</span></div>
+        <div class="task-dock-actions">
+          <button id="task-cancel-all" class="secondary" type="button">Cancel active</button>
+          <button id="task-clear-all" class="secondary" type="button">Clear all</button>
+        </div>
+        <div class="task-dock-head"><span>Start time</span><span>Task</span><span>Status</span><span>Actions</span></div>
         <div id="task-dock-list" class="task-dock-list"><div class="task-empty">Uploads, installs, VM/container jobs, and transfers will appear here.</div></div>
       </div>
     </section>
