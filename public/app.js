@@ -642,7 +642,7 @@ function filesView() {
         <div><span class="eyebrow">FILES & MEDIA SETTINGS</span><h2>Library settings</h2><p class="muted">Manage phone library sync and desktop file display preferences.</p></div>
         <div class="files-settings-grid">
           <div class="files-setting-box"><b>Desktop view</b><p class="muted">Choose List, Grid, or Photos view on desktop.</p><div class="head-actions"><button class="secondary" type="button" data-file-view="list">☷ List</button><button class="secondary" type="button" data-file-view="grid">▦ Grid</button><button class="secondary" type="button" data-file-view="gallery">▦ Photos</button></div></div>
-          ${state.overview.appliance.role === 'administrator' ? '<div class="files-setting-box"><b>Phone library sync</b><p class="muted">Automatically route phone photos to Photos and phone videos to Videos.</p><button class="primary phone-sync-button" type="button" data-phone-sync>Configure phone sync</button></div>' : ''}
+          ${state.overview.appliance.role === 'administrator' && state.overview.appliance.features?.phoneSync !== false ? '<div class="files-setting-box"><b>Phone library sync</b><p class="muted">Automatically route phone photos to Photos and phone videos to Videos.</p><button class="primary phone-sync-button" type="button" data-phone-sync>Configure phone sync</button></div>' : ''}
         </div>
       </article>
     </section>
@@ -657,7 +657,7 @@ function filesView() {
       <label class="primary upload-button">${section === 'Photos' ? 'Upload photos' : section === 'Videos' ? 'Upload videos' : section === 'Audio' ? 'Upload audio' : 'Upload'}<input id="file-upload" type="file" ${section === 'Photos' ? 'accept="image/*"' : section === 'Videos' ? 'accept="video/*"' : section === 'Audio' ? 'accept="audio/*"' : ''} multiple hidden></label>
       <label class="secondary upload-button">Upload folder<input id="folder-upload" type="file" webkitdirectory directory multiple hidden></label>
       <button class="secondary desktop-files-settings-button" type="button" data-files-settings-tab>⚙ Settings</button>
-      ${state.overview.appliance.role === 'administrator' ? '<button class="secondary phone-sync-button files-sync-trigger" type="button" data-phone-sync>Phone sync</button>' : ''}
+      ${state.overview.appliance.role === 'administrator' && state.overview.appliance.features?.phoneSync !== false ? '<button class="secondary phone-sync-button files-sync-trigger" type="button" data-phone-sync>Phone sync</button>' : ''}
     </div></div>
     <div class="file-drop-zone" data-file-drop tabindex="0"><b>Drop files here</b><span>Multiple files and ZIP archives are supported. Use “Upload folder” to preserve a whole folder tree.</span></div>
     <p class="muted">${allFiles ? 'All files shows only your Documents, Photos, Videos, and Audio libraries.' : 'Open folders normally or switch back to All files to see all four libraries together.'} ZIP and other file types are accepted, uploads have visible progress, and LightNAS does not impose an application-level file-size ceiling.</p>
@@ -1128,7 +1128,25 @@ function bindViewActions() {
       (item.healthy ? 'writable' : 'readonly') + '">' + (item.healthy ? 'HEALTHY' : 'NEEDS ATTENTION') +
       '</span></div>').join('') + '</div>';
   };
-  $$('[data-overview-metric]', $('#content')).forEach(button => button.addEventListener('click', () => {
+  $('[data-feature-toggle]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+    const key = button.dataset.featureToggle;
+    const enabled = button.dataset.featureEnabled !== 'true';
+    button.disabled = true;
+    const original = button.textContent;
+    button.textContent = enabled ? 'Turning on…' : 'Turning off…';
+    try {
+      const result = await request('/api/capabilities/config', { method:'PATCH', body:JSON.stringify({ key, enabled }) });
+      state.overview.appliance.features = result.features;
+      $('[data-view]').forEach(link => link.classList.toggle('hidden', !canView(link.dataset.view, state.overview.appliance)));
+      render('capabilities');
+      toast(`${key} ${enabled ? 'enabled' : 'disabled'}.`);
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = original;
+      toast(error.message);
+    }
+  }));
+  $('[data-overview-metric]', $('#content')).forEach(button => button.addEventListener('click', () => {
     state.overviewMetric = button.dataset.overviewMetric;
     localStorage.setItem('lightnas-overview-metric', state.overviewMetric);
     render('home');
@@ -1447,7 +1465,7 @@ function bindViewActions() {
               <button class="secondary" type="button" data-mobile-file-view="gallery">▦ Photos</button>
             </div>
           </div>
-          ${state.overview.appliance.role === 'administrator' ? '<div class="mobile-files-setting-group"><span class="eyebrow">PHONE LIBRARY</span><button class="secondary" type="button" data-open-phone-sync-from-settings>Phone sync</button></div>' : ''}
+          ${state.overview.appliance.role === 'administrator' && state.overview.appliance.features?.phoneSync !== false ? '<div class="mobile-files-setting-group"><span class="eyebrow">PHONE LIBRARY</span><button class="secondary" type="button" data-open-phone-sync-from-settings>Phone sync</button></div>' : ''}
         </div>`;
       document.body.append(dialog);
       dialog.querySelector('[data-mobile-files-settings-close]')?.addEventListener('click', () => dialog.close());
