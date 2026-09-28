@@ -1040,6 +1040,47 @@ def create_container(data: dict) -> dict:
     }
 
 
+def repair_container_network(name: str) -> dict:
+    config = Path("/var/lib/lxc") / name / "config"
+    if not config.exists():
+        raise ValueError("unknown local LXC container")
+    rootfs = rootfs_from_config(config)
+    if not rootfs or not rootfs.is_dir():
+        raise RuntimeError("container root filesystem is unavailable")
+
+    settings = container_settings(name)
+    if settings.get("ipv4Mode") == "dhcp":
+        append_unique(config, f"lxc.net.0.hwaddr = {unique_container_mac()}")
+        machine_id = os.urandom(16).hex()
+        (rootfs / "etc" / "machine-id").write_text(machine_id + "\n", encoding="utf-8")
+        dbus_machine_id = rootfs / "var" / "lib" / "dbus" / "machine-id"
+        if dbus_machine_id.parent.exists() and not dbus_machine_id.is_symlink():
+            dbus_machine_id.write_text(machine_id + "\n", encoding="utf-8")
+        network_file = rootfs / "etc" / "systemd" / "network" / "10-lightnas-eth0.network"
+        if network_file.exists():
+            network_text = network_file.read_text(encoding="utf-8")
+            if "[DHCPv4]" not in network_text:
+                network_text = network_text.rstrip() + "\n\n[DHCPv4]\nClientIdentifier=mac\n"
+            elif not re.search(r"^ClientIdentifier\s*=\s*mac\s*$", network_text, re.MULTILINE | re.IGNORECASE):
+                network_text = network_text.rstrip() + "\nClientIdentifier=mac\n"
+            network_file.write_text(network_text, encoding="utf-8")
+
+    was_running = lxc_state(name) == "running"
+    if was_running:
+        run(["lxc-stop", "-n", name, "-t", "20"], timeout=35, check=False)
+    run(["lxc-start", "-n", name, "-d"], timeout=60)
+
+    ipv4 = ""
+    for _attempt in range(30):
+        ipv4 = next((value for value in container_addresses(name) if ":" not in value), "")
+        if ipv4:
+            break
+        time.sleep(1)
+    if not ipv4:
+        raise RuntimeError(f"container {name} restarted but did not receive an IPv4 address")
+    return {"id": name, "action": "repair-network", "status": "running", "ipv4": ipv4}
+
+
 def container_action(data: dict) -> dict:
     name = str(data.get("id") or data.get("name") or "").strip()
     action = str(data.get("action") or "")
@@ -1053,6 +1094,8 @@ def container_action(data: dict) -> dict:
         run(["lxc-stop", "-n", name, "-t", "30"], timeout=45)
     elif action == "reboot":
         run(["lxc-stop", "-n", name, "-r", "-t", "30"], timeout=60)
+    elif action == "repair-network":
+        return repair_container_network(name)
     elif action == "delete":
         if data.get("deleteFiles") is not True or str(data.get("confirmation") or "") != name:
             raise ValueError("deleting a container requires delete all files and the exact container ID")
