@@ -68,7 +68,7 @@ function renderTemplateLibrary() {
     <section class="panel">
       <div class="panel-head"><div><span class="eyebrow">CONTAINER TEMPLATE LIBRARY</span><h2>System container templates</h2></div>
         <div class="head-actions">
-          <button class="primary" type="button" data-template-browse>Browse upstream templates</button>
+          <button class="primary" type="button" data-template-browse>Pull image</button>
           <button class="secondary" type="button" data-template-upload>Upload template</button>
           <button class="secondary" type="button" data-template-url>Import URL</button>
         </div>
@@ -150,7 +150,7 @@ async function openUrlDialog(preferredStorageId = '') {
     const form = event.currentTarget;
     const error = dialog.querySelector('[data-template-error]');
     error.textContent = 'Downloading…';
-    const progress = window.LightNASProgress?.open('Downloading container image', form.elements.url.value);
+    const progress = window.LightNASProgress?.open('Pulling container image', form.elements.url.value);
     try {
       await tRequest('/api/templates/import', {
         method: 'POST',
@@ -196,7 +196,7 @@ function renderCatalog(dialog, query = '') {
             <span><b>${tEsc(item.package || item.filename)}</b><small>${tEsc(item.source || '')}</small></span>
             <span>${tEsc(item.version || '')}</span>
             <span>${tEsc(item.description || item.filename)}</span>
-            <span><button class="secondary" type="button" data-template-catalog-file="${tEsc(id)}">Download</button></span>
+            <span><button class="secondary" type="button" data-template-catalog-file="${tEsc(id)}">Pull</button></span>
           </div>`;
         }).join('')}`;
     }).join('')}
@@ -222,7 +222,7 @@ async function openCatalogDialog(preferredStorageId = '') {
     <div class="dialog-actions template-catalog-actions">
       <button class="secondary" type="button" data-template-upload data-template-storage="${tEsc(preferredStorageId)}">Upload template file</button>
       <button class="secondary" type="button" data-template-url data-template-storage="${tEsc(preferredStorageId)}">Import URL</button>
-      <button class="primary" type="button" data-template-download-selected disabled>Download selected</button>
+      <button class="primary" type="button" data-template-download-selected disabled>Pull selected</button>
     </div>`;
   const select = dialog.querySelector('[data-template-catalog-storage]');
   const desired = preferredStorageId || preferredTarget(library.targets);
@@ -268,19 +268,19 @@ document.addEventListener('click', async event => {
     const storageId = dialog.querySelector('[data-template-catalog-storage]')?.value;
     const error = dialog.querySelector('[data-template-error]');
     catalogFile.disabled = true;
-    error.textContent = 'Downloading selected upstream template…';
+    error.textContent = 'Pulling selected upstream image…';
     const selected = templateState.catalog?.find(item => (item.id || item.filename) === catalogFile.dataset.templateCatalogFile);
-    const progress = window.LightNASProgress?.open('Downloading container image', selected?.filename || selected?.package || 'Selected system template');
+    const progress = window.LightNASProgress?.open('Pulling container image', selected?.filename || selected?.package || 'Selected system template');
     try {
       await tRequest('/api/templates/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ storageId, proxmoxTemplate: catalogFile.dataset.templateCatalogFile })
       });
-      error.textContent = 'Template downloaded.';
+      error.textContent = 'Image pulled.';
       await refreshTemplateLibrary();
       catalogFile.textContent = 'Downloaded';
-      progress?.succeed(`${selected?.package || selected?.filename || 'The container image'} downloaded successfully and is ready to use.`);
+      progress?.succeed(`${selected?.package || selected?.filename || 'The container image'} pulled successfully and is ready to use.`);
     } catch (problem) {
       error.textContent = problem.message;
       catalogFile.disabled = false;
