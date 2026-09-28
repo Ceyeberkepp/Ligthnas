@@ -777,11 +777,106 @@ async function uploadFilesWithProgress(fileList, folderMode = false) {
 }
 
 
-function capabilitiesView() {
-  const { system } = state.overview;
-  return `${pageHead('System capabilities', 'Hardware eligibility estimates; these services may still need installation.')}
-    <div class="capability-list">${system.capabilities.map(item => `<article class="capability-row"><div><b>${escapeHtml(item.name)}</b><p>${escapeHtml(item.available ? `Hardware requirement met · ${item.minimum}` : item.reason)}</p></div><span class="badge ${item.available ? 'available' : 'gated'}">${item.available ? 'ELIGIBLE' : 'HARDWARE GATED'}</span></article>`).join('')}</div>`;
+function seriesStats(values = []) {
+  const clean = values.map(Number).filter(Number.isFinite);
+  if (!clean.length) return { current: 0, average: 0, peak: 0, minimum: 0 };
+  return {
+    current: clean.at(-1) || 0,
+    average: clean.reduce((sum, value) => sum + value, 0) / clean.length,
+    peak: Math.max(...clean),
+    minimum: Math.min(...clean)
+  };
 }
+
+function monitoringView() {
+  const system = state.overview.system || {};
+  const storage = state.overview.storage?.usableStorage || state.overview.storage?.virtualStorage || state.overview.storage?.local || {};
+  const cpu = seriesStats(state.metricHistory.cpu);
+  const memory = seriesStats(state.metricHistory.memory);
+  const load = seriesStats(state.metricHistory.load);
+  const networkIn = seriesStats(state.metricHistory.networkIn);
+  const networkOut = seriesStats(state.metricHistory.networkOut);
+  const analyticsEnabled = state.overview.appliance.features?.monitoringAnalytics !== false;
+  const activity = state.overview.activity || [];
+  return `${pageHead('Monitoring & analytics', 'Live performance graphs, session analytics, and recent system activity.', '<button class="secondary" data-action="refresh">Refresh now</button>')}
+    <section class="monitoring-live-grid">
+      ${overviewChart('CPU usage', `${system.cpu?.loadPercent || 0}`, '%', state.metricHistory.cpu)}
+      ${overviewChart('Memory usage', `${system.memory?.usedPercent || 0}`, '%', state.metricHistory.memory)}
+      ${overviewChart('System load', `${system.cpu?.loadAverage?.[0] || 0}`, '', state.metricHistory.load, Math.max(2, system.cpu?.cores || 1))}
+      ${overviewNetworkChart(system)}
+    </section>
+    ${analyticsEnabled ? `<section class="analytics-section">
+      <div class="section-heading"><div><span class="eyebrow">SESSION ANALYTICS</span><h2>Performance summary</h2></div><small>Updates every 5 seconds · ${state.metricHistory.cpu.length} samples</small></div>
+      <div class="analytics-grid">
+        <article class="panel analytics-card"><span>CPU average</span><strong>${cpu.average.toFixed(1)}%</strong><small>Peak ${cpu.peak.toFixed(1)}% · current ${cpu.current.toFixed(1)}%</small></article>
+        <article class="panel analytics-card"><span>Memory average</span><strong>${memory.average.toFixed(1)}%</strong><small>Peak ${memory.peak.toFixed(1)}% · ${bytes(system.memory?.freeBytes || 0)} free now</small></article>
+        <article class="panel analytics-card"><span>Load average</span><strong>${load.average.toFixed(2)}</strong><small>Peak ${load.peak.toFixed(2)} · ${system.cpu?.cores || 0} logical CPUs</small></article>
+        <article class="panel analytics-card"><span>Network peak</span><strong>↓ ${bytes(networkIn.peak)}/s</strong><small>↑ ${bytes(networkOut.peak)}/s transmitted</small></article>
+        <article class="panel analytics-card"><span>Storage used</span><strong>${Number(storage.usedPercent || 0)}%</strong><small>${bytes(storage.usedBytes || 0)} of ${bytes(storage.totalBytes || 0)}</small></article>
+        <article class="panel analytics-card"><span>Uptime</span><strong>${duration(system.uptimeSeconds || 0)}</strong><small>${activity.length} recent activity event${activity.length === 1 ? '' : 's'}</small></article>
+      </div>
+    </section>` : ''}
+    <section class="monitoring-activity panel">
+      <div class="panel-head"><div><span class="eyebrow">ACTIVITY</span><h2>Recent system events</h2></div><small>Newest first</small></div>
+      <div class="activity-list">${activity.length ? activity.map(item => `<div class="activity"><span class="activity-icon">${item.severity === 'warning' ? '!' : item.severity === 'success' ? '✓' : '↗'}</span><div><b>${escapeHtml(item.message)}</b><time>${relativeTime(item.timestamp)}</time></div></div>`).join('') : '<p class="muted">No recent activity.</p>'}</div>
+    </section>`;
+}
+
+function capabilitiesView() {
+  const { system, appliance } = state.overview;
+  const hardware = system.capabilities || [];
+  const features = appliance.features || {};
+  const optional = [
+    ['appStore', 'App Store', 'One-click application catalog and managed app hosting.', 'apps'],
+    ['containers', 'System containers', 'Native Linux system containers and terminal access.', 'containers'],
+    ['virtualMachines', 'Virtual machines', 'KVM/libvirt or supported hypervisor virtual machines.', 'vms'],
+    ['ai', 'AI workspace', 'Local and remote AI tools, model runtimes, and AI applications.', 'ai'],
+    ['phoneSync', 'Phone library sync', 'Automatic phone photo/video uploads into Files & media.', 'files'],
+    ['monitoringAnalytics', 'Monitoring analytics', 'Live charts and session performance analytics.', 'monitoring'],
+    ['integrations', 'Integrations', 'Host runtimes, external services, and provider connections.', 'integrations']
+  ];
+  return `${pageHead('Capabilities', 'Review hardware support and control optional LightNAS features.')}
+    <section class="capability-overview-grid">
+      <article class="panel capability-overview"><span class="eyebrow">HARDWARE</span><strong>${hardware.filter(item => item.available).length}/${hardware.length}</strong><p>hardware capability checks passed</p></article>
+      <article class="panel capability-overview"><span class="eyebrow">FEATURES</span><strong>${optional.filter(([key]) => features[key] !== false).length}/${optional.length}</strong><p>optional LightNAS features enabled</p></article>
+      <article class="panel capability-overview"><span class="eyebrow">CPU</span><strong>${system.cpu?.cores || 0}</strong><p>logical cores · ${escapeHtml(system.architecture || '')}</p></article>
+      <article class="panel capability-overview"><span class="eyebrow">MEMORY</span><strong>${bytes(system.memory?.totalBytes || 0)}</strong><p>${system.memory?.usedPercent || 0}% currently used</p></article>
+    </section>
+    <section class="capability-section">
+      <div class="section-heading"><div><span class="eyebrow">FEATURE CONTROL</span><h2>Optional services & interface modules</h2><p class="muted">Turn LightNAS features on or off without uninstalling your data or applications.</p></div></div>
+      <div class="capability-toggle-grid">${optional.map(([key, name, description, target]) => {
+        const enabled = features[key] !== false;
+        return `<article class="panel capability-toggle-card"><div><div class="capability-title-row"><h3>${escapeHtml(name)}</h3><span class="user-status ${enabled ? 'active' : 'disabled'}">${enabled ? 'ENABLED' : 'DISABLED'}</span></div><p>${escapeHtml(description)}</p></div><div class="capability-actions"><button class="secondary" type="button" data-view-link="${target}">Open</button>${appliance.role === 'administrator' ? `<button class="${enabled ? 'secondary' : 'primary'}" type="button" data-feature-toggle="${key}" data-feature-enabled="${enabled}">${enabled ? 'Turn off' : 'Turn on'}</button>` : ''}</div></article>`;
+      }).join('')}</div>
+    </section>
+    <section class="capability-section">
+      <div class="section-heading"><div><span class="eyebrow">HARDWARE ELIGIBILITY</span><h2>Detected system capabilities</h2></div></div>
+      <div class="capability-list">${hardware.map(item => `<article class="capability-row"><div><b>${escapeHtml(item.name)}</b><p>${escapeHtml(item.available ? `Requirement met · ${item.minimum}` : item.reason)}</p></div><span class="badge ${item.available ? 'available' : 'gated'}">${item.available ? 'READY' : 'LIMITED'}</span></article>`).join('')}</div>
+    </section>`;
+}
+
+function aiView() {
+  const apps = state.runtimes?.catalog || [];
+  const docker = state.runtimes?.docker;
+  const aiApps = apps.filter(app => String(app.category || '').toLowerCase() === 'ai' || ['ollama','flowise','localai','open-webui'].includes(String(app.id || '').toLowerCase()));
+  const localAi = state.overview.system?.capabilities?.find(item => item.name === 'Local AI');
+  return `${pageHead('AI', 'Run local AI services, model runtimes, and AI workflows from LightNAS.', '<button class="secondary" data-action="refresh-runtime">Refresh AI</button>')}
+    <section class="ai-summary-grid">
+      <article class="panel ai-summary-card"><span class="eyebrow">LOCAL AI</span><strong>${localAi?.available ? 'Ready' : 'Limited'}</strong><p>${escapeHtml(localAi?.available ? 'Hardware meets the local AI baseline.' : localAi?.reason || 'Hardware status unavailable.')}</p></article>
+      <article class="panel ai-summary-card"><span class="eyebrow">AI APPS</span><strong>${aiApps.length}</strong><p>AI applications available in the LightNAS catalog.</p></article>
+      <article class="panel ai-summary-card"><span class="eyebrow">APP ENGINE</span><strong>${docker?.available && docker?.enabled ? 'Online' : 'Offline'}</strong><p>${escapeHtml(docker?.available && docker?.enabled ? 'Managed AI applications can be launched.' : docker?.reason || 'App runtime is not ready.')}</p></article>
+    </section>
+    <section class="ai-workspace">
+      <div class="section-heading"><div><span class="eyebrow">AI WORKSPACE</span><h2>Available AI tools</h2><p class="muted">Install a model runtime, workflow builder, or compatible AI service directly from the App Store engine.</p></div></div>
+      <div class="tool-grid ai-app-grid">${aiApps.map(app => {
+        const instance = docker?.containers?.find(container => container.name === `lightnas-app-${app.id}`);
+        const running = instance?.state === 'running';
+        const appUrl = `http://${location.hostname}:${app.port}/`;
+        return `<article class="panel app-card"><span class="eyebrow">${escapeHtml(app.category || 'AI')}</span><h2>${escapeHtml(app.name)}</h2><p class="muted">${escapeHtml(app.description || '')}</p><p class="muted app-source">${escapeHtml(app.image || '')} · Port ${app.port}</p>${instance ? `<div class="head-actions">${running ? `<a class="primary" href="${escapeHtml(appUrl)}" target="_blank" rel="noopener">Open</a>` : ''}<button class="secondary" data-app-action="${running ? 'stop' : 'start'}" data-app-id="${app.id}">${running ? 'Stop' : 'Start'}</button><button class="secondary" data-app-action="restart" data-app-id="${app.id}">Restart</button></div>` : `<button class="primary" data-install="${app.id}">Install</button>`}</article>`;
+      }).join('') || '<div class="empty compact-empty"><p>Loading AI application catalog…</p></div>'}</div>
+    </section>`;
+}
+
 
 function settingsView() {
   const { appliance } = state.overview;
