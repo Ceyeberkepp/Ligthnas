@@ -242,7 +242,7 @@ EOF
       [[ -f "$config" ]] || continue
       link="$(sed -nE 's/^lxc\.net\.[0-9]+\.link\s*=\s*([^[:space:]]+).*/\1/p' "$config" | head -1)"
       type="$(sed -nE 's/^lxc\.net\.[0-9]+\.type\s*=\s*([^[:space:]]+).*/\1/p' "$config" | head -1)"
-      [[ "$link" =~ ^(virbr0|lxcbr0)$ || "$type" == "macvlan" ]] || continue
+      [[ "$link" =~ ^(virbr0|lxcbr0|lightnas0)$ || "$type" == "macvlan" ]] || continue
       name="$(basename "$(dirname "$config")")"
       was_running=0
       [[ "$(lxc-info -n "$name" -sH 2>/dev/null || true)" == "RUNNING" ]] && was_running=1
