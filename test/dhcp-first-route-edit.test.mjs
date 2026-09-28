@@ -8,7 +8,7 @@ test('container wizard defaults to DHCP and only enables static fields on manual
   const controls = await read('public/dialog-controls.js');
   assert.match(controls, /<option value="dhcp">DHCP \/ automatic<\/option>/);
   assert.match(controls, /form\.elements\.ipv4Mode\.value = 'dhcp'/);
-  assert.match(controls, /field\.disabled = !manual/);
+  assert.match(controls, /form\.elements\[name\]\.disabled = !manual/);
   assert.match(controls, /if \(!manual\) form\.elements\[name\]\.value = ''/);
 });
 
