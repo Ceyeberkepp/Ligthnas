@@ -1451,3 +1451,97 @@
     justify-content:flex-start;
   }
 }
+
+
+/* Compact Settings & Security extensions */
+.totp-admin {
+  margin-top:10px;
+  padding:14px 16px;
+}
+.totp-admin .admin-section-head {
+  margin-bottom:8px;
+}
+.totp-admin .admin-section-head h2 {
+  margin:2px 0 3px;
+}
+.totp-admin .admin-section-head p {
+  margin:0;
+}
+.mfa-method-grid {
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:8px;
+  margin:8px 0 10px;
+}
+.mfa-method {
+  display:grid;
+  grid-template-columns:auto minmax(0,1fr) auto;
+  gap:9px;
+  align-items:start;
+  padding:11px 12px !important;
+}
+.mfa-method h3 {
+  margin:0 0 3px;
+  font-size:13px;
+}
+.mfa-method p {
+  margin:0;
+  color:var(--muted);
+  font-size:10px;
+  line-height:1.35;
+}
+.mfa-icon {
+  min-width:34px;
+  height:28px;
+  display:grid;
+  place-items:center;
+  border-radius:8px;
+  background:var(--panel-2);
+  font-size:9px;
+  font-weight:800;
+}
+.mfa-config-grid {
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:8px;
+}
+.mfa-config {
+  padding:11px 12px !important;
+}
+.mfa-config h3 {
+  margin:0 0 8px;
+  font-size:13px;
+}
+.security-stack-form {
+  display:grid;
+  gap:8px;
+}
+.security-stack-form label {
+  margin:0;
+}
+.security-enrollment {
+  margin-top:8px;
+  padding:10px;
+}
+.security-enrollment p {
+  margin-top:0;
+}
+.totp-qr {
+  max-width:180px;
+}
+.automation-admin {
+  margin-top:10px;
+}
+.admin-section-head {
+  gap:10px;
+}
+.admin-section-head h2 {
+  margin:2px 0 3px;
+}
+
+@media (max-width:900px) {
+  .mfa-method-grid,
+  .mfa-config-grid {
+    grid-template-columns:1fr;
+  }
+}
