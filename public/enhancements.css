@@ -1682,3 +1682,32 @@
     align-items:flex-start;
   }
 }
+
+
+/* Editable routes */
+.route-row {
+  grid-template-columns:minmax(130px,1.2fr) minmax(130px,1fr) minmax(100px,.8fr) 90px auto;
+}
+.route-row small {
+  display:block;
+  margin-top:2px;
+  color:var(--muted);
+  font-size:10px;
+}
+.route-row .runtime-actions {
+  justify-content:flex-end;
+}
+.route-managed-label {
+  font-size:10px;
+  text-transform:uppercase;
+  letter-spacing:.04em;
+}
+@media (max-width:760px) {
+  .route-row {
+    grid-template-columns:1fr 1fr;
+  }
+  .route-row .runtime-actions {
+    grid-column:1 / -1;
+    justify-content:flex-start;
+  }
+}
