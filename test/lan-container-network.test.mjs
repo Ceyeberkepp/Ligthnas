@@ -9,14 +9,14 @@ test('LightNAS installs LXC networking for every supported installation', async 
   assert.doesNotMatch(installer, /if ! systemd-detect-virt --container[^\n]+LIGHTNAS_ENABLE_NESTED_RUNTIMES[^\n]+then\n\s+echo "      Installing native system-container/);
 });
 
-test('nested LightNAS keeps the working eth0 and uses it as the direct container LAN parent', async () => {
+test('nested LightNAS keeps management networking unchanged and defaults guests to managed NAT', async () => {
   const network = await readFile(new URL('../scripts/configure-appliance-network.sh', import.meta.url), 'utf8');
-  assert.match(network, /never move or readdress the/);
-  assert.match(network, /type macvlan mode bridge/);
-  assert.match(network, /LIGHTNAS_NETWORK_MODE=nested-macvlan/);
-  assert.match(network, /LIGHTNAS_CONTAINER_PARENT=%s/);
-  assert.match(network, /management networking is unchanged/);
-  assert.match(network, /nested macvlan is unavailable; using managed NAT fallback/);
+  assert.match(network, /use the LightNAS-owned NAT bridge by default/);
+  assert.match(network, /LIGHTNAS_NESTED_LAN_MODE:-nat/);
+  assert.match(network, /LIGHTNAS_NETWORK_MODE=lxc-nat/);
+  assert.match(network, /LIGHTNAS_CONTAINER_BRIDGE=lightnas0/);
+  assert.match(network, /advanced nested macvlan mode enabled/);
+  assert.match(network, /requested nested macvlan is unavailable; falling back to managed NAT/);
 });
 
 test('host agent creates nested system containers as macvlan children of the existing uplink', async () => {
@@ -27,14 +27,14 @@ test('host agent creates nested system containers as macvlan children of the exi
   assert.match(agent, /return \[parent\]/);
 });
 
-test('runtime provisioning migrates old 10.77 containers to eth0 macvlan automatically', async () => {
+test('runtime provisioning migrates old nested macvlan containers to managed NAT automatically', async () => {
   const provision = await readFile(new URL('../scripts/provision-runtimes.sh', import.meta.url), 'utf8');
   assert.match(provision, /set_flag LIGHTNAS_ALLOW_NESTED_LXC 1/);
-  assert.match(provision, /network_mode.*nested-macvlan/);
-  assert.match(provision, /lxc\.net\.0\.type = macvlan/);
-  assert.match(provision, /lxc\.net\.0\.macvlan\.mode = bridge/);
-  assert.match(provision, /systemctl disable --now lightnas-container-network\.service/);
-  assert.match(provision, /containers receive real LAN addresses/);
+  assert.match(provision, /network_mode.*lxc-nat/);
+  assert.match(provision, /\$type" == "macvlan/);
+  assert.match(provision, /lxc\.net\.0\.type = veth/);
+  assert.match(provision, /lxc\.net\.0\.link = lightnas0/);
+  assert.match(provision, /managed NAT fallback/);
 });
 
 test('Proxmox installer preserves net0 settings and only disables its firewall flag for nested MACs', async () => {
