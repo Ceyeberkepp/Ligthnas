@@ -236,12 +236,14 @@ EOF
     for config in /var/lib/lxc/*/config; do
       [[ -f "$config" ]] || continue
       link="$(sed -nE 's/^lxc\.net\.[0-9]+\.link\s*=\s*([^[:space:]]+).*/\1/p' "$config" | head -1)"
-      [[ "$link" =~ ^(virbr0|lxcbr0)$ ]] || continue
+      type="$(sed -nE 's/^lxc\.net\.[0-9]+\.type\s*=\s*([^[:space:]]+).*/\1/p' "$config" | head -1)"
+      [[ "$link" =~ ^(virbr0|lxcbr0)$ || "$type" == "macvlan" ]] || continue
       name="$(basename "$(dirname "$config")")"
       was_running=0
       [[ "$(lxc-info -n "$name" -sH 2>/dev/null || true)" == "RUNNING" ]] && was_running=1
       [[ "$was_running" == "1" ]] && lxc-stop -n "$name" -t 30 >/dev/null 2>&1 || true
-      sed -Ei 's#^(lxc\.net\.[0-9]+\.link\s*=\s*)(virbr0|lxcbr0)\s*$#\1lightnas0#' "$config"
+      sed -i '/^lxc\.net\.0\.type\s*=/d;/^lxc\.net\.0\.link\s*=/d;/^lxc\.net\.0\.macvlan\.mode\s*=/d;/^lxc\.net\.0\.vlan\.id\s*=/d' "$config"
+      printf '%s\n' 'lxc.net.0.type = veth' 'lxc.net.0.link = lightnas0' >>"$config"
       [[ "$was_running" == "1" ]] && lxc-start -n "$name" -d >/dev/null 2>&1 || true
     done
   fi
