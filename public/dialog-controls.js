@@ -757,21 +757,39 @@ async function showContainerManager(id) {
         || payload.gateway.trim() !== String(item.gateway || '').trim()
         || payload.dns.trim() !== String(item.dns || '').trim()
         || payload.startOnBoot !== (item.startOnBoot !== false);
-      if (settingsChanged) await dialogApi('/api/containers', { method: 'POST', body: JSON.stringify(payload) });
-      const access = await dialogApi('/api/containers', { method: 'POST', body: JSON.stringify({
-        id,
-        action: 'auto-publish',
-        targetPort: Number(values.targetPort) || 0,
-        hostPort: Number(values.hostPort) || 0
-      }) });
+      let updateResult = null;
+      if (settingsChanged) {
+        updateResult = await dialogApi('/api/containers', { method: 'POST', body: JSON.stringify(payload) });
+      }
+
+      let access = null;
+      let publishWarning = '';
+      try {
+        access = await dialogApi('/api/containers', { method: 'POST', body: JSON.stringify({
+          id,
+          action: 'auto-publish',
+          targetPort: Number(values.targetPort) || 0,
+          hostPort: Number(values.hostPort) || 0
+        }) });
+      } catch (problem) {
+        // Application discovery is secondary to saving container settings.
+        // Do not report "Save failed" after networking/resources were already
+        // saved successfully.
+        publishWarning = problem.message || 'Application access is not ready yet.';
+      }
+
       dialog.close();
       refreshRuntime();
       const detectedUrl = access?.accessUrl || (access?.mode === 'direct'
         ? `${access.scheme || 'http'}://${access.targetHost}${((access.scheme || 'http') === 'https' && Number(access.targetPort) === 443) || ((access.scheme || 'http') === 'http' && Number(access.targetPort) === 80) ? '' : `:${access.targetPort}`}/`
         : access?.mode === 'proxy' ? `${access.scheme || 'http'}://${location.hostname}:${access.hostPort}/` : '');
+      const ipNote = updateResult?.ipv4 ? ` IPv4: ${updateResult.ipv4}.` : '';
+      const fallbackNote = updateResult?.automaticFallback
+        ? ' DHCP was attempted first; this nested host required LightNAS managed automatic addressing.'
+        : '';
       progress.succeed(detectedUrl
-        ? `${item.name || id} was saved. Its application is available at ${detectedUrl}`
-        : `${item.name || id} was saved. LightNAS will detect its web application automatically after the service starts.`);
+        ? `${item.name || id} was saved.${ipNote}${fallbackNote} Its application is available at ${detectedUrl}`
+        : `${item.name || id} was saved.${ipNote}${fallbackNote}${publishWarning ? ` Application discovery is pending: ${publishWarning}` : ' LightNAS will detect any web application automatically after the service starts.'}`);
     } catch (problem) {
       progress.fail(problem.message);
       error.textContent = problem.message;
