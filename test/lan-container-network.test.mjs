@@ -34,7 +34,7 @@ test('runtime provisioning migrates old nested macvlan containers to managed NAT
   assert.match(provision, /\$type" == "macvlan/);
   assert.match(provision, /lxc\.net\.0\.type = veth/);
   assert.match(provision, /lxc\.net\.0\.link = lightnas0/);
-  assert.match(provision, /10\\.77\\.0\\.0\/24 NAT fallback/);
+  assert.match(provision, /10\.77\.0\.0\/24 NAT fallback/);
 });
 
 test('Proxmox installer preserves net0 settings and only disables its firewall flag for nested MACs', async () => {
