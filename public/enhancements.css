@@ -955,3 +955,52 @@
 @media (max-width:760px) {
   .desktop-files-settings-button { display:none !important; }
 }
+
+
+/* Compact Files & media tab spacing */
+.files-page > .page-head {
+  margin-bottom:14px;
+}
+.files-page > .library-tabs {
+  padding:2px 1px 6px;
+  margin-bottom:2px;
+}
+.files-page .file-toolbar {
+  padding:6px 0 8px;
+  margin-bottom:6px;
+}
+.files-page .file-drop-zone {
+  margin:6px 0 8px;
+  min-height:50px;
+}
+.files-page .desktop-files-settings-panel {
+  margin:8px 0 12px;
+}
+.files-page .files-library-content > p.muted {
+  margin:4px 0 10px;
+}
+.files-page .file-browser-grid,
+.files-page .file-photo-gallery,
+.files-page .storage-list {
+  margin-top:0;
+}
+
+@media (max-width:760px) {
+  .files-page > .page-head {
+    margin-bottom:10px;
+  }
+  .files-page > .library-tabs {
+    padding:0 0 4px;
+    margin-bottom:0;
+  }
+  .files-page .file-toolbar {
+    padding:4px 0 6px;
+    margin-bottom:4px;
+  }
+  .files-page .files-library-content > p.muted {
+    margin:2px 0 7px;
+  }
+  .files-page.photo-mode {
+    padding-top:44px;
+  }
+}
