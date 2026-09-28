@@ -858,6 +858,7 @@ def configure_container_guest(config: Path, data: dict) -> None:
         "network": str(data.get("network") or ""),
         "imageId": str(data.get("image") or ""),
         "templateFile": Path(str(data.get("templatePath") or "")).name,
+        "ipv4Mode": mode,
         "createdBy": "LightNAS",
     }
     (config.parent / "lightnas.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
@@ -892,6 +893,22 @@ def verify_container_installation(config: Path, image: dict | None, template_pat
         "name": values.get("PRETTY_NAME") or values.get("NAME") or (Path(template_path).name if template_path else "Linux"),
         "version": values.get("VERSION_ID") or values.get("VERSION_CODENAME") or "",
     }
+
+
+
+def kick_container_dhcp(name: str) -> None:
+    """Make a DHCP-configured guest actively request/renew an IPv4 lease."""
+    commands = [
+        ["lxc-attach", "-n", name, "--", "ip", "link", "set", "eth0", "up"],
+        ["lxc-attach", "-n", name, "--", "systemctl", "restart", "systemd-networkd.service"],
+        ["lxc-attach", "-n", name, "--", "networkctl", "reload"],
+        ["lxc-attach", "-n", name, "--", "networkctl", "reconfigure", "eth0"],
+    ]
+    for args in commands:
+        try:
+            run(args, timeout=20, check=False)
+        except Exception:
+            pass
 
 
 def create_container(data: dict) -> dict:
@@ -961,15 +978,6 @@ def create_container(data: dict) -> dict:
     else:
         config = bootstrap_template_container(name, image, storage_root_value)
 
-    if network_state.get("LIGHTNAS_NETWORK_MODE") == "lxc-nat" and str(data.get("ipv4Mode") or "dhcp") == "dhcp":
-        data = {
-            **data,
-            "ipv4Mode": "manual",
-            "ipv4Address": next_managed_container_ipv4(name),
-            "gateway": "10.77.0.1",
-            "dns": "10.77.0.1",
-        }
-
     try:
         configure_container_guest(config, data)
         installed_guest = verify_container_installation(config, image, template_path)
@@ -1022,12 +1030,14 @@ def create_container(data: dict) -> dict:
         # deleting user data after an image was successfully created.
         raise RuntimeError(f"container {name} was built but could not start; inspect lxc-start -n {name} -F -l DEBUG")
 
+    if str(data.get("ipv4Mode") or "dhcp") == "dhcp":
+        kick_container_dhcp(name)
+
     ipv4 = ""
     default_route = ""
-    # Do not report a successful container creation until the guest has a real
-    # IPv4 address. Managed NAT addresses are normally static and appear very
-    # quickly; direct-LAN/macvlan mode may wait on upstream DHCP.
-    for _attempt in range(30):
+    # DHCP is the default for every new container. Wait for the guest to
+    # acquire both an address and a default route before reporting success.
+    for _attempt in range(60):
         addresses = [address for address in container_addresses(name) if ":" not in address]
         ipv4 = next((address for address in addresses if not direct_macvlan or not address.startswith("10.77.0.")), "")
         if ipv4:
@@ -1078,20 +1088,42 @@ def repair_container_network(name: str) -> dict:
         raise RuntimeError("container root filesystem is unavailable")
 
     state = lightnas_network_state()
+    settings = container_settings(name)
+    metadata_path = config.parent / "lightnas.json"
+    metadata = {}
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        pass
+
+    # New containers are DHCP by default. Legacy LightNAS builds silently
+    # converted DHCP requests to a private static 10.77.0.x address; those
+    # records have no ipv4Mode metadata and are restored to DHCP here.
+    explicit_manual = metadata.get("ipv4Mode") == "manual"
+    mode = "manual" if explicit_manual else "dhcp"
+
     network_dir = rootfs / "etc" / "systemd" / "network"
     network_dir.mkdir(parents=True, exist_ok=True)
+    for existing in network_dir.glob("*.network"):
+        if existing.is_file() or existing.is_symlink():
+            existing.unlink()
 
     if state.get("LIGHTNAS_NETWORK_MODE") == "lxc-nat":
-        # Private LightNAS networking must work even if DHCP/dnsmasq is slow or
-        # unavailable. Assign an unused address from the managed subnet.
         append_unique(config, "lxc.net.0.type = veth")
         append_unique(config, "lxc.net.0.link = lightnas0")
-        new_address = next_managed_container_ipv4(name)
-        lines = [
-            "[Match]", "Name=eth0", "", "[Network]",
-            f"Address={new_address}", "Gateway=10.77.0.1", "DNS=10.77.0.1",
-        ]
-        (network_dir / "10-lightnas-eth0.network").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    lines = ["[Match]", "Name=eth0", "", "[Network]"]
+    if mode == "manual":
+        address = str(settings.get("ipv4Address") or "").strip()
+        gateway = str(settings.get("gateway") or "").strip()
+        dns_values = [item.strip() for item in str(settings.get("dns") or "").split(",") if item.strip()]
+        if not address:
+            raise RuntimeError("container is marked static but has no IPv4 address configured")
+        lines.append(f"Address={address}")
+        if gateway:
+            lines.append(f"Gateway={gateway}")
+        for item in dns_values:
+            lines.append(f"DNS={item}")
     else:
         append_unique(config, f"lxc.net.0.hwaddr = {unique_container_mac()}")
         machine_id = os.urandom(16).hex()
@@ -1099,28 +1131,50 @@ def repair_container_network(name: str) -> dict:
         dbus_machine_id = rootfs / "var" / "lib" / "dbus" / "machine-id"
         if dbus_machine_id.parent.exists() and not dbus_machine_id.is_symlink():
             dbus_machine_id.write_text(machine_id + "\n", encoding="utf-8")
-        network_file = network_dir / "10-lightnas-eth0.network"
-        if network_file.exists():
-            network_text = network_file.read_text(encoding="utf-8")
-            if "[DHCPv4]" not in network_text:
-                network_text = network_text.rstrip() + "\n\n[DHCPv4]\nClientIdentifier=mac\n"
-            elif not re.search(r"^ClientIdentifier\s*=\s*mac\s*$", network_text, re.MULTILINE | re.IGNORECASE):
-                network_text = network_text.rstrip() + "\nClientIdentifier=mac\n"
-            network_file.write_text(network_text, encoding="utf-8")
+        lines += ["DHCP=ipv4", "IPv6AcceptRA=yes", "", "[DHCPv4]", "ClientIdentifier=mac"]
+        metadata["ipv4Mode"] = "dhcp"
+        try:
+            metadata_path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+        except OSError:
+            pass
+
+    (network_dir / "10-lightnas-eth0.network").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    subprocess.run(
+        ["systemctl", "--root", str(rootfs), "disable", "NetworkManager.service", "networking.service"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+    )
+    subprocess.run(
+        ["systemctl", "--root", str(rootfs), "enable", "systemd-networkd.service"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+    )
 
     if lxc_state(name) == "running":
         run(["lxc-stop", "-n", name, "-t", "20"], timeout=35, check=False)
     run(["lxc-start", "-n", name, "-d"], timeout=60)
+    if mode == "dhcp":
+        kick_container_dhcp(name)
 
     ipv4 = ""
-    for _attempt in range(30):
+    default_route = ""
+    for _attempt in range(60):
         ipv4 = next((value for value in container_addresses(name) if ":" not in value), "")
         if ipv4:
-            break
+            try:
+                default_route = run(
+                    ["lxc-attach", "-n", name, "--", "ip", "-4", "route", "show", "default"],
+                    timeout=5,
+                    check=False,
+                ).strip()
+            except Exception:
+                default_route = ""
+            if default_route:
+                break
         time.sleep(1)
     if not ipv4:
-        raise RuntimeError(f"container {name} restarted but did not receive an IPv4 address")
-    return {"id": name, "action": "repair-network", "status": "running", "ipv4": ipv4}
+        raise RuntimeError(f"container {name} restarted in {mode.upper()} mode but did not receive an IPv4 address")
+    if not default_route:
+        raise RuntimeError(f"container {name} received {ipv4} but has no IPv4 default route")
+    return {"id": name, "action": "repair-network", "status": "running", "ipv4": ipv4, "ipv4Mode": mode, "defaultRoute": default_route}
 
 
 def container_action(data: dict) -> dict:
@@ -1220,6 +1274,16 @@ def update_container(data: dict) -> dict:
             lines.append(f"DNS={item}")
     (network_dir / "10-lightnas-eth0.network").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
+    metadata_path = config.parent / "lightnas.json"
+    metadata = {}
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        pass
+    metadata["ipv4Mode"] = mode
+    metadata["network"] = requested_network or metadata.get("network") or ""
+    metadata_path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+
     interfaces = rootfs / "etc" / "network" / "interfaces"
     if interfaces.parent.exists():
         interfaces.write_text("auto lo\niface lo inet loopback\n", encoding="utf-8")
@@ -1239,6 +1303,8 @@ def update_container(data: dict) -> dict:
             ["lxc-attach", "-n", current, "--", "systemctl", "restart", "systemd-networkd.service"],
             check=False, capture_output=True, timeout=30,
         )
+        if mode == "dhcp":
+            kick_container_dhcp(current)
     return {
         "id": current, "name": current, "memoryMiB": memory, "cpus": cpus,
         "network": requested_network, "ipv4Mode": mode, "ipv4Address": address,
