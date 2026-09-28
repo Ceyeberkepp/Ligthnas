@@ -13,12 +13,13 @@ test('nested container creation always uses the LightNAS LAN parent and DHCP', a
   assert.match(agent, /lxc\.net\.0\.type = \{'macvlan' if direct_macvlan else 'veth'\}/);
 });
 
-test('container creation waits for a usable IPv4 and default route', async () => {
+test('container creation is DHCP-first and guarantees managed automatic IPv4 when nested DHCP fails', async () => {
   const agent = await readFile(new URL('../scripts/lightnas-host-agent.py', import.meta.url), 'utf8');
-  assert.match(agent, /for _attempt in range\(60\)/);
-  assert.match(agent, /ip", "-4", "route", "show", "default"/);
-  assert.match(agent, /did not receive an IPv4 address/);
-  assert.match(agent, /has no IPv4 default route/);
+  assert.match(agent, /DHCP is always attempted first/);
+  assert.match(agent, /def apply_managed_automatic_address/);
+  assert.match(agent, /lxc\.net\.0\.ipv4\.address/);
+  assert.match(agent, /lxc\.net\.0\.ipv4\.gateway/);
+  assert.match(agent, /automaticFallback/);
   assert.match(agent, /"networkMode": "direct-lan" if direct_macvlan else "managed"/);
 });
 
