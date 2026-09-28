@@ -15,3 +15,11 @@ test('template extraction skips archived dev nodes in nested unprivileged LightN
   assert.match(agent, /\(rootfs \/ "dev"\)\.mkdir\(mode=0o755, exist_ok=True\)/);
   assert.match(agent, /LXC supplies the runtime \/dev mount/);
 });
+
+
+test('pulled template boot failures return actionable LXC diagnostics', async () => {
+  const agent = await readFile(new URL('../scripts/lightnas-host-agent.py', import.meta.url), 'utf8');
+  assert.match(agent, /lxc-\{name\}-start\.log/);
+  assert.match(agent, /"lxc-start", "-n", name, "-F", "-l", "DEBUG", "-o"/);
+  assert.match(agent, /Permission denied\|Operation not permitted\|No such file\|exec\|mount\|apparmor\|cgroup\|hook/);
+});
