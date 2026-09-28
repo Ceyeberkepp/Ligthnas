@@ -937,6 +937,31 @@ def apply_managed_automatic_address(name: str, config: Path) -> str:
     clear_managed_automatic_address(config)
     append_unique(config, f"lxc.net.0.ipv4.address = {address}")
     append_unique(config, "lxc.net.0.ipv4.gateway = 10.77.0.1")
+
+    # Persist the managed fallback inside systemd-networkd too. LXC-level
+    # address injection gets the guest online immediately, but a DHCP-only
+    # networkd profile can later remove that address during a service restart.
+    # The LightNAS UI still records this as DHCP/Automatic; this file is only
+    # the deterministic fallback used when nested DHCP broadcasts do not work.
+    rootfs = rootfs_from_config(config)
+    if rootfs and rootfs.is_dir():
+        network_dir = rootfs / "etc" / "systemd" / "network"
+        network_dir.mkdir(parents=True, exist_ok=True)
+        fallback_lines = [
+            "[Match]",
+            "Name=eth0",
+            "",
+            "[Network]",
+            f"Address={address}",
+            "Gateway=10.77.0.1",
+            "DNS=10.77.0.1",
+            "IPv6AcceptRA=yes",
+        ]
+        (network_dir / "10-lightnas-eth0.network").write_text(
+            "\n".join(fallback_lines) + "\n",
+            encoding="utf-8",
+        )
+
     if lxc_state(name) == "running":
         run(["lxc-stop", "-n", name, "-t", "20"], timeout=35, check=False)
     run(["lxc-start", "-n", name, "-d"], timeout=60)
