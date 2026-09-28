@@ -31,7 +31,8 @@ test('current Files UI scopes All Files to library folders and supports multi/fo
     read('src/files.mjs'),
     read('src/server.mjs')
   ]);
-  assert.match(app, /Upload<input id="file-upload" type="file" multiple/);
+  assert.match(app, /id="file-upload" type="file"/);
+  assert.match(app, /multiple hidden/);
   assert.match(app, /Upload folder<input id="folder-upload" type="file" webkitdirectory directory multiple/);
   assert.match(app, /uploadFilesWithProgress/);
   assert.match(app, /XMLHttpRequest/);
