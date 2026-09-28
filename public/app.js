@@ -1,4 +1,4 @@
-const state = { overview: null, view: 'home', folder: '', files: null, fileError: null, fileView: localStorage.getItem('lightnas-file-view') === 'grid' ? 'grid' : 'list', fileTruncated: false, overviewMetric: localStorage.getItem('lightnas-overview-metric') || 'cpu', lastNetworkSample: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, smtp: undefined, media: null, network: null, metricHistory: { cpu: [], load: [], memory: [], storage: [], networkIn: [], networkOut: [] } };
+const state = { overview: null, view: 'home', folder: '', files: null, fileError: null, fileView: ['list','grid','gallery'].includes(localStorage.getItem('lightnas-file-view')) ? localStorage.getItem('lightnas-file-view') : 'grid', fileTruncated: false, overviewMetric: localStorage.getItem('lightnas-overview-metric') || 'cpu', lastNetworkSample: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, smtp: undefined, media: null, network: null, metricHistory: { cpu: [], load: [], memory: [], storage: [], networkIn: [], networkOut: [] } };
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
 const themeChoices = ['system', 'light', 'dark'];
@@ -579,10 +579,22 @@ function filesView() {
     const location = !entry.directory && (entry.folder || path.includes('/')) ? (entry.folder || path.split('/').slice(0, -1).join('/') || 'Root') : '';
     const kind = entry.directory ? 'Folder' : libraryKindForName(entry.name);
     const meta = entry.directory ? 'Folder' : `${kind} · ${bytes(entry.sizeBytes)}${location ? ` · ${escapeHtml(location)}` : ''}`;
+    const visual = entry.directory
+      ? '<span class="folder-glyph">▣</span>'
+      : `<span class="file-glyph file-kind-${kind.toLowerCase()}">${kind === 'Photo' ? '▧' : kind === 'Video' ? '▷' : kind === 'Audio' ? '♪' : '▤'}</span>`;
+
+    if (state.fileView === 'gallery') {
+      return `<article class="file-gallery-item ${kind.toLowerCase()}">
+        <button class="file-name file-gallery-open" data-open="${escapeHtml(entry.name)}" data-path="${escapeHtml(path)}" data-directory="${entry.directory}" aria-label="Open ${escapeHtml(entry.name)}">
+          <span class="file-card-visual">${visual}</span>
+        </button>
+      </article>`;
+    }
+
     return state.fileView === 'grid'
       ? `<article class="file-card">
           <button class="file-name file-card-open" data-open="${escapeHtml(entry.name)}" data-path="${escapeHtml(path)}" data-directory="${entry.directory}">
-            <span class="file-card-visual">${entry.directory ? '<span class="folder-glyph">▣</span>' : `<span class="file-glyph file-kind-${kind.toLowerCase()}">${kind === 'Photo' ? '▧' : kind === 'Video' ? '▷' : kind === 'Audio' ? '♪' : '▤'}</span>`}</span>
+            <span class="file-card-visual">${visual}</span>
             <span class="file-card-title">${escapeHtml(entry.name)}</span>
           </button>
           <span class="muted file-location">${meta}</span>
@@ -607,15 +619,17 @@ function filesView() {
       <div class="view-toggle" role="group" aria-label="File view">
         <button class="secondary ${state.fileView === 'list' ? 'active' : ''}" type="button" data-file-view="list" aria-pressed="${state.fileView === 'list'}">☷ List</button>
         <button class="secondary ${state.fileView === 'grid' ? 'active' : ''}" type="button" data-file-view="grid" aria-pressed="${state.fileView === 'grid'}">▦ Grid</button>
+        <button class="secondary gallery-view-button ${state.fileView === 'gallery' ? 'active' : ''}" type="button" data-file-view="gallery" aria-pressed="${state.fileView === 'gallery'}">▦ Photos</button>
       </div>
       <button class="secondary" data-action="new-folder">+ Folder</button>
-      <label class="primary upload-button">Upload<input id="file-upload" type="file" multiple hidden></label>
+      <label class="primary upload-button">${section === 'Photos' ? 'Upload photos' : section === 'Videos' ? 'Upload videos' : section === 'Audio' ? 'Upload audio' : 'Upload'}<input id="file-upload" type="file" ${section === 'Photos' ? 'accept="image/*"' : section === 'Videos' ? 'accept="video/*"' : section === 'Audio' ? 'accept="audio/*"' : ''} multiple hidden></label>
       <label class="secondary upload-button">Upload folder<input id="folder-upload" type="file" webkitdirectory directory multiple hidden></label>
+      ${state.overview.appliance.role === 'administrator' ? '<button class="secondary phone-sync-button" type="button" data-phone-sync>Phone sync</button>' : ''}
     </div></div>
     <div class="file-drop-zone" data-file-drop tabindex="0"><b>Drop files here</b><span>Multiple files and ZIP archives are supported. Use “Upload folder” to preserve a whole folder tree.</span></div>
     <p class="muted">${allFiles ? 'All files shows only your Documents, Photos, Videos, and Audio libraries.' : 'Open folders normally or switch back to All files to see all four libraries together.'} ZIP and other file types are accepted, uploads have visible progress, and LightNAS does not impose an application-level file-size ceiling.</p>
     ${state.fileTruncated && allFiles ? '<div class="module-note">Showing the newest 10,000 files. Open a category or folder to browse beyond that safety limit.</div>' : ''}
-    <div class="${state.fileView === 'grid' ? 'file-browser-grid' : 'storage-list'}">${state.fileError ? `<div class="empty error-state"><p><b>Files could not be loaded.</b></p><p>${escapeHtml(state.fileError)}</p><button class="secondary" data-action="refresh-files">Try again</button></div>` : entries === null ? '<div class="empty"><p>Loading files…</p></div>' : entries.length ? entries.map(item).join('') : `<div class="empty"><p>${allFiles ? 'No files have been uploaded yet.' : 'This folder is empty.'}</p></div>`}</div>`;
+    <div class="${state.fileView === 'gallery' ? 'file-photo-gallery' : state.fileView === 'grid' ? 'file-browser-grid' : 'storage-list'}">${state.fileError ? `<div class="empty error-state"><p><b>Files could not be loaded.</b></p><p>${escapeHtml(state.fileError)}</p><button class="secondary" data-action="refresh-files">Try again</button></div>` : entries === null ? '<div class="empty"><p>Loading files…</p></div>' : entries.length ? entries.map(item).join('') : `<div class="empty"><p>${allFiles ? 'No files have been uploaded yet.' : 'This folder is empty.'}</p></div>`}</div>`;
 }
 
 async function loadFiles(forceRefresh = false) {
@@ -1282,10 +1296,53 @@ function bindViewActions() {
     } catch (error) { toast(error.message); }
   }));
   $$('[data-file-view]', $('#content')).forEach(button => button.addEventListener('click', () => {
-    state.fileView = button.dataset.fileView === 'grid' ? 'grid' : 'list';
+    state.fileView = ['list','grid','gallery'].includes(button.dataset.fileView) ? button.dataset.fileView : 'grid';
     localStorage.setItem('lightnas-file-view', state.fileView);
     render('files');
   }));
+  $('[data-phone-sync]', $('#content'))?.addEventListener('click', async () => {
+    let dialog = $('#phone-sync-dialog');
+    if (!dialog) {
+      dialog = document.createElement('dialog');
+      dialog.id = 'phone-sync-dialog';
+      dialog.className = 'lightnas-dialog phone-sync-dialog';
+      dialog.innerHTML = `
+        <div class="dialog-body">
+          <div class="dialog-head"><div><span class="eyebrow">PHONE LIBRARY SYNC</span><h2>Automatically send new photos & videos to LightNAS</h2></div><button class="dialog-close" type="button" data-phone-sync-close aria-label="Close">×</button></div>
+          <p class="muted">LightNAS provides a private upload endpoint for iPhone Shortcuts or Android automation. New images are routed to Photos and videos to Videos automatically.</p>
+          <div class="phone-sync-steps">
+            <div><b>1</b><span>Create a phone sync key.</span></div>
+            <div><b>2</b><span>On iPhone, use Shortcuts automation when Camera closes or at a schedule. Send the newest photo/video with an HTTP PUT request.</span></div>
+            <div><b>3</b><span>On Android, use Tasker/MacroDroid to watch DCIM and PUT new files to the same endpoint.</span></div>
+          </div>
+          <div class="phone-sync-secret hidden" data-phone-sync-secret>
+            <label>Upload URL<input data-phone-sync-url readonly></label>
+            <label>Bearer token<textarea data-phone-sync-token readonly rows="3"></textarea></label>
+            <p class="muted">Header: <code>Authorization: Bearer TOKEN</code>. Set <code>Content-Type</code> to the file MIME type. This token is shown only once.</p>
+          </div>
+          <div class="dialog-actions"><button class="secondary" type="button" data-phone-sync-close>Close</button><button class="primary" type="button" data-create-phone-sync>Create phone sync key</button></div>
+          <div class="form-error" data-phone-sync-error role="alert"></div>
+        </div>`;
+      document.body.append(dialog);
+      dialog.querySelectorAll('[data-phone-sync-close]').forEach(button => button.addEventListener('click', () => dialog.close()));
+      dialog.querySelector('[data-create-phone-sync]').addEventListener('click', async event => {
+        const button = event.currentTarget;
+        const error = dialog.querySelector('[data-phone-sync-error]');
+        error.textContent = '';
+        button.disabled = true;
+        try {
+          const result = await request('/api/mobile-sync/key', { method:'POST', body:'{}' });
+          const secret = dialog.querySelector('[data-phone-sync-secret]');
+          secret.classList.remove('hidden');
+          dialog.querySelector('[data-phone-sync-url]').value = location.origin + '/api/mobile-sync/upload?filename=FILE_NAME';
+          dialog.querySelector('[data-phone-sync-token]').value = result.token;
+          button.textContent = 'New key created';
+        } catch (problem) { error.textContent = problem.message; }
+        finally { button.disabled = false; }
+      });
+    }
+    dialog.showModal();
+  });
   $$('[data-download-folder]', $('#content')).forEach(button => button.addEventListener('click', () => {
     const path = button.dataset.downloadFolder || '';
     const link = document.createElement('a');
@@ -1451,20 +1508,33 @@ $('#node-shell-top')?.addEventListener('click', () => {
   window.open(`/node-shell.html?v=${Date.now()}`, '_blank', 'noopener,width=1200,height=800');
 });
 $('#logout').addEventListener('click', async () => { await request('/api/logout', { method: 'POST' }); setLoginMethods([]); showAuth('login'); });
+function setMobileSidebar(open) {
+  const sidebar = $('.sidebar');
+  const backdrop = $('#sidebar-backdrop');
+  if (!sidebar) return;
+  sidebar.classList.toggle('open', Boolean(open));
+  if (backdrop) backdrop.hidden = !open;
+  document.body.classList.toggle('mobile-sidebar-open', Boolean(open));
+}
+
 function applySidebarPreference() {
   const collapsed = localStorage.getItem('lightnas-sidebar-collapsed') === '1';
   $('#console').classList.toggle('sidebar-collapsed', collapsed && innerWidth > 760);
+  if (innerWidth > 760) setMobileSidebar(false);
 }
 applySidebarPreference();
 $('#menu').addEventListener('click', () => {
   if (innerWidth <= 760) {
-    $('.sidebar').classList.toggle('open');
+    setMobileSidebar(!$('.sidebar').classList.contains('open'));
     return;
   }
   const collapsed = !$('#console').classList.contains('sidebar-collapsed');
   $('#console').classList.toggle('sidebar-collapsed', collapsed);
   localStorage.setItem('lightnas-sidebar-collapsed', collapsed ? '1' : '0');
 });
+$('#sidebar-close')?.addEventListener('click', () => setMobileSidebar(false));
+$('#sidebar-backdrop')?.addEventListener('click', () => setMobileSidebar(false));
+addEventListener('keydown', event => { if (event.key === 'Escape' && innerWidth <= 760) setMobileSidebar(false); });
 addEventListener('resize', applySidebarPreference);
 $('#theme-toggle').addEventListener('click', () => { theme = themeChoices[(themeChoices.indexOf(theme) + 1) % themeChoices.length]; localStorage.setItem('lightnas-theme', theme); applyTheme(); toast(`Appearance: ${theme}`); });
 $('#avatar').addEventListener('click', () => {
@@ -1494,8 +1564,8 @@ $('#avatar').addEventListener('click', () => {
   }, { once: true });
   input.click();
 });
-$('#mobile-more').addEventListener('click', () => $('.sidebar').classList.add('open'));
-$$('[data-view]').forEach(link => link.addEventListener('click', () => $('.sidebar').classList.remove('open')));
+$('#mobile-more').addEventListener('click', () => setMobileSidebar(true));
+$$('[data-view]').forEach(link => link.addEventListener('click', () => setMobileSidebar(false)));
 $$('.close-dialog').forEach(button => button.addEventListener('click', () => $('#share-dialog').close()));
 $('#share-form').addEventListener('submit', async event => {
   event.preventDefault();

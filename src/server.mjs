@@ -90,6 +90,21 @@ function maskPhone(value) {
   return phone.length >= 4 ? `••••${phone.slice(-4)}` : 'configured phone';
 }
 
+const mobilePhotoExt = new Set(['jpg','jpeg','png','gif','webp','bmp','avif','heic','heif','dng','cr2','cr3','nef','arw','raf','orf','rw2']);
+const mobileVideoExt = new Set(['mp4','mov','m4v','webm','mkv','avi','mts','m2ts','3gp']);
+const mobileAudioExt = new Set(['mp3','m4a','aac','wav','flac','ogg','opus']);
+
+function mobileLibraryDestination(filename, contentType = '') {
+  const safeName = basename(String(filename || 'upload').replace(/[\u0000-\u001f]/g, '')).replace(/[^A-Za-z0-9._() -]/g, '_').slice(0, 180) || `upload-${Date.now()}`;
+  const extension = safeName.toLowerCase().split('.').pop();
+  const type = String(contentType || '').toLowerCase();
+  const folder = type.startsWith('image/') || mobilePhotoExt.has(extension) ? 'Photos'
+    : type.startsWith('video/') || mobileVideoExt.has(extension) ? 'Videos'
+    : type.startsWith('audio/') || mobileAudioExt.has(extension) ? 'Audio'
+    : 'Documents';
+  return { folder, safeName };
+}
+
 function enabledMfaMethods(account) {
   const methods = [];
   if (account?.totpEnabled) methods.push('totp');
@@ -603,6 +618,36 @@ async function api(req, res, url) {
   const context = requireSession(req, res);
   if (!context) return;
   const { username, account, isAdmin, permissions } = context;
+
+  if (req.method === 'POST' && url.pathname === '/api/mobile-sync/key') {
+    if (!requireOwner(res, context)) return;
+    store.state.security.apiTokens = store.state.security.apiTokens.filter(item => item.name !== 'Phone sync');
+    const { record, secret } = createApiTokenRecord({ name: 'Phone sync', permissions: ['files.read', 'files.write'], allowed: PERMISSIONS });
+    store.state.security.apiTokens.push(record);
+    store.addActivity('security', 'A Phone sync upload key was created.', 'success');
+    await store.save();
+    return send(res, 201, { token: secret, id: record.id, permissions: record.permissions });
+  }
+
+  if (req.method === 'PUT' && url.pathname === '/api/mobile-sync/upload') {
+    if (!requirePermission(res, permissions, 'files.write')) return;
+    const { folder, safeName } = mobileLibraryDestination(url.searchParams.get('filename') || req.headers['x-file-name'] || 'mobile-upload', req.headers['content-type']);
+    await createFolder(folder).catch(error => { if (error.code !== 'EEXIST') throw error; });
+    let target = `${folder}/${safeName}`;
+    try {
+      await uploadFile(target, req);
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      const dot = safeName.lastIndexOf('.');
+      const stem = dot > 0 ? safeName.slice(0, dot) : safeName;
+      const ext = dot > 0 ? safeName.slice(dot) : '';
+      target = `${folder}/${stem}-${Date.now()}${ext}`;
+      await uploadFile(target, req);
+    }
+    store.addActivity('file', `Phone sync uploaded ${target}.`, 'success');
+    await store.save();
+    return send(res, 201, { ok: true, path: target, library: folder });
+  }
 
   if (req.method === 'GET' && url.pathname === '/api/profile/avatar') {
     if (context.apiToken || !account.avatarExt) return send(res, 404, { error: 'No profile picture is configured.' });

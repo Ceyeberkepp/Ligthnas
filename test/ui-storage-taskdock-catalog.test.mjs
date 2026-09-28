@@ -13,7 +13,7 @@ test('overview storage exposes configured pools and sources', async () => {
 test('files UI removes attached-storage tab and simplifies upload label', async () => {
   const app = await read('public/app.js');
   assert.doesNotMatch(app, /\['Attached storage', 'Attached storage'\]/);
-  assert.match(app, />Upload<input id="file-upload"/);
+  assert.match(app, /id="file-upload" type="file"/);
   assert.match(app, />Upload folder<input id="folder-upload"/);
 });
 
