@@ -567,6 +567,8 @@ function fileEntryPath(entry) {
 }
 
 function filesView() {
+  const mobileFiles = matchMedia('(max-width: 760px)').matches;
+  if (mobileFiles && state.fileView === 'list') state.fileView = 'grid';
   const segments = state.folder.split('/').filter(Boolean);
   const section = librarySections.some(([folder]) => folder === (segments[0] || '')) ? (segments[0] || '') : '';
   const allFiles = state.folder === '';
@@ -613,7 +615,7 @@ function filesView() {
         </article>`;
   };
 
-  return `${pageHead('Files & media', 'Browse and manage the actual files stored in LightNAS.', '<button class="secondary" data-action="refresh-files">Refresh</button>')}
+  return `<section class="files-page ${state.fileView === 'gallery' ? 'photo-mode' : 'grid-mode'}">${pageHead('Files & media', 'Browse and manage the actual files stored in LightNAS.', '<button class="secondary" data-action="refresh-files">Refresh</button>')}
     <nav class="library-tabs" aria-label="File library sections">${tabs}</nav>
     <div class="file-toolbar"><div class="breadcrumbs">${crumbs}</div><div class="file-toolbar-actions">
       <div class="view-toggle" role="group" aria-label="File view">
@@ -629,7 +631,9 @@ function filesView() {
     <div class="file-drop-zone" data-file-drop tabindex="0"><b>Drop files here</b><span>Multiple files and ZIP archives are supported. Use “Upload folder” to preserve a whole folder tree.</span></div>
     <p class="muted">${allFiles ? 'All files shows only your Documents, Photos, Videos, and Audio libraries.' : 'Open folders normally or switch back to All files to see all four libraries together.'} ZIP and other file types are accepted, uploads have visible progress, and LightNAS does not impose an application-level file-size ceiling.</p>
     ${state.fileTruncated && allFiles ? '<div class="module-note">Showing the newest 10,000 files. Open a category or folder to browse beyond that safety limit.</div>' : ''}
-    <div class="${state.fileView === 'gallery' ? 'file-photo-gallery' : state.fileView === 'grid' ? 'file-browser-grid' : 'storage-list'}">${state.fileError ? `<div class="empty error-state"><p><b>Files could not be loaded.</b></p><p>${escapeHtml(state.fileError)}</p><button class="secondary" data-action="refresh-files">Try again</button></div>` : entries === null ? '<div class="empty"><p>Loading files…</p></div>' : entries.length ? entries.map(item).join('') : `<div class="empty"><p>${allFiles ? 'No files have been uploaded yet.' : 'This folder is empty.'}</p></div>`}</div>`;
+    <div class="${state.fileView === 'gallery' ? 'file-photo-gallery' : state.fileView === 'grid' ? 'file-browser-grid' : 'storage-list'}">${state.fileError ? `<div class="empty error-state"><p><b>Files could not be loaded.</b></p><p>${escapeHtml(state.fileError)}</p><button class="secondary" data-action="refresh-files">Try again</button></div>` : entries === null ? '<div class="empty"><p>Loading files…</p></div>' : entries.length ? entries.map(item).join('') : `<div class="empty"><p>${allFiles ? 'No files have been uploaded yet.' : 'This folder is empty.'}</p></div>`}</div>
+    <button class="secondary mobile-files-settings-button" type="button" data-mobile-files-settings aria-label="Files & media settings">⚙ Settings</button>
+  </section>`;
 }
 
 async function loadFiles(forceRefresh = false) {
@@ -1300,6 +1304,41 @@ function bindViewActions() {
     localStorage.setItem('lightnas-file-view', state.fileView);
     render('files');
   }));
+  $('[data-mobile-files-settings]', $('#content'))?.addEventListener('click', () => {
+    let dialog = $('#mobile-files-settings-dialog');
+    if (!dialog) {
+      dialog = document.createElement('dialog');
+      dialog.id = 'mobile-files-settings-dialog';
+      dialog.className = 'lightnas-dialog mobile-files-settings-dialog';
+      dialog.innerHTML = `
+        <div class="dialog-body">
+          <div class="dialog-head"><div><span class="eyebrow">FILES & MEDIA</span><h2>Mobile view settings</h2></div><button class="dialog-close" type="button" data-mobile-files-settings-close aria-label="Close">×</button></div>
+          <div class="mobile-files-setting-group">
+            <span class="eyebrow">VIEW</span>
+            <div class="mobile-files-view-options">
+              <button class="secondary" type="button" data-mobile-file-view="grid">▦ Grid</button>
+              <button class="secondary" type="button" data-mobile-file-view="gallery">▦ Photos</button>
+            </div>
+          </div>
+          ${state.overview.appliance.role === 'administrator' ? '<div class="mobile-files-setting-group"><span class="eyebrow">PHONE LIBRARY</span><button class="secondary" type="button" data-open-phone-sync-from-settings>Phone sync</button></div>' : ''}
+        </div>`;
+      document.body.append(dialog);
+      dialog.querySelector('[data-mobile-files-settings-close]')?.addEventListener('click', () => dialog.close());
+      dialog.querySelectorAll('[data-mobile-file-view]').forEach(button => button.addEventListener('click', () => {
+        state.fileView = button.dataset.mobileFileView === 'gallery' ? 'gallery' : 'grid';
+        localStorage.setItem('lightnas-file-view', state.fileView);
+        dialog.close();
+        render('files');
+      }));
+      dialog.querySelector('[data-open-phone-sync-from-settings]')?.addEventListener('click', () => {
+        dialog.close();
+        $('#content .phone-sync-button')?.click();
+      });
+    }
+    dialog.querySelectorAll('[data-mobile-file-view]').forEach(button => button.classList.toggle('active', button.dataset.mobileFileView === state.fileView));
+    dialog.showModal();
+  });
+
   $('[data-phone-sync]', $('#content'))?.addEventListener('click', async () => {
     let dialog = $('#phone-sync-dialog');
     if (!dialog) {
