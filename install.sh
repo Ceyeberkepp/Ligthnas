@@ -173,12 +173,6 @@ done
 
 RUNTIME_PROVISION_NEEDED=0
 if [[ -r /etc/lightnas/network.env ]] && grep -q '^LIGHTNAS_NETWORK_MODE=nested-macvlan
-  RUNTIME_PROVISION_NEEDED=1
-  echo "      Runtime engines will finish provisioning in the background after the control panel starts."
-else
-  echo "      Existing runtime configuration detected; skipping slow reprovisioning."
-  echo "      Set LIGHTNAS_REPAIR_RUNTIMES=1 to force container/VM/app runtime repair."
-fi
 [[ -e "${DATA_DIRECTORY}/runtime-status.txt" ]] && chown lightnas:lightnas "${DATA_DIRECTORY}/runtime-status.txt"
 
 chown -R root:root "${INSTALL_DIRECTORY}"
