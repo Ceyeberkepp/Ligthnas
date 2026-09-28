@@ -164,7 +164,7 @@ async function openPreview(name, explicitPath = '') {
   if (!kind) return false;
   const path = explicitPath || joinPath(currentFolder(), name);
   const extension = name.toLowerCase().split('.').pop();
-  const raw = ['raw','dng','cr2','cr3','nef','nrw','arw','srf','sr2','raf','orf','rw2','pef','srw','x3f'].includes(extension);
+  const raw = ['raw','dng','cr2','cr3','nef','nrw','arw','srf','sr2','raf','orf','rw2','pef','srw','x3f','heic','heif'].includes(extension);
   const dialog = ensureViewer();
   if (dialog.dataset.objectUrl) URL.revokeObjectURL(dialog.dataset.objectUrl);
   delete dialog.dataset.objectUrl;
@@ -430,13 +430,19 @@ function enhanceFileThumbnails() {
     media.alt = '';
     // Normal photos are streamed directly instead of spawning FFmpeg for
     // every card in All Files. RAW photos and videos still use generated JPGs.
-    media.src = kind === 'image' && browserNativeImages.has(extension)
-      ? `/api/files/download?path=${encodeURIComponent(path)}`
-      : `/api/files/thumbnail?path=${encodeURIComponent(path)}`;
+    const galleryCard = button.classList.contains('file-gallery-open');
+    media.loading = galleryCard ? 'eager' : 'lazy';
+    media.src = galleryCard
+      ? `/api/files/thumbnail?path=${encodeURIComponent(path)}`
+      : kind === 'image' && browserNativeImages.has(extension)
+        ? `/api/files/download?path=${encodeURIComponent(path)}`
+        : `/api/files/thumbnail?path=${encodeURIComponent(path)}`;
     media.addEventListener('error', () => {
       if (media.dataset.fallback === '1') return;
       media.dataset.fallback = '1';
-      media.src = `/api/files/thumbnail?path=${encodeURIComponent(path)}`;
+      media.src = kind === 'image' && browserNativeImages.has(extension)
+        ? `/api/files/download?path=${encodeURIComponent(path)}`
+        : `/api/files/thumbnail?path=${encodeURIComponent(path)}`;
     }, { once:true });
     button.prepend(media);
   }
