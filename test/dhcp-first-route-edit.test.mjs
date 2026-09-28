@@ -32,3 +32,13 @@ test('container settings save is not marked failed only because application disc
   assert.match(controls, /publishWarning = problem\.message/);
   assert.match(controls, /DHCP was attempted first; this nested host required LightNAS managed automatic addressing/);
 });
+
+
+test('managed automatic fallback persists inside the guest network profile', async () => {
+  const agent = await read('scripts/lightnas-host-agent.py');
+  assert.match(agent, /Persist the managed fallback inside systemd-networkd too/);
+  assert.match(agent, /f"Address=\{address\}"/);
+  assert.match(agent, /"Gateway=10\.77\.0\.1"/);
+  assert.match(agent, /"DNS=10\.77\.0\.1"/);
+  assert.match(agent, /10-lightnas-eth0\.network/);
+});
