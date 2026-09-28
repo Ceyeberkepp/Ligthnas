@@ -23,3 +23,14 @@ test('pulled template boot failures return actionable LXC diagnostics', async ()
   assert.match(agent, /"lxc-start", "-n", name, "-F", "-l", "DEBUG", "-o"/);
   assert.match(agent, /Permission denied\|Operation not permitted\|No such file\|exec\|mount\|apparmor\|cgroup\|hook/);
 });
+
+
+test('nested pulled templates avoid host-side IPv4 gateway injection', async () => {
+  const agent = await readFile(new URL('../scripts/lightnas-host-agent.py', import.meta.url), 'utf8');
+  assert.match(agent, /def sanitize_nested_lxc_network/);
+  assert.match(agent, /"lxc\.net\.0\.ipv4\.address"/);
+  assert.match(agent, /"lxc\.net\.0\.ipv4\.gateway"/);
+  const fallback = agent.slice(agent.indexOf('def apply_managed_automatic_address'), agent.indexOf('def sanitize_nested_lxc_network'));
+  assert.doesNotMatch(fallback, /append_unique\(config, f"lxc\.net\.0\.ipv4\.address/);
+  assert.doesNotMatch(fallback, /append_unique\(config, "lxc\.net\.0\.ipv4\.gateway/);
+});
