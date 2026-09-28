@@ -104,36 +104,75 @@ function dialogEsc(value) {
 
 const lightnasTasks = (() => {
   let items = [];
+  const cancelHandlers = new Map();
   try { items = JSON.parse(sessionStorage.getItem('lightnas-tasks') || '[]'); } catch {}
   if (!Array.isArray(items)) items = [];
-  items = items.slice(-40);
+  items = items.slice(-40).map(item => item?.status === 'running'
+    ? { ...item, status:'canceled', detail:item.detail ? `${item.detail} · interrupted by page reload` : 'Interrupted by page reload' }
+    : item);
+
   const save = () => {
     try { sessionStorage.setItem('lightnas-tasks', JSON.stringify(items.slice(-40))); } catch {}
   };
+  const statusLabel = item => item.status === 'success' ? 'OK'
+    : item.status === 'error' ? 'Error'
+    : item.status === 'canceled' ? 'Canceled'
+    : Number.isFinite(item.percent) ? item.percent + '%' : 'Running';
   const render = () => {
     const dock = document.getElementById('task-dock');
     const list = document.getElementById('task-dock-list');
     const count = document.getElementById('task-dock-count');
     const summary = document.getElementById('task-dock-summary');
+    const cancelAllButton = document.getElementById('task-cancel-all');
+    const clearAllButton = document.getElementById('task-clear-all');
     if (!dock || !list || !count || !summary) return;
     const active = items.filter(item => item.status === 'running').length;
     count.textContent = String(active);
     count.classList.toggle('active', active > 0);
     summary.textContent = active ? `${active} active task${active === 1 ? '' : 's'}` : (items.length ? 'Recent tasks complete' : 'No active tasks');
+    if (cancelAllButton) cancelAllButton.disabled = active === 0;
+    if (clearAllButton) clearAllButton.disabled = items.length === 0;
     list.innerHTML = items.length ? [...items].reverse().map(item => `
-      <article class="task-row">
+      <article class="task-row" data-task-id="${dialogEsc(item.id)}">
         <time>${dialogEsc(item.time || '')}</time>
         <div><b>${dialogEsc(item.title)}</b><small>${dialogEsc(item.detail || '')}</small>${item.status === 'running' ? `<div class="task-mini-progress"><span style="width:${Math.max(2, Number(item.percent) || 2)}%"></span></div>` : ''}</div>
-        <span class="task-status ${item.status}">${item.status === 'success' ? 'OK' : item.status === 'error' ? 'Error' : `${Number.isFinite(item.percent) ? item.percent + '%' : 'Running'}`}</span>
+        <span class="task-status ${item.status}">${statusLabel(item)}</span>
+        <div class="task-row-actions">${item.status === 'running' ? `<button class="secondary" type="button" data-task-cancel="${dialogEsc(item.id)}">Cancel</button>` : ''}<button class="secondary" type="button" data-task-clear="${dialogEsc(item.id)}">Clear</button></div>
       </article>`).join('') : '<div class="task-empty">Uploads, installs, VM/container jobs, and transfers will appear here.</div>';
   };
-  const create = (title, detail) => {
+  const cancel = id => {
+    const task = items.find(item => item.id === id);
+    if (!task || task.status !== 'running') return;
+    try { cancelHandlers.get(id)?.(); } catch {}
+    cancelHandlers.delete(id);
+    task.status = 'canceled';
+    task.detail = task.detail ? `${task.detail} · canceled` : 'Canceled';
+    save(); render();
+  };
+  const clear = id => {
+    cancelHandlers.delete(id);
+    items = items.filter(item => item.id !== id);
+    save(); render();
+  };
+  const cancelAll = () => {
+    for (const item of items.filter(item => item.status === 'running')) cancel(item.id);
+  };
+  const clearAll = () => {
+    cancelHandlers.clear();
+    items = [];
+    save(); render();
+  };
+  const create = (title, detail, options = {}) => {
     const task = { id: crypto.randomUUID?.() || String(Date.now() + Math.random()), title, detail, time: new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' }), status:'running', percent:null };
-    items.push(task); save(); render();
+    items.push(task);
+    if (typeof options.cancel === 'function') cancelHandlers.set(task.id, options.cancel);
+    save(); render();
     return {
-      update(percent, message) { task.percent = Math.max(0, Math.min(100, Number(percent) || 0)); if (message) task.detail = message; save(); render(); },
-      success(message) { task.status='success'; task.percent=100; if (message) task.detail=message; save(); render(); },
-      error(message) { task.status='error'; if (message) task.detail=message; save(); render(); }
+      id: task.id,
+      update(percent, message) { if (task.status !== 'running') return; task.percent = Math.max(0, Math.min(100, Number(percent) || 0)); if (message) task.detail = message; save(); render(); },
+      success(message) { if (task.status !== 'running') return; cancelHandlers.delete(task.id); task.status='success'; task.percent=100; if (message) task.detail=message; save(); render(); },
+      error(message) { if (task.status !== 'running') return; cancelHandlers.delete(task.id); task.status='error'; if (message) task.detail=message; save(); render(); },
+      cancel() { cancel(task.id); }
     };
   };
   addEventListener('DOMContentLoaded', () => {
@@ -150,9 +189,18 @@ const lightnasTasks = (() => {
         localStorage.setItem('lightnas-task-dock-collapsed', next ? '1' : '0');
       });
     }
+    document.getElementById('task-cancel-all')?.addEventListener('click', cancelAll);
+    document.getElementById('task-clear-all')?.addEventListener('click', clearAll);
+    document.getElementById('task-dock-list')?.addEventListener('click', event => {
+      const cancelButton = event.target.closest('[data-task-cancel]');
+      const clearButton = event.target.closest('[data-task-clear]');
+      if (cancelButton) cancel(cancelButton.dataset.taskCancel);
+      if (clearButton) clear(clearButton.dataset.taskClear);
+    });
+    save();
     render();
   });
-  return { create, render };
+  return { create, render, cancel, clear, cancelAll, clearAll };
 })();
 
 function openProgressDialog(title, detail, options = {}) {
