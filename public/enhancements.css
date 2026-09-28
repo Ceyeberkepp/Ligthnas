@@ -914,7 +914,7 @@
 
 
 /* Files & media desktop settings + stable desktop/mobile view separation */
-.mobile-photo-view-button { display:none; }
+.mobile-photo-view-button { display:inline-flex; }
 .files-sync-trigger { display:none !important; }
 .desktop-files-settings-panel { margin:16px 0 20px; }
 .files-settings-card { display:grid; gap:18px; }
