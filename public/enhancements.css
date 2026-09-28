@@ -796,3 +796,118 @@
   .phone-sync-button { grid-column:1 / -1; }
   .file-photo-gallery { grid-template-columns:repeat(3,1fr); }
 }
+
+
+/* Mobile-only Files & media view rules. Desktop keeps the existing controls. */
+.mobile-files-settings-button { display:none; }
+
+@media (max-width:760px) {
+  .files-page [data-file-view="list"] { display:none !important; }
+  .files-page .phone-sync-button { display:none !important; }
+
+  .mobile-files-settings-button {
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    position:sticky;
+    top:8px;
+    z-index:18;
+    margin-left:auto;
+    margin-bottom:10px;
+    min-height:38px;
+    padding:8px 12px;
+    border-radius:999px;
+    box-shadow:0 5px 18px rgba(0,0,0,.08);
+  }
+
+  .mobile-files-settings-dialog {
+    width:calc(100vw - 18px);
+    max-width:440px;
+    max-height:88dvh;
+    overflow:auto;
+  }
+  .mobile-files-setting-group {
+    display:grid;
+    gap:10px;
+    padding:14px 0;
+    border-top:1px solid var(--line);
+  }
+  .mobile-files-setting-group:first-of-type { border-top:0; }
+  .mobile-files-view-options {
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:8px;
+  }
+  .mobile-files-view-options .secondary.active {
+    background:var(--accent);
+    color:#fff;
+    border-color:var(--accent);
+  }
+
+  /* Photo mode behaves like a dedicated phone photo library: gallery + Settings only. */
+  .files-page.photo-mode > .page-head,
+  .files-page.photo-mode > .library-tabs,
+  .files-page.photo-mode > .file-toolbar,
+  .files-page.photo-mode > .file-drop-zone,
+  .files-page.photo-mode > p.muted,
+  .files-page.photo-mode > .module-note {
+    display:none !important;
+  }
+  .files-page.photo-mode {
+    position:relative;
+    padding-top:50px;
+  }
+  .files-page.photo-mode > .mobile-files-settings-button {
+    position:absolute;
+    top:4px;
+    right:0;
+    margin:0;
+  }
+  .files-page.photo-mode .file-photo-gallery {
+    margin-top:0;
+  }
+
+  /* Stable full-screen mobile viewer without disturbing gallery thumbnails behind it. */
+  .lightnas-viewer {
+    width:100vw !important;
+    height:100dvh;
+    max-height:100dvh;
+    margin:0;
+    border:0;
+    border-radius:0;
+    padding:0;
+  }
+  .lightnas-viewer .dialog-body {
+    min-height:100dvh;
+    display:grid;
+    grid-template-rows:auto minmax(0,1fr) auto auto;
+    padding:max(12px,env(safe-area-inset-top)) 10px max(12px,env(safe-area-inset-bottom));
+  }
+  .lightnas-viewer .viewer-shell {
+    min-height:0;
+    display:grid;
+  }
+  .lightnas-viewer .viewer-stage {
+    min-height:0;
+    height:100%;
+    max-height:none;
+    overflow:hidden;
+    border-radius:0;
+  }
+  .lightnas-viewer img,
+  .lightnas-viewer video {
+    width:100%;
+    height:100%;
+    max-width:100%;
+    max-height:100%;
+    object-fit:contain;
+  }
+  .lightnas-viewer .viewer-arrow {
+    width:40px;
+    height:52px;
+  }
+}
+
+@media (min-width:761px) {
+  .mobile-files-settings-dialog { display:none; }
+}
