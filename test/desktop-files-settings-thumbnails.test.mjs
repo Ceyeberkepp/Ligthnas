@@ -26,12 +26,13 @@ test('all previewable file clicks bypass legacy download handler on desktop and 
   assert.match(app, /event\.preventDefault\(\);\s*return;/);
 });
 
-test('all image and video cards use cached thumbnail endpoint with retry repair', async () => {
-  const enhancements = await read('public/enhancements.js');
-  assert.match(enhancements, /Always use LightNAS' dedicated thumbnail endpoint/);
-  assert.match(enhancements, /media\.src = `\/api\/files\/thumbnail\?path=/);
-  assert.match(enhancements, /existing\.complete && existing\.naturalWidth === 0/);
-  assert.match(enhancements, /media\.dataset\.retry === '1'/);
+test('all image and video cards render stable thumbnail URLs directly', async () => {
+  const [app, enhancements] = await Promise.all([read('public/app.js'), read('public/enhancements.js')]);
+  assert.match(app, /<img class="file-thumb"/);
+  assert.match(app, /\/api\/files\/thumbnail\?path=/);
+  assert.match(app, /thumbVersion/);
+  const enhancer = enhancements.slice(enhancements.indexOf('function enhanceFileThumbnails()'), enhancements.indexOf('function permissionsMarkup'));
+  assert.doesNotMatch(enhancer, /createElement\('img'\)/);
 });
 
 test('native images bypass FFmpeg while HEIC and HEIF use the conversion pipeline', async () => {

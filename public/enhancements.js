@@ -147,23 +147,10 @@ function ensureViewer() {
   });
   dialog.addEventListener('close', () => {
     if (dialog.dataset.objectUrl) URL.revokeObjectURL(dialog.dataset.objectUrl);
-    const sourcePath = dialog.dataset.sourcePath || '';
     delete dialog.dataset.objectUrl;
     delete dialog.dataset.currentName;
     delete dialog.dataset.sourcePath;
     dialog.querySelector('[data-viewer-stage]').replaceChildren();
-
-    // Refresh the tile that was just previewed. This avoids Chromium/Safari
-    // leaving a decoded image element in a broken state after dialog teardown.
-    if (sourcePath) {
-      const button = [...document.querySelectorAll('#content .file-name[data-directory="false"]')]
-        .find(item => (item.dataset.path || joinPath(currentFolder(), item.dataset.open || '')) === sourcePath);
-      const thumb = button?.querySelector('.file-thumb');
-      if (thumb) {
-        thumb.dataset.retry = '';
-        thumb.src = `/api/files/thumbnail?path=${encodeURIComponent(sourcePath)}&v=${Date.now()}`;
-      }
-    }
   });
   return dialog;
 }
@@ -426,41 +413,10 @@ async function enhanceRuntimeControls() {
 }
 
 function enhanceFileThumbnails() {
-  if (location.hash !== '#files') return;
-  const folder = currentFolder();
-  const browserNativeImages = new Set(['jpg','jpeg','png','gif','webp','bmp','svg','avif']);
-  for (const button of [...document.querySelectorAll('#content .file-name[data-directory="false"]')]) {
-    const name = button.dataset.open || '';
-    const kind = previewKind(name);
-    if (!['image', 'video'].includes(kind)) continue;
-    const path = button.dataset.path || joinPath(folder, name);
-    const existing = button.querySelector('.file-thumb');
-    if (existing) {
-      // Mobile browsers can occasionally discard a decoded gallery image
-      // after the full-screen viewer opens. If the tile comes back broken,
-      // force a fresh cached thumbnail request instead of leaving a dead tile.
-      if (existing.complete && existing.naturalWidth === 0) {
-        existing.dataset.fallback = '';
-        existing.src = `/api/files/thumbnail?path=${encodeURIComponent(path)}&v=${Date.now()}`;
-      }
-      continue;
-    }
-    const media = document.createElement('img');
-    media.className = 'file-thumb';
-    media.loading = button.classList.contains('file-gallery-open') ? 'eager' : 'lazy';
-    media.decoding = 'async';
-    media.alt = '';
-    // Always use LightNAS' dedicated thumbnail endpoint for file cards.
-    // Browser-native images are streamed directly by that route; RAW/video
-    // formats use generated previews. The card never shares the viewer URL.
-    media.src = `/api/files/thumbnail?path=${encodeURIComponent(path)}`;
-    media.addEventListener('error', () => {
-      if (media.dataset.retry === '1') return;
-      media.dataset.retry = '1';
-      media.src = `/api/files/thumbnail?path=${encodeURIComponent(path)}&v=${Date.now()}`;
-    }, { once:true });
-    button.prepend(media);
-  }
+  // Thumbnails are rendered directly by app.js. Keeping thumbnail DOM out of
+  // the MutationObserver avoids click/open/close races that previously left
+  // image elements broken after previewing a file.
+  return;
 }
 
 function permissionsMarkup(options, selected = []) {
