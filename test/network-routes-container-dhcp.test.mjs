@@ -18,7 +18,8 @@ test('containers with no IPv4 can repair their DHCP identity', async () => {
   const [agent, app] = await Promise.all([read('scripts/lightnas-host-agent.py'), read('public/app.js')]);
   assert.match(agent, /def repair_container_network\(name: str\)/);
   assert.match(agent, /action == "repair-network"/);
-  assert.match(agent, /did not receive an IPv4 address/);
+  assert.match(agent, /def apply_managed_automatic_address/);
+  assert.match(agent, /automatic IPv4 configuration failed/);
   assert.match(app, /data-container-action="repair-network"/);
   assert.match(app, />Repair network</);
 });
