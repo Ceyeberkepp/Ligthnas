@@ -1545,3 +1545,140 @@
     grid-template-columns:1fr;
   }
 }
+
+
+/* Compact Integrations automation workspace */
+.automation-admin {
+  margin-top:10px;
+}
+.automation-grid {
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:10px;
+}
+.automation-card {
+  padding:14px 15px;
+}
+.automation-card-head {
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:12px;
+  margin-bottom:10px;
+}
+.automation-card-head h2 {
+  margin:2px 0 3px;
+}
+.automation-card-head p {
+  margin:0;
+  font-size:11px;
+}
+.automation-form {
+  display:grid;
+  gap:9px;
+  margin:0;
+}
+.automation-form label {
+  margin:0;
+}
+.automation-inline-fields {
+  display:grid;
+  grid-template-columns:minmax(140px,.7fr) minmax(220px,1.3fr);
+  gap:8px;
+}
+.automation-permissions {
+  border:1px solid var(--line);
+  border-radius:10px;
+  background:var(--panel-2);
+  overflow:hidden;
+}
+.automation-permissions > summary {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  padding:9px 11px;
+  cursor:pointer;
+  font-size:12px;
+  font-weight:800;
+}
+.automation-permissions > summary small {
+  color:var(--muted);
+  font-weight:600;
+}
+.automation-permissions .security-check-grid {
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:5px 8px;
+  padding:9px 10px 10px;
+  border-top:1px solid var(--line);
+  max-height:220px;
+  overflow:auto;
+}
+.automation-permissions .security-check-grid label {
+  min-height:34px;
+  padding:6px 8px;
+  border:1px solid var(--line);
+  border-radius:8px;
+  background:var(--panel);
+}
+.automation-form-actions {
+  display:flex;
+  justify-content:flex-start;
+}
+.automation-list {
+  display:grid;
+  gap:0;
+  margin-top:10px;
+  border-top:1px solid var(--line);
+}
+.automation-row {
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:10px;
+  align-items:center;
+  min-height:50px;
+  padding:9px 0;
+  border-bottom:1px solid var(--line);
+}
+.automation-row:last-child {
+  border-bottom:0;
+}
+.automation-row b,
+.automation-row small {
+  display:block;
+}
+.automation-row small {
+  margin-top:2px;
+  color:var(--muted);
+  font-size:10px;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.automation-empty {
+  padding:10px 0 2px;
+  color:var(--muted);
+  font-size:11px;
+}
+.automation-card .secret-once {
+  margin:0;
+  max-height:120px;
+  overflow:auto;
+}
+
+@media (max-width:980px) {
+  .automation-grid {
+    grid-template-columns:1fr;
+  }
+}
+
+@media (max-width:620px) {
+  .automation-inline-fields,
+  .automation-permissions .security-check-grid {
+    grid-template-columns:1fr;
+  }
+  .automation-card-head {
+    align-items:flex-start;
+  }
+}
