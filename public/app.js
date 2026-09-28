@@ -1088,12 +1088,48 @@ function firewallView() {
 
 function integrationsView() {
   const apps = state.runtimes?.docker, containers = state.runtimes?.containers, vm = state.runtimes?.virtualization;
-  return `${pageHead('Integrations', 'See which host services and compute providers LightNAS can actually reach.', '<button class="secondary" data-action="refresh-runtime">Refresh</button>')}
-    <div class="tool-grid">
-      <article class="panel"><h2>System containers</h2><p>${containers?.available && containers?.enabled ? `${escapeHtml(containers.provider || 'provider')} connected. System-container creation is enabled.` : escapeHtml(containers?.reason || 'Checking system-container provider…')}</p><button class="secondary" data-view-link="containers">Open containers</button></article>
-      <article class="panel"><h2>Virtualization</h2><p>${vm?.available && vm?.enabled ? `${escapeHtml(vm.provider || 'KVM')} connected.` : escapeHtml(vm?.reason || 'Checking virtualization…')}</p><button class="secondary" data-view-link="vms">Open virtual machines</button></article>
-      <article class="panel"><h2>Optional App Store engine</h2><p>${apps?.available && apps?.enabled ? 'Docker/OCI app engine connected. This is separate from System Containers.' : escapeHtml(apps?.reason || 'Docker/OCI app engine is optional and currently disabled.')}</p><button class="secondary" data-view-link="apps">Open App Store</button></article>
-    </div>`;
+  const integrations = [
+    {
+      name:'System containers',
+      detail: containers?.available && containers?.enabled ? `${containers.provider || 'provider'} connected` : containers?.reason || 'Checking container provider…',
+      online:Boolean(containers?.available && containers?.enabled),
+      target:'containers'
+    },
+    {
+      name:'Virtualization',
+      detail: vm?.available && vm?.enabled ? `${vm.provider || 'KVM'} connected` : vm?.reason || 'Checking virtualization…',
+      online:Boolean(vm?.available && vm?.enabled),
+      target:'vms'
+    },
+    {
+      name:'App Store engine',
+      detail: apps?.available && apps?.enabled ? 'Docker/OCI engine connected' : apps?.reason || 'Docker/OCI engine disabled',
+      online:Boolean(apps?.available && apps?.enabled),
+      target:'apps'
+    },
+    {
+      name:'AI workspace',
+      detail: state.overview.appliance.features?.ai !== false ? 'AI workspace enabled' : 'AI workspace disabled in Capabilities',
+      online:state.overview.appliance.features?.ai !== false,
+      target:'ai'
+    },
+    {
+      name:'Email / SMTP',
+      detail: state.smtp?.config ? `${state.smtp.config.host}:${state.smtp.config.port}` : 'Not configured',
+      online:Boolean(state.smtp?.config),
+      target:'smtp'
+    }
+  ];
+  return `${pageHead('Integrations', 'Connected runtimes, services, and LightNAS providers.', '<button class="secondary" data-action="refresh-runtime">Refresh</button>')}
+    <section class="integration-summary-grid">
+      <article class="panel integration-summary"><span class="eyebrow">CONNECTED</span><strong>${integrations.filter(item => item.online).length}</strong><p>services currently ready</p></article>
+      <article class="panel integration-summary"><span class="eyebrow">AVAILABLE</span><strong>${integrations.length}</strong><p>managed integration points</p></article>
+      <article class="panel integration-summary"><span class="eyebrow">CONTROL</span><strong>Local</strong><p>managed directly by LightNAS</p></article>
+    </section>
+    <section class="integration-list panel">
+      <div class="panel-head"><div><span class="eyebrow">PROVIDERS</span><h2>Integration status</h2></div><small>Live status</small></div>
+      ${integrations.map(item => `<div class="integration-row"><span class="integration-dot ${item.online ? 'online' : ''}"></span><div><b>${escapeHtml(item.name)}</b><small>${escapeHtml(item.detail)}</small></div><span class="user-status ${item.online ? 'active' : 'disabled'}">${item.online ? 'READY' : 'OFFLINE'}</span><button class="secondary" type="button" data-view-link="${item.target}">Open</button></div>`).join('')}
+    </section>`;
 }
 
 function render(view) {
