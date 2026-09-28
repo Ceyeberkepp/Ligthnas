@@ -4,12 +4,11 @@ import { readFile } from 'node:fs/promises';
 
 const read = path => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
-test('All Files thumbnails stream browser-native images directly with thumbnail fallback', async () => {
+test('All Files thumbnails use stable cached thumbnails with a cache-busting retry', async () => {
   const enhancements = await read('public/enhancements.js');
-  assert.match(enhancements, /browserNativeImages/);
-  assert.match(enhancements, /\/api\/files\/download\?path=/);
-  assert.match(enhancements, /media\.dataset\.fallback/);
-  assert.match(enhancements, /\/api\/files\/thumbnail\?path=/);
+  assert.match(enhancements, /media\.src = `\/api\/files\/thumbnail\?path=/);
+  assert.match(enhancements, /media\.dataset\.retry/);
+  assert.match(enhancements, /&v=\$\{Date\.now\(\)\}/);
 });
 
 test('Files supports an iPhone-style gallery view and contextual multi-select media upload', async () => {

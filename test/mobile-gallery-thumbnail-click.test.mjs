@@ -4,9 +4,9 @@ import { readFile } from 'node:fs/promises';
 
 const read = path => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
-test('mobile gallery click does not trigger the legacy download handler', async () => {
+test('previewable file clicks never trigger the legacy download handler', async () => {
   const app = await read('public/app.js');
-  assert.match(app, /button\.classList\.contains\('file-gallery-open'\) && matchMedia\('\(max-width: 760px\)'\)\.matches/);
+  assert.match(app, /isPreviewableFileName\(button\.dataset\.open \|\| ''\)/);
   assert.match(app, /event\.preventDefault\(\);\s*return;/);
 });
 

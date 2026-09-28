@@ -911,3 +911,39 @@
 @media (min-width:761px) {
   .mobile-files-settings-dialog { display:none; }
 }
+
+
+/* Files & media desktop settings + stable desktop/mobile view separation */
+.mobile-photo-view-button { display:none; }
+.files-sync-trigger { display:none !important; }
+.desktop-files-settings-panel { margin:16px 0 20px; }
+.files-settings-card { display:grid; gap:18px; }
+.files-settings-card h2 { margin:5px 0 5px; }
+.files-settings-card p { margin:0; }
+.files-settings-grid {
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:12px;
+}
+.files-setting-box {
+  display:grid;
+  align-content:start;
+  gap:10px;
+  padding:14px;
+  border:1px solid var(--line);
+  border-radius:12px;
+  background:var(--panel-2);
+}
+.files-setting-box > b { font-size:13px; }
+.desktop-files-settings-tab { display:inline-flex; }
+
+@media (max-width:760px) {
+  .mobile-photo-view-button { display:inline-flex; }
+  .desktop-files-settings-tab,
+  .desktop-files-settings-panel { display:none !important; }
+  .files-settings-open .files-library-content { display:block; }
+}
+
+@media (max-width:900px) and (min-width:761px) {
+  .files-settings-grid { grid-template-columns:1fr; }
+}

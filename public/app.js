@@ -1,4 +1,4 @@
-const state = { overview: null, view: 'home', folder: '', files: null, fileError: null, fileView: ['list','grid','gallery'].includes(localStorage.getItem('lightnas-file-view')) ? localStorage.getItem('lightnas-file-view') : 'grid', fileTruncated: false, overviewMetric: localStorage.getItem('lightnas-overview-metric') || 'cpu', lastNetworkSample: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, smtp: undefined, media: null, network: null, metricHistory: { cpu: [], load: [], memory: [], storage: [], networkIn: [], networkOut: [] } };
+const state = { overview: null, view: 'home', folder: '', files: null, fileError: null, filesSettingsOpen: false, fileView: ['list','grid','gallery'].includes(localStorage.getItem('lightnas-file-view')) ? localStorage.getItem('lightnas-file-view') : 'grid', fileTruncated: false, overviewMetric: localStorage.getItem('lightnas-overview-metric') || 'cpu', lastNetworkSample: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, smtp: undefined, media: null, network: null, metricHistory: { cpu: [], load: [], memory: [], storage: [], networkIn: [], networkOut: [] } };
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
 const themeChoices = ['system', 'light', 'dark'];
@@ -562,6 +562,15 @@ function libraryKindForName(name) {
   return category === 'Photos' ? 'Photo' : category === 'Videos' ? 'Video' : category === 'Audio' ? 'Audio' : 'Document';
 }
 
+const previewableFileExtensions = new Set([
+  'jpg','jpeg','png','gif','webp','bmp','svg','avif','heic','heif','raw','dng','cr2','cr3','nef','nrw','arw','srf','sr2','raf','orf','rw2','pef','srw','x3f',
+  'mp4','webm','mov','m4v','ogv','mkv','avi','wmv','flv','mpeg','mpg','m2v','mts','m2ts','ts','3gp','3g2','vob',
+  'mp3','wav','ogg','m4a','aac','flac','pdf','txt','log','md','json','csv','xml','yaml','yml','ini','conf','sh','js','mjs','css','html'
+]);
+function isPreviewableFileName(name) {
+  return previewableFileExtensions.has(fileExtension(name));
+}
+
 function fileEntryPath(entry) {
   return entry.path || [state.folder, entry.name].filter(Boolean).join('/');
 }
@@ -574,7 +583,8 @@ function filesView() {
   const allFiles = state.folder === '';
   const crumbs = [`<button class="panel-link" data-folder="">Files & media</button>`, ...segments.map((segment, index) => `<span> / </span><button class="panel-link" data-folder="${escapeHtml(segments.slice(0, index + 1).join('/'))}">${escapeHtml(segment)}</button>`)].join('');
   const entries = Array.isArray(state.files) ? (allFiles ? state.files.filter(entry => !entry.directory && !isSystemImageFile(entry.name)) : state.files.filter(entry => entry.directory || !isSystemImageFile(entry.name))) : state.files;
-  const tabs = librarySections.map(([folder, label]) => `<button type="button" class="library-tab ${section === folder ? 'active' : ''}" data-library-tab="${escapeHtml(folder)}" aria-pressed="${section === folder}">${escapeHtml(label)}</button>`).join('');
+  const tabs = librarySections.map(([folder, label]) => `<button type="button" class="library-tab ${!state.filesSettingsOpen && section === folder ? 'active' : ''}" data-library-tab="${escapeHtml(folder)}" aria-pressed="${!state.filesSettingsOpen && section === folder}">${escapeHtml(label)}</button>`).join('') +
+    `<button type="button" class="library-tab desktop-files-settings-tab ${state.filesSettingsOpen ? 'active' : ''}" data-files-settings-tab aria-pressed="${state.filesSettingsOpen}">Settings</button>`;
 
   const item = entry => {
     const path = fileEntryPath(entry);
@@ -617,21 +627,32 @@ function filesView() {
 
   return `<section class="files-page ${state.fileView === 'gallery' ? 'photo-mode' : 'grid-mode'}">${pageHead('Files & media', 'Browse and manage the actual files stored in LightNAS.', '<button class="secondary" data-action="refresh-files">Refresh</button>')}
     <nav class="library-tabs" aria-label="File library sections">${tabs}</nav>
+    <section class="desktop-files-settings-panel ${state.filesSettingsOpen ? '' : 'hidden'}">
+      <article class="panel files-settings-card">
+        <div><span class="eyebrow">FILES & MEDIA SETTINGS</span><h2>Library settings</h2><p class="muted">Manage phone library sync and desktop file display preferences.</p></div>
+        <div class="files-settings-grid">
+          <div class="files-setting-box"><b>Desktop view</b><p class="muted">Use List or Grid on desktop. Photos view is reserved for the mobile photo experience.</p><div class="head-actions"><button class="secondary" type="button" data-file-view="list">☷ List</button><button class="secondary" type="button" data-file-view="grid">▦ Grid</button></div></div>
+          ${state.overview.appliance.role === 'administrator' ? '<div class="files-setting-box"><b>Phone library sync</b><p class="muted">Automatically route phone photos to Photos and phone videos to Videos.</p><button class="primary phone-sync-button" type="button" data-phone-sync>Configure phone sync</button></div>' : ''}
+        </div>
+      </article>
+    </section>
+    <div class="files-library-content ${state.filesSettingsOpen ? 'hidden' : ''}">
     <div class="file-toolbar"><div class="breadcrumbs">${crumbs}</div><div class="file-toolbar-actions">
       <div class="view-toggle" role="group" aria-label="File view">
         <button class="secondary ${state.fileView === 'list' ? 'active' : ''}" type="button" data-file-view="list" aria-pressed="${state.fileView === 'list'}">☷ List</button>
         <button class="secondary ${state.fileView === 'grid' ? 'active' : ''}" type="button" data-file-view="grid" aria-pressed="${state.fileView === 'grid'}">▦ Grid</button>
-        <button class="secondary gallery-view-button ${state.fileView === 'gallery' ? 'active' : ''}" type="button" data-file-view="gallery" aria-pressed="${state.fileView === 'gallery'}">▦ Photos</button>
+        <button class="secondary gallery-view-button mobile-photo-view-button ${state.fileView === 'gallery' ? 'active' : ''}" type="button" data-file-view="gallery" aria-pressed="${state.fileView === 'gallery'}">▦ Photos</button>
       </div>
       <button class="secondary" data-action="new-folder">+ Folder</button>
       <label class="primary upload-button">${section === 'Photos' ? 'Upload photos' : section === 'Videos' ? 'Upload videos' : section === 'Audio' ? 'Upload audio' : 'Upload'}<input id="file-upload" type="file" ${section === 'Photos' ? 'accept="image/*"' : section === 'Videos' ? 'accept="video/*"' : section === 'Audio' ? 'accept="audio/*"' : ''} multiple hidden></label>
       <label class="secondary upload-button">Upload folder<input id="folder-upload" type="file" webkitdirectory directory multiple hidden></label>
-      ${state.overview.appliance.role === 'administrator' ? '<button class="secondary phone-sync-button" type="button" data-phone-sync>Phone sync</button>' : ''}
+      ${state.overview.appliance.role === 'administrator' ? '<button class="secondary phone-sync-button files-sync-trigger" type="button" data-phone-sync>Phone sync</button>' : ''}
     </div></div>
     <div class="file-drop-zone" data-file-drop tabindex="0"><b>Drop files here</b><span>Multiple files and ZIP archives are supported. Use “Upload folder” to preserve a whole folder tree.</span></div>
     <p class="muted">${allFiles ? 'All files shows only your Documents, Photos, Videos, and Audio libraries.' : 'Open folders normally or switch back to All files to see all four libraries together.'} ZIP and other file types are accepted, uploads have visible progress, and LightNAS does not impose an application-level file-size ceiling.</p>
     ${state.fileTruncated && allFiles ? '<div class="module-note">Showing the newest 10,000 files. Open a category or folder to browse beyond that safety limit.</div>' : ''}
     <div class="${state.fileView === 'gallery' ? 'file-photo-gallery' : state.fileView === 'grid' ? 'file-browser-grid' : 'storage-list'}">${state.fileError ? `<div class="empty error-state"><p><b>Files could not be loaded.</b></p><p>${escapeHtml(state.fileError)}</p><button class="secondary" data-action="refresh-files">Try again</button></div>` : entries === null ? '<div class="empty"><p>Loading files…</p></div>' : entries.length ? entries.map(item).join('') : `<div class="empty"><p>${allFiles ? 'No files have been uploaded yet.' : 'This folder is empty.'}</p></div>`}</div>
+    </div>
     <button class="secondary mobile-files-settings-button" type="button" data-mobile-files-settings aria-label="Files & media settings">⚙ Settings</button>
   </section>`;
 }
@@ -1391,7 +1412,8 @@ function bindViewActions() {
     link.click();
     link.remove();
   }));
-  $$('[data-library-tab]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+  document.querySelectorAll('#content [data-library-tab]').forEach(button => button.addEventListener('click', async () => {
+    state.filesSettingsOpen = false;
     const folder = button.dataset.libraryTab || '';
     if (folder && folder !== 'Attached storage') {
       try { await request(`/api/files?path=${encodeURIComponent(folder)}`); }
@@ -1404,14 +1426,22 @@ function bindViewActions() {
     state.files = null;
     render('files');
   }));
-  $$('[data-folder]', $('#content')).forEach(button => button.addEventListener('click', () => { state.folder = button.dataset.folder; state.files = null; render('files'); }));
+  $('[data-files-settings-tab]', $('#content'))?.addEventListener('click', () => {
+    state.filesSettingsOpen = true;
+    if (innerWidth > 760 && state.fileView === 'gallery') {
+      state.fileView = 'grid';
+      localStorage.setItem('lightnas-file-view', 'grid');
+    }
+    render('files');
+  });
+  document.querySelectorAll('#content [data-folder]').forEach(button => button.addEventListener('click', () => { state.folder = button.dataset.folder; state.files = null; render('files'); }));
   document.querySelectorAll('#content [data-open]').forEach(button => button.addEventListener('click', async event => {
     const path = button.dataset.path || [state.folder, button.dataset.open].filter(Boolean).join('/');
     if (button.dataset.directory === 'true') { state.folder = path; state.files = null; render('files'); return; }
     // On mobile Photos view, the preview layer owns the click. Do not also
     // trigger the legacy download handler, which caused the tile image to be
     // replaced/invalidated after opening it once.
-    if (button.classList.contains('file-gallery-open') && matchMedia('(max-width: 760px)').matches) {
+    if (isPreviewableFileName(button.dataset.open || '')) {
       event.preventDefault();
       return;
     }

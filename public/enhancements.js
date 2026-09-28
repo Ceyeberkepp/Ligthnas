@@ -1,5 +1,5 @@
 const previewExtensions = {
-  image: new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'avif', 'raw', 'dng', 'cr2', 'cr3', 'nef', 'nrw', 'arw', 'srf', 'sr2', 'raf', 'orf', 'rw2', 'pef', 'srw', 'x3f']),
+  image: new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'avif', 'heic', 'heif', 'raw', 'dng', 'cr2', 'cr3', 'nef', 'nrw', 'arw', 'srf', 'sr2', 'raf', 'orf', 'rw2', 'pef', 'srw', 'x3f']),
   video: new Set(['mp4', 'webm', 'mov', 'm4v', 'ogv', 'mkv', 'avi', 'wmv', 'flv', 'mpeg', 'mpg', 'm2v', 'mts', 'm2ts', 'ts', '3gp', '3g2', 'vob']),
   audio: new Set(['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac']),
   pdf: new Set(['pdf']),
@@ -176,9 +176,7 @@ async function openPreview(name, explicitPath = '') {
 
   if (kind === 'image') {
     viewer = document.createElement('img');
-    viewer.src = raw
-      ? `/api/files/thumbnail?preview=1&path=${encodeURIComponent(path)}`
-      : `/api/files/download?path=${encodeURIComponent(path)}`;
+    viewer.src = `/api/files/thumbnail?preview=1&path=${encodeURIComponent(path)}`;
     viewer.alt = name;
   } else if (kind === 'video') {
     // Always use the server preview path. Browser codec support differs across
@@ -426,33 +424,25 @@ function enhanceFileThumbnails() {
       // Mobile browsers can occasionally discard a decoded gallery image
       // after the full-screen viewer opens. If the tile comes back broken,
       // force a fresh cached thumbnail request instead of leaving a dead tile.
-      if (button.classList.contains('file-gallery-open') && existing.complete && existing.naturalWidth === 0) {
+      if (existing.complete && existing.naturalWidth === 0) {
         existing.dataset.fallback = '';
         existing.src = `/api/files/thumbnail?path=${encodeURIComponent(path)}&v=${Date.now()}`;
       }
       continue;
     }
-    const extension = name.toLowerCase().split('.').pop();
     const media = document.createElement('img');
     media.className = 'file-thumb';
-    media.loading = 'lazy';
+    media.loading = button.classList.contains('file-gallery-open') ? 'eager' : 'lazy';
     media.decoding = 'async';
     media.alt = '';
-    // Normal photos are streamed directly instead of spawning FFmpeg for
-    // every card in All Files. RAW photos and videos still use generated JPGs.
-    const galleryCard = button.classList.contains('file-gallery-open');
-    media.loading = galleryCard ? 'eager' : 'lazy';
-    media.src = galleryCard
-      ? `/api/files/thumbnail?path=${encodeURIComponent(path)}`
-      : kind === 'image' && browserNativeImages.has(extension)
-        ? `/api/files/download?path=${encodeURIComponent(path)}`
-        : `/api/files/thumbnail?path=${encodeURIComponent(path)}`;
+    // Always use LightNAS' cached JPEG thumbnail endpoint for file cards.
+    // This avoids desktop/mobile browsers reusing or invalidating the original
+    // file response when the full preview is opened.
+    media.src = `/api/files/thumbnail?path=${encodeURIComponent(path)}`;
     media.addEventListener('error', () => {
-      if (media.dataset.fallback === '1') return;
-      media.dataset.fallback = '1';
-      media.src = kind === 'image' && browserNativeImages.has(extension)
-        ? `/api/files/download?path=${encodeURIComponent(path)}`
-        : `/api/files/thumbnail?path=${encodeURIComponent(path)}`;
+      if (media.dataset.retry === '1') return;
+      media.dataset.retry = '1';
+      media.src = `/api/files/thumbnail?path=${encodeURIComponent(path)}&v=${Date.now()}`;
     }, { once:true });
     button.prepend(media);
   }

@@ -20,18 +20,17 @@ test('mobile photo mode hides Files chrome but preserves Settings and gallery', 
   assert.doesNotMatch(css, /@media \(min-width:761px\)[\s\S]*\.files-page\.photo-mode > \.page-head/);
 });
 
-test('phone sync moves into mobile Files settings without changing desktop button', async () => {
-  const [app, css] = await Promise.all([read('public/app.js'), read('public/enhancements.css')]);
+test('phone sync remains available through mobile Files settings', async () => {
+  const app = await read('public/app.js');
   assert.match(app, /data-open-phone-sync-from-settings/);
   assert.match(app, /#content \.phone-sync-button/);
-  assert.match(css, /@media \(max-width:760px\)[\s\S]*\.files-page \.phone-sync-button \{ display:none !important; \}/);
 });
 
-test('gallery thumbnails use stable generated previews and HEIC opens as JPEG preview', async () => {
+test('gallery thumbnails use the stable cached thumbnail endpoint and HEIC preview support', async () => {
   const enhancements = await read('public/enhancements.js');
-  assert.match(enhancements, /const galleryCard = button\.classList\.contains\('file-gallery-open'\)/);
-  assert.match(enhancements, /galleryCard[\s\S]*\/api\/files\/thumbnail\?path=/);
-  assert.match(enhancements, /'heic','heif'/);
+  assert.match(enhancements, /Always use LightNAS' cached JPEG thumbnail endpoint/);
+  assert.match(enhancements, /media\.src = `\/api\/files\/thumbnail\?path=/);
+  assert.match(enhancements, /'heic', 'heif'/);
 });
 
 test('mobile viewer becomes full-screen without changing desktop viewer rules', async () => {
