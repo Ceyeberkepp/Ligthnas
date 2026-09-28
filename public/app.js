@@ -591,9 +591,12 @@ function filesView() {
     const location = !entry.directory && (entry.folder || path.includes('/')) ? (entry.folder || path.split('/').slice(0, -1).join('/') || 'Root') : '';
     const kind = entry.directory ? 'Folder' : libraryKindForName(entry.name);
     const meta = entry.directory ? 'Folder' : `${kind} · ${bytes(entry.sizeBytes)}${location ? ` · ${escapeHtml(location)}` : ''}`;
+    const thumbVersion = encodeURIComponent(entry.modifiedAt || entry.sizeBytes || '1');
     const visual = entry.directory
       ? '<span class="folder-glyph">▣</span>'
-      : `<span class="file-glyph file-kind-${kind.toLowerCase()}">${kind === 'Photo' ? '▧' : kind === 'Video' ? '▷' : kind === 'Audio' ? '♪' : '▤'}</span>`;
+      : (kind === 'Photo' || kind === 'Video')
+        ? `<img class="file-thumb" loading="${state.fileView === 'gallery' ? 'eager' : 'lazy'}" decoding="async" alt="" src="/api/files/thumbnail?path=${encodeURIComponent(path)}&v=${thumbVersion}">`
+        : `<span class="file-glyph file-kind-${kind.toLowerCase()}">${kind === 'Audio' ? '♪' : '▤'}</span>`;
 
     if (state.fileView === 'gallery') {
       return `<article class="file-gallery-item ${kind.toLowerCase()}">
@@ -646,6 +649,7 @@ function filesView() {
       <button class="secondary" data-action="new-folder">+ Folder</button>
       <label class="primary upload-button">${section === 'Photos' ? 'Upload photos' : section === 'Videos' ? 'Upload videos' : section === 'Audio' ? 'Upload audio' : 'Upload'}<input id="file-upload" type="file" ${section === 'Photos' ? 'accept="image/*"' : section === 'Videos' ? 'accept="video/*"' : section === 'Audio' ? 'accept="audio/*"' : ''} multiple hidden></label>
       <label class="secondary upload-button">Upload folder<input id="folder-upload" type="file" webkitdirectory directory multiple hidden></label>
+      <button class="secondary desktop-files-settings-button" type="button" data-files-settings-tab>⚙ Settings</button>
       ${state.overview.appliance.role === 'administrator' ? '<button class="secondary phone-sync-button files-sync-trigger" type="button" data-phone-sync>Phone sync</button>' : ''}
     </div></div>
     <div class="file-drop-zone" data-file-drop tabindex="0"><b>Drop files here</b><span>Multiple files and ZIP archives are supported. Use “Upload folder” to preserve a whole folder tree.</span></div>
