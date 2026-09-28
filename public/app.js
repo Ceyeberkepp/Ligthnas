@@ -134,13 +134,20 @@ async function refreshLoginMethods() {
   }
 }
 
+function featureEnabled(view, appliance = state.overview?.appliance) {
+  const features = appliance?.features || {};
+  const mapping = { apps:'appStore', containers:'containers', vms:'virtualMachines', ai:'ai', integrations:'integrations' };
+  const key = mapping[view];
+  return !key || features[key] !== false;
+}
+
 function canView(view, appliance = state.overview?.appliance) {
-  if (!appliance) return false;
+  if (!appliance || !featureEnabled(view, appliance)) return false;
   if (appliance.role === 'administrator') return true;
   const allowed = new Set(appliance.permissions || []);
   const required = {
     home: ['overview.view'], files: ['files.read'], media: ['files.read'], storage: ['storage.view'], pools: ['pools.view', 'storage.manage'], shares: ['shares.view', 'shares.manage'],
-    apps: ['apps.view', 'apps.manage'], containers: ['containers.view', 'containers.manage', 'containers.console'], vms: ['vms.view', 'vms.manage', 'vms.console'],
+    apps: ['apps.view', 'apps.manage'], ai: ['apps.view', 'apps.manage', 'system.view'], containers: ['containers.view', 'containers.manage', 'containers.console'], vms: ['vms.view', 'vms.manage', 'vms.console'],
     network: ['network.view'], firewall: ['firewall.view', 'firewall.manage', 'network.manage'], monitoring: ['monitoring.view', 'system.view'], capabilities: ['capabilities.view', 'system.view'],
     integrations: ['integrations.view', 'integrations.manage'], assistant: ['admin.view', 'system.view'], users: ['users.manage'], permissions: ['users.manage'], shell: ['system.shell'], smtp: ['smtp.manage'], settings: ['settings.manage'], admin: ['admin.view']
   }[view];
@@ -180,13 +187,13 @@ async function showConsole() {
   rememberStorageSignature();
   clearInterval(overviewTimer);
   overviewTimer = setInterval(async () => {
-    if (state.view !== 'home' || $('#console').classList.contains('hidden')) return;
+    if (!['home', 'monitoring'].includes(state.view) || $('#console').classList.contains('hidden')) return;
     try {
       state.overview = await request('/api/overview');
       captureOverviewMetrics();
-      render('home');
+      render(state.view);
     } catch {}
-  }, 15000);
+  }, 5000);
 }
 
 function storageInventorySignature(source = state.overview) {
