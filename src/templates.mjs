@@ -6,6 +6,7 @@ import { pipeline } from 'node:stream/promises';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import { createHash } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 import { listStoragePools } from './storage-pools.mjs';
 
 const PROXMOX_IMAGES_BASE = 'https://download.proxmox.com/images/';
@@ -276,14 +277,36 @@ export async function importContainerTemplate({ storageId, url, proxmoxTemplate 
     expectedSha512 = item.sha512 || null;
   }
   const safeUrl = await validateUrl(source);
-  const filename = safeFilename(safeUrl.pathname);
   let response;
-  try {
-    ({ response } = await safeFetch(safeUrl.toString(), DOWNLOAD_TIMEOUT_MS));
-  } catch (error) {
-    throw normalizeTemplateTransferError(error);
+  let finalUrl = safeUrl;
+  let lastError = null;
+
+  // Pulls can briefly fail when an upstream mirror/CDN rotates, rate-limits,
+  // or closes an idle connection. Retry transient failures automatically so a
+  // normal "Pull image" action does not require the administrator to repeat it.
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      ({ response, url: finalUrl } = await safeFetch(safeUrl.toString(), DOWNLOAD_TIMEOUT_MS));
+      if (response.ok && response.body) break;
+      const transient = response.status === 429 || response.status >= 500;
+      if (!transient) {
+        throw Object.assign(new Error(`Template download failed with HTTP ${response.status}.`), { status: 502 });
+      }
+      lastError = Object.assign(new Error(`Template download failed with HTTP ${response.status}.`), { status: 502 });
+    } catch (error) {
+      lastError = normalizeTemplateTransferError(error);
+    }
+    if (attempt < 3) await delay(attempt * 750);
   }
-  if (!response.ok || !response.body) throw Object.assign(new Error(`Template download failed with HTTP ${response.status}.`), { status: 502 });
+
+  if (!response?.ok || !response.body) {
+    throw lastError || Object.assign(new Error('Template download failed after three attempts.'), { status: 502 });
+  }
+
+  // A catalog/CDN may redirect to the real archive filename. Use the final URL
+  // rather than the original request URL so redirected image pulls are saved
+  // with the correct .tar.zst/.tar.xz/.tar.gz filename.
+  const filename = safeFilename(finalUrl.pathname);
   const length = Number(response.headers.get('content-length') || 0);
   return await saveStream(Readable.fromWeb(response.body), target, filename, length, expectedSha512);
 }
