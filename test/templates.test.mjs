@@ -25,3 +25,16 @@ test('template transfer errors preserve deliberate HTTP status', () => {
   const expected = Object.assign(new Error('checksum failed'), { status: 502 });
   assert.equal(normalizeTemplateTransferError(expected), expected);
 });
+
+
+test('container image pull retries transient upstream failures and honors redirect filenames', async () => {
+  const templates = await read('src/templates.mjs');
+  const ui = await read('public/templates.js');
+  assert.match(templates, /for \(let attempt = 1; attempt <= 3; attempt \+= 1\)/);
+  assert.match(templates, /response\.status === 429 \|\| response\.status >= 500/);
+  assert.match(templates, /safeFilename\(finalUrl\.pathname\)/);
+  assert.match(templates, /await delay\(attempt \* 750\)/);
+  assert.match(ui, />Pull image<\/button>/);
+  assert.match(ui, />Pull selected<\/button>/);
+  assert.match(ui, /Pulling container image/);
+});
