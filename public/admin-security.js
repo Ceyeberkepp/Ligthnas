@@ -234,17 +234,10 @@ function refreshCurrent() {
 }
 
 async function enhance() {
+  // Security/admin enhancements must never rewrite Files & media thumbnails.
+  // app.js owns thumbnail URLs so opening settings, MFA, or other admin panels
+  // cannot invalidate photo tiles.
   await Promise.allSettled([renderGroups(), renderTotp(), renderAutomation()]);
-  // Use cached FFmpeg thumbnails for images and videos rendered by the other enhancement layer.
-  if (location.hash === '#files') {
-    const folder = qa('#content [data-folder]').at(-1)?.dataset.folder || '';
-    for (const thumb of qa('#content .file-thumb')) {
-      const button = thumb.closest('[data-open]');
-      if (!button) continue;
-      const path = [folder, button.dataset.open].filter(Boolean).join('/');
-      thumb.src = `/api/files/thumbnail?path=${encodeURIComponent(path)}`;
-    }
-  }
 }
 
 const observer = new MutationObserver(() => {
