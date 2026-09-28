@@ -150,7 +150,7 @@ async function openUrlDialog(preferredStorageId = '') {
     const form = event.currentTarget;
     const error = dialog.querySelector('[data-template-error]');
     error.textContent = 'Downloading…';
-    const progress = window.LightNASProgress?.open('Pulling container image', form.elements.url.value);
+    const progress = window.LightNASProgress?.open('Downloading container image', form.elements.url.value);
     try {
       await tRequest('/api/templates/import', {
         method: 'POST',
@@ -270,7 +270,7 @@ document.addEventListener('click', async event => {
     catalogFile.disabled = true;
     error.textContent = 'Pulling selected upstream image…';
     const selected = templateState.catalog?.find(item => (item.id || item.filename) === catalogFile.dataset.templateCatalogFile);
-    const progress = window.LightNASProgress?.open('Pulling container image', selected?.filename || selected?.package || 'Selected system template');
+    const progress = window.LightNASProgress?.open('Downloading container image', selected?.filename || selected?.package || 'Selected system template');
     try {
       await tRequest('/api/templates/import', {
         method: 'POST',
