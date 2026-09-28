@@ -1508,20 +1508,33 @@ $('#node-shell-top')?.addEventListener('click', () => {
   window.open(`/node-shell.html?v=${Date.now()}`, '_blank', 'noopener,width=1200,height=800');
 });
 $('#logout').addEventListener('click', async () => { await request('/api/logout', { method: 'POST' }); setLoginMethods([]); showAuth('login'); });
+function setMobileSidebar(open) {
+  const sidebar = $('.sidebar');
+  const backdrop = $('#sidebar-backdrop');
+  if (!sidebar) return;
+  sidebar.classList.toggle('open', Boolean(open));
+  if (backdrop) backdrop.hidden = !open;
+  document.body.classList.toggle('mobile-sidebar-open', Boolean(open));
+}
+
 function applySidebarPreference() {
   const collapsed = localStorage.getItem('lightnas-sidebar-collapsed') === '1';
   $('#console').classList.toggle('sidebar-collapsed', collapsed && innerWidth > 760);
+  if (innerWidth > 760) setMobileSidebar(false);
 }
 applySidebarPreference();
 $('#menu').addEventListener('click', () => {
   if (innerWidth <= 760) {
-    $('.sidebar').classList.toggle('open');
+    setMobileSidebar(!$('.sidebar').classList.contains('open'));
     return;
   }
   const collapsed = !$('#console').classList.contains('sidebar-collapsed');
   $('#console').classList.toggle('sidebar-collapsed', collapsed);
   localStorage.setItem('lightnas-sidebar-collapsed', collapsed ? '1' : '0');
 });
+$('#sidebar-close')?.addEventListener('click', () => setMobileSidebar(false));
+$('#sidebar-backdrop')?.addEventListener('click', () => setMobileSidebar(false));
+addEventListener('keydown', event => { if (event.key === 'Escape' && innerWidth <= 760) setMobileSidebar(false); });
 addEventListener('resize', applySidebarPreference);
 $('#theme-toggle').addEventListener('click', () => { theme = themeChoices[(themeChoices.indexOf(theme) + 1) % themeChoices.length]; localStorage.setItem('lightnas-theme', theme); applyTheme(); toast(`Appearance: ${theme}`); });
 $('#avatar').addEventListener('click', () => {
@@ -1551,8 +1564,8 @@ $('#avatar').addEventListener('click', () => {
   }, { once: true });
   input.click();
 });
-$('#mobile-more').addEventListener('click', () => $('.sidebar').classList.add('open'));
-$$('[data-view]').forEach(link => link.addEventListener('click', () => $('.sidebar').classList.remove('open')));
+$('#mobile-more').addEventListener('click', () => setMobileSidebar(true));
+$('[data-view]').forEach(link => link.addEventListener('click', () => setMobileSidebar(false)));
 $$('.close-dialog').forEach(button => button.addEventListener('click', () => $('#share-dialog').close()));
 $('#share-form').addEventListener('submit', async event => {
   event.preventDefault();
