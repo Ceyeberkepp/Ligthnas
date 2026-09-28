@@ -15,7 +15,7 @@ test('nested container creation always uses the LightNAS LAN parent and DHCP', a
 
 test('container creation waits for a usable IPv4 and default route', async () => {
   const agent = await readFile(new URL('../scripts/lightnas-host-agent.py', import.meta.url), 'utf8');
-  assert.match(agent, /for _attempt in range\(30\)/);
+  assert.match(agent, /for _attempt in range\(60\)/);
   assert.match(agent, /ip", "-4", "route", "show", "default"/);
   assert.match(agent, /did not receive an IPv4 address/);
   assert.match(agent, /has no IPv4 default route/);

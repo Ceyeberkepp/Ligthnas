@@ -1110,6 +1110,7 @@ function networkView() {
           const profile = connections.find(item => item.device === route.device);
           const protocol = String(route.protocol || '').toLowerCase();
           const persistentEditable = Boolean(profile && route.gateway && !['kernel','dhcp','ra','redirect'].includes(protocol));
+          const runtimeEditable = Boolean(route.device && route.gateway);
           const normalizedDestination = route.destination === 'default' ? '0.0.0.0/0' : route.destination;
           const oldRoute = `${normalizedDestination} ${route.gateway || ''} ${route.metric ?? 100}`.trim();
           return `<div class="route-row">
@@ -1118,7 +1119,11 @@ function networkView() {
             <span>${escapeHtml(route.device || '—')}<small>${escapeHtml(profile?.name || protocol || '')}</small></span>
             <span>metric ${route.metric ?? '—'}</span>
             <div class="runtime-actions">
-              ${persistentEditable ? `<button class="secondary" data-network-edit-route data-route-connection="${escapeHtml(profile.name)}" data-route-destination="${escapeHtml(route.destination)}" data-route-gateway="${escapeHtml(route.gateway || '')}" data-route-metric="${route.metric ?? 100}" data-route-old="${escapeHtml(oldRoute)}">Edit</button><button class="secondary danger-button" data-network-delete-route data-route-connection="${escapeHtml(profile.name)}" data-route-old="${escapeHtml(oldRoute)}">Delete</button>` : '<span class="muted route-managed-label">system</span>'}
+              ${persistentEditable
+                ? `<button class="secondary" data-network-edit-route data-route-connection="${escapeHtml(profile.name)}" data-route-destination="${escapeHtml(route.destination)}" data-route-gateway="${escapeHtml(route.gateway || '')}" data-route-device="${escapeHtml(route.device || '')}" data-route-metric="${route.metric ?? 100}" data-route-old="${escapeHtml(oldRoute)}">Edit</button><button class="secondary danger-button" data-network-delete-route data-route-connection="${escapeHtml(profile.name)}" data-route-old="${escapeHtml(oldRoute)}">Delete</button>`
+                : runtimeEditable
+                  ? `<button class="secondary" data-network-edit-route data-route-runtime="true" data-route-destination="${escapeHtml(route.destination)}" data-route-gateway="${escapeHtml(route.gateway || '')}" data-route-device="${escapeHtml(route.device || '')}" data-route-metric="${route.metric ?? 100}">Edit</button><span class="muted route-managed-label">runtime</span>`
+                  : '<span class="muted route-managed-label">system</span>'}
             </div>
           </div>`;
         }).join('') || '<div class="empty">No routes visible.</div>'}</div>

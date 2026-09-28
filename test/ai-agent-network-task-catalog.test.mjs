@@ -13,12 +13,14 @@ test('nested LightNAS defaults to managed NAT and upgrades old macvlan installs'
   assert.match(install, /Old nested macvlan mode detected/);
 });
 
-test('managed container network auto-assigns a unique private IPv4 and waits for it', async () => {
-  const agent = await read('scripts/lightnas-host-agent.py');
-  assert.match(agent, /def next_managed_container_ipv4/);
-  assert.match(agent, /10\.77\.0\.\{host\}/);
-  assert.match(agent, /"ipv4Address": next_managed_container_ipv4\(name\)/);
-  assert.match(agent, /use Repair network or check the LightNAS container bridge/);
+test('managed container network is DHCP-first and repairs legacy auto-static guests', async () => {
+  const [agent, provision] = await Promise.all([read('scripts/lightnas-host-agent.py'), read('scripts/provision-runtimes.sh')]);
+  assert.match(agent, /mode = str\(data\.get\("ipv4Mode"\) or "dhcp"\)/);
+  assert.doesNotMatch(agent, /"ipv4Address": next_managed_container_ipv4\(name\)/);
+  assert.match(agent, /def kick_container_dhcp/);
+  assert.match(agent, /ClientIdentifier=mac/);
+  assert.match(provision, /dhcp-authoritative/);
+  assert.match(provision, /Older LightNAS builds silently converted DHCP/);
 });
 
 test('AI helper can diagnose and repair no-IP containers', async () => {

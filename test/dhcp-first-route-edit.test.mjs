@@ -1,0 +1,26 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+
+const read = path => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
+
+test('container wizard defaults to DHCP and only enables static fields on manual selection', async () => {
+  const controls = await read('public/dialog-controls.js');
+  assert.match(controls, /<option value="dhcp">DHCP \/ automatic<\/option>/);
+  assert.match(controls, /form\.elements\.ipv4Mode\.value = 'dhcp'/);
+  assert.match(controls, /field\.disabled = !manual/);
+  assert.match(controls, /if \(!manual\) form\.elements\[name\]\.value = ''/);
+});
+
+test('networking can edit persistent and live gateway routes', async () => {
+  const [app, controls, agent] = await Promise.all([
+    read('public/app.js'),
+    read('public/dialog-controls.js'),
+    read('scripts/lightnas-host-agent.py')
+  ]);
+  assert.match(app, /const runtimeEditable = Boolean\(route\.device && route\.gateway\)/);
+  assert.match(app, /data-route-runtime="true"/);
+  assert.match(controls, /action: 'route-runtime-update'/);
+  assert.match(agent, /if action == "route-runtime-update":/);
+  assert.match(agent, /"ip", "-4", "route", "replace"/);
+});

@@ -184,10 +184,15 @@ case "${1:-start}" in
     ip link set "$bridge" up
     sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1 || true
     if [[ -s "$pidfile" ]]; then kill "$(cat "$pidfile")" >/dev/null 2>&1 || true; rm -f "$pidfile"; fi
-    dnsmasq --conf-file=/dev/null --interface="$bridge" --bind-dynamic \
+    upstream_dns="$(awk '/^nameserver[[:space:]]+/ && $2 !~ /^127\./ {print $2; exit}' /etc/resolv.conf 2>/dev/null || true)"
+    [[ -n "$upstream_dns" ]] || upstream_dns=1.1.1.1
+    mkdir -p /var/lib/misc
+    dnsmasq --conf-file=/dev/null --port=0 --interface="$bridge" --bind-dynamic \
+      --dhcp-authoritative \
       --dhcp-range=10.77.0.20,10.77.0.250,255.255.255.0,12h \
-      --dhcp-option=3,"$gateway" --dhcp-option=6,"$gateway" \
-      --pid-file="$pidfile" >/dev/null 2>&1 || true
+      --dhcp-option=3,"$gateway" --dhcp-option=6,"$upstream_dns" \
+      --dhcp-leasefile=/var/lib/misc/dnsmasq-lightnas0.leases \
+      --pid-file="$pidfile"
     if command -v nft >/dev/null 2>&1; then
       nft delete table ip lightnas_nat >/dev/null 2>&1 || true
       nft add table ip lightnas_nat >/dev/null 2>&1 || true
@@ -244,6 +249,55 @@ EOF
       [[ "$was_running" == "1" ]] && lxc-stop -n "$name" -t 30 >/dev/null 2>&1 || true
       sed -i '/^lxc\.net\.0\.type\s*=/d;/^lxc\.net\.0\.link\s*=/d;/^lxc\.net\.0\.macvlan\.mode\s*=/d;/^lxc\.net\.0\.vlan\.id\s*=/d' "$config"
       printf '%s\n' 'lxc.net.0.type = veth' 'lxc.net.0.link = lightnas0' >>"$config"
+
+      rootfs="$(sed -nE 's#^lxc\.rootfs\.path\s*=\s*(dir:)?(.+?)\s*$#\2#p' "$config" | head -1)"
+      metadata="$(dirname "$config")/lightnas.json"
+      network_file="$rootfs/etc/systemd/network/10-lightnas-eth0.network"
+      explicit_mode=""
+      if [[ -f "$metadata" ]] && command -v python3 >/dev/null 2>&1; then
+        explicit_mode="$(python3 - "$metadata" <<'PY'
+import json, sys
+try:
+    print(json.load(open(sys.argv[1], encoding="utf-8")).get("ipv4Mode", ""))
+except Exception:
+    print("")
+PY
+)"
+      fi
+      # Older LightNAS builds silently converted DHCP into a generated
+      # 10.77.0.x static address. Restore those legacy auto-generated entries
+      # to DHCP only when there is no explicit user-selected IPv4 mode.
+      if [[ -z "$explicit_mode" && -f "$network_file" ]] && grep -Eq '^Address=10\.77\.0\.[0-9]+/24$' "$network_file"; then
+        cat >"$network_file" <<'EOF'
+[Match]
+Name=eth0
+
+[Network]
+DHCP=ipv4
+IPv6AcceptRA=yes
+
+[DHCPv4]
+ClientIdentifier=mac
+EOF
+        if command -v python3 >/dev/null 2>&1; then
+          python3 - "$metadata" <<'PY'
+import json, os, sys
+path=sys.argv[1]
+data={}
+try:
+    with open(path, encoding="utf-8") as f:
+        data=json.load(f)
+except Exception:
+    pass
+data["ipv4Mode"]="dhcp"
+os.makedirs(os.path.dirname(path), exist_ok=True)
+with open(path, "w", encoding="utf-8") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+PY
+        fi
+      fi
+
       [[ "$was_running" == "1" ]] && lxc-start -n "$name" -d >/dev/null 2>&1 || true
     done
   fi
