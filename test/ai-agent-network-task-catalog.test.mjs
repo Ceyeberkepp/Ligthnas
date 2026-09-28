@@ -20,7 +20,7 @@ test('managed container network is DHCP-first and repairs legacy auto-static gue
   assert.match(agent, /def kick_container_dhcp/);
   assert.match(agent, /ClientIdentifier=mac/);
   assert.match(provision, /dhcp-authoritative/);
-  assert.match(provision, /Legacy LightNAS builds silently converted DHCP/);
+  assert.match(provision, /Older LightNAS builds silently converted DHCP/);
 });
 
 test('AI helper can diagnose and repair no-IP containers', async () => {
