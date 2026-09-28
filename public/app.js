@@ -1,4 +1,4 @@
-const state = { overview: null, view: 'home', folder: '', files: null, fileError: null, filesSettingsOpen: false, fileView: ['list','grid','gallery'].includes(localStorage.getItem('lightnas-file-view')) ? localStorage.getItem('lightnas-file-view') : 'grid', fileTruncated: false, overviewMetric: localStorage.getItem('lightnas-overview-metric') || 'cpu', lastNetworkSample: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, smtp: undefined, media: null, network: null, metricHistory: { cpu: [], load: [], memory: [], storage: [], networkIn: [], networkOut: [] } };
+const state = { overview: null, view: 'home', folder: '', files: null, fileError: null, filesSettingsOpen: false, aiMessages: [], fileView: ['list','grid','gallery'].includes(localStorage.getItem('lightnas-file-view')) ? localStorage.getItem('lightnas-file-view') : 'grid', fileTruncated: false, overviewMetric: localStorage.getItem('lightnas-overview-metric') || 'cpu', lastNetworkSample: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, smtp: undefined, media: null, network: null, metricHistory: { cpu: [], load: [], memory: [], storage: [], networkIn: [], networkOut: [] } };
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
 const themeChoices = ['system', 'light', 'dark'];
@@ -856,25 +856,67 @@ function capabilitiesView() {
     </section>`;
 }
 
-function aiView() {
+function lightnasAgentReply(input) {
+  const question = String(input || '').trim();
+  const lower = question.toLowerCase();
+  const system = state.overview?.system || {};
+  const storage = state.overview?.storage?.usableStorage || state.overview?.storage?.virtualStorage || state.overview?.storage?.local || {};
+  const containers = state.runtimes?.containers?.containers || [];
+  const noIp = containers.filter(item => /running|active/i.test(String(item.status || '')) && !/^\d+\.\d+\.\d+\.\d+$/.test(String(item.ipv4 || '')));
   const apps = state.runtimes?.catalog || [];
-  const docker = state.runtimes?.docker;
-  const aiApps = apps.filter(app => String(app.category || '').toLowerCase() === 'ai' || ['ollama','flowise','localai','open-webui'].includes(String(app.id || '').toLowerCase()));
-  const localAi = state.overview.system?.capabilities?.find(item => item.name === 'Local AI');
-  return `${pageHead('AI', 'Run local AI services, model runtimes, and AI workflows from LightNAS.', '<button class="secondary" data-action="refresh-runtime">Refresh AI</button>')}
-    <section class="ai-summary-grid">
-      <article class="panel ai-summary-card"><span class="eyebrow">LOCAL AI</span><strong>${localAi?.available ? 'Ready' : 'Limited'}</strong><p>${escapeHtml(localAi?.available ? 'Hardware meets the local AI baseline.' : localAi?.reason || 'Hardware status unavailable.')}</p></article>
-      <article class="panel ai-summary-card"><span class="eyebrow">AI APPS</span><strong>${aiApps.length}</strong><p>AI applications available in the LightNAS catalog.</p></article>
-      <article class="panel ai-summary-card"><span class="eyebrow">APP ENGINE</span><strong>${docker?.available && docker?.enabled ? 'Online' : 'Offline'}</strong><p>${escapeHtml(docker?.available && docker?.enabled ? 'Managed AI applications can be launched.' : docker?.reason || 'App runtime is not ready.')}</p></article>
-    </section>
-    <section class="ai-workspace">
-      <div class="section-heading"><div><span class="eyebrow">AI WORKSPACE</span><h2>Available AI tools</h2><p class="muted">Install a model runtime, workflow builder, or compatible AI service directly from the App Store engine.</p></div></div>
-      <div class="tool-grid ai-app-grid">${aiApps.map(app => {
-        const instance = docker?.containers?.find(container => container.name === `lightnas-app-${app.id}`);
-        const running = instance?.state === 'running';
-        const appUrl = `http://${location.hostname}:${app.port}/`;
-        return `<article class="panel app-card"><span class="eyebrow">${escapeHtml(app.category || 'AI')}</span><h2>${escapeHtml(app.name)}</h2><p class="muted">${escapeHtml(app.description || '')}</p><p class="muted app-source">${escapeHtml(app.image || '')} · Port ${app.port}</p>${instance ? `<div class="head-actions">${running ? `<a class="primary" href="${escapeHtml(appUrl)}" target="_blank" rel="noopener">Open</a>` : ''}<button class="secondary" data-app-action="${running ? 'stop' : 'start'}" data-app-id="${app.id}">${running ? 'Stop' : 'Start'}</button><button class="secondary" data-app-action="restart" data-app-id="${app.id}">Restart</button></div>` : `<button class="primary" data-install="${app.id}">Install</button>`}</article>`;
-      }).join('') || '<div class="empty compact-empty"><p>Loading AI application catalog…</p></div>'}</div>
+  const defaultRoute = (state.network?.routes || []).find(item => item.destination === 'default');
+
+  if (/container|ip|dhcp|network/.test(lower)) {
+    if (noIp.length) {
+      return {
+        text: `${noIp.length} running container${noIp.length === 1 ? '' : 's'} currently ${noIp.length === 1 ? 'has' : 'have'} no IPv4 address: ${noIp.map(item => item.name || item.id).join(', ')}. LightNAS can repair their DHCP identity and restart them on the managed container network.`,
+        action: 'repair-noip',
+        actionLabel: `Repair ${noIp.length} container network${noIp.length === 1 ? '' : 's'}`
+      };
+    }
+    return { text: `Container networking looks healthy in the current inventory. ${containers.length} container${containers.length === 1 ? '' : 's'} detected. Default gateway: ${defaultRoute?.gateway || 'not loaded yet'}.` };
+  }
+  if (/storage|disk|space|pool/.test(lower)) {
+    return { text: `Storage currently reports ${bytes(storage.usedBytes || 0)} used of ${bytes(storage.totalBytes || 0)}, with ${bytes(storage.availableBytes || 0)} available. Open Storage or Pools & datasets for disk-level controls.` };
+  }
+  if (/cpu|memory|ram|performance|slow|load/.test(lower)) {
+    return { text: `Current host CPU usage is ${system.cpu?.loadPercent || 0}% and memory usage is ${system.memory?.usedPercent || 0}% (${bytes(system.memory?.usedBytes || 0)} used). Monitoring has live graphs if you need to inspect a spike.` };
+  }
+  if (/app|install|software|catalog/.test(lower)) {
+    const aiCount = apps.filter(app => String(app.category || '').toLowerCase() === 'ai').length;
+    return { text: `The App Store currently has ${apps.length} one-click entries, including ${aiCount} AI tools. AI runtimes and tools live in App Store; this AI page is the LightNAS operations helper.`, action:'open-apps', actionLabel:'Open App Store' };
+  }
+  if (/health|status|problem|issue|diagnos/.test(lower)) {
+    return { text: `LightNAS is online. CPU is ${system.cpu?.loadPercent || 0}%, memory is ${system.memory?.usedPercent || 0}%, and ${noIp.length ? `${noIp.length} running container(s) need network attention` : 'the current container inventory has no missing IPv4 addresses'}. Use Monitoring for live graphs or ask me about networking, storage, apps, CPU, or memory.` };
+  }
+  return { text: 'I am the LightNAS operations helper. Ask me about container networking, storage, CPU or memory, system health, or installed/app-store software. I use the live LightNAS inventory to guide actions instead of showing AI application installers here.' };
+}
+
+function aiView() {
+  const messages = state.aiMessages.length ? state.aiMessages : [
+    { role:'agent', text:'I am the LightNAS helper. I can inspect the current NAS state, diagnose container networking, summarize storage and performance, and guide you to the right control.' }
+  ];
+  return `${pageHead('AI helper', 'A system-aware LightNAS assistant for troubleshooting and administration.', '<button class="secondary" data-ai-prompt="Check system health">Check health</button>')}
+    <section class="ai-agent-shell">
+      <aside class="panel ai-agent-context">
+        <span class="eyebrow">QUICK HELP</span>
+        <h2>Ask LightNAS</h2>
+        <p class="muted">The helper reads the current LightNAS inventory. AI runtimes such as Ollama, Open WebUI, Flowise and LocalAI are installed from App Store.</p>
+        <div class="ai-quick-actions">
+          <button class="secondary" type="button" data-ai-prompt="Diagnose container networking">Container networking</button>
+          <button class="secondary" type="button" data-ai-prompt="Show storage summary">Storage summary</button>
+          <button class="secondary" type="button" data-ai-prompt="Show performance status">Performance</button>
+          <button class="secondary" type="button" data-ai-prompt="Tell me about apps">Apps</button>
+        </div>
+        <button class="primary" type="button" data-ai-action="open-apps">Open AI tools in App Store</button>
+      </aside>
+      <section class="panel ai-agent-chat">
+        <div class="ai-agent-messages">${messages.map(message => `<article class="ai-message ${message.role === 'user' ? 'user' : 'agent'}"><span>${message.role === 'user' ? 'YOU' : 'LIGHTNAS'}</span><p>${escapeHtml(message.text)}</p>${message.action ? `<button class="secondary" type="button" data-ai-action="${escapeHtml(message.action)}">${escapeHtml(message.actionLabel || 'Run action')}</button>` : ''}</article>`).join('')}</div>
+        <form class="ai-agent-form" data-ai-form>
+          <input name="message" autocomplete="off" maxlength="500" placeholder="Ask: Why does my container have no IP?" required>
+          <button class="primary" type="submit">Ask</button>
+        </form>
+      </section>
     </section>`;
 }
 
@@ -1180,6 +1222,40 @@ function bindViewActions() {
       (item.healthy ? 'writable' : 'readonly') + '">' + (item.healthy ? 'HEALTHY' : 'NEEDS ATTENTION') +
       '</span></div>').join('') + '</div>';
   };
+  $('[data-ai-prompt]', $('#content')).forEach(button => button.addEventListener('click', () => {
+    const question = button.dataset.aiPrompt || '';
+    state.aiMessages.push({ role:'user', text:question });
+    state.aiMessages.push({ role:'agent', ...lightnasAgentReply(question) });
+    render('ai');
+  }));
+  $('[data-ai-form]', $('#content'))?.addEventListener('submit', event => {
+    event.preventDefault();
+    const input = event.currentTarget.elements.message;
+    const question = String(input.value || '').trim();
+    if (!question) return;
+    state.aiMessages.push({ role:'user', text:question });
+    state.aiMessages.push({ role:'agent', ...lightnasAgentReply(question) });
+    render('ai');
+  });
+  $('[data-ai-action]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+    const action = button.dataset.aiAction;
+    if (action === 'open-apps') { location.hash = 'apps'; return; }
+    if (action === 'repair-noip') {
+      const containers = state.runtimes?.containers?.containers || [];
+      const targets = containers.filter(item => /running|active/i.test(String(item.status || '')) && !/^\d+\.\d+\.\d+\.\d+$/.test(String(item.ipv4 || '')));
+      if (!targets.length) return toast('No running containers currently need IPv4 repair.');
+      if (!confirm(`Repair networking for ${targets.length} container${targets.length === 1 ? '' : 's'}? Each affected container will restart.`)) return;
+      button.disabled = true;
+      for (const item of targets) {
+        try { await request('/api/containers', { method:'POST', body:JSON.stringify({ id:item.id || item.name, action:'repair-network' }) }); }
+        catch (error) { toast(`${item.name || item.id}: ${error.message}`); }
+      }
+      await loadContainers();
+      state.aiMessages.push({ role:'agent', ...lightnasAgentReply('diagnose container networking') });
+      render('ai');
+    }
+  }));
+
   document.querySelectorAll('#content [data-feature-toggle]').forEach(button => button.addEventListener('click', async () => {
     const key = button.dataset.featureToggle;
     const enabled = button.dataset.featureEnabled !== 'true';
