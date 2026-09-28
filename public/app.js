@@ -584,7 +584,7 @@ function filesView() {
   const crumbs = [`<button class="panel-link" data-folder="">Files & media</button>`, ...segments.map((segment, index) => `<span> / </span><button class="panel-link" data-folder="${escapeHtml(segments.slice(0, index + 1).join('/'))}">${escapeHtml(segment)}</button>`)].join('');
   const entries = Array.isArray(state.files) ? (allFiles ? state.files.filter(entry => !entry.directory && !isSystemImageFile(entry.name)) : state.files.filter(entry => entry.directory || !isSystemImageFile(entry.name))) : state.files;
   const tabs = librarySections.map(([folder, label]) => `<button type="button" class="library-tab ${!state.filesSettingsOpen && section === folder ? 'active' : ''}" data-library-tab="${escapeHtml(folder)}" aria-pressed="${!state.filesSettingsOpen && section === folder}">${escapeHtml(label)}</button>`).join('') +
-    `<button type="button" class="library-tab desktop-files-settings-tab ${state.filesSettingsOpen ? 'active' : ''}" data-files-settings-tab aria-pressed="${state.filesSettingsOpen}">Settings</button>`;
+    `<button type="button" class="library-tab desktop-files-settings-tab ${state.filesSettingsOpen ? 'active' : ''}" data-files-settings-tab aria-pressed="${state.filesSettingsOpen}">⚙ Settings</button>`;
 
   const item = entry => {
     const path = fileEntryPath(entry);
@@ -631,7 +631,7 @@ function filesView() {
       <article class="panel files-settings-card">
         <div><span class="eyebrow">FILES & MEDIA SETTINGS</span><h2>Library settings</h2><p class="muted">Manage phone library sync and desktop file display preferences.</p></div>
         <div class="files-settings-grid">
-          <div class="files-setting-box"><b>Desktop view</b><p class="muted">Use List or Grid on desktop. Photos view is reserved for the mobile photo experience.</p><div class="head-actions"><button class="secondary" type="button" data-file-view="list">☷ List</button><button class="secondary" type="button" data-file-view="grid">▦ Grid</button></div></div>
+          <div class="files-setting-box"><b>Desktop view</b><p class="muted">Choose List, Grid, or Photos view on desktop.</p><div class="head-actions"><button class="secondary" type="button" data-file-view="list">☷ List</button><button class="secondary" type="button" data-file-view="grid">▦ Grid</button><button class="secondary" type="button" data-file-view="gallery">▦ Photos</button></div></div>
           ${state.overview.appliance.role === 'administrator' ? '<div class="files-setting-box"><b>Phone library sync</b><p class="muted">Automatically route phone photos to Photos and phone videos to Videos.</p><button class="primary phone-sync-button" type="button" data-phone-sync>Configure phone sync</button></div>' : ''}
         </div>
       </article>
@@ -1428,10 +1428,6 @@ function bindViewActions() {
   }));
   $('[data-files-settings-tab]', $('#content'))?.addEventListener('click', () => {
     state.filesSettingsOpen = true;
-    if (innerWidth > 760 && state.fileView === 'gallery') {
-      state.fileView = 'grid';
-      localStorage.setItem('lightnas-file-view', 'grid');
-    }
     render('files');
   });
   document.querySelectorAll('#content [data-folder]').forEach(button => button.addEventListener('click', () => { state.folder = button.dataset.folder; state.files = null; render('files'); }));
