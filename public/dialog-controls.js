@@ -975,6 +975,54 @@ document.addEventListener('click', async event => {
     return;
   }
 
+  const editRoute = event.target.closest('[data-network-edit-route]');
+  if (editRoute) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    showEditor({
+      eyebrow: 'STATIC ROUTE',
+      title: 'Edit IPv4 route',
+      description: 'Update this persistent NetworkManager route. Save only is safest; applying immediately can interrupt management connectivity.',
+      fields: [
+        { name: 'destination', label: 'Destination', value: editRoute.dataset.routeDestination || '', placeholder: '10.20.0.0/16 or default', required: true },
+        { name: 'gateway', label: 'Gateway', value: editRoute.dataset.routeGateway || '', placeholder: '10.5.5.1', required: true },
+        { name: 'metric', label: 'Metric', type: 'number', min: 0, max: 65535, value: editRoute.dataset.routeMetric || '100', required: true },
+        { name: 'activate', label: 'Apply immediately', type: 'select', value: 'no', options: [{ value: 'no', label: 'Save only' }, { value: 'yes', label: 'Save and activate profile now' }] }
+      ],
+      submitLabel: 'Save route',
+      onSubmit: async values => {
+        await dialogApi('/api/network', { method: 'POST', body: JSON.stringify({
+          action: 'route-update',
+          connection: editRoute.dataset.routeConnection,
+          oldRoute: editRoute.dataset.routeOld,
+          destination: values.destination,
+          gateway: values.gateway,
+          metric: Number(values.metric),
+          activate: values.activate === 'yes'
+        }) });
+        location.reload();
+      }
+    });
+    return;
+  }
+
+  const deleteRoute = event.target.closest('[data-network-delete-route]');
+  if (deleteRoute) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (!confirm('Delete this persistent static route?')) return;
+    try {
+      await dialogApi('/api/network', { method: 'POST', body: JSON.stringify({
+        action: 'route-delete',
+        connection: deleteRoute.dataset.routeConnection,
+        route: deleteRoute.dataset.routeOld,
+        activate: false
+      }) });
+      location.reload();
+    } catch (problem) { alert(problem.message); }
+    return;
+  }
+
   const addRoute = event.target.closest('[data-network-add-route]');
   if (addRoute) {
     event.preventDefault();

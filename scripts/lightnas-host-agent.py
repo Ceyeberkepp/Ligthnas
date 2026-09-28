@@ -474,6 +474,25 @@ def append_unique(path: Path, line: str) -> None:
     path.write_text("\n".join(kept) + "\n", encoding="utf-8")
 
 
+def unique_container_mac() -> str:
+    """Generate a locally administered unicast MAC not used by another LightNAS LXC."""
+    used = set()
+    try:
+        for config in Path("/var/lib/lxc").glob("*/config"):
+            match = re.search(r"^lxc\.net\.0\.hwaddr\s*=\s*([0-9A-Fa-f:]{17})\s*$", config.read_text(encoding="utf-8", errors="ignore"), re.MULTILINE)
+            if match:
+                used.add(match.group(1).lower())
+    except OSError:
+        pass
+    for _attempt in range(64):
+        raw = bytearray(os.urandom(6))
+        raw[0] = (raw[0] | 0x02) & 0xFE
+        value = ":".join(f"{part:02x}" for part in raw)
+        if value not in used:
+            return value
+    raise RuntimeError("could not allocate a unique container MAC address")
+
+
 def managed_container_storage_root(value: str) -> Path:
     path = Path(value or "/var/lib/lightnas/storage/local/rootdir").resolve()
     text = str(path)
@@ -790,9 +809,18 @@ def configure_container_guest(config: Path, data: dict) -> None:
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
         )
 
+        # Every container gets its own machine identity. Imported/cloned rootfs
+        # archives commonly carry the same /etc/machine-id, which can make
+        # DHCP servers hand multiple containers the same lease.
+        machine_id = os.urandom(16).hex()
+        (rootfs / "etc" / "machine-id").write_text(machine_id + "\n", encoding="utf-8")
+        dbus_machine_id = rootfs / "var" / "lib" / "dbus" / "machine-id"
+        if dbus_machine_id.parent.exists() and not dbus_machine_id.is_symlink():
+            dbus_machine_id.write_text(machine_id + "\n", encoding="utf-8")
+
         network_lines = ["[Match]", "Name=eth0", "", "[Network]"]
         if mode == "dhcp":
-            network_lines += ["DHCP=ipv4", "IPv6AcceptRA=yes"]
+            network_lines += ["DHCP=ipv4", "IPv6AcceptRA=yes", "", "[DHCPv4]", "ClientIdentifier=mac"]
         else:
             network_lines.append(f"Address={address}")
             if gateway:
@@ -946,7 +974,9 @@ def create_container(data: dict) -> dict:
     if mac_address:
         if not re.fullmatch(r"(?:[A-Fa-f0-9]{2}:){5}[A-Fa-f0-9]{2}", mac_address):
             raise ValueError("invalid container MAC address")
-        append_unique(config, f"lxc.net.0.hwaddr = {mac_address}")
+    else:
+        mac_address = unique_container_mac()
+    append_unique(config, f"lxc.net.0.hwaddr = {mac_address.lower()}")
     if in_container():
         # The outer appliance container remains the security boundary. Avoid
         # inner AppArmor profile loading, which is commonly blocked in nested
@@ -1010,6 +1040,47 @@ def create_container(data: dict) -> dict:
     }
 
 
+def repair_container_network(name: str) -> dict:
+    config = Path("/var/lib/lxc") / name / "config"
+    if not config.exists():
+        raise ValueError("unknown local LXC container")
+    rootfs = rootfs_from_config(config)
+    if not rootfs or not rootfs.is_dir():
+        raise RuntimeError("container root filesystem is unavailable")
+
+    settings = container_settings(name)
+    if settings.get("ipv4Mode") == "dhcp":
+        append_unique(config, f"lxc.net.0.hwaddr = {unique_container_mac()}")
+        machine_id = os.urandom(16).hex()
+        (rootfs / "etc" / "machine-id").write_text(machine_id + "\n", encoding="utf-8")
+        dbus_machine_id = rootfs / "var" / "lib" / "dbus" / "machine-id"
+        if dbus_machine_id.parent.exists() and not dbus_machine_id.is_symlink():
+            dbus_machine_id.write_text(machine_id + "\n", encoding="utf-8")
+        network_file = rootfs / "etc" / "systemd" / "network" / "10-lightnas-eth0.network"
+        if network_file.exists():
+            network_text = network_file.read_text(encoding="utf-8")
+            if "[DHCPv4]" not in network_text:
+                network_text = network_text.rstrip() + "\n\n[DHCPv4]\nClientIdentifier=mac\n"
+            elif not re.search(r"^ClientIdentifier\s*=\s*mac\s*$", network_text, re.MULTILINE | re.IGNORECASE):
+                network_text = network_text.rstrip() + "\nClientIdentifier=mac\n"
+            network_file.write_text(network_text, encoding="utf-8")
+
+    was_running = lxc_state(name) == "running"
+    if was_running:
+        run(["lxc-stop", "-n", name, "-t", "20"], timeout=35, check=False)
+    run(["lxc-start", "-n", name, "-d"], timeout=60)
+
+    ipv4 = ""
+    for _attempt in range(30):
+        ipv4 = next((value for value in container_addresses(name) if ":" not in value), "")
+        if ipv4:
+            break
+        time.sleep(1)
+    if not ipv4:
+        raise RuntimeError(f"container {name} restarted but did not receive an IPv4 address")
+    return {"id": name, "action": "repair-network", "status": "running", "ipv4": ipv4}
+
+
 def container_action(data: dict) -> dict:
     name = str(data.get("id") or data.get("name") or "").strip()
     action = str(data.get("action") or "")
@@ -1023,6 +1094,8 @@ def container_action(data: dict) -> dict:
         run(["lxc-stop", "-n", name, "-t", "30"], timeout=45)
     elif action == "reboot":
         run(["lxc-stop", "-n", name, "-r", "-t", "30"], timeout=60)
+    elif action == "repair-network":
+        return repair_container_network(name)
     elif action == "delete":
         if data.get("deleteFiles") is not True or str(data.get("confirmation") or "") != name:
             raise ValueError("deleting a container requires delete all files and the exact container ID")
@@ -1472,6 +1545,37 @@ def network_action(data: dict) -> dict:
         if bool(data.get("activate")):
             run(["nmcli", "connection", "up", name], timeout=45)
         return {"action": action, "connection": name, "route": route, "activated": bool(data.get("activate"))}
+    if action == "route-update":
+        name = str(data.get("connection") or "")
+        old_route = str(data.get("oldRoute") or "").strip()
+        destination = str(data.get("destination") or "").strip()
+        gateway = str(data.get("gateway") or "").strip()
+        try:
+            metric = int(data.get("metric") or 100)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("invalid route metric") from exc
+        if not CONNECTION_RE.fullmatch(name) or not old_route or len(old_route) > 256 or any(ch in old_route for ch in "\r\n\x00"):
+            raise ValueError("invalid route update request")
+        if destination == "default":
+            destination = "0.0.0.0/0"
+        if not CIDR_RE.fullmatch(destination):
+            raise ValueError("route destination must be an IPv4 network in CIDR form or default")
+        try:
+            ipaddress.ip_address(gateway)
+        except ValueError as exc:
+            raise ValueError("route gateway must be an IPv4 address") from exc
+        if not (0 <= metric <= 65535):
+            raise ValueError("invalid route metric")
+        new_route = f"{destination} {gateway} {metric}"
+        run(["nmcli", "connection", "modify", name, "-ipv4.routes", old_route], timeout=30)
+        try:
+            run(["nmcli", "connection", "modify", name, "+ipv4.routes", new_route], timeout=30)
+        except Exception:
+            run(["nmcli", "connection", "modify", name, "+ipv4.routes", old_route], timeout=30, check=False)
+            raise
+        if bool(data.get("activate")):
+            run(["nmcli", "connection", "up", name], timeout=45)
+        return {"action": action, "connection": name, "oldRoute": old_route, "route": new_route, "activated": bool(data.get("activate"))}
     if action == "connection-delete":
         name = str(data.get("name") or "")
         if not CONNECTION_RE.fullmatch(name):
