@@ -947,3 +947,11 @@
 @media (max-width:900px) and (min-width:761px) {
   .files-settings-grid { grid-template-columns:1fr; }
 }
+
+
+/* Stable Files toolbar access */
+.desktop-files-settings-button { display:inline-flex; }
+
+@media (max-width:760px) {
+  .desktop-files-settings-button { display:none !important; }
+}
