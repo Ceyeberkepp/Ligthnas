@@ -1222,7 +1222,7 @@ function bindViewActions() {
       (item.healthy ? 'writable' : 'readonly') + '">' + (item.healthy ? 'HEALTHY' : 'NEEDS ATTENTION') +
       '</span></div>').join('') + '</div>';
   };
-  $('[data-ai-prompt]', $('#content')).forEach(button => button.addEventListener('click', () => {
+  document.querySelectorAll('#content [data-ai-prompt]').forEach(button => button.addEventListener('click', () => {
     const question = button.dataset.aiPrompt || '';
     state.aiMessages.push({ role:'user', text:question });
     state.aiMessages.push({ role:'agent', ...lightnasAgentReply(question) });
@@ -1237,7 +1237,7 @@ function bindViewActions() {
     state.aiMessages.push({ role:'agent', ...lightnasAgentReply(question) });
     render('ai');
   });
-  $('[data-ai-action]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+  document.querySelectorAll('#content [data-ai-action]').forEach(button => button.addEventListener('click', async () => {
     const action = button.dataset.aiAction;
     if (action === 'open-apps') { location.hash = 'apps'; return; }
     if (action === 'repair-noip') {
