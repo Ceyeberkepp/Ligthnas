@@ -1405,9 +1405,16 @@ function bindViewActions() {
     render('files');
   }));
   $$('[data-folder]', $('#content')).forEach(button => button.addEventListener('click', () => { state.folder = button.dataset.folder; state.files = null; render('files'); }));
-  $$('[data-open]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+  $('[data-open]', $('#content')).forEach(button => button.addEventListener('click', async event => {
     const path = button.dataset.path || [state.folder, button.dataset.open].filter(Boolean).join('/');
     if (button.dataset.directory === 'true') { state.folder = path; state.files = null; render('files'); return; }
+    // On mobile Photos view, the preview layer owns the click. Do not also
+    // trigger the legacy download handler, which caused the tile image to be
+    // replaced/invalidated after opening it once.
+    if (button.classList.contains('file-gallery-open') && matchMedia('(max-width: 760px)').matches) {
+      event.preventDefault();
+      return;
+    }
     try { const response = await fetch(`/api/files/download?path=${encodeURIComponent(path)}`); if (!response.ok) throw new Error((await response.json()).error); const object = URL.createObjectURL(await response.blob()); const link = document.createElement('a'); link.href = object; link.download = button.dataset.open; link.click(); setTimeout(() => URL.revokeObjectURL(object), 60000); } catch (error) { toast(error.message); }
   }));
   $$('[data-action="new-folder"]', $('#content')).forEach(button => button.addEventListener('click', async () => { const name = prompt('New folder name'); if (name === null) return; try { await request(`/api/files?path=${encodeURIComponent([state.folder, name].filter(Boolean).join('/'))}`, { method: 'POST', body: '{}' }); await loadFiles(); toast('Folder created.'); } catch (error) { toast(error.message); } }));
