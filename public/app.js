@@ -406,7 +406,7 @@ function shellView() {
 }
 
 async function loadSmtp() {
-  try { state.smtp = (await request('/api/smtp')).config; if (state.view === 'smtp') render('smtp'); } catch (error) { toast(error.message); }
+  try { state.smtp = (await request('/api/smtp')).config; if (['smtp','integrations'].includes(state.view)) render(state.view); } catch (error) { toast(error.message); }
 }
 
 function smtpView() {
@@ -1115,8 +1115,8 @@ function integrationsView() {
     },
     {
       name:'Email / SMTP',
-      detail: state.smtp?.config ? `${state.smtp.config.host}:${state.smtp.config.port}` : 'Not configured',
-      online:Boolean(state.smtp?.config),
+      detail: state.smtp ? `${state.smtp.host}:${state.smtp.port}` : 'Not configured',
+      online:Boolean(state.smtp),
       target:'smtp'
     }
   ];
@@ -1145,7 +1145,7 @@ function render(view) {
   if (state.view === 'files' && state.files === null) loadFiles();
   if (['pools', 'storage'].includes(state.view) && state.spaces === null) loadSpaces();
   if (['users', 'permissions'].includes(state.view) && state.users === null) loadUsers();
-  if (state.view === 'smtp' && state.smtp === undefined) loadSmtp();
+  if (['smtp','integrations'].includes(state.view) && state.smtp === undefined) loadSmtp();
   if (['files', 'media'].includes(state.view) && state.media === null) loadMedia();
   if (['network', 'firewall'].includes(state.view) && !state.network) loadNetwork();
   if (state.view === 'containers' && !state.runtimes?.containers && !state.containerError) loadContainers();
