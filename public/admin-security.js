@@ -212,13 +212,47 @@ async function renderAutomation() {
   const section = document.createElement('section');
   section.className = 'automation-admin';
   section.innerHTML = `
-    <div class="admin-section-head"><div><span class="eyebrow">DEVELOPER & AUTOMATION</span><h2>API tokens</h2><p class="muted">Tokens use the same scoped permission model as users and never become the appliance owner.</p></div></div>
-    <form class="panel creation-form" data-token-form><label>Token name<input name="name" required maxlength="64" placeholder="Backup automation"></label>${checkboxes(permissions, ['storage.view'], 'permissions')}<button class="primary" type="submit">Create token</button><div class="form-error"></div><pre class="secret-once hidden" data-token-secret></pre></form>
-    <div class="storage-list">${(tokenData.tokens || []).map(token => `<article class="storage-row"><div><h3>${escapeText(token.name)}</h3><p>${token.disabled ? 'Disabled' : 'Active'} · ${(token.permissions || []).map(value => escapeText(permissionNames[value] || value)).join(', ') || 'No scopes'} · Last used ${escapeText(token.lastUsedAt || 'never')}</p></div><button class="secondary danger-button" type="button" data-delete-token="${token.id}">Delete</button></article>`).join('') || '<div class="empty"><p>No API tokens.</p></div>'}</div>
-    <div class="admin-section-head"><div><span class="eyebrow">EVENT DELIVERY</span><h2>Webhooks</h2><p class="muted">LightNAS signs each JSON delivery with HMAC-SHA256 using the webhook secret.</p></div></div>
-    <form class="panel creation-form" data-webhook-form><label>Name<input name="name" required maxlength="64" placeholder="Operations alerts"></label><label>HTTPS URL<input name="url" type="url" required placeholder="https://automation.example.com/lightnas"></label><label>Events<input name="events" placeholder="storage,vm,container or *" value="*"></label><button class="primary" type="submit">Create webhook</button><div class="form-error"></div><pre class="secret-once hidden" data-webhook-secret></pre></form>
-    <div class="storage-list">${(hookData.webhooks || []).map(hook => `<article class="storage-row"><div><h3>${escapeText(hook.name)}</h3><p>${escapeText(hook.url)} · ${(hook.events || []).join(', ')} · Last status ${hook.lastStatus ?? 'never'}</p></div><div class="head-actions"><button class="secondary" type="button" data-test-webhook="${hook.id}">Test</button><button class="secondary danger-button" type="button" data-delete-webhook="${hook.id}">Delete</button></div></article>`).join('') || '<div class="empty"><p>No webhooks.</p></div>'}</div>`;
-  q('.page-head', content)?.insertAdjacentElement('afterend', section);
+    <div class="automation-grid">
+      <article class="panel automation-card">
+        <div class="automation-card-head">
+          <div><span class="eyebrow">DEVELOPER ACCESS</span><h2>API tokens</h2><p class="muted">Create scoped tokens for scripts, backups, and automation.</p></div>
+          <span class="content-badge">${(tokenData.tokens || []).length} token${(tokenData.tokens || []).length === 1 ? '' : 's'}</span>
+        </div>
+        <form class="automation-form" data-token-form>
+          <label>Token name<input name="name" required maxlength="64" placeholder="Backup automation"></label>
+          <details class="automation-permissions">
+            <summary>Permissions <small>Choose scopes</small></summary>
+            ${checkboxes(permissions, ['storage.view'], 'permissions')}
+          </details>
+          <div class="automation-form-actions"><button class="primary" type="submit">Create token</button></div>
+          <div class="form-error"></div>
+          <pre class="secret-once hidden" data-token-secret></pre>
+        </form>
+        <div class="automation-list">${(tokenData.tokens || []).map(token => `<div class="automation-row"><div><b>${escapeText(token.name)}</b><small>${token.disabled ? 'Disabled' : 'Active'} · ${(token.permissions || []).map(value => escapeText(permissionNames[value] || value)).join(', ') || 'No scopes'} · Last used ${escapeText(token.lastUsedAt || 'never')}</small></div><button class="secondary danger-button" type="button" data-delete-token="${token.id}">Delete</button></div>`).join('') || '<div class="automation-empty">No API tokens yet.</div>'}</div>
+      </article>
+
+      <article class="panel automation-card">
+        <div class="automation-card-head">
+          <div><span class="eyebrow">EVENT DELIVERY</span><h2>Webhooks</h2><p class="muted">Send signed JSON events to external automation systems.</p></div>
+          <span class="content-badge">${(hookData.webhooks || []).length} hook${(hookData.webhooks || []).length === 1 ? '' : 's'}</span>
+        </div>
+        <form class="automation-form webhook-form" data-webhook-form>
+          <div class="automation-inline-fields">
+            <label>Name<input name="name" required maxlength="64" placeholder="Operations alerts"></label>
+            <label>HTTPS URL<input name="url" type="url" required placeholder="https://automation.example.com/lightnas"></label>
+          </div>
+          <label>Events<input name="events" placeholder="storage,vm,container or *" value="*"></label>
+          <div class="automation-form-actions"><button class="primary" type="submit">Create webhook</button></div>
+          <div class="form-error"></div>
+          <pre class="secret-once hidden" data-webhook-secret></pre>
+        </form>
+        <div class="automation-list">${(hookData.webhooks || []).map(hook => `<div class="automation-row"><div><b>${escapeText(hook.name)}</b><small>${escapeText(hook.url)} · ${(hook.events || []).join(', ')} · Last status ${hook.lastStatus ?? 'never'}</small></div><div class="head-actions"><button class="secondary" type="button" data-test-webhook="${hook.id}">Test</button><button class="secondary danger-button" type="button" data-delete-webhook="${hook.id}">Delete</button></div></div>`).join('') || '<div class="automation-empty">No webhooks yet.</div>'}</div>
+      </article>
+    </div>`;
+
+  const integrations = q('.integration-list', content);
+  if (integrations) integrations.insertAdjacentElement('afterend', section);
+  else q('.page-head', content)?.insertAdjacentElement('afterend', section);
 }
 
 async function renderEditableNetwork() {
