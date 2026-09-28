@@ -415,17 +415,29 @@ async function enhanceRuntimeControls() {
 function enhanceFileThumbnails() {
   if (location.hash !== '#files') return;
   const folder = currentFolder();
+  const browserNativeImages = new Set(['jpg','jpeg','png','gif','webp','bmp','svg','avif']);
   for (const button of [...document.querySelectorAll('#content .file-name[data-directory="false"]')]) {
     if (button.querySelector('.file-thumb')) continue;
     const name = button.dataset.open || '';
     const kind = previewKind(name);
     if (!['image', 'video'].includes(kind)) continue;
     const path = button.dataset.path || joinPath(folder, name);
+    const extension = name.toLowerCase().split('.').pop();
     const media = document.createElement('img');
     media.className = 'file-thumb';
     media.loading = 'lazy';
+    media.decoding = 'async';
     media.alt = '';
-    media.src = `/api/files/thumbnail?path=${encodeURIComponent(path)}`;
+    // Normal photos are streamed directly instead of spawning FFmpeg for
+    // every card in All Files. RAW photos and videos still use generated JPGs.
+    media.src = kind === 'image' && browserNativeImages.has(extension)
+      ? `/api/files/download?path=${encodeURIComponent(path)}`
+      : `/api/files/thumbnail?path=${encodeURIComponent(path)}`;
+    media.addEventListener('error', () => {
+      if (media.dataset.fallback === '1') return;
+      media.dataset.fallback = '1';
+      media.src = `/api/files/thumbnail?path=${encodeURIComponent(path)}`;
+    }, { once:true });
     button.prepend(media);
   }
 }
