@@ -60,6 +60,18 @@ store.state.security ||= { apiTokens: [], webhooks: [], identityProviders: [] };
 store.state.security.apiTokens ||= [];
 store.state.security.webhooks ||= [];
 store.state.security.identityProviders ||= [];
+const DEFAULT_FEATURES = {
+  appStore: true,
+  containers: true,
+  virtualMachines: true,
+  ai: true,
+  phoneSync: true,
+  monitoringAnalytics: true,
+  integrations: true
+};
+if (store.state.config) {
+  store.state.config.features = { ...DEFAULT_FEATURES, ...(store.state.config.features || {}) };
+}
 const spaceRoot = join(dirname(resolve(process.env.NAS_DATA_FILE || 'data/state.json')), 'files', 'Spaces');
 const profileRoot = join(dirname(resolve(process.env.NAS_DATA_FILE || 'data/state.json')), 'profiles');
 const brandingRoot = join(dirname(resolve(process.env.NAS_DATA_FILE || 'data/state.json')), 'branding');
@@ -890,7 +902,7 @@ async function api(req, res, url) {
     return send(res, 200, { ok: true, remaining: account.passkeys.length });
   }
 
-  const ownerOnly = url.pathname === '/api/settings' ||
+  const ownerOnly = url.pathname === '/api/settings' || url.pathname === '/api/capabilities/config' ||
     url.pathname === '/api/smtp' || url.pathname === '/api/smtp/test' ||
     url.pathname.startsWith('/api/security/api-tokens') || url.pathname.startsWith('/api/security/webhooks') ||
     url.pathname.startsWith('/api/security/identity-providers');
@@ -1205,6 +1217,17 @@ async function api(req, res, url) {
     return send(res, 200, { ok: true });
   }
 
+  if (req.method === 'PATCH' && url.pathname === '/api/capabilities/config') {
+    const input = await bodyJson(req);
+    const key = String(input.key || '');
+    if (!Object.hasOwn(DEFAULT_FEATURES, key)) return send(res, 400, { error: 'Unknown LightNAS feature.' });
+    const enabled = Boolean(input.enabled);
+    store.state.config.features = { ...DEFAULT_FEATURES, ...(store.state.config.features || {}), [key]: enabled };
+    store.addActivity('capability', `${key} was ${enabled ? 'enabled' : 'disabled'}.`, enabled ? 'success' : 'warning');
+    await store.save();
+    return send(res, 200, { ok: true, features: store.state.config.features });
+  }
+
   if (req.method === 'GET' && url.pathname === '/api/settings') {
     const { username: owner, deviceName, timezone, logoExt } = store.state.config;
     return send(res, 200, { username: owner, deviceName, timezone, logo: Boolean(logoExt) });
@@ -1411,7 +1434,7 @@ async function api(req, res, url) {
     const storage = overviewStorageCache || quickStorageSummary(filesystems);
     if (!overviewStorageCache || Date.now() - overviewStorageCacheAt >= OVERVIEW_STORAGE_TTL_MS) warmOverviewStorage();
     return send(res, 200, {
-      appliance: { deviceName: store.state.config.deviceName, username, role: isAdmin ? 'administrator' : context.apiToken ? 'api' : 'user', permissions, timezone: store.state.config.timezone, avatar: Boolean(account.avatarExt), logo: Boolean(store.state.config.logoExt) },
+      appliance: { deviceName: store.state.config.deviceName, username, role: isAdmin ? 'administrator' : context.apiToken ? 'api' : 'user', permissions, timezone: store.state.config.timezone, avatar: Boolean(account.avatarExt), logo: Boolean(store.state.config.logoExt), features: { ...DEFAULT_FEATURES, ...(store.state.config.features || {}) } },
       system, filesystems, storage, host: null,
       shares: store.state.shares, activity: store.state.activity.slice(0, 8)
     });

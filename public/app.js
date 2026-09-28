@@ -134,13 +134,20 @@ async function refreshLoginMethods() {
   }
 }
 
+function featureEnabled(view, appliance = state.overview?.appliance) {
+  const features = appliance?.features || {};
+  const mapping = { apps:'appStore', containers:'containers', vms:'virtualMachines', ai:'ai', integrations:'integrations' };
+  const key = mapping[view];
+  return !key || features[key] !== false;
+}
+
 function canView(view, appliance = state.overview?.appliance) {
-  if (!appliance) return false;
+  if (!appliance || !featureEnabled(view, appliance)) return false;
   if (appliance.role === 'administrator') return true;
   const allowed = new Set(appliance.permissions || []);
   const required = {
     home: ['overview.view'], files: ['files.read'], media: ['files.read'], storage: ['storage.view'], pools: ['pools.view', 'storage.manage'], shares: ['shares.view', 'shares.manage'],
-    apps: ['apps.view', 'apps.manage'], containers: ['containers.view', 'containers.manage', 'containers.console'], vms: ['vms.view', 'vms.manage', 'vms.console'],
+    apps: ['apps.view', 'apps.manage'], ai: ['apps.view', 'apps.manage', 'system.view'], containers: ['containers.view', 'containers.manage', 'containers.console'], vms: ['vms.view', 'vms.manage', 'vms.console'],
     network: ['network.view'], firewall: ['firewall.view', 'firewall.manage', 'network.manage'], monitoring: ['monitoring.view', 'system.view'], capabilities: ['capabilities.view', 'system.view'],
     integrations: ['integrations.view', 'integrations.manage'], assistant: ['admin.view', 'system.view'], users: ['users.manage'], permissions: ['users.manage'], shell: ['system.shell'], smtp: ['smtp.manage'], settings: ['settings.manage'], admin: ['admin.view']
   }[view];
@@ -180,13 +187,13 @@ async function showConsole() {
   rememberStorageSignature();
   clearInterval(overviewTimer);
   overviewTimer = setInterval(async () => {
-    if (state.view !== 'home' || $('#console').classList.contains('hidden')) return;
+    if (!['home', 'monitoring'].includes(state.view) || $('#console').classList.contains('hidden')) return;
     try {
       state.overview = await request('/api/overview');
       captureOverviewMetrics();
-      render('home');
+      render(state.view);
     } catch {}
-  }, 15000);
+  }, 5000);
 }
 
 function storageInventorySignature(source = state.overview) {
@@ -399,7 +406,7 @@ function shellView() {
 }
 
 async function loadSmtp() {
-  try { state.smtp = (await request('/api/smtp')).config; if (state.view === 'smtp') render('smtp'); } catch (error) { toast(error.message); }
+  try { state.smtp = (await request('/api/smtp')).config; if (['smtp','integrations'].includes(state.view)) render(state.view); } catch (error) { toast(error.message); }
 }
 
 function smtpView() {
@@ -635,7 +642,7 @@ function filesView() {
         <div><span class="eyebrow">FILES & MEDIA SETTINGS</span><h2>Library settings</h2><p class="muted">Manage phone library sync and desktop file display preferences.</p></div>
         <div class="files-settings-grid">
           <div class="files-setting-box"><b>Desktop view</b><p class="muted">Choose List, Grid, or Photos view on desktop.</p><div class="head-actions"><button class="secondary" type="button" data-file-view="list">☷ List</button><button class="secondary" type="button" data-file-view="grid">▦ Grid</button><button class="secondary" type="button" data-file-view="gallery">▦ Photos</button></div></div>
-          ${state.overview.appliance.role === 'administrator' ? '<div class="files-setting-box"><b>Phone library sync</b><p class="muted">Automatically route phone photos to Photos and phone videos to Videos.</p><button class="primary phone-sync-button" type="button" data-phone-sync>Configure phone sync</button></div>' : ''}
+          ${state.overview.appliance.role === 'administrator' && state.overview.appliance.features?.phoneSync !== false ? '<div class="files-setting-box"><b>Phone library sync</b><p class="muted">Automatically route phone photos to Photos and phone videos to Videos.</p><button class="primary phone-sync-button" type="button" data-phone-sync>Configure phone sync</button></div>' : ''}
         </div>
       </article>
     </section>
@@ -650,7 +657,7 @@ function filesView() {
       <label class="primary upload-button">${section === 'Photos' ? 'Upload photos' : section === 'Videos' ? 'Upload videos' : section === 'Audio' ? 'Upload audio' : 'Upload'}<input id="file-upload" type="file" ${section === 'Photos' ? 'accept="image/*"' : section === 'Videos' ? 'accept="video/*"' : section === 'Audio' ? 'accept="audio/*"' : ''} multiple hidden></label>
       <label class="secondary upload-button">Upload folder<input id="folder-upload" type="file" webkitdirectory directory multiple hidden></label>
       <button class="secondary desktop-files-settings-button" type="button" data-files-settings-tab>⚙ Settings</button>
-      ${state.overview.appliance.role === 'administrator' ? '<button class="secondary phone-sync-button files-sync-trigger" type="button" data-phone-sync>Phone sync</button>' : ''}
+      ${state.overview.appliance.role === 'administrator' && state.overview.appliance.features?.phoneSync !== false ? '<button class="secondary phone-sync-button files-sync-trigger" type="button" data-phone-sync>Phone sync</button>' : ''}
     </div></div>
     <div class="file-drop-zone" data-file-drop tabindex="0"><b>Drop files here</b><span>Multiple files and ZIP archives are supported. Use “Upload folder” to preserve a whole folder tree.</span></div>
     <p class="muted">${allFiles ? 'All files shows only your Documents, Photos, Videos, and Audio libraries.' : 'Open folders normally or switch back to All files to see all four libraries together.'} ZIP and other file types are accepted, uploads have visible progress, and LightNAS does not impose an application-level file-size ceiling.</p>
@@ -770,11 +777,106 @@ async function uploadFilesWithProgress(fileList, folderMode = false) {
 }
 
 
-function capabilitiesView() {
-  const { system } = state.overview;
-  return `${pageHead('System capabilities', 'Hardware eligibility estimates; these services may still need installation.')}
-    <div class="capability-list">${system.capabilities.map(item => `<article class="capability-row"><div><b>${escapeHtml(item.name)}</b><p>${escapeHtml(item.available ? `Hardware requirement met · ${item.minimum}` : item.reason)}</p></div><span class="badge ${item.available ? 'available' : 'gated'}">${item.available ? 'ELIGIBLE' : 'HARDWARE GATED'}</span></article>`).join('')}</div>`;
+function seriesStats(values = []) {
+  const clean = values.map(Number).filter(Number.isFinite);
+  if (!clean.length) return { current: 0, average: 0, peak: 0, minimum: 0 };
+  return {
+    current: clean.at(-1) || 0,
+    average: clean.reduce((sum, value) => sum + value, 0) / clean.length,
+    peak: Math.max(...clean),
+    minimum: Math.min(...clean)
+  };
 }
+
+function monitoringView() {
+  const system = state.overview.system || {};
+  const storage = state.overview.storage?.usableStorage || state.overview.storage?.virtualStorage || state.overview.storage?.local || {};
+  const cpu = seriesStats(state.metricHistory.cpu);
+  const memory = seriesStats(state.metricHistory.memory);
+  const load = seriesStats(state.metricHistory.load);
+  const networkIn = seriesStats(state.metricHistory.networkIn);
+  const networkOut = seriesStats(state.metricHistory.networkOut);
+  const analyticsEnabled = state.overview.appliance.features?.monitoringAnalytics !== false;
+  const activity = state.overview.activity || [];
+  return `${pageHead('Monitoring & analytics', 'Live performance graphs, session analytics, and recent system activity.', '<button class="secondary" data-action="refresh">Refresh now</button>')}
+    <section class="monitoring-live-grid">
+      ${overviewChart('CPU usage', `${system.cpu?.loadPercent || 0}`, '%', state.metricHistory.cpu)}
+      ${overviewChart('Memory usage', `${system.memory?.usedPercent || 0}`, '%', state.metricHistory.memory)}
+      ${overviewChart('System load', `${system.cpu?.loadAverage?.[0] || 0}`, '', state.metricHistory.load, Math.max(2, system.cpu?.cores || 1))}
+      ${overviewNetworkChart(system)}
+    </section>
+    ${analyticsEnabled ? `<section class="analytics-section">
+      <div class="section-heading"><div><span class="eyebrow">SESSION ANALYTICS</span><h2>Performance summary</h2></div><small>Updates every 5 seconds · ${state.metricHistory.cpu.length} samples</small></div>
+      <div class="analytics-grid">
+        <article class="panel analytics-card"><span>CPU average</span><strong>${cpu.average.toFixed(1)}%</strong><small>Peak ${cpu.peak.toFixed(1)}% · current ${cpu.current.toFixed(1)}%</small></article>
+        <article class="panel analytics-card"><span>Memory average</span><strong>${memory.average.toFixed(1)}%</strong><small>Peak ${memory.peak.toFixed(1)}% · ${bytes(system.memory?.freeBytes || 0)} free now</small></article>
+        <article class="panel analytics-card"><span>Load average</span><strong>${load.average.toFixed(2)}</strong><small>Peak ${load.peak.toFixed(2)} · ${system.cpu?.cores || 0} logical CPUs</small></article>
+        <article class="panel analytics-card"><span>Network peak</span><strong>↓ ${bytes(networkIn.peak)}/s</strong><small>↑ ${bytes(networkOut.peak)}/s transmitted</small></article>
+        <article class="panel analytics-card"><span>Storage used</span><strong>${Number(storage.usedPercent || 0)}%</strong><small>${bytes(storage.usedBytes || 0)} of ${bytes(storage.totalBytes || 0)}</small></article>
+        <article class="panel analytics-card"><span>Uptime</span><strong>${duration(system.uptimeSeconds || 0)}</strong><small>${activity.length} recent activity event${activity.length === 1 ? '' : 's'}</small></article>
+      </div>
+    </section>` : ''}
+    <section class="monitoring-activity panel">
+      <div class="panel-head"><div><span class="eyebrow">ACTIVITY</span><h2>Recent system events</h2></div><small>Newest first</small></div>
+      <div class="activity-list">${activity.length ? activity.map(item => `<div class="activity"><span class="activity-icon">${item.severity === 'warning' ? '!' : item.severity === 'success' ? '✓' : '↗'}</span><div><b>${escapeHtml(item.message)}</b><time>${relativeTime(item.timestamp)}</time></div></div>`).join('') : '<p class="muted">No recent activity.</p>'}</div>
+    </section>`;
+}
+
+function capabilitiesView() {
+  const { system, appliance } = state.overview;
+  const hardware = system.capabilities || [];
+  const features = appliance.features || {};
+  const optional = [
+    ['appStore', 'App Store', 'One-click application catalog and managed app hosting.', 'apps'],
+    ['containers', 'System containers', 'Native Linux system containers and terminal access.', 'containers'],
+    ['virtualMachines', 'Virtual machines', 'KVM/libvirt or supported hypervisor virtual machines.', 'vms'],
+    ['ai', 'AI workspace', 'Local and remote AI tools, model runtimes, and AI applications.', 'ai'],
+    ['phoneSync', 'Phone library sync', 'Automatic phone photo/video uploads into Files & media.', 'files'],
+    ['monitoringAnalytics', 'Monitoring analytics', 'Live charts and session performance analytics.', 'monitoring'],
+    ['integrations', 'Integrations', 'Host runtimes, external services, and provider connections.', 'integrations']
+  ];
+  return `${pageHead('Capabilities', 'Review hardware support and control optional LightNAS features.')}
+    <section class="capability-overview-grid">
+      <article class="panel capability-overview"><span class="eyebrow">HARDWARE</span><strong>${hardware.filter(item => item.available).length}/${hardware.length}</strong><p>hardware capability checks passed</p></article>
+      <article class="panel capability-overview"><span class="eyebrow">FEATURES</span><strong>${optional.filter(([key]) => features[key] !== false).length}/${optional.length}</strong><p>optional LightNAS features enabled</p></article>
+      <article class="panel capability-overview"><span class="eyebrow">CPU</span><strong>${system.cpu?.cores || 0}</strong><p>logical cores · ${escapeHtml(system.architecture || '')}</p></article>
+      <article class="panel capability-overview"><span class="eyebrow">MEMORY</span><strong>${bytes(system.memory?.totalBytes || 0)}</strong><p>${system.memory?.usedPercent || 0}% currently used</p></article>
+    </section>
+    <section class="capability-section">
+      <div class="section-heading"><div><span class="eyebrow">FEATURE CONTROL</span><h2>Optional services & interface modules</h2><p class="muted">Turn LightNAS features on or off without uninstalling your data or applications.</p></div></div>
+      <div class="capability-toggle-grid">${optional.map(([key, name, description, target]) => {
+        const enabled = features[key] !== false;
+        return `<article class="panel capability-toggle-card"><div><div class="capability-title-row"><h3>${escapeHtml(name)}</h3><span class="user-status ${enabled ? 'active' : 'disabled'}">${enabled ? 'ENABLED' : 'DISABLED'}</span></div><p>${escapeHtml(description)}</p></div><div class="capability-actions"><button class="secondary" type="button" data-view-link="${target}">Open</button>${appliance.role === 'administrator' ? `<button class="${enabled ? 'secondary' : 'primary'}" type="button" data-feature-toggle="${key}" data-feature-enabled="${enabled}">${enabled ? 'Turn off' : 'Turn on'}</button>` : ''}</div></article>`;
+      }).join('')}</div>
+    </section>
+    <section class="capability-section">
+      <div class="section-heading"><div><span class="eyebrow">HARDWARE ELIGIBILITY</span><h2>Detected system capabilities</h2></div></div>
+      <div class="capability-list">${hardware.map(item => `<article class="capability-row"><div><b>${escapeHtml(item.name)}</b><p>${escapeHtml(item.available ? `Requirement met · ${item.minimum}` : item.reason)}</p></div><span class="badge ${item.available ? 'available' : 'gated'}">${item.available ? 'READY' : 'LIMITED'}</span></article>`).join('')}</div>
+    </section>`;
+}
+
+function aiView() {
+  const apps = state.runtimes?.catalog || [];
+  const docker = state.runtimes?.docker;
+  const aiApps = apps.filter(app => String(app.category || '').toLowerCase() === 'ai' || ['ollama','flowise','localai','open-webui'].includes(String(app.id || '').toLowerCase()));
+  const localAi = state.overview.system?.capabilities?.find(item => item.name === 'Local AI');
+  return `${pageHead('AI', 'Run local AI services, model runtimes, and AI workflows from LightNAS.', '<button class="secondary" data-action="refresh-runtime">Refresh AI</button>')}
+    <section class="ai-summary-grid">
+      <article class="panel ai-summary-card"><span class="eyebrow">LOCAL AI</span><strong>${localAi?.available ? 'Ready' : 'Limited'}</strong><p>${escapeHtml(localAi?.available ? 'Hardware meets the local AI baseline.' : localAi?.reason || 'Hardware status unavailable.')}</p></article>
+      <article class="panel ai-summary-card"><span class="eyebrow">AI APPS</span><strong>${aiApps.length}</strong><p>AI applications available in the LightNAS catalog.</p></article>
+      <article class="panel ai-summary-card"><span class="eyebrow">APP ENGINE</span><strong>${docker?.available && docker?.enabled ? 'Online' : 'Offline'}</strong><p>${escapeHtml(docker?.available && docker?.enabled ? 'Managed AI applications can be launched.' : docker?.reason || 'App runtime is not ready.')}</p></article>
+    </section>
+    <section class="ai-workspace">
+      <div class="section-heading"><div><span class="eyebrow">AI WORKSPACE</span><h2>Available AI tools</h2><p class="muted">Install a model runtime, workflow builder, or compatible AI service directly from the App Store engine.</p></div></div>
+      <div class="tool-grid ai-app-grid">${aiApps.map(app => {
+        const instance = docker?.containers?.find(container => container.name === `lightnas-app-${app.id}`);
+        const running = instance?.state === 'running';
+        const appUrl = `http://${location.hostname}:${app.port}/`;
+        return `<article class="panel app-card"><span class="eyebrow">${escapeHtml(app.category || 'AI')}</span><h2>${escapeHtml(app.name)}</h2><p class="muted">${escapeHtml(app.description || '')}</p><p class="muted app-source">${escapeHtml(app.image || '')} · Port ${app.port}</p>${instance ? `<div class="head-actions">${running ? `<a class="primary" href="${escapeHtml(appUrl)}" target="_blank" rel="noopener">Open</a>` : ''}<button class="secondary" data-app-action="${running ? 'stop' : 'start'}" data-app-id="${app.id}">${running ? 'Stop' : 'Start'}</button><button class="secondary" data-app-action="restart" data-app-id="${app.id}">Restart</button></div>` : `<button class="primary" data-install="${app.id}">Install</button>`}</article>`;
+      }).join('') || '<div class="empty compact-empty"><p>Loading AI application catalog…</p></div>'}</div>
+    </section>`;
+}
+
 
 function settingsView() {
   const { appliance } = state.overview;
@@ -986,20 +1088,56 @@ function firewallView() {
 
 function integrationsView() {
   const apps = state.runtimes?.docker, containers = state.runtimes?.containers, vm = state.runtimes?.virtualization;
-  return `${pageHead('Integrations', 'See which host services and compute providers LightNAS can actually reach.', '<button class="secondary" data-action="refresh-runtime">Refresh</button>')}
-    <div class="tool-grid">
-      <article class="panel"><h2>System containers</h2><p>${containers?.available && containers?.enabled ? `${escapeHtml(containers.provider || 'provider')} connected. System-container creation is enabled.` : escapeHtml(containers?.reason || 'Checking system-container provider…')}</p><button class="secondary" data-view-link="containers">Open containers</button></article>
-      <article class="panel"><h2>Virtualization</h2><p>${vm?.available && vm?.enabled ? `${escapeHtml(vm.provider || 'KVM')} connected.` : escapeHtml(vm?.reason || 'Checking virtualization…')}</p><button class="secondary" data-view-link="vms">Open virtual machines</button></article>
-      <article class="panel"><h2>Optional App Store engine</h2><p>${apps?.available && apps?.enabled ? 'Docker/OCI app engine connected. This is separate from System Containers.' : escapeHtml(apps?.reason || 'Docker/OCI app engine is optional and currently disabled.')}</p><button class="secondary" data-view-link="apps">Open App Store</button></article>
-    </div>`;
+  const integrations = [
+    {
+      name:'System containers',
+      detail: containers?.available && containers?.enabled ? `${containers.provider || 'provider'} connected` : containers?.reason || 'Checking container provider…',
+      online:Boolean(containers?.available && containers?.enabled),
+      target:'containers'
+    },
+    {
+      name:'Virtualization',
+      detail: vm?.available && vm?.enabled ? `${vm.provider || 'KVM'} connected` : vm?.reason || 'Checking virtualization…',
+      online:Boolean(vm?.available && vm?.enabled),
+      target:'vms'
+    },
+    {
+      name:'App Store engine',
+      detail: apps?.available && apps?.enabled ? 'Docker/OCI engine connected' : apps?.reason || 'Docker/OCI engine disabled',
+      online:Boolean(apps?.available && apps?.enabled),
+      target:'apps'
+    },
+    {
+      name:'AI workspace',
+      detail: state.overview.appliance.features?.ai !== false ? 'AI workspace enabled' : 'AI workspace disabled in Capabilities',
+      online:state.overview.appliance.features?.ai !== false,
+      target:'ai'
+    },
+    {
+      name:'Email / SMTP',
+      detail: state.smtp ? `${state.smtp.host}:${state.smtp.port}` : 'Not configured',
+      online:Boolean(state.smtp),
+      target:'smtp'
+    }
+  ];
+  return `${pageHead('Integrations', 'Connected runtimes, services, and LightNAS providers.', '<button class="secondary" data-action="refresh-runtime">Refresh</button>')}
+    <section class="integration-summary-grid">
+      <article class="panel integration-summary"><span class="eyebrow">CONNECTED</span><strong>${integrations.filter(item => item.online).length}</strong><p>services currently ready</p></article>
+      <article class="panel integration-summary"><span class="eyebrow">AVAILABLE</span><strong>${integrations.length}</strong><p>managed integration points</p></article>
+      <article class="panel integration-summary"><span class="eyebrow">CONTROL</span><strong>Local</strong><p>managed directly by LightNAS</p></article>
+    </section>
+    <section class="integration-list panel">
+      <div class="panel-head"><div><span class="eyebrow">PROVIDERS</span><h2>Integration status</h2></div><small>Live status</small></div>
+      ${integrations.map(item => `<div class="integration-row"><span class="integration-dot ${item.online ? 'online' : ''}"></span><div><b>${escapeHtml(item.name)}</b><small>${escapeHtml(item.detail)}</small></div><span class="user-status ${item.online ? 'active' : 'disabled'}">${item.online ? 'READY' : 'OFFLINE'}</span><button class="secondary" type="button" data-view-link="${item.target}">Open</button></div>`).join('')}
+    </section>`;
 }
 
 function render(view) {
   if (view === 'media') view = 'files';
-  state.view = ['home', 'storage', 'pools', 'files', 'users', 'permissions', 'shell', 'smtp', 'admin', 'shares', 'capabilities', 'apps', 'containers', 'vms', 'monitoring', 'settings', 'network', 'firewall', 'integrations'].includes(view) ? view : 'home';
+  state.view = ['home', 'storage', 'pools', 'files', 'users', 'permissions', 'shell', 'smtp', 'admin', 'shares', 'capabilities', 'apps', 'ai', 'containers', 'vms', 'monitoring', 'settings', 'network', 'firewall', 'integrations'].includes(view) ? view : 'home';
   if (!canView(state.view)) state.view = canView('home') ? 'home' : 'files';
   const content = $('#content');
-  content.innerHTML = state.view === 'home' ? homeView() : state.view === 'storage' ? storageView() : state.view === 'pools' ? poolsView() : state.view === 'files' ? filesView() : state.view === 'media' ? mediaView() : state.view === 'users' ? usersView() : state.view === 'permissions' ? permissionsView() : state.view === 'shell' ? shellView() : state.view === 'smtp' ? smtpView() : state.view === 'admin' ? adminView() : state.view === 'shares' ? sharesView() : state.view === 'containers' ? containersView() : state.view === 'vms' ? vmsView() : state.view === 'settings' ? settingsView() : state.view === 'capabilities' ? capabilitiesView() : state.view === 'network' ? networkView() : state.view === 'firewall' ? firewallView() : state.view === 'integrations' ? integrationsView() : moduleView(state.view);
+  content.innerHTML = state.view === 'home' ? homeView() : state.view === 'storage' ? storageView() : state.view === 'pools' ? poolsView() : state.view === 'files' ? filesView() : state.view === 'media' ? mediaView() : state.view === 'users' ? usersView() : state.view === 'permissions' ? permissionsView() : state.view === 'shell' ? shellView() : state.view === 'smtp' ? smtpView() : state.view === 'admin' ? adminView() : state.view === 'shares' ? sharesView() : state.view === 'containers' ? containersView() : state.view === 'vms' ? vmsView() : state.view === 'settings' ? settingsView() : state.view === 'capabilities' ? capabilitiesView() : state.view === 'monitoring' ? monitoringView() : state.view === 'ai' ? aiView() : state.view === 'network' ? networkView() : state.view === 'firewall' ? firewallView() : state.view === 'integrations' ? integrationsView() : moduleView(state.view);
   $$('[data-view]').forEach(link => link.classList.toggle('active', link.dataset.view === state.view));
   $(`[data-view="${state.view}"]`, $('#nav'))?.closest('details')?.setAttribute('open', '');
   content.focus({ preventScroll: true });
@@ -1007,11 +1145,11 @@ function render(view) {
   if (state.view === 'files' && state.files === null) loadFiles();
   if (['pools', 'storage'].includes(state.view) && state.spaces === null) loadSpaces();
   if (['users', 'permissions'].includes(state.view) && state.users === null) loadUsers();
-  if (state.view === 'smtp' && state.smtp === undefined) loadSmtp();
+  if (['smtp','integrations'].includes(state.view) && state.smtp === undefined) loadSmtp();
   if (['files', 'media'].includes(state.view) && state.media === null) loadMedia();
   if (['network', 'firewall'].includes(state.view) && !state.network) loadNetwork();
   if (state.view === 'containers' && !state.runtimes?.containers && !state.containerError) loadContainers();
-  if (['apps', 'vms', 'integrations'].includes(state.view) && (!state.runtimes?.docker || !state.runtimes?.virtualization) && !state.runtimeError) loadRuntimes();
+  if (['apps', 'ai', 'vms', 'integrations'].includes(state.view) && (!state.runtimes?.docker || !state.runtimes?.virtualization || !state.runtimes?.catalog) && !state.runtimeError) loadRuntimes();
 }
 
 function bindViewActions() {
@@ -1026,7 +1164,25 @@ function bindViewActions() {
       (item.healthy ? 'writable' : 'readonly') + '">' + (item.healthy ? 'HEALTHY' : 'NEEDS ATTENTION') +
       '</span></div>').join('') + '</div>';
   };
-  $$('[data-overview-metric]', $('#content')).forEach(button => button.addEventListener('click', () => {
+  document.querySelectorAll('#content [data-feature-toggle]').forEach(button => button.addEventListener('click', async () => {
+    const key = button.dataset.featureToggle;
+    const enabled = button.dataset.featureEnabled !== 'true';
+    button.disabled = true;
+    const original = button.textContent;
+    button.textContent = enabled ? 'Turning on…' : 'Turning off…';
+    try {
+      const result = await request('/api/capabilities/config', { method:'PATCH', body:JSON.stringify({ key, enabled }) });
+      state.overview.appliance.features = result.features;
+      document.querySelectorAll('[data-view]').forEach(link => link.classList.toggle('hidden', !canView(link.dataset.view, state.overview.appliance)));
+      render('capabilities');
+      toast(`${key} ${enabled ? 'enabled' : 'disabled'}.`);
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = original;
+      toast(error.message);
+    }
+  }));
+  document.querySelectorAll('#content [data-overview-metric]').forEach(button => button.addEventListener('click', () => {
     state.overviewMetric = button.dataset.overviewMetric;
     localStorage.setItem('lightnas-overview-metric', state.overviewMetric);
     render('home');
@@ -1345,7 +1501,7 @@ function bindViewActions() {
               <button class="secondary" type="button" data-mobile-file-view="gallery">▦ Photos</button>
             </div>
           </div>
-          ${state.overview.appliance.role === 'administrator' ? '<div class="mobile-files-setting-group"><span class="eyebrow">PHONE LIBRARY</span><button class="secondary" type="button" data-open-phone-sync-from-settings>Phone sync</button></div>' : ''}
+          ${state.overview.appliance.role === 'administrator' && state.overview.appliance.features?.phoneSync !== false ? '<div class="mobile-files-setting-group"><span class="eyebrow">PHONE LIBRARY</span><button class="secondary" type="button" data-open-phone-sync-from-settings>Phone sync</button></div>' : ''}
         </div>`;
       document.body.append(dialog);
       dialog.querySelector('[data-mobile-files-settings-close]')?.addEventListener('click', () => dialog.close());

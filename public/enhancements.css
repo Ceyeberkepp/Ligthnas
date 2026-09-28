@@ -1198,3 +1198,350 @@
     gap:8px;
   }
 }
+
+
+/* Compact Settings, Integrations, Monitoring, AI and Capabilities workspaces */
+.settings-dashboard {
+  gap:10px;
+}
+.settings-dashboard > .panel,
+.settings-dashboard > form.panel {
+  padding:14px 16px;
+}
+.settings-card-head {
+  margin-bottom:8px;
+}
+.settings-card-head h2 {
+  margin:2px 0 3px;
+}
+.settings-general-grid {
+  gap:10px;
+}
+.branding-preview {
+  min-height:0;
+  margin:7px 0 9px;
+  padding:9px 10px;
+}
+.brand-logo-preview {
+  width:58px;
+  height:58px;
+  flex-basis:58px;
+}
+.password-card {
+  gap:10px;
+}
+.settings-dashboard label {
+  margin-bottom:0;
+}
+
+.integration-summary-grid,
+.ai-summary-grid,
+.capability-overview-grid {
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:10px;
+  margin-bottom:10px;
+}
+.capability-overview-grid {
+  grid-template-columns:repeat(4,minmax(0,1fr));
+}
+.integration-summary,
+.ai-summary-card,
+.capability-overview {
+  padding:14px 16px;
+}
+.integration-summary strong,
+.ai-summary-card strong,
+.capability-overview strong {
+  display:block;
+  margin:6px 0 3px;
+  font-size:22px;
+  line-height:1.05;
+}
+.integration-summary p,
+.ai-summary-card p,
+.capability-overview p {
+  margin:0;
+  color:var(--muted);
+  font-size:11px;
+}
+
+.integration-list {
+  padding:12px 14px;
+}
+.integration-list .panel-head {
+  margin-bottom:5px;
+}
+.integration-row {
+  display:grid;
+  grid-template-columns:12px minmax(0,1fr) auto auto;
+  gap:10px;
+  align-items:center;
+  padding:9px 2px;
+  border-top:1px solid var(--line);
+}
+.integration-row:first-of-type {
+  border-top:0;
+}
+.integration-row > div {
+  min-width:0;
+}
+.integration-row b,
+.integration-row small {
+  display:block;
+}
+.integration-row small {
+  margin-top:2px;
+  color:var(--muted);
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.integration-dot {
+  width:9px;
+  height:9px;
+  border-radius:50%;
+  background:var(--muted);
+}
+.integration-dot.online {
+  background:var(--success);
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--success) 12%,transparent);
+}
+
+.monitoring-live-grid {
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:10px;
+  margin-bottom:14px;
+}
+.monitoring-live-grid .overview-chart {
+  min-height:210px;
+  padding:14px 16px;
+}
+.monitoring-live-grid .overview-chart svg {
+  min-height:120px;
+}
+.analytics-section,
+.capability-section,
+.ai-workspace {
+  margin-top:14px;
+}
+.analytics-grid {
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:9px;
+}
+.analytics-card {
+  padding:13px 15px;
+}
+.analytics-card > span {
+  display:block;
+  color:var(--muted);
+  font-size:10px;
+  font-weight:800;
+  letter-spacing:.04em;
+  text-transform:uppercase;
+}
+.analytics-card strong {
+  display:block;
+  margin:5px 0 3px;
+  font-size:20px;
+}
+.analytics-card small {
+  color:var(--muted);
+}
+.monitoring-activity {
+  margin-top:14px;
+  padding:13px 15px;
+}
+.monitoring-activity .activity {
+  padding:8px 0;
+}
+
+.capability-toggle-grid {
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:9px;
+}
+.capability-toggle-card {
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:12px;
+  align-items:center;
+  padding:14px 15px;
+}
+.capability-toggle-card h3 {
+  margin:0;
+  font-size:14px;
+}
+.capability-toggle-card p {
+  margin:5px 0 0;
+  color:var(--muted);
+  font-size:11px;
+  line-height:1.4;
+}
+.capability-title-row {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+}
+.capability-actions {
+  display:flex;
+  gap:6px;
+  align-items:center;
+}
+.capability-section .section-heading {
+  margin-bottom:8px;
+}
+.capability-section .capability-list {
+  gap:7px;
+}
+.capability-section .capability-row {
+  padding:11px 13px;
+}
+
+.ai-workspace .section-heading {
+  margin-bottom:8px;
+}
+.ai-app-grid {
+  gap:10px;
+}
+.ai-app-grid .app-card {
+  padding:14px 15px;
+}
+.ai-app-grid .app-card h2 {
+  margin:4px 0 5px;
+}
+.ai-app-grid .app-card p {
+  margin:4px 0;
+}
+
+@media (max-width:900px) {
+  .integration-summary-grid,
+  .ai-summary-grid,
+  .capability-overview-grid,
+  .analytics-grid {
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+  .capability-toggle-grid,
+  .monitoring-live-grid {
+    grid-template-columns:1fr;
+  }
+}
+
+@media (max-width:600px) {
+  .integration-summary-grid,
+  .ai-summary-grid,
+  .capability-overview-grid,
+  .analytics-grid {
+    grid-template-columns:1fr;
+  }
+  .integration-row {
+    grid-template-columns:10px minmax(0,1fr) auto;
+  }
+  .integration-row > button {
+    grid-column:2 / -1;
+    justify-self:start;
+  }
+  .capability-toggle-card {
+    grid-template-columns:1fr;
+  }
+  .capability-actions {
+    justify-content:flex-start;
+  }
+}
+
+
+/* Compact Settings & Security extensions */
+.totp-admin {
+  margin-top:10px;
+  padding:14px 16px;
+}
+.totp-admin .admin-section-head {
+  margin-bottom:8px;
+}
+.totp-admin .admin-section-head h2 {
+  margin:2px 0 3px;
+}
+.totp-admin .admin-section-head p {
+  margin:0;
+}
+.mfa-method-grid {
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:8px;
+  margin:8px 0 10px;
+}
+.mfa-method {
+  display:grid;
+  grid-template-columns:auto minmax(0,1fr) auto;
+  gap:9px;
+  align-items:start;
+  padding:11px 12px !important;
+}
+.mfa-method h3 {
+  margin:0 0 3px;
+  font-size:13px;
+}
+.mfa-method p {
+  margin:0;
+  color:var(--muted);
+  font-size:10px;
+  line-height:1.35;
+}
+.mfa-icon {
+  min-width:34px;
+  height:28px;
+  display:grid;
+  place-items:center;
+  border-radius:8px;
+  background:var(--panel-2);
+  font-size:9px;
+  font-weight:800;
+}
+.mfa-config-grid {
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:8px;
+}
+.mfa-config {
+  padding:11px 12px !important;
+}
+.mfa-config h3 {
+  margin:0 0 8px;
+  font-size:13px;
+}
+.security-stack-form {
+  display:grid;
+  gap:8px;
+}
+.security-stack-form label {
+  margin:0;
+}
+.security-enrollment {
+  margin-top:8px;
+  padding:10px;
+}
+.security-enrollment p {
+  margin-top:0;
+}
+.totp-qr {
+  max-width:180px;
+}
+.automation-admin {
+  margin-top:10px;
+}
+.admin-section-head {
+  gap:10px;
+}
+.admin-section-head h2 {
+  margin:2px 0 3px;
+}
+
+@media (max-width:900px) {
+  .mfa-method-grid,
+  .mfa-config-grid {
+    grid-template-columns:1fr;
+  }
+}
