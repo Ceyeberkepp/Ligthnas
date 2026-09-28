@@ -172,7 +172,11 @@ for vm_user in libvirt-qemu qemu; do
 done
 
 RUNTIME_PROVISION_NEEDED=0
-if [[ "${EXISTING_INSTALL}" == "0" || ! -s "${DATA_DIRECTORY}/runtime-status.txt" || "${LIGHTNAS_REPAIR_RUNTIMES:-0}" == "1" ]]; then
+if [[ -r /etc/lightnas/network.env ]] && grep -q '^LIGHTNAS_NETWORK_MODE=nested-macvlan$' /etc/lightnas/network.env; then
+  RUNTIME_PROVISION_NEEDED=1
+  echo "      Old nested macvlan mode detected; scheduling automatic migration to reliable container NAT."
+fi
+if [[ "${EXISTING_INSTALL}" == "0" || ! -s "${DATA_DIRECTORY}/runtime-status.txt" || "${LIGHTNAS_REPAIR_RUNTIMES:-0}" == "1" || "${RUNTIME_PROVISION_NEEDED}" == "1" ]]; then
   RUNTIME_PROVISION_NEEDED=1
   echo "      Runtime engines will finish provisioning in the background after the control panel starts."
 else

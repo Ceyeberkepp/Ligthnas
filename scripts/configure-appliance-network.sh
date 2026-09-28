@@ -71,28 +71,35 @@ EOF
   done
 }
 
-# When LightNAS itself runs inside a Proxmox LXC, never move or readdress the
-# working management eth0. Use that existing uplink as the parent for LXC
-# macvlan interfaces instead. Inner containers then behave like normal
-# Proxmox LXCs: each receives its own LAN DHCP address while LightNAS keeps
-# its existing management address on eth0.
+# When LightNAS itself runs inside another container (for example a
+# Proxmox LXC), use the LightNAS-owned NAT bridge by default. A macvlan device
+# may be creatable inside the guest while the outer hypervisor/switch still
+# rejects frames from additional MAC addresses. That failure looks exactly like
+# "container starts but never gets DHCP". NAT is the reliable zero-touch mode.
+#
+# Advanced operators can explicitly request direct nested LAN addressing with:
+#   LIGHTNAS_NESTED_LAN_MODE=macvlan
 container_kind="$(systemd-detect-virt --container 2>/dev/null || true)"
 if [[ -n "$container_kind" && "$container_kind" != "none" ]]; then
   nested_uplink="$(ip -4 route show default 2>/dev/null | awk 'NR==1 {for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')"
   [[ -n "$nested_uplink" && -e "/sys/class/net/$nested_uplink" ]] || nested_uplink=eth0
 
-  macvlan_probe="lnmv-probe-$$"
-  if ip link add link "$nested_uplink" name "$macvlan_probe" type macvlan mode bridge >/dev/null 2>&1; then
-    ip link delete "$macvlan_probe" >/dev/null 2>&1 || true
-    printf 'LIGHTNAS_NETWORK_MODE=nested-macvlan\nLIGHTNAS_UPLINK=%s\nLIGHTNAS_CONTAINER_PARENT=%s\n' "$nested_uplink" "$nested_uplink" >"$STATE_FILE"
-    echo "LightNAS network: using $nested_uplink as the direct LAN parent for system containers; management networking is unchanged."
-    exit 0
+  if [[ "${LIGHTNAS_NESTED_LAN_MODE:-nat}" == "macvlan" ]]; then
+    macvlan_probe="lnmv-probe-$$"
+    if ip link add link "$nested_uplink" name "$macvlan_probe" type macvlan mode bridge >/dev/null 2>&1; then
+      ip link delete "$macvlan_probe" >/dev/null 2>&1 || true
+      printf 'LIGHTNAS_NETWORK_MODE=nested-macvlan\nLIGHTNAS_UPLINK=%s\nLIGHTNAS_CONTAINER_PARENT=%s\n' "$nested_uplink" "$nested_uplink" >"$STATE_FILE"
+      echo "LightNAS network: advanced nested macvlan mode enabled on $nested_uplink."
+      exit 0
+    fi
+    echo "LightNAS network: requested nested macvlan is unavailable; falling back to managed NAT." >&2
   fi
 
   printf 'LIGHTNAS_NETWORK_MODE=lxc-nat\nLIGHTNAS_UPLINK=%s\nLIGHTNAS_CONTAINER_BRIDGE=lightnas0\nLIGHTNAS_VM_NETWORK=default\n' "$nested_uplink" >"$STATE_FILE"
-  echo "LightNAS network: nested macvlan is unavailable; using managed NAT fallback."
+  echo "LightNAS network: nested appliance detected; using reliable managed NAT for system containers."
   exit 0
 fi
+
 is_virtual_name() {
   [[ "${1:-}" =~ ^(lo|docker[0-9]*|virbr[0-9]*|lightnas[0-9]*|lxcbr[0-9]*|br-[A-Fa-f0-9]+|veth.*|tap.*|tun.*)$ ]]
 }
