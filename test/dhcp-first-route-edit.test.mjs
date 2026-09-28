@@ -24,3 +24,11 @@ test('networking can edit persistent and live gateway routes', async () => {
   assert.match(agent, /if action == "route-runtime-update":/);
   assert.match(agent, /"ip", "-4", "route", "replace"/);
 });
+
+
+test('container settings save is not marked failed only because application discovery is pending', async () => {
+  const controls = await read('public/dialog-controls.js');
+  assert.match(controls, /Application discovery is secondary to saving container settings/);
+  assert.match(controls, /publishWarning = problem\.message/);
+  assert.match(controls, /DHCP was attempted first; this nested host required LightNAS managed automatic addressing/);
+});
