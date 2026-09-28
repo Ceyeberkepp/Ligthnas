@@ -1412,7 +1412,7 @@ function bindViewActions() {
     link.click();
     link.remove();
   }));
-  $('[data-library-tab]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+  document.querySelectorAll('#content [data-library-tab]').forEach(button => button.addEventListener('click', async () => {
     state.filesSettingsOpen = false;
     const folder = button.dataset.libraryTab || '';
     if (folder && folder !== 'Attached storage') {
@@ -1434,7 +1434,7 @@ function bindViewActions() {
     }
     render('files');
   });
-  $('[data-folder]', $('#content')).forEach(button => button.addEventListener('click', () => { state.folder = button.dataset.folder; state.files = null; render('files'); }));
+  document.querySelectorAll('#content [data-folder]').forEach(button => button.addEventListener('click', () => { state.folder = button.dataset.folder; state.files = null; render('files'); }));
   document.querySelectorAll('#content [data-open]').forEach(button => button.addEventListener('click', async event => {
     const path = button.dataset.path || [state.folder, button.dataset.open].filter(Boolean).join('/');
     if (button.dataset.directory === 'true') { state.folder = path; state.files = null; render('files'); return; }
