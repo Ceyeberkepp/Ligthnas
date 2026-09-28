@@ -567,6 +567,8 @@ function fileEntryPath(entry) {
 }
 
 function filesView() {
+  const mobileFiles = matchMedia('(max-width: 760px)').matches;
+  if (mobileFiles && state.fileView === 'list') state.fileView = 'grid';
   const segments = state.folder.split('/').filter(Boolean);
   const section = librarySections.some(([folder]) => folder === (segments[0] || '')) ? (segments[0] || '') : '';
   const allFiles = state.folder === '';
