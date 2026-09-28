@@ -435,6 +435,22 @@ async function showRuntimeWizard(kind) {
     return true;
   };
 
+  if (isContainer && form.elements.ipv4Mode) {
+    const updateContainerNetworkFields = () => {
+      const manual = form.elements.ipv4Mode.value === 'manual';
+      for (const name of ['ipv4Address', 'gateway', 'dns']) {
+        if (form.elements[name]) {
+          form.elements[name].disabled = !manual;
+          if (!manual) form.elements[name].value = '';
+        }
+      }
+      if (form.elements.ipv4Address) form.elements.ipv4Address.required = manual;
+    };
+    form.elements.ipv4Mode.value = 'dhcp';
+    form.elements.ipv4Mode.addEventListener('change', updateContainerNetworkFields);
+    updateContainerNetworkFields();
+  }
+
   if (!isContainer && form.elements.iso) {
     const applyVmGuestProfile = () => {
       const selected = images.find(item => item.value === form.elements.iso.value);
@@ -698,9 +714,18 @@ async function showContainerManager(id) {
   const mode = dialog.querySelector('[name="ipv4Mode"]');
   const updateNetworkFields = () => {
     const manual = mode.value === 'manual';
-    dialog.querySelector('[name="ipv4Address"]').required = manual;
-    dialog.querySelector('[name="ipv4Address"]').disabled = !manual;
-    dialog.querySelector('[name="gateway"]').disabled = !manual;
+    const addressField = dialog.querySelector('[name="ipv4Address"]');
+    const gatewayField = dialog.querySelector('[name="gateway"]');
+    const dnsField = dialog.querySelector('[name="dns"]');
+    addressField.required = manual;
+    addressField.disabled = !manual;
+    gatewayField.disabled = !manual;
+    dnsField.disabled = !manual;
+    if (!manual) {
+      addressField.value = '';
+      gatewayField.value = '';
+      dnsField.value = '';
+    }
   };
   mode.addEventListener('change', updateNetworkFields);
   updateNetworkFields();
