@@ -624,7 +624,7 @@ function filesView() {
       <button class="secondary" data-action="new-folder">+ Folder</button>
       <label class="primary upload-button">${section === 'Photos' ? 'Upload photos' : section === 'Videos' ? 'Upload videos' : section === 'Audio' ? 'Upload audio' : 'Upload'}<input id="file-upload" type="file" ${section === 'Photos' ? 'accept="image/*"' : section === 'Videos' ? 'accept="video/*"' : section === 'Audio' ? 'accept="audio/*"' : ''} multiple hidden></label>
       <label class="secondary upload-button">Upload folder<input id="folder-upload" type="file" webkitdirectory directory multiple hidden></label>
-      <button class="secondary phone-sync-button" type="button" data-phone-sync>Phone sync</button>
+      ${state.overview.appliance.role === 'administrator' ? '<button class="secondary phone-sync-button" type="button" data-phone-sync>Phone sync</button>' : ''}
     </div></div>
     <div class="file-drop-zone" data-file-drop tabindex="0"><b>Drop files here</b><span>Multiple files and ZIP archives are supported. Use “Upload folder” to preserve a whole folder tree.</span></div>
     <p class="muted">${allFiles ? 'All files shows only your Documents, Photos, Videos, and Audio libraries.' : 'Open folders normally or switch back to All files to see all four libraries together.'} ZIP and other file types are accepted, uploads have visible progress, and LightNAS does not impose an application-level file-size ceiling.</p>
