@@ -28,7 +28,7 @@ test('phone sync remains available through mobile Files settings', async () => {
 
 test('gallery thumbnails use the stable cached thumbnail endpoint and HEIC preview support', async () => {
   const enhancements = await read('public/enhancements.js');
-  assert.match(enhancements, /Always use LightNAS' cached JPEG thumbnail endpoint/);
+  assert.match(enhancements, /Always use LightNAS' dedicated thumbnail endpoint/);
   assert.match(enhancements, /media\.src = `\/api\/files\/thumbnail\?path=/);
   assert.match(enhancements, /'heic', 'heif'/);
 });

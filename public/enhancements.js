@@ -147,9 +147,23 @@ function ensureViewer() {
   });
   dialog.addEventListener('close', () => {
     if (dialog.dataset.objectUrl) URL.revokeObjectURL(dialog.dataset.objectUrl);
+    const sourcePath = dialog.dataset.sourcePath || '';
     delete dialog.dataset.objectUrl;
     delete dialog.dataset.currentName;
+    delete dialog.dataset.sourcePath;
     dialog.querySelector('[data-viewer-stage]').replaceChildren();
+
+    // Refresh the tile that was just previewed. This avoids Chromium/Safari
+    // leaving a decoded image element in a broken state after dialog teardown.
+    if (sourcePath) {
+      const button = [...document.querySelectorAll('#content .file-name[data-directory="false"]')]
+        .find(item => (item.dataset.path || joinPath(currentFolder(), item.dataset.open || '')) === sourcePath);
+      const thumb = button?.querySelector('.file-thumb');
+      if (thumb) {
+        thumb.dataset.retry = '';
+        thumb.src = `/api/files/thumbnail?path=${encodeURIComponent(sourcePath)}&v=${Date.now()}`;
+      }
+    }
   });
   return dialog;
 }
@@ -168,6 +182,7 @@ async function openPreview(name, explicitPath = '') {
   const dialog = ensureViewer();
   if (dialog.dataset.objectUrl) URL.revokeObjectURL(dialog.dataset.objectUrl);
   delete dialog.dataset.objectUrl;
+  dialog.dataset.sourcePath = path;
   dialog.querySelector('[data-viewer-title]').textContent = name;
   dialog.querySelector('[data-viewer-meta]').textContent = `${kind.toUpperCase()} preview`;
   const stage = dialog.querySelector('[data-viewer-stage]');
@@ -435,9 +450,9 @@ function enhanceFileThumbnails() {
     media.loading = button.classList.contains('file-gallery-open') ? 'eager' : 'lazy';
     media.decoding = 'async';
     media.alt = '';
-    // Always use LightNAS' cached JPEG thumbnail endpoint for file cards.
-    // This avoids desktop/mobile browsers reusing or invalidating the original
-    // file response when the full preview is opened.
+    // Always use LightNAS' dedicated thumbnail endpoint for file cards.
+    // Browser-native images are streamed directly by that route; RAW/video
+    // formats use generated previews. The card never shares the viewer URL.
     media.src = `/api/files/thumbnail?path=${encodeURIComponent(path)}`;
     media.addEventListener('error', () => {
       if (media.dataset.retry === '1') return;
