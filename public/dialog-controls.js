@@ -204,7 +204,7 @@ const lightnasTasks = (() => {
 })();
 
 function openProgressDialog(title, detail, options = {}) {
-  const task = lightnasTasks.create(title, detail || 'Starting…');
+  const task = lightnasTasks.create(title, detail || 'Starting…', { cancel: options.cancel });
   const dialog = document.createElement('dialog');
   dialog.className = 'lightnas-dialog transfer-dialog';
   dialog.innerHTML = `
