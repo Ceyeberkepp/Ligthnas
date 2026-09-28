@@ -4,12 +4,15 @@ import { readFile } from 'node:fs/promises';
 
 const read = path => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
-test('AI tab is present and wired to a real AI workspace', async () => {
-  const [html, app] = await Promise.all([read('public/index.html'), read('public/app.js')]);
+test('AI tab is a system-aware LightNAS helper while AI tools remain in App Store', async () => {
+  const [html, app, runtime] = await Promise.all([read('public/index.html'), read('public/app.js'), read('src/runtimes-next.mjs')]);
   assert.match(html, /href="#ai" data-view="ai"/);
   assert.match(app, /function aiView\(\)/);
-  assert.match(app, /AI WORKSPACE/);
-  assert.match(app, /data-install=/);
+  assert.match(app, /function lightnasAgentReply\(input\)/);
+  assert.match(app, /AI helper/);
+  assert.match(app, /data-ai-form/);
+  assert.match(app, /data-ai-action="open-apps"/);
+  assert.match(runtime, /category: 'AI'/);
   assert.match(app, /state\.view === 'ai' \? aiView\(\)/);
 });
 
