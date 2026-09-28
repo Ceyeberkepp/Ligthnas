@@ -1004,3 +1004,197 @@
     padding-top:44px;
   }
 }
+
+
+/* Global compact layout rhythm — reduce unused whitespace across the entire control center */
+.content {
+  padding-top:22px;
+  padding-left:26px;
+  padding-right:26px;
+}
+.page-head {
+  margin-bottom:16px;
+  gap:14px;
+}
+.page-head h1 {
+  margin-top:2px;
+}
+.page-head p {
+  margin-top:5px;
+}
+.metric-grid {
+  margin:10px 0 12px;
+  gap:12px;
+}
+.metric {
+  padding:16px;
+}
+.metric strong {
+  margin:9px 0 8px;
+}
+.dashboard-grid,
+.tool-grid {
+  gap:12px;
+}
+.panel {
+  padding:17px;
+}
+.panel-head {
+  margin-bottom:12px;
+}
+.section-heading {
+  margin-bottom:10px;
+}
+.section-heading h2 {
+  margin-top:3px;
+  margin-bottom:0;
+}
+.module-hero {
+  margin-top:18px;
+  padding:22px;
+}
+.module-hero h2 {
+  margin:13px 0 6px;
+}
+.module-hero > p {
+  margin-top:0;
+  margin-bottom:10px;
+}
+.requirement {
+  margin-top:14px;
+  padding-top:12px;
+}
+.creation-form {
+  margin:14px 0;
+}
+.storage-workspace,
+.dataset-workspace {
+  margin-top:14px;
+  margin-bottom:18px;
+}
+.storage-list,
+.capability-list,
+.share-list,
+.user-card-grid {
+  gap:9px;
+}
+.storage-row,
+.capability-row,
+.share-row {
+  padding:14px 16px;
+}
+.user-summary-grid {
+  gap:10px;
+  margin-bottom:14px;
+}
+.user-summary {
+  padding:15px;
+}
+.user-create-card {
+  margin-bottom:14px;
+}
+.user-list-section {
+  margin-top:4px;
+}
+.settings-dashboard {
+  gap:12px;
+}
+.settings-card-head {
+  margin-bottom:12px;
+}
+.branding-preview {
+  margin:10px 0 12px;
+  padding:12px;
+}
+.dataset-grid {
+  gap:9px;
+}
+.compute-section-head {
+  margin:16px 0 8px;
+}
+.network-status-strip {
+  gap:8px;
+  margin-bottom:10px;
+}
+.host-live-monitor {
+  margin-top:12px;
+}
+.unified-storage {
+  gap:11px;
+  margin:12px 0 18px;
+}
+.unified-storage > h2 {
+  margin:8px 0 -2px;
+}
+.inventory-heading {
+  padding:16px;
+}
+.attached-storage {
+  margin:14px 0;
+}
+.attached-storage-grid,
+.inventory-grid {
+  gap:10px;
+  margin-top:10px;
+}
+.activity {
+  padding:10px 0;
+}
+.runtime-actions {
+  margin-top:6px;
+  padding-top:7px;
+}
+.file-toolbar {
+  gap:10px;
+}
+.content-badge {
+  margin-top:1px;
+  margin-bottom:1px;
+}
+
+@media (max-width:1050px) {
+  .content {
+    padding-left:20px;
+    padding-right:20px;
+  }
+}
+
+@media (max-width:760px) {
+  .content {
+    padding:16px 12px 96px;
+  }
+  .page-head {
+    margin-bottom:12px;
+    gap:8px;
+  }
+  .metric-grid {
+    margin:8px 0 10px;
+    gap:8px;
+  }
+  .metric {
+    padding:13px;
+  }
+  .panel {
+    padding:14px;
+  }
+  .module-hero {
+    margin-top:12px;
+    padding:16px;
+  }
+  .storage-row,
+  .capability-row,
+  .share-row {
+    padding:12px;
+  }
+  .section-heading {
+    margin-bottom:8px;
+  }
+  .compute-section-head {
+    margin:12px 0 7px;
+  }
+  .settings-dashboard,
+  .user-summary-grid,
+  .dataset-grid {
+    gap:8px;
+  }
+}
