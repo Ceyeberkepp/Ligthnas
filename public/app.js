@@ -1405,7 +1405,7 @@ function bindViewActions() {
     render('files');
   }));
   $$('[data-folder]', $('#content')).forEach(button => button.addEventListener('click', () => { state.folder = button.dataset.folder; state.files = null; render('files'); }));
-  $('[data-open]', $('#content')).forEach(button => button.addEventListener('click', async event => {
+  document.querySelectorAll('#content [data-open]').forEach(button => button.addEventListener('click', async event => {
     const path = button.dataset.path || [state.folder, button.dataset.open].filter(Boolean).join('/');
     if (button.dataset.directory === 'true') { state.folder = path; state.files = null; render('files'); return; }
     // On mobile Photos view, the preview layer owns the click. Do not also
