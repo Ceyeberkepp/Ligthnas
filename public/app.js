@@ -1063,7 +1063,22 @@ function networkView() {
     <div class="dashboard-grid network-secondary-grid">
       <section class="panel">
         <div class="panel-head"><h2>Routes</h2><button class="secondary" data-network-add-route>+ Static route</button></div>
-        <div class="route-table">${routes.map(route => `<div class="route-row"><strong>${escapeHtml(route.destination)}</strong><span>via ${escapeHtml(route.gateway || 'on-link')}</span><span>${escapeHtml(route.device || '—')}</span><span>metric ${route.metric ?? '—'}</span></div>`).join('') || '<div class="empty">No routes visible.</div>'}</div>
+        <div class="route-table">${routes.map(route => {
+          const profile = connections.find(item => item.device === route.device);
+          const protocol = String(route.protocol || '').toLowerCase();
+          const persistentEditable = Boolean(profile && route.gateway && !['kernel','dhcp','ra','redirect'].includes(protocol));
+          const normalizedDestination = route.destination === 'default' ? '0.0.0.0/0' : route.destination;
+          const oldRoute = `${normalizedDestination} ${route.gateway || ''} ${route.metric ?? 100}`.trim();
+          return `<div class="route-row">
+            <strong>${escapeHtml(route.destination)}</strong>
+            <span>via ${escapeHtml(route.gateway || 'on-link')}</span>
+            <span>${escapeHtml(route.device || '—')}<small>${escapeHtml(profile?.name || protocol || '')}</small></span>
+            <span>metric ${route.metric ?? '—'}</span>
+            <div class="runtime-actions">
+              ${persistentEditable ? `<button class="secondary" data-network-edit-route data-route-connection="${escapeHtml(profile.name)}" data-route-destination="${escapeHtml(route.destination)}" data-route-gateway="${escapeHtml(route.gateway || '')}" data-route-metric="${route.metric ?? 100}" data-route-old="${escapeHtml(oldRoute)}">Edit</button><button class="secondary danger-button" data-network-delete-route data-route-connection="${escapeHtml(profile.name)}" data-route-old="${escapeHtml(oldRoute)}">Delete</button>` : '<span class="muted route-managed-label">system</span>'}
+            </div>
+          </div>`;
+        }).join('') || '<div class="empty">No routes visible.</div>'}</div>
       </section>
       <section class="panel">
         <h2>DNS</h2>
