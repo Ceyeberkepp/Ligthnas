@@ -10,8 +10,9 @@ test('previewable file clicks never trigger the legacy download handler', async 
   assert.match(app, /event\.preventDefault\(\);\s*return;/);
 });
 
-test('broken mobile gallery thumbnails are automatically reloaded', async () => {
+test('gallery thumbnails are not rewritten by enhancement observers', async () => {
   const enhancements = await read('public/enhancements.js');
-  assert.match(enhancements, /existing\.complete && existing\.naturalWidth === 0/);
-  assert.match(enhancements, /\/api\/files\/thumbnail\?path=.*&v=/);
+  const enhancer = enhancements.slice(enhancements.indexOf('function enhanceFileThumbnails()'), enhancements.indexOf('function permissionsMarkup'));
+  assert.match(enhancer, /Thumbnails are rendered directly by app\.js/);
+  assert.doesNotMatch(enhancer, /thumbnail\?path/);
 });
