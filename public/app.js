@@ -1343,7 +1343,7 @@ function bindViewActions() {
     }
     dialog.showModal();
   });
-  $('[data-download-folder]', $('#content')).forEach(button => button.addEventListener('click', () => {
+  $$('[data-download-folder]', $('#content')).forEach(button => button.addEventListener('click', () => {
     const path = button.dataset.downloadFolder || '';
     const link = document.createElement('a');
     link.href = `/api/files/archive?path=${encodeURIComponent(path)}`;
@@ -1565,7 +1565,7 @@ $('#avatar').addEventListener('click', () => {
   input.click();
 });
 $('#mobile-more').addEventListener('click', () => setMobileSidebar(true));
-$('[data-view]').forEach(link => link.addEventListener('click', () => setMobileSidebar(false)));
+$$('[data-view]').forEach(link => link.addEventListener('click', () => setMobileSidebar(false)));
 $$('.close-dialog').forEach(button => button.addEventListener('click', () => $('#share-dialog').close()));
 $('#share-form').addEventListener('submit', async event => {
   event.preventDefault();
