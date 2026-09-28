@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#08111f">
   <title>Lightweight AI NAS OS</title>
   <link rel="stylesheet" href="/styles.css">
@@ -75,7 +75,9 @@
   </main>
 
   <div id="console" class="console hidden">
+    <div id="sidebar-backdrop" class="sidebar-backdrop" hidden></div>
     <aside class="sidebar">
+      <button id="sidebar-close" class="sidebar-close" type="button" aria-label="Close navigation">×</button>
       <a class="brand sidebar-brand" href="#home">
         <span class="brand-mark small" aria-hidden="true"><span></span><span></span><span></span></span>
         <span>LightNAS</span>
