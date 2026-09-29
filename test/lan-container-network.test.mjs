@@ -9,15 +9,14 @@ test('LightNAS installs LXC networking for every supported installation', async 
   assert.doesNotMatch(installer, /if ! systemd-detect-virt --container[^\n]+LIGHTNAS_ENABLE_NESTED_RUNTIMES[^\n]+then\n\s+echo "      Installing native system-container/);
 });
 
-test('nested LightNAS follows the appliance LAN by default and keeps NAT only as fallback', async () => {
+test('nested LightNAS never risks the appliance management link for guest networking', async () => {
   const network = await readFile(new URL('../scripts/configure-appliance-network.sh', import.meta.url), 'utf8');
-  assert.match(network, /follow the appliance's real LAN by default/);
+  assert.match(network, /never move the appliance management IP or default route/);
   assert.match(network, /LIGHTNAS_NESTED_LAN_MODE:-auto/);
   assert.match(network, /LIGHTNAS_NETWORK_MODE=nested-macvlan/);
   assert.match(network, /LIGHTNAS_CONTAINER_PARENT=%s/);
-  assert.match(network, /system containers will follow the real LAN/);
   assert.match(network, /LIGHTNAS_NETWORK_MODE=lxc-nat/);
-  assert.match(network, /private compatibility NAT/);
+  assert.match(network, /preserving management networking and using safe container NAT fallback/);
 });
 
 test('host agent creates nested system containers as macvlan children of the existing uplink', async () => {
