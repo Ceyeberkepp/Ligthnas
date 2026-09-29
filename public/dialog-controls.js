@@ -205,6 +205,16 @@ const lightnasTasks = (() => {
 
 function openProgressDialog(title, detail, options = {}) {
   const task = lightnasTasks.create(title, detail || 'Starting…', { cancel: options.cancel });
+  if (options.modal === false || options.taskOnly === true) {
+    return {
+      update(percent, message = '') {
+        task.update(Math.max(0, Math.min(100, Number(percent) || 0)), message);
+      },
+      succeed(message = 'The operation completed successfully.') { task.success(message); },
+      fail(message = 'The operation could not be completed.') { task.error(message); },
+      close() {}
+    };
+  }
   const dialog = document.createElement('dialog');
   dialog.className = 'lightnas-dialog transfer-dialog';
   dialog.innerHTML = `
@@ -485,7 +495,7 @@ async function showRuntimeWizard(kind) {
     };
     delete payload.passwordConfirm;
     create.disabled = true;
-    const progress = openProgressDialog(isContainer ? 'Creating system container' : 'Creating virtual machine', `Preparing ${name}. This can take several minutes.`);
+    const progress = openProgressDialog(isContainer ? 'Creating system container' : 'Creating virtual machine', `Preparing ${name}. This can take several minutes.`, { modal:false });
     try {
       const result = await dialogApi(isContainer ? '/api/containers' : '/api/vms', { method: 'POST', body: JSON.stringify(payload) });
       dialog.close();
@@ -550,7 +560,7 @@ function showRuntimeDeleteDialog(kind, id) {
     if (confirmation !== id) { error.textContent = `Type exactly: ${id}`; form.elements.confirmation.focus(); return; }
     const submit = form.querySelector('button[type="submit"]');
     submit.disabled = true;
-    const progress = openProgressDialog(`Deleting ${label}`, `Removing ${id} and all managed files…`);
+    const progress = openProgressDialog(`Deleting ${label}`, `Removing ${id} and all managed files…`, { modal:false });
     try {
       await dialogApi(isContainer ? '/api/containers' : '/api/vms', {
         method: 'POST',
@@ -738,7 +748,7 @@ async function showContainerManager(id) {
     error.textContent = '';
     submit.disabled = true;
     submit.textContent = 'Saving…';
-    const progress = openProgressDialog('Saving container settings', `Applying settings for ${item.name || id}…`);
+    const progress = openProgressDialog('Saving container settings', `Applying settings for ${item.name || id}…`, { modal:false });
     try {
       const values = Object.fromEntries(new FormData(form));
       const payload = {
