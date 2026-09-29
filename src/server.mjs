@@ -639,6 +639,21 @@ async function api(req, res, url) {
     return send(res, 200, { ok: true }, { 'Set-Cookie': 'nas_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0' });
   }
 
+  if (req.method === 'GET' && url.pathname === '/api/branding/logo') {
+    if (!store.state.config?.logoExt) return send(res, 404, { error: 'No custom logo is configured.' });
+    const extension = store.state.config.logoExt;
+    const path = join(brandingRoot, `logo.${extension}`);
+    const type = extension === 'png' ? 'image/png' : extension === 'webp' ? 'image/webp' : 'image/jpeg';
+    try {
+      const data = await readFile(path);
+      res.writeHead(200, { 'Content-Type': type, 'Content-Length': data.length, 'Cache-Control': 'private, max-age=300', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': csp });
+      return res.end(data);
+    } catch (error) {
+      if (error.code === 'ENOENT') return send(res, 404, { error: 'Custom logo is unavailable.' });
+      throw error;
+    }
+  }
+
   const context = requireSession(req, res);
   if (!context) return;
   const { username, account, isAdmin, permissions } = context;
