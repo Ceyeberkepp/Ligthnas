@@ -840,6 +840,62 @@ document.addEventListener('click', async event => {
     return;
   }
 
+
+  const appEdit = event.target.closest('[data-app-edit]');
+  if (appEdit) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    try {
+      const inventory = await dialogApi('/api/runtimes');
+      window.LightNASRuntimeInventory = inventory;
+      const id = appEdit.dataset.appEdit;
+      const containerName = appEdit.dataset.appContainer || `lightnas-app-${id}`;
+      const item = (inventory.docker?.containers || []).find(candidate => candidate.name === containerName);
+      const app = (inventory.catalog || []).find(candidate => candidate.id === id);
+      if (!item || !app) throw new Error('Managed application is no longer available.');
+
+      const memoryMiB = Math.max(128, Math.round(Number(item.memory || 0) / 1048576) || parseInt(String(app.memory || '512'), 10) || 512);
+      showEditor({
+        eyebrow: 'MANAGED APPLICATION',
+        title: `Edit ${app.name}`,
+        description: 'Change Docker CPU, memory, and restart limits without reinstalling the application. CPU 0 means no CPU cap.',
+        fields: [
+          { name:'container', label:'Container', value:item.name, readonly:true },
+          { name:'image', label:'Image', value:item.image || app.image, readonly:true },
+          { name:'memoryMiB', label:'Memory limit (MiB)', type:'number', value:memoryMiB, min:128, max:262144, step:1, required:true },
+          { name:'cpus', label:'CPU limit', type:'number', value:item.cpuUnlimited ? 0 : Number(item.cpus || 0), min:0, max:128, step:.25, required:true },
+          { name:'restartPolicy', label:'Restart policy', type:'select', value:item.restartPolicy || 'unless-stopped', options:[
+            { value:'unless-stopped', label:'Unless stopped' },
+            { value:'always', label:'Always' },
+            { value:'on-failure', label:'On failure' },
+            { value:'no', label:'Never' }
+          ]},
+          { name:'publishedPort', label:'Published app port', value:String(app.port || ''), readonly:true }
+        ],
+        submitLabel: 'Save application',
+        onSubmit: async values => {
+          const memoryMiBValue = Number(values.memoryMiB);
+          const cpuValue = Number(values.cpus);
+          if (!Number.isInteger(memoryMiBValue)) throw new Error('Memory must be a whole number of MiB.');
+          if (!Number.isFinite(cpuValue)) throw new Error('CPU limit must be a number.');
+          await dialogApi(`/api/catalog/${encodeURIComponent(id)}/update`, {
+            method:'POST',
+            body:JSON.stringify({
+              memoryMiB: memoryMiBValue,
+              cpus: cpuValue,
+              restartPolicy: values.restartPolicy
+            })
+          });
+          refreshRuntime();
+          window.LightNASToast?.show?.(`${app.name} resource settings saved.`);
+        }
+      });
+    } catch (problem) {
+      window.LightNASToast?.show?.(problem.message) || console.warn(problem.message);
+    }
+    return;
+  }
+
   const containerEdit = event.target.closest('[data-container-edit]');
   if (containerEdit) {
     event.preventDefault();
