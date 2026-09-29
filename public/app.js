@@ -167,13 +167,13 @@ function applyApplianceBranding(appliance = state.overview?.appliance) {
   document.documentElement.style.setProperty('--accent-soft', `color-mix(in srgb, ${accent} 12%, var(--panel))`);
   document.documentElement.style.setProperty('--accent-strong', `color-mix(in srgb, ${accent} 82%, black)`);
   document.documentElement.style.setProperty('--accent-contrast', luminance > .58 ? '#06201c' : '#ffffff');
-  $('.brand-mark').forEach(mark => {
+  $$('.brand-mark').forEach(mark => {
     mark.classList.toggle('custom-logo', logoMode === 'picture');
     mark.classList.toggle('text-logo-mode', logoMode === 'text');
     mark.style.backgroundImage = logoUrl;
     mark.hidden = logoMode === 'text';
   });
-  $('[data-brand-name]').forEach(node => {
+  $$('[data-brand-name]').forEach(node => {
     node.textContent = brandName;
     node.hidden = logoMode === 'picture';
   });
