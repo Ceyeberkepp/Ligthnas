@@ -27,7 +27,7 @@ test('host agent creates nested system containers as macvlan children of the exi
   assert.match(agent, /return \[parent\]/);
 });
 
-test('runtime provisioning migrates old nested macvlan containers to managed NAT automatically', async () => {
+test('runtime provisioning migrates old private NAT containers to direct host LAN automatically', async () => {
   const provision = await readFile(new URL('../scripts/provision-runtimes.sh', import.meta.url), 'utf8');
   assert.match(provision, /set_flag LIGHTNAS_ALLOW_NESTED_LXC 1/);
   assert.match(provision, /network_mode.*lxc-nat/);

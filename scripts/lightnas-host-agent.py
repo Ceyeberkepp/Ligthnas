@@ -930,17 +930,17 @@ def apply_managed_automatic_address(name: str, config: Path) -> str:
     """Keep DHCP as the user-selected mode but guarantee an address on lightnas0.
 
     Some nested LXC environments allow veth networking but drop DHCP broadcasts.
-    In that case LightNAS injects an address from its managed automatic pool at
-    the LXC layer. The user still sees DHCP/Automatic and can switch to Static.
+    In that case LightNAS assigns an address from its managed automatic pool
+    inside the guest network configuration. Do not inject ipv4.address/gateway
+    into the outer LXC config: nested LXC can reject gateway setup before eth0
+    is available, which aborts the container before systemd starts.
     """
     address = next_managed_container_ipv4(name)
     clear_managed_automatic_address(config)
-    append_unique(config, f"lxc.net.0.ipv4.address = {address}")
-    append_unique(config, "lxc.net.0.ipv4.gateway = 10.77.0.1")
 
-    # Persist the managed fallback inside systemd-networkd too. LXC-level
-    # address injection gets the guest online immediately, but a DHCP-only
-    # networkd profile can later remove that address during a service restart.
+    # Persist the managed fallback inside systemd-networkd. The LightNAS UI
+    # still records this as DHCP/Automatic; this file is only the deterministic
+    # fallback used when nested DHCP broadcasts do not work.
     # The LightNAS UI still records this as DHCP/Automatic; this file is only
     # the deterministic fallback used when nested DHCP broadcasts do not work.
     rootfs = rootfs_from_config(config)
@@ -972,6 +972,26 @@ def apply_managed_automatic_address(name: str, config: Path) -> str:
     except Exception:
         pass
     return bare
+
+
+
+def sanitize_nested_lxc_network(config: Path) -> bool:
+    """Remove host-side static IPv4 directives that can abort nested LXC boot."""
+    if not in_container() or not config.exists():
+        return False
+    current = config.read_text(encoding="utf-8")
+    kept = [
+        row for row in current.splitlines()
+        if row.split("=", 1)[0].strip() not in {
+            "lxc.net.0.ipv4.address",
+            "lxc.net.0.ipv4.gateway",
+        }
+    ]
+    cleaned = "\n".join(kept) + "\n"
+    if cleaned == current:
+        return False
+    config.write_text(cleaned, encoding="utf-8")
+    return True
 
 
 def create_container(data: dict) -> dict:
@@ -1087,13 +1107,43 @@ def create_container(data: dict) -> dict:
         append_unique(config, "lxc.apparmor.profile = unconfined")
 
     clear_managed_automatic_address(config)
+    sanitize_nested_lxc_network(config)
 
     try:
         run(["lxc-start", "-n", name, "-d"], timeout=60)
-    except Exception:
+    except Exception as start_error:
         # Keep a completely built rootfs for troubleshooting rather than
-        # deleting user data after an image was successfully created.
-        raise RuntimeError(f"container {name} was built but could not start; inspect lxc-start -n {name} -F -l DEBUG")
+        # deleting user data after an image was successfully created. Capture
+        # the real LXC boot blocker so the web UI does not only show ABORTING.
+        log_path = Path("/run/lightnas") / f"lxc-{name}-start.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            subprocess.run(
+                ["lxc-start", "-n", name, "-F", "-l", "DEBUG", "-o", str(log_path)],
+                text=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=20,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            subprocess.run(["lxc-stop", "-n", name, "-k"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+        detail = ""
+        try:
+            lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+            useful = [
+                line.strip() for line in lines
+                if re.search(r"(ERROR|Failed|Permission denied|Operation not permitted|No such file|exec|mount|apparmor|cgroup|hook)", line, re.IGNORECASE)
+            ]
+            detail = " | ".join(useful[-5:])[:1200]
+        except OSError:
+            pass
+        message = f"container {name} was built but could not start"
+        if detail:
+            message += f": {detail}"
+        else:
+            message += f": {start_error}"
+        raise RuntimeError(message) from start_error
 
     if str(data.get("ipv4Mode") or "dhcp") == "dhcp":
         kick_container_dhcp(name)
@@ -1296,6 +1346,7 @@ def container_action(data: dict) -> dict:
     if not (Path("/var/lib/lxc") / name / "config").exists():
         raise ValueError("unknown local LXC container")
     if action == "start":
+        sanitize_nested_lxc_network(config)
         run(["lxc-start", "-n", name, "-d"], timeout=60)
     elif action in {"stop", "shutdown"}:
         run(["lxc-stop", "-n", name, "-t", "30"], timeout=45)
