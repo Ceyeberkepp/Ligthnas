@@ -493,9 +493,63 @@ def unique_container_mac() -> str:
     raise RuntimeError("could not allocate a unique container MAC address")
 
 
+def managed_container_ipv4_pool() -> tuple[ipaddress.IPv4Network, ipaddress.IPv4Address, ipaddress.IPv4Address, ipaddress.IPv4Address]:
+    """Return the active LightNAS-managed IPv4 pool, preferring the host LAN pool."""
+    state = lightnas_network_state()
+    try:
+        subnet = ipaddress.ip_network(str(state.get("LIGHTNAS_CONTAINER_SUBNET") or ""), strict=False)
+        start = ipaddress.ip_address(str(state.get("LIGHTNAS_CONTAINER_POOL_START") or ""))
+        end = ipaddress.ip_address(str(state.get("LIGHTNAS_CONTAINER_POOL_END") or ""))
+        gateway = ipaddress.ip_address(str(state.get("LIGHTNAS_CONTAINER_GATEWAY") or ""))
+        if (
+            isinstance(subnet, ipaddress.IPv4Network)
+            and isinstance(start, ipaddress.IPv4Address)
+            and isinstance(end, ipaddress.IPv4Address)
+            and isinstance(gateway, ipaddress.IPv4Address)
+            and start in subnet and end in subnet and gateway in subnet and int(start) <= int(end)
+        ):
+            return subnet, start, end, gateway
+    except ValueError:
+        pass
+    return (
+        ipaddress.ip_network("10.77.0.0/24"),
+        ipaddress.ip_address("10.77.0.20"),
+        ipaddress.ip_address("10.77.0.250"),
+        ipaddress.ip_address("10.77.0.1"),
+    )
+
+
+def address_responds_on_host(candidate: str) -> bool:
+    """Best-effort collision check before LightNAS assigns a managed LAN address."""
+    try:
+        neighbors = run(["ip", "neigh", "show", candidate], timeout=3, check=False).strip()
+        if neighbors and "FAILED" not in neighbors and "INCOMPLETE" not in neighbors:
+            return True
+    except Exception:
+        pass
+    if available("ping"):
+        try:
+            probe = subprocess.run(
+                ["ping", "-c", "1", "-W", "1", candidate],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=2,
+                check=False,
+            )
+            return probe.returncode == 0
+        except Exception:
+            pass
+    return False
+
+
 def next_managed_container_ipv4(exclude: str = "") -> str:
-    """Allocate a stable address on LightNAS' private 10.77.0.0/24 container network."""
-    used = set()
+    """Allocate the next free address from the LightNAS-managed container pool."""
+    subnet, start, end, gateway = managed_container_ipv4_pool()
+    state = lightnas_network_state()
+    used = {
+        str(gateway),
+        str(state.get("LIGHTNAS_HOST_ADDRESS") or "").split("/", 1)[0],
+    }
     try:
         for config in Path("/var/lib/lxc").glob("*/config"):
             if exclude and config.parent.name == exclude:
@@ -509,11 +563,14 @@ def next_managed_container_ipv4(exclude: str = "") -> str:
                     used.add(address)
     except Exception:
         pass
-    for host in range(20, 251):
-        candidate = f"10.77.0.{host}"
-        if candidate not in used:
-            return candidate + "/24"
-    raise RuntimeError("LightNAS private container network has no free IPv4 addresses")
+
+    candidate = start
+    while int(candidate) <= int(end):
+        text = str(candidate)
+        if text not in used and candidate in subnet and not address_responds_on_host(text):
+            return f"{text}/{subnet.prefixlen}"
+        candidate += 1
+    raise RuntimeError(f"LightNAS managed container pool {start}-{end} has no free IPv4 addresses")
 
 
 def managed_container_storage_root(value: str) -> Path:
@@ -928,15 +985,10 @@ def clear_managed_automatic_address(config: Path) -> None:
 
 
 def apply_managed_automatic_address(name: str, config: Path) -> str:
-    """Keep DHCP as the user-selected mode but guarantee an address on lightnas0.
-
-    Some nested LXC environments allow veth networking but drop DHCP broadcasts.
-    In that case LightNAS assigns an address from its managed automatic pool
-    inside the guest network configuration. Do not inject ipv4.address/gateway
-    into the outer LXC config: nested LXC can reject gateway setup before eth0
-    is available, which aborts the container before systemd starts.
-    """
+    """Apply the LightNAS-managed address without modifying the appliance IP."""
     address = next_managed_container_ipv4(name)
+    _subnet, _start, _end, gateway = managed_container_ipv4_pool()
+    gateway_text = str(gateway)
     clear_managed_automatic_address(config)
 
     # Persist the managed fallback inside systemd-networkd. The LightNAS UI
@@ -954,8 +1006,8 @@ def apply_managed_automatic_address(name: str, config: Path) -> str:
             "",
             "[Network]",
             f"Address={address}",
-            "Gateway=10.77.0.1",
-            "DNS=10.77.0.1",
+            f"Gateway={gateway_text}",
+            f"DNS={gateway_text}",
             "IPv6AcceptRA=yes",
         ]
         (network_dir / "10-lightnas-eth0.network").write_text(
@@ -969,7 +1021,7 @@ def apply_managed_automatic_address(name: str, config: Path) -> str:
     bare = address.split("/", 1)[0]
     try:
         run(["lxc-attach", "-n", name, "--", "ip", "addr", "replace", address, "dev", "eth0"], timeout=10, check=False)
-        run(["lxc-attach", "-n", name, "--", "ip", "route", "replace", "default", "via", "10.77.0.1", "dev", "eth0"], timeout=10, check=False)
+        run(["lxc-attach", "-n", name, "--", "ip", "route", "replace", "default", "via", gateway_text, "dev", "eth0"], timeout=10, check=False)
     except Exception:
         pass
     return bare
@@ -1150,12 +1202,17 @@ def create_container(data: dict) -> dict:
             message += f": {start_error}"
         raise RuntimeError(message) from start_error
 
-    if str(data.get("ipv4Mode") or "dhcp") == "dhcp":
+    managed_pool_direct = direct_lan and bool(network_state.get("LIGHTNAS_CONTAINER_POOL_START")) and bool(network_state.get("LIGHTNAS_CONTAINER_POOL_END"))
+    if str(data.get("ipv4Mode") or "dhcp") == "dhcp" and not managed_pool_direct:
         kick_container_dhcp(name)
 
     ipv4 = ""
     default_route = ""
     automatic_fallback = False
+    managed_pool_assignment = False
+    if managed_pool_direct:
+        ipv4 = apply_managed_automatic_address(name, config)
+        managed_pool_assignment = True
     # DHCP is always attempted first. Nested hypervisors can occasionally pass
     # veth traffic while dropping DHCP broadcasts; LightNAS then guarantees an
     # automatic address from its own managed pool without changing the user's
@@ -1163,7 +1220,9 @@ def create_container(data: dict) -> dict:
     dhcp_mode = str(data.get("ipv4Mode") or "dhcp") == "dhcp"
     for _attempt in range(20 if dhcp_mode else 30):
         addresses = [address for address in container_addresses(name) if ":" not in address]
-        ipv4 = next((address for address in addresses if not direct_lan or not address.startswith("10.77.0.")), "")
+        discovered = next((address for address in addresses if not direct_lan or not address.startswith("10.77.0.")), "")
+        if discovered:
+            ipv4 = discovered
         if ipv4:
             try:
                 default_route = run(
@@ -1217,6 +1276,7 @@ def create_container(data: dict) -> dict:
         "defaultRoute": default_route,
         "networkMode": "direct-lan" if direct_lan else "managed",
         "automaticFallback": automatic_fallback,
+        "managedLanPool": managed_pool_assignment,
     }
 
 
