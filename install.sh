@@ -261,7 +261,13 @@ EOF
 
 systemctl daemon-reload
 systemctl enable lightnas-network-bootstrap.service
-systemctl restart lightnas-network-bootstrap.service || true
+if [[ "${EXISTING_INSTALL}" == "0" || "${LIGHTNAS_REPAIR_NETWORK:-0}" == "1" ]]; then
+  echo "      Applying LightNAS network bootstrap..."
+  systemctl restart lightnas-network-bootstrap.service || true
+else
+  echo "      Existing network configuration detected; skipping live network changes during update."
+  echo "      Set LIGHTNAS_REPAIR_NETWORK=1 only when an administrator explicitly wants network repair."
+fi
 systemctl enable lightnas-host-agent.service
 systemctl restart lightnas-host-agent.service
 systemctl enable "${SERVICE_NAME}"
