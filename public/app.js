@@ -657,8 +657,8 @@ function vmsView() {
 function sharesView() {
   const { shares } = state.overview;
   return `${pageHead('Network shares', 'Connect directly from Windows, Linux, or macOS over SMB and SFTP.', '<button class="primary" data-action="new-share">+ Create share</button>')}
-    <section class="module-note share-help"><b>Quick connect:</b> Windows File Explorer uses <code>\\\\LIGHTNAS-IP\\share</code>. Linux/macOS can use <code>smb://LIGHTNAS-IP/share</code> or <code>sftp user@LIGHTNAS-IP</code>.</section>
-    <div class="share-list">${shares.map(share => `<article class="share-row network-share-row"><div><div class="volume-title"><h3>${escapeHtml(share.name)}</h3><span class="volume-state writable">ACTIVE</span></div><p>${escapeHtml(share.protocol)} · user ${escapeHtml(share.username || '—')} · ${escapeHtml(share.description || 'No description')}</p><div class="share-addresses">${share.smb ? `<code>${escapeHtml(share.smb)}</code>` : ''}${share.smbUrl ? `<code>${escapeHtml(share.smbUrl)}</code>` : ''}${share.sftp ? `<code>${escapeHtml(share.sftp)}</code>` : ''}</div></div><button class="secondary danger-button" data-delete-share="${escapeHtml(share.id)}" data-name="${escapeHtml(share.name)}">Remove share</button></article>`).join('') || '<div class="empty"><p>No network shares configured yet.</p></div>'}</div>`;
+    <section class="module-note share-help"><b>Quick connect:</b> Windows File Explorer uses <code>\\\\LIGHTNAS-IP\\share</code>. The built-in <code>Files</code> share is the same Documents, Photos, Videos, and Audio library shown in Files & media and requires the LightNAS administrator credentials.</section>
+    <div class="share-list">${shares.map(share => `<article class="share-row network-share-row"><div><div class="volume-title"><h3>${escapeHtml(share.name)}</h3><span class="volume-state writable">${share.system ? 'SYSTEM' : 'ACTIVE'}</span></div><p>${escapeHtml(share.protocol)} · user ${escapeHtml(share.username || '—')} · ${escapeHtml(share.description || 'No description')}</p><div class="share-addresses">${share.smb ? `<code>${escapeHtml(share.smb)}</code>` : ''}${share.smbUrl ? `<code>${escapeHtml(share.smbUrl)}</code>` : ''}${share.sftp ? `<code>${escapeHtml(share.sftp)}</code>` : ''}</div></div>${share.system ? '<span class="muted share-managed-label">Managed by LightNAS</span>' : `<button class="secondary danger-button" data-delete-share="${escapeHtml(share.id)}" data-name="${escapeHtml(share.name)}">Remove share</button>`}</article>`).join('') || '<div class="empty"><p>No network shares configured yet.</p></div>'}</div>`;
 }
 
 const librarySections = [
@@ -768,13 +768,6 @@ function filesView() {
   };
 
   return `<section class="files-page ${state.fileView === 'gallery' ? 'photo-mode' : 'grid-mode'}">${pageHead('Files & media', 'Browse and manage the actual files stored in LightNAS.', '<button class="secondary" data-action="refresh-files">Refresh</button>')}
-    <div class="library-selector-row">
-      <label class="file-toolbar-select library-selector">Library
-        <select data-library-select aria-label="File library section">
-          ${libraryOptions}
-        </select>
-      </label>
-    </div>
     <section class="desktop-files-settings-panel ${state.filesSettingsOpen ? '' : 'hidden'}">
       <article class="panel files-settings-card">
         <div><span class="eyebrow">FILES & MEDIA SETTINGS</span><h2>Library settings</h2><p class="muted">Manage phone library sync and desktop file display preferences.</p></div>
@@ -786,6 +779,11 @@ function filesView() {
     </section>
     <div class="files-library-content ${state.filesSettingsOpen ? 'hidden' : ''}">
     <div class="file-toolbar"><div class="breadcrumbs">${crumbs}</div><div class="file-toolbar-actions">
+      <label class="file-toolbar-select select-only library-selector">
+        <select data-library-select aria-label="File library section">
+          ${libraryOptions}
+        </select>
+      </label>
       <label class="file-toolbar-select">View
         <select data-file-view-select aria-label="File view">
           <option value="list" ${state.fileView === 'list' ? 'selected' : ''}>☷ List</option>
@@ -796,7 +794,7 @@ function filesView() {
       <button class="secondary" data-action="new-folder">+ Folder</button>
       <label class="file-toolbar-select upload-select-only">
         <select data-file-upload-select aria-label="Upload">
-          <option value="">Upload…</option>
+          <option value="">Choose…</option>
           <option value="files">Upload files</option>
           <option value="folder">Upload folder</option>
         </select>
