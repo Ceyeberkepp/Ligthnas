@@ -110,3 +110,29 @@ test('General settings owns both text and picture branding', async () => {
   assert.match(index, /data-brand-name>LightNAS/);
   assert.match(styles, /\.general-branding-row/);
 });
+
+
+test('network shares provision SMB and SFTP instead of saving plans only', async () => {
+  const [app, index, server, shares, installer, securityCss] = await Promise.all([
+    read('public/app.js'),
+    read('public/index.html'),
+    read('src/server.mjs'),
+    read('src/network-shares.mjs'),
+    read('install.sh'),
+    read('public/admin-security.css')
+  ]);
+  assert.match(index, /SMB \+ SFTP/);
+  assert.match(index, /Network username/);
+  assert.match(index, /Network password/);
+  assert.match(app, /Network shares/);
+  assert.match(app, /sftp user@LIGHTNAS-IP/);
+  assert.match(app, /share\.smb/);
+  assert.match(server, /provisionNetworkShare/);
+  assert.match(server, /removeNetworkShare/);
+  assert.match(shares, /smbpasswd/);
+  assert.match(shares, /ForceCommand internal-sftp/);
+  assert.match(shares, /testparm/);
+  assert.match(installer, /samba openssh-server/);
+  assert.match(securityCss, /align-items: start/);
+  assert.doesNotMatch(app, /Saved configurations only\. No SMB, NFS, or SFTP service is changed/);
+});
