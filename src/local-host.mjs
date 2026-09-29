@@ -70,8 +70,12 @@ export async function localProvisionNetworkShare(input) {
   return await request('share-provision', input, 60000);
 }
 
-export async function localRepairNetworkShares(shares = []) {
-  return await request('share-repair', { shares }, 60000);
+export async function localRepairNetworkShares(shares = [], adminUsername = '') {
+  return await request('share-repair', { shares, adminUsername }, 60000);
+}
+
+export async function localSyncShareAdministrator(input) {
+  return await request('share-admin-sync', input, 60000);
 }
 
 export async function localRemoveNetworkShare(input) {
