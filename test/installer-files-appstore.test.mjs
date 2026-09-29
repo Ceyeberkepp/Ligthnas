@@ -140,3 +140,15 @@ test('storage create dialog never renders a silently empty volume selector', asy
   assert.match(system, /await writeFile\(probe/);
   assert.match(system, /await rm\(probe/);
 });
+
+
+test('large storage uploads retry failed chunks, support cancel, and stay in the Tasks dock', async () => {
+  const storageUi = await read('public/storage-manager.js');
+  assert.match(storageUi, /for\(let attempt=1;attempt<=3&&!uploaded;attempt\+=1\)/);
+  assert.match(storageUi, /new AbortController\(\)/);
+  assert.match(storageUi, /controller\.abort\(\)/);
+  assert.match(storageUi, /signal:controller\.signal/);
+  assert.match(storageUi, /elapsedText/);
+  assert.match(storageUi, /modal:false/);
+  assert.match(storageUi, /Chunk retry/);
+});
