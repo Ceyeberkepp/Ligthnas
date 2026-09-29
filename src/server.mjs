@@ -41,6 +41,7 @@ import {
 } from './identity-providers.mjs';
 import { ContainerPublisher } from './container-publish.mjs';
 import { discoverContainerApplication } from './container-app-access.mjs';
+import { provisionNetworkShare, removeNetworkShare, publicShare } from './network-shares.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const publicRoot = join(root, 'public');
@@ -1439,7 +1440,7 @@ async function api(req, res, url) {
     return send(res, 200, {
       appliance: { deviceName: store.state.config.deviceName, brandName: store.state.config.brandName || 'LightNAS', username, role: isAdmin ? 'administrator' : context.apiToken ? 'api' : 'user', permissions, timezone: store.state.config.timezone, avatar: Boolean(account.avatarExt), logo: Boolean(store.state.config.logoExt), features: { ...DEFAULT_FEATURES, ...(store.state.config.features || {}) } },
       system, filesystems, storage, host: null,
-      shares: store.state.shares, activity: store.state.activity.slice(0, 8)
+      shares: store.state.shares.map(share => publicShare(share, system?.network?.primaryIpv4 || String(req.headers.host || '').split(':')[0] || 'lightnas')), activity: store.state.activity.slice(0, 8)
     });
   }
   if (req.method === 'GET' && url.pathname === '/api/storage/scan') {
@@ -1698,18 +1699,21 @@ async function api(req, res, url) {
 
   if (req.method === 'GET' && url.pathname === '/api/shares') {
     if (!requirePermission(res, permissions, 'files.read')) return;
-    return send(res, 200, { shares: store.state.shares });
+    const snapshot = await getSystemSnapshot().catch(() => ({}));
+    const host = snapshot?.network?.primaryIpv4 || String(req.headers.host || '').split(':')[0] || 'lightnas';
+    return send(res, 200, { shares: store.state.shares.map(share => publicShare(share, host)) });
   }
   if (req.method === 'POST' && url.pathname === '/api/shares') {
     if (!requirePermission(res, permissions, 'shares.manage')) return;
     const input = await bodyJson(req);
-    if (!/^[a-zA-Z0-9][a-zA-Z0-9 _.-]{1,63}$/.test(input.name || '')) return send(res, 400, { error: 'Share name must contain 2–64 valid characters.' });
-    if (store.state.shares.some(share => share.name.toLowerCase() === input.name.toLowerCase())) return send(res, 409, { error: 'A share with this name already exists.' });
-    const share = { id: crypto.randomUUID(), name: input.name, protocol: ['SMB', 'NFS', 'SFTP'].includes(input.protocol) ? input.protocol : 'SMB', description: String(input.description || '').slice(0, 160), createdAt: new Date().toISOString() };
-    store.state.shares.push(share);
-    store.addActivity('share', `Share plan ${share.name} was saved for ${share.protocol}.`, 'info');
+    if (store.state.shares.some(share => share.name.toLowerCase() === String(input.name || '').toLowerCase())) return send(res, 409, { error: 'A share with this name already exists.' });
+    const share = await provisionNetworkShare(input, store.state.shares);
+    store.state.shares.push({ id:share.id, name:share.name, protocol:share.protocol, username:share.username, description:share.description, createdAt:share.createdAt });
+    store.addActivity('share', `Network share ${share.name} was provisioned for ${share.protocol}.`, 'success');
     await store.save();
-    return send(res, 201, { share });
+    const snapshot = await getSystemSnapshot().catch(() => ({}));
+    const host = snapshot?.network?.primaryIpv4 || String(req.headers.host || '').split(':')[0] || 'lightnas';
+    return send(res, 201, { share: publicShare(share, host) });
   }
   if (req.method === 'DELETE' && /^\/api\/shares\/[0-9a-f-]{36}$/.test(url.pathname)) {
     if (!requirePermission(res, permissions, 'shares.manage')) return;
@@ -1717,9 +1721,10 @@ async function api(req, res, url) {
     const index = store.state.shares.findIndex(share => share.id === id);
     if (index < 0) return send(res, 404, { error: 'Share plan not found.' });
     const [share] = store.state.shares.splice(index, 1);
-    store.addActivity('share', `Share plan ${share.name} was removed.`, 'info');
+    await removeNetworkShare(share, store.state.shares);
+    store.addActivity('share', `Network share ${share.name} was removed; its files were preserved.`, 'info');
     await store.save();
-    return send(res, 200, { ok: true });
+    return send(res, 200, { ok: true, filesPreserved: true });
   }
 
   return send(res, 404, { error: 'API endpoint not found.' });
