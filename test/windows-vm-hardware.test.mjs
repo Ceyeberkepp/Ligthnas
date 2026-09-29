@@ -36,7 +36,8 @@ test('new local Windows VMs force driver-free SATA and E1000 defaults', async ()
   assert.match(runtime, /const windowsInstaller = isWindowsInstaller\(isoEntry\)/);
   assert.match(runtime, /const diskBus = windowsInstaller \? 'sata' : requestedDiskBus/);
   assert.match(runtime, /const networkModel = windowsInstaller \? 'e1000' : requestedNetworkModel/);
-  assert.match(runtime, /const firmware = windowsInstaller[\s\S]*?\? 'uefi'/);
+  assert.match(runtime, /const requestedFirmware = windowsInstaller[\s\S]*?\? 'uefi'/);
+  assert.match(runtime, /const firmware = requestedFirmware === 'uefi' && !uefiFirmwarePath \? 'bios' : requestedFirmware/);
 });
 
 test('VM wizard detects Windows media and selects compatible hardware automatically', async () => {

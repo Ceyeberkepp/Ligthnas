@@ -2,7 +2,7 @@ import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomBytes } from 'node:crypto';
 import net from 'node:net';
-import { mkdir, mkdtemp, readdir, lstat, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readdir, lstat, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { proxmoxInventory, proxmoxCreateVm, proxmoxManageVm, proxmoxUpdateVm } from './proxmox.mjs';
@@ -14,6 +14,20 @@ const execute = promisify(execFile);
 const dataRoot = dirname(process.env.NAS_DATA_FILE || 'data/state.json');
 const vmIsoDirectory = process.env.LIGHTNAS_VM_ISO_DIR || '/var/lib/libvirt/images';
 let operationRunning = false;
+
+async function findUefiFirmware() {
+  const candidates = [
+    '/usr/share/OVMF/OVMF_CODE_4M.fd',
+    '/usr/share/OVMF/OVMF_CODE.fd',
+    '/usr/share/edk2/x64/OVMF_CODE.fd',
+    '/usr/share/edk2/ovmf/OVMF_CODE.fd',
+    '/usr/share/qemu/OVMF_CODE.fd'
+  ];
+  for (const candidate of candidates) {
+    try { await access(candidate); return candidate; } catch {}
+  }
+  return null;
+}
 
 async function exclusive(operation) {
   if (operationRunning) throw Object.assign(new Error('Another runtime operation is in progress.'), { status: 409 });
@@ -855,9 +869,12 @@ export async function createVm(input) {
 
   const networkDetail = virtualization.networkDetails?.find(item => item.name === input.network);
   const windowsInstaller = isWindowsInstaller(isoEntry);
-  const firmware = windowsInstaller
+  const requestedFirmware = windowsInstaller
     ? 'uefi'
     : (['bios', 'uefi'].includes(input.firmware) ? input.firmware : 'bios');
+  const uefiFirmwarePath = requestedFirmware === 'uefi' ? await findUefiFirmware() : null;
+  const firmware = requestedFirmware === 'uefi' && !uefiFirmwarePath ? 'bios' : requestedFirmware;
+  const firmwareFallback = requestedFirmware === 'uefi' && firmware === 'bios';
   const requestedDiskBus = ['scsi', 'virtio', 'sata'].includes(input.diskBus) ? input.diskBus : 'scsi';
   const requestedNetworkModel = ['virtio', 'e1000', 'rtl8139'].includes(input.networkModel) ? input.networkModel : 'virtio';
   // Windows Setup must work without a separate VirtIO driver ISO. Present the
@@ -894,5 +911,18 @@ export async function createVm(input) {
     if (!autostart.ok) throw Object.assign(new Error(`VM was created, but autostart could not be enabled: ${autostart.error}`), { status: 409 });
   }
   if (isoEntry) queueInstallerBootKey(input.name);
-  return { id: input.name, name: input.name, provider: virtualization.provider, acceleration: virtualization.acceleration, firmware, diskBus, networkModel, guestProfile: windowsInstaller ? 'windows' : 'generic', details: response.output || 'VM created and started.' };
+  return {
+    id: input.name,
+    name: input.name,
+    provider: virtualization.provider,
+    acceleration: virtualization.acceleration,
+    firmware,
+    firmwareFallback,
+    diskBus,
+    networkModel,
+    guestProfile: windowsInstaller ? 'windows' : 'generic',
+    details: firmwareFallback
+      ? 'VM created with legacy BIOS because UEFI/OVMF firmware is not installed on this host. Install the ovmf package for UEFI guests.'
+      : (response.output || 'VM created and started.')
+  };
 }

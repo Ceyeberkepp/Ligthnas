@@ -16,13 +16,13 @@ test('AI tab is a system-aware LightNAS helper while AI tools remain in App Stor
   assert.match(app, /state\.view === 'ai' \? aiView\(\)/);
 });
 
-test('monitoring has live graphs and session analytics refreshed every five seconds', async () => {
-  const app = await read('public/app.js');
-  assert.match(app, /function monitoringView\(\)/);
-  assert.match(app, /monitoring-live-grid/);
-  assert.match(app, /SESSION ANALYTICS/);
-  assert.match(app, /analytics-grid/);
-  assert.match(app, /\['home', 'monitoring'\]\.includes\(state\.view\)/);
+test('Overview owns live graphs and legacy monitoring links redirect there', async () => {
+  const [html, app] = await Promise.all([read('public/index.html'), read('public/app.js')]);
+  assert.doesNotMatch(html, /data-view="monitoring"/);
+  assert.match(app, /overview-graph-panel/);
+  assert.match(app, /overview-graph-tabs/);
+  assert.match(app, /if \(view === 'monitoring'\) view = 'home'/);
+  assert.match(app, /if \(state\.view !== 'home'/);
   assert.match(app, /\}, 5000\);/);
 });
 
