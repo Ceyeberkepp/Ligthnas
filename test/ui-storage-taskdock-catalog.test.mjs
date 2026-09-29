@@ -72,3 +72,37 @@ test('Settings and MFA have responsive structured layouts', async () => {
   assert.match(styles, /\.mfa-config-grid/);
   assert.match(styles, /@media \(max-width: 1050px\)[\s\S]*\.settings-dashboard/);
 });
+
+
+test('managed App Store containers show access address and terminal controls', async () => {
+  const [app, server, system, terminal] = await Promise.all([
+    read('public/app.js'),
+    read('src/server.mjs'),
+    read('src/system.mjs'),
+    read('public/container-console.js')
+  ]);
+  assert.match(app, /data-app-terminal/);
+  assert.match(app, /data-app-open/);
+  assert.match(app, /primaryIpv4 \|\| location\.hostname/);
+  assert.match(app, /http:\/\/\$\{hostAddress\}:\$\{app\.port\}/);
+  assert.match(server, /\/api\\\/console\\\/app\\\//);
+  assert.match(server, /openContainerShell\(appContainer\[1\]\)/);
+  assert.match(server, /apps\.manage/);
+  assert.match(system, /network\.primaryIpv4 = primaryIpv4/);
+  assert.match(terminal, /params\.get\('type'\) === 'app'/);
+});
+
+test('General settings owns both text and picture branding', async () => {
+  const [app, server, index, styles] = await Promise.all([
+    read('public/app.js'),
+    read('src/server.mjs'),
+    read('public/index.html'),
+    read('public/enhancements.css')
+  ]);
+  assert.match(app, /Brand \/ logo name/);
+  assert.match(app, /Upload picture logo/);
+  assert.doesNotMatch(app, /<span class="eyebrow">BRANDING<\/span>/);
+  assert.match(server, /brandName: store\.state\.config\.brandName \|\| 'LightNAS'/);
+  assert.match(index, /data-brand-name>LightNAS/);
+  assert.match(styles, /\.general-branding-row/);
+});
