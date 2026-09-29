@@ -724,6 +724,7 @@ async function api(req, res, url) {
     for (const old of ['jpg','png','webp']) if (old !== extension) await rm(join(brandingRoot, `logo.${old}`), { force: true }).catch(() => {});
     await writeFile(join(brandingRoot, `logo.${extension}`), data, { mode: 0o600 });
     store.state.config.logoExt = extension;
+    store.state.config.logoMode = 'picture';
     await store.save();
     return send(res, 200, { ok: true, logo: true });
   }
@@ -731,6 +732,7 @@ async function api(req, res, url) {
     if (!requireOwner(res, context)) return;
     for (const old of ['jpg','png','webp']) await rm(join(brandingRoot, `logo.${old}`), { force: true }).catch(() => {});
     delete store.state.config.logoExt;
+    store.state.config.logoMode = 'text';
     await store.save();
     return send(res, 200, { ok: true, logo: false });
   }
@@ -1230,15 +1232,27 @@ async function api(req, res, url) {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/settings') {
-    const { username: owner, deviceName, timezone, logoExt, brandName } = store.state.config;
-    return send(res, 200, { username: owner, deviceName, brandName: brandName || 'LightNAS', timezone, logo: Boolean(logoExt) });
+    const { username: owner, deviceName, timezone, logoExt, brandName, logoMode, accentColor } = store.state.config;
+    return send(res, 200, {
+      username: owner,
+      deviceName,
+      brandName: brandName || 'LightNAS',
+      logoMode: logoMode === 'picture' && logoExt ? 'picture' : 'text',
+      accentColor: /^#[0-9a-f]{6}$/i.test(String(accentColor || '')) ? accentColor : '#087b70',
+      timezone,
+      logo: Boolean(logoExt)
+    });
   }
   if (req.method === 'PATCH' && url.pathname === '/api/settings') {
     const input = await bodyJson(req);
     if (!/^[a-zA-Z0-9][a-zA-Z0-9-]{1,31}$/.test(input.deviceName || '')) return send(res, 400, { error: 'Device name must contain 2–32 letters, numbers, or hyphens.' });
     if (!['UTC', 'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles'].includes(input.timezone)) return send(res, 400, { error: 'Choose a supported time zone.' });
     const brandName = String(input.brandName || store.state.config.brandName || 'LightNAS').trim();
-    if (brandName.length < 2 || brandName.length > 32 || /[<>\r\n]/.test(brandName)) return send(res, 400, { error: 'Brand / logo name must contain 2–32 characters.' });
+    if (brandName.length < 2 || brandName.length > 32 || /[<>\r\n]/.test(brandName)) return send(res, 400, { error: 'Brand name must contain 2–32 characters.' });
+    const logoMode = input.logoMode === 'picture' ? 'picture' : 'text';
+    if (logoMode === 'picture' && !store.state.config.logoExt) return send(res, 400, { error: 'Upload a picture logo before switching to Picture logo.' });
+    const accentColor = String(input.accentColor || store.state.config.accentColor || '#087b70').trim();
+    if (!/^#[0-9a-f]{6}$/i.test(accentColor)) return send(res, 400, { error: 'Site accent color must be a six-digit hex color such as #087b70.' });
     const changedPassword = Boolean(input.newPassword);
     if (changedPassword) {
       if (typeof input.currentPassword !== 'string' || !(await verifyPassword(input.currentPassword, store.state.config.passwordHash))) return send(res, 403, { error: 'Current administrator password is required to change the password.' });
@@ -1246,6 +1260,8 @@ async function api(req, res, url) {
     }
     store.state.config.deviceName = input.deviceName;
     store.state.config.brandName = brandName;
+    store.state.config.logoMode = logoMode;
+    store.state.config.accentColor = accentColor;
     store.state.config.timezone = input.timezone;
     if (changedPassword) store.state.config.passwordHash = await hashPassword(input.newPassword);
     store.addActivity('settings', changedPassword ? 'Administrator password was changed.' : 'Appliance settings were updated.');
@@ -1447,7 +1463,19 @@ async function api(req, res, url) {
     const storage = overviewStorageCache || quickStorageSummary(filesystems);
     if (!overviewStorageCache || Date.now() - overviewStorageCacheAt >= OVERVIEW_STORAGE_TTL_MS) warmOverviewStorage();
     return send(res, 200, {
-      appliance: { deviceName: store.state.config.deviceName, brandName: store.state.config.brandName || 'LightNAS', username, role: isAdmin ? 'administrator' : context.apiToken ? 'api' : 'user', permissions, timezone: store.state.config.timezone, avatar: Boolean(account.avatarExt), logo: Boolean(store.state.config.logoExt), features: { ...DEFAULT_FEATURES, ...(store.state.config.features || {}) } },
+      appliance: {
+        deviceName: store.state.config.deviceName,
+        brandName: store.state.config.brandName || 'LightNAS',
+        logoMode: store.state.config.logoMode === 'picture' && store.state.config.logoExt ? 'picture' : 'text',
+        accentColor: /^#[0-9a-f]{6}$/i.test(String(store.state.config.accentColor || '')) ? store.state.config.accentColor : '#087b70',
+        username,
+        role: isAdmin ? 'administrator' : context.apiToken ? 'api' : 'user',
+        permissions,
+        timezone: store.state.config.timezone,
+        avatar: Boolean(account.avatarExt),
+        logo: Boolean(store.state.config.logoExt),
+        features: { ...DEFAULT_FEATURES, ...(store.state.config.features || {}) }
+      },
       system, filesystems, storage, host: null,
       shares: store.state.shares.map(share => publicShare(share, system?.network?.primaryIpv4 || String(req.headers.host || '').split(':')[0] || 'lightnas')), activity: store.state.activity.slice(0, 8)
     });

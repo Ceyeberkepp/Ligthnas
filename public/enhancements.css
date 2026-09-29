@@ -2317,3 +2317,48 @@
 .ai-agent-context > .primary {
   margin-top: auto;
 }
+
+
+/* Exclusive branding modes + customizable site accent */
+.branding-settings-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.accent-color-control {
+  display: grid;
+  grid-template-columns: 52px minmax(0,1fr);
+  gap: 8px;
+  align-items: center;
+}
+.accent-color-control input[type="color"] {
+  width: 52px;
+  min-height: 42px;
+  padding: 3px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.branding-preview.picture-only {
+  justify-content: flex-start;
+}
+.branding-preview.picture-only > div:last-child {
+  display: none;
+}
+.branding-preview.picture-only .brand-logo-preview {
+  width: 180px;
+  height: 68px;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: left center;
+}
+.sidebar-brand [data-brand-name][hidden],
+.mobile-brand [data-brand-name][hidden],
+[data-brand-name][hidden] {
+  display: none !important;
+}
+.brand-mark[hidden] {
+  display: none !important;
+}
+@media (max-width: 900px) {
+  .branding-settings-grid {
+    grid-template-columns: 1fr;
+  }
+}
