@@ -500,6 +500,17 @@ function applyUserGroups(username, groupIds) {
 
 async function api(req, res, url) {
   if (req.method === 'GET' && url.pathname === '/api/status') return send(res, 200, { version: '0.12.0', setupRequired: !store.state.config });
+  if (req.method === 'GET' && url.pathname === '/api/branding') {
+    const config = store.state.config || {};
+    return send(res, 200, {
+      brandName: config.brandName || 'LightNAS',
+      logoMode: config.logoMode === 'picture' && config.logoExt ? 'picture' : 'text',
+      logo: Boolean(config.logoExt),
+      accentColor: /^#[0-9a-f]{6}$/i.test(String(config.accentColor || '')) ? config.accentColor : '#087b70',
+      sidebarColor: /^#[0-9a-f]{6}$/i.test(String(config.sidebarColor || '')) ? config.sidebarColor : '#ffffff',
+      contentColor: /^#[0-9a-f]{6}$/i.test(String(config.contentColor || '')) ? config.contentColor : '#f2f6fa'
+    });
+  }
 
   if (req.method === 'POST' && url.pathname === '/api/setup') {
     if (store.state.config) return send(res, 409, { error: 'This appliance is already configured.' });
@@ -626,6 +637,21 @@ async function api(req, res, url) {
   if (req.method === 'POST' && url.pathname === '/api/logout') {
     sessions.delete(cookies(req).nas_session);
     return send(res, 200, { ok: true }, { 'Set-Cookie': 'nas_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0' });
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/branding/logo') {
+    if (!store.state.config?.logoExt) return send(res, 404, { error: 'No custom logo is configured.' });
+    const extension = store.state.config.logoExt;
+    const path = join(brandingRoot, `logo.${extension}`);
+    const type = extension === 'png' ? 'image/png' : extension === 'webp' ? 'image/webp' : 'image/jpeg';
+    try {
+      const data = await readFile(path);
+      res.writeHead(200, { 'Content-Type': type, 'Content-Length': data.length, 'Cache-Control': 'private, max-age=300', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': csp });
+      return res.end(data);
+    } catch (error) {
+      if (error.code === 'ENOENT') return send(res, 404, { error: 'Custom logo is unavailable.' });
+      throw error;
+    }
   }
 
   const context = requireSession(req, res);
@@ -1232,13 +1258,15 @@ async function api(req, res, url) {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/settings') {
-    const { username: owner, deviceName, timezone, logoExt, brandName, logoMode, accentColor } = store.state.config;
+    const { username: owner, deviceName, timezone, logoExt, brandName, logoMode, accentColor, sidebarColor, contentColor } = store.state.config;
     return send(res, 200, {
       username: owner,
       deviceName,
       brandName: brandName || 'LightNAS',
       logoMode: logoMode === 'picture' && logoExt ? 'picture' : 'text',
       accentColor: /^#[0-9a-f]{6}$/i.test(String(accentColor || '')) ? accentColor : '#087b70',
+      sidebarColor: /^#[0-9a-f]{6}$/i.test(String(sidebarColor || '')) ? sidebarColor : '#ffffff',
+      contentColor: /^#[0-9a-f]{6}$/i.test(String(contentColor || '')) ? contentColor : '#f2f6fa',
       timezone,
       logo: Boolean(logoExt)
     });
@@ -1254,7 +1282,11 @@ async function api(req, res, url) {
       : (input.logoMode === 'picture' ? 'picture' : 'text');
     if (logoMode === 'picture' && !store.state.config.logoExt) return send(res, 400, { error: 'Upload a picture logo before switching to Picture logo.' });
     const accentColor = String(input.accentColor || store.state.config.accentColor || '#087b70').trim();
+    const sidebarColor = String(input.sidebarColor || store.state.config.sidebarColor || '#ffffff').trim();
+    const contentColor = String(input.contentColor || store.state.config.contentColor || '#f2f6fa').trim();
     if (!/^#[0-9a-f]{6}$/i.test(accentColor)) return send(res, 400, { error: 'Site accent color must be a six-digit hex color such as #087b70.' });
+    if (!/^#[0-9a-f]{6}$/i.test(sidebarColor)) return send(res, 400, { error: 'Sidebar color must be a six-digit hex color.' });
+    if (!/^#[0-9a-f]{6}$/i.test(contentColor)) return send(res, 400, { error: 'Main content color must be a six-digit hex color.' });
     const changedPassword = Boolean(input.newPassword);
     if (changedPassword) {
       if (typeof input.currentPassword !== 'string' || !(await verifyPassword(input.currentPassword, store.state.config.passwordHash))) return send(res, 403, { error: 'Current administrator password is required to change the password.' });
@@ -1264,6 +1296,8 @@ async function api(req, res, url) {
     store.state.config.brandName = brandName;
     store.state.config.logoMode = logoMode;
     store.state.config.accentColor = accentColor;
+    store.state.config.sidebarColor = sidebarColor;
+    store.state.config.contentColor = contentColor;
     store.state.config.timezone = input.timezone;
     if (changedPassword) store.state.config.passwordHash = await hashPassword(input.newPassword);
     store.addActivity('settings', changedPassword ? 'Administrator password was changed.' : 'Appliance settings were updated.');
@@ -1470,6 +1504,8 @@ async function api(req, res, url) {
         brandName: store.state.config.brandName || 'LightNAS',
         logoMode: store.state.config.logoMode === 'picture' && store.state.config.logoExt ? 'picture' : 'text',
         accentColor: /^#[0-9a-f]{6}$/i.test(String(store.state.config.accentColor || '')) ? store.state.config.accentColor : '#087b70',
+        sidebarColor: /^#[0-9a-f]{6}$/i.test(String(store.state.config.sidebarColor || '')) ? store.state.config.sidebarColor : '#ffffff',
+        contentColor: /^#[0-9a-f]{6}$/i.test(String(store.state.config.contentColor || '')) ? store.state.config.contentColor : '#f2f6fa',
         username,
         role: isAdmin ? 'administrator' : context.apiToken ? 'api' : 'user',
         permissions,

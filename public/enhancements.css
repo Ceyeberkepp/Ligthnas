@@ -2389,3 +2389,74 @@ textarea:focus {
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 10%, var(--panel));
 }
+
+
+/* Full appliance branding: sidebar, workspace, login and larger picture logos. */
+.content {
+  background: var(--brand-content-bg, var(--bg));
+}
+.sidebar {
+  background: var(--sidebar);
+  color: var(--sidebar-text, var(--text));
+}
+.sidebar nav a,
+.nav-group summary,
+.sidebar .ghost-button {
+  color: var(--sidebar-muted, var(--muted));
+}
+.sidebar nav a:hover,
+.sidebar nav a.active,
+.sidebar .foot-admin,
+.sidebar .device-mini b {
+  color: var(--sidebar-text, var(--text));
+}
+.sidebar-brand .brand-mark.custom-logo {
+  width: min(180px, calc(var(--sidebar-width, 250px) - 46px));
+  height: 72px;
+  border-radius: 0;
+  background-position: left center;
+}
+.console.sidebar-collapsed .sidebar-brand .brand-mark.custom-logo {
+  width: 48px;
+  height: 48px;
+  background-position: center;
+}
+.auth-story {
+  background:
+    radial-gradient(circle at 30% 30%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 35%),
+    var(--auth-brand-bg, var(--sidebar)) !important;
+  color: var(--sidebar-text, var(--text));
+}
+.auth-story .brand,
+.auth-story .story-copy h1,
+.auth-story .story-status {
+  color: var(--sidebar-text, var(--text));
+}
+.auth-story .story-copy p {
+  color: var(--sidebar-muted, var(--muted));
+}
+.auth-panel {
+  background: var(--auth-panel-bg, var(--panel)) !important;
+}
+.auth-story .brand-mark.custom-logo {
+  width: min(260px, 70vw);
+  height: 104px;
+  border-radius: 0;
+  background-position: left center;
+  background-size: contain;
+}
+.boot-screen .brand-mark.custom-logo {
+  width: min(240px, 70vw);
+  height: 96px;
+  border-radius: 0;
+}
+@media (max-width: 900px) {
+  .sidebar-brand .brand-mark.custom-logo {
+    width: min(190px, 70vw);
+    height: 68px;
+  }
+  .auth-story .brand-mark.custom-logo {
+    width: min(220px, 70vw);
+    height: 82px;
+  }
+}
