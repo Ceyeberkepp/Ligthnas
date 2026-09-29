@@ -18,3 +18,23 @@ test('SMB shares grant safe parent traversal ACLs and repair saved shares', asyn
   assert.match(localHost, /localRepairNetworkShares/);
   assert.match(server, /await localRepairNetworkShares\(store\.state\.shares\.map/);
 });
+
+
+test('LightNAS administrator is synchronized as SMB admin for every share', async () => {
+  const [agent, localHost, server, shares] = await Promise.all([
+    readFile(new URL('../scripts/lightnas-host-agent.py', import.meta.url), 'utf8'),
+    readFile(new URL('../src/local-host.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../src/server.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../src/network-shares.mjs', import.meta.url), 'utf8')
+  ]);
+
+  assert.match(agent, /def share_admin_sync\(data: dict\)/);
+  assert.match(agent, /admin users = \{admin_username\}/);
+  assert.match(agent, /valid users = \{share\['username'\]\}/);
+  assert.match(agent, /if action == "share-admin-sync":/);
+  assert.match(localHost, /localSyncShareAdministrator/);
+  assert.match(server, /await localSyncShareAdministrator\(/);
+  assert.match(server, /adminUsername: store\.state\.config\.username/);
+  assert.match(shares, /adminUsername: String\(input\.adminUsername/);
+  assert.match(shares, /removeNetworkShare\(share, remainingShares = \[\], adminUsername = ''\)/);
+});
