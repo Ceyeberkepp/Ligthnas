@@ -78,12 +78,12 @@ test('ISO build does not hard-require the Ubuntu keyring package on Debian', asy
 });
 
 
-test('nested networking falls back to a transparent host-LAN bridge before private NAT', async () => {
+test('nested networking never bridges over the appliance management interface', async () => {
   const network = await readFile(new URL('../scripts/configure-appliance-network.sh', import.meta.url), 'utf8');
-  assert.match(network, /LIGHTNAS_NESTED_LAN_BRIDGE:-lightnas-lan0/);
-  assert.match(network, /macvlan is unavailable; trying transparent host-LAN bridge/);
-  assert.match(network, /LIGHTNAS_NETWORK_MODE=bridge/);
-  assert.match(network, /transparent nested LAN bridge is unavailable; using private compatibility NAT/);
+  assert.match(network, /never move the appliance management IP or default route/);
+  assert.match(network, /LIGHTNAS_NETWORK_MODE=nested-macvlan/);
+  assert.match(network, /preserving management networking and using safe container NAT fallback/);
+  assert.doesNotMatch(network, /LIGHTNAS_NESTED_LAN_BRIDGE:-lightnas-lan0/);
 });
 
 
