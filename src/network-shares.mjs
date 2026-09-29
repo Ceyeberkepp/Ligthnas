@@ -37,6 +37,7 @@ export async function provisionNetworkShare(input, existingShares = []) {
   await localProvisionNetworkShare({
     share,
     password,
+    adminUsername: String(input.adminUsername || '').trim().toLowerCase(),
     existingShares: existingShares.map(item => ({
       id:String(item.id || ''),
       name:String(item.name || ''),
@@ -47,8 +48,9 @@ export async function provisionNetworkShare(input, existingShares = []) {
   return share;
 }
 
-export async function removeNetworkShare(share, remainingShares = []) {
+export async function removeNetworkShare(share, remainingShares = [], adminUsername = '') {
   return await localRemoveNetworkShare({
+    adminUsername: String(adminUsername || '').trim().toLowerCase(),
     share: {
       id:String(share.id || ''),
       name:String(share.name || ''),
