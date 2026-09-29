@@ -27,8 +27,9 @@ test('LXC appliance networking follows the host LAN when direct nested LAN is av
   assert.match(helper, /Keep the existing LightNAS eth0\/net0 connection and IP exactly as-is/);
   assert.match(helper, /firewall=0/);
 
-  assert.match(agent, /LIGHTNAS_NETWORK_MODE"\) == "nested-macvlan"/);
+  assert.match(agent, /\{"nested-macvlan", "nested-ipvlan"\}/);
   assert.match(agent, /lxc\.net\.0\.macvlan\.mode = bridge/);
+  assert.match(agent, /lxc\.net\.0\.ipvlan\.mode = l2/);
   assert.match(agent, /LIGHTNAS_NETWORK_MODE.*lxc-nat/);
   assert.match(runtime, /LightNAS managed NAT/);
   assert.match(ui, /Proxmox-style host networking/);

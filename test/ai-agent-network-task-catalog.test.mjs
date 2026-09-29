@@ -10,8 +10,9 @@ test('nested LightNAS preserves management networking and uses direct LAN only w
   assert.match(network, /LIGHTNAS_NETWORK_MODE=nested-macvlan/);
   assert.match(network, /direct LAN is available/);
   assert.match(network, /preserving management networking and using safe container NAT fallback/);
-  assert.match(provision, /lxc\.net\.0\.type = macvlan/);
+  assert.match(provision, /direct_type="\$\{network_mode#nested-\}"/);
   assert.match(provision, /lxc\.net\.0\.macvlan\.mode = bridge/);
+  assert.match(provision, /lxc\.net\.0\.ipvlan\.mode = l2/);
   assert.match(install, /automatic migration to the LightNAS host LAN/);
 });
 

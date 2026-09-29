@@ -14,25 +14,28 @@ test('nested LightNAS never risks the appliance management link for guest networ
   assert.match(network, /never move the appliance management IP or default route/);
   assert.match(network, /LIGHTNAS_NESTED_LAN_MODE:-auto/);
   assert.match(network, /LIGHTNAS_NETWORK_MODE=nested-macvlan/);
+  assert.match(network, /LIGHTNAS_NETWORK_MODE=nested-ipvlan/);
   assert.match(network, /LIGHTNAS_CONTAINER_PARENT=%s/);
   assert.match(network, /LIGHTNAS_NETWORK_MODE=lxc-nat/);
   assert.match(network, /preserving management networking and using safe container NAT fallback/);
 });
 
-test('host agent creates nested system containers as macvlan children of the existing uplink', async () => {
+test('host agent creates nested system containers with safe direct-LAN macvlan or ipvlan', async () => {
   const agent = await readFile(new URL('../scripts/lightnas-host-agent.py', import.meta.url), 'utf8');
-  assert.match(agent, /LIGHTNAS_NETWORK_MODE"\) == "nested-macvlan"/);
-  assert.match(agent, /lxc\.net\.0\.type = \{'macvlan' if direct_macvlan else 'veth'\}/);
+  assert.match(agent, /\{"nested-macvlan", "nested-ipvlan"\}/);
+  assert.match(agent, /direct_type = "macvlan".*"ipvlan"/);
   assert.match(agent, /lxc\.net\.0\.macvlan\.mode = bridge/);
+  assert.match(agent, /lxc\.net\.0\.ipvlan\.mode = l2/);
   assert.match(agent, /return \[parent\]/);
 });
 
 test('runtime provisioning migrates old private NAT containers to direct host LAN automatically', async () => {
   const provision = await readFile(new URL('../scripts/provision-runtimes.sh', import.meta.url), 'utf8');
   assert.match(provision, /set_flag LIGHTNAS_ALLOW_NESTED_LXC 1/);
-  assert.match(provision, /network_mode.*nested-macvlan/);
-  assert.match(provision, /lxc\.net\.0\.type = macvlan/);
+  assert.match(provision, /nested-\(macvlan\|ipvlan\)/);
+  assert.match(provision, /direct_type="\$\{network_mode#nested-\}"/);
   assert.match(provision, /lxc\.net\.0\.macvlan\.mode = bridge/);
+  assert.match(provision, /lxc\.net\.0\.ipvlan\.mode = l2/);
   assert.match(provision, /LIGHTNAS_CONTAINER_PARENT/);
 });
 
