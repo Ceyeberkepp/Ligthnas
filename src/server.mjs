@@ -12,7 +12,7 @@ import { listFiles, listAllFiles, createFolder, uploadFile, downloadFile, downlo
 import { thumbnailFor } from './thumbnails.mjs';
 import { catalog, runtimeInventory, installCatalogApp, manageCatalogApp, updateCatalogApp, openContainerShell, createContainer, createVm } from './runtimes-next.mjs';
 import { proxmoxConsoleSocket, proxmoxUpdateStorage, proxmoxCleanDisk } from './proxmox.mjs';
-import { localContainerSummary, localContainerInventory, localManageContainer, localContainerConsoleSocket, localContainerCommand, localVmConsoleSocket, localNodeConsoleSocket, localNetworkInventory, localNetworkAction, localApplianceHealth, localApplianceRepair, localRepairNetworkShares } from './local-host.mjs';
+import { localContainerSummary, localContainerInventory, localManageContainer, localContainerConsoleSocket, localContainerCommand, localVmConsoleSocket, localNodeConsoleSocket, localNetworkInventory, localNetworkAction, localApplianceHealth, localApplianceRepair, localRepairNetworkShares, localSyncShareAdministrator } from './local-host.mjs';
 import { validateSmtp, sendSmtpTest } from './mailer.mjs';
 import { mediaAvailable, convertMedia } from './media.mjs';
 import { createDataset, updateDataset } from './zfs.mjs';
@@ -70,7 +70,7 @@ queueMicrotask(async () => {
       name:String(share.name || ''),
       protocol:String(share.protocol || ''),
       username:String(share.username || '')
-    })));
+    })), store.state.config?.username || '');
   } catch (error) {
     console.warn('LightNAS share permission repair deferred:', error.message);
   }
@@ -544,6 +544,16 @@ async function api(req, res, url) {
     };
     store.addActivity('setup', `Appliance ${input.deviceName} was configured.`, 'success');
     await store.save();
+    try {
+      await localSyncShareAdministrator({
+        username: input.username,
+        password: input.password,
+        shares: []
+      });
+    } catch (error) {
+      store.addActivity('share', `SMB administrator sync needs attention: ${error.message}`, 'warning');
+      await store.save();
+    }
     let readiness = null;
     try { readiness = await localApplianceRepair(); }
     catch (error) {
@@ -645,6 +655,22 @@ async function api(req, res, url) {
       }
     }
 
+    if (username === store.state.config.username) {
+      try {
+        await localSyncShareAdministrator({
+          username,
+          password: input.password,
+          shares: store.state.shares.map(share => ({
+            id:String(share.id || ''),
+            name:String(share.name || ''),
+            protocol:String(share.protocol || ''),
+            username:String(share.username || '')
+          }))
+        });
+      } catch (error) {
+        console.warn('SMB administrator synchronization deferred:', error.message);
+      }
+    }
     const token = sessions.create(username);
     store.addActivity('login', `${username} signed in.`, 'info');
     await store.save();
@@ -1327,7 +1353,19 @@ async function api(req, res, url) {
     if (changedPassword) store.state.config.passwordHash = await hashPassword(input.newPassword);
     store.addActivity('settings', changedPassword ? 'Administrator password was changed.' : 'Appliance settings were updated.');
     await store.save();
-    if (changedPassword) sessions.clear();
+    if (changedPassword) {
+      await localSyncShareAdministrator({
+        username: store.state.config.username,
+        password: input.newPassword,
+        shares: store.state.shares.map(share => ({
+          id:String(share.id || ''),
+          name:String(share.name || ''),
+          protocol:String(share.protocol || ''),
+          username:String(share.username || '')
+        }))
+      });
+      sessions.clear();
+    }
     return send(res, 200, { ok: true, signInRequired: changedPassword }, changedPassword ? { 'Set-Cookie': 'nas_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0' } : {});
   }
 
@@ -1809,7 +1847,7 @@ async function api(req, res, url) {
     if (!requirePermission(res, permissions, 'shares.manage')) return;
     const input = await bodyJson(req);
     if (store.state.shares.some(share => share.name.toLowerCase() === String(input.name || '').toLowerCase())) return send(res, 409, { error: 'A share with this name already exists.' });
-    const share = await provisionNetworkShare(input, store.state.shares);
+    const share = await provisionNetworkShare({ ...input, adminUsername: store.state.config.username }, store.state.shares);
     store.state.shares.push({ id:share.id, name:share.name, protocol:share.protocol, username:share.username, description:share.description, createdAt:share.createdAt });
     store.addActivity('share', `Network share ${share.name} was provisioned for ${share.protocol}.`, 'success');
     await store.save();
@@ -1823,7 +1861,7 @@ async function api(req, res, url) {
     const index = store.state.shares.findIndex(share => share.id === id);
     if (index < 0) return send(res, 404, { error: 'Share plan not found.' });
     const [share] = store.state.shares.splice(index, 1);
-    await removeNetworkShare(share, store.state.shares);
+    await removeNetworkShare(share, store.state.shares, store.state.config.username);
     store.addActivity('share', `Network share ${share.name} was removed; its files were preserved.`, 'info');
     await store.save();
     return send(res, 200, { ok: true, filesPreserved: true });
