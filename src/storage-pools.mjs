@@ -1,5 +1,6 @@
 import { createWriteStream } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { localPrepareStoragePool } from './local-host.mjs';
 import { dirname, extname, join, resolve } from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -129,7 +130,7 @@ function publicPool(pool, source) {
     availableBytes: source?.availableBytes || 0,
     usedBytes: source?.usedBytes || 0,
     usedPercent: source?.usedPercent || 0,
-    writable: Boolean(source?.writable !== false && !source?.readOnly),
+    writable: Boolean(!source?.readOnly && (source?.writable !== false || pool?.preparedByHostAgent)),
     online: Boolean(source),
     local: pool.id === 'local',
     dedicated: pool.id === 'local' ? Boolean(source?.dedicated) : true,
@@ -163,6 +164,8 @@ export async function listStoragePools() {
     usedBytes: volume.usedBytes,
     usedPercent: volume.usedPercent,
     writable: Boolean(volume.writable && !volume.readOnly),
+    mountedReadOnly: Boolean(volume.mountedReadOnly),
+    needsPrivilegeSetup: Boolean(volume.needsPrivilegeSetup),
     configured: configuredSources.has(volume.id),
     capacitySource: volume.capacitySource || 'filesystem',
     configuredSize: volume.configuredSize || null,
@@ -199,13 +202,20 @@ export async function createStoragePool(input) {
   const inventory = await getStorageInventory();
   const source = inventory.attachedVolumes.find(item => item.id === sourceId);
   if (!source) throw Object.assign(new Error('Select an attached virtual storage volume.'), { status: 400 });
-  if (source.readOnly || !source.writable) throw Object.assign(new Error('The selected virtual storage is read-only to LightNAS.'), { status: 409 });
+  if (source.mountedReadOnly || source.readOnly) {
+    throw Object.assign(new Error('The selected volume is mounted read-only by the host. Remount it read/write before adding it to LightNAS.'), { status: 409 });
+  }
 
   const config = await readConfig();
   if (config.pools.some(pool => pool.id.toLowerCase() === name.toLowerCase())) throw Object.assign(new Error('A storage with this name already exists.'), { status: 409 });
   if (config.pools.some(pool => pool.sourceId === sourceId)) throw Object.assign(new Error('This virtual volume is already assigned to a LightNAS storage. Edit that storage instead.'), { status: 409 });
 
   const root = join(source.mountPoint, '.lightnas', 'storage', name);
+  let preparedByHostAgent = false;
+  if (!source.writable || source.needsPrivilegeSetup) {
+    await localPrepareStoragePool({ mountPoint: source.mountPoint, name });
+    preparedByHostAgent = true;
+  }
   await ensureLayout(root, content);
   const pool = {
     id: name,
@@ -214,6 +224,7 @@ export async function createStoragePool(input) {
     mountPoint: source.mountPoint,
     root,
     content,
+    preparedByHostAgent,
     createdAt: new Date().toISOString()
   };
   config.pools.push(pool);

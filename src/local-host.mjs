@@ -74,6 +74,10 @@ export async function localRemoveNetworkShare(input) {
   return await request('share-remove', input, 60000);
 }
 
+export async function localPrepareStoragePool(input) {
+  return await request('storage-prepare', input, 60000);
+}
+
 export async function localApplianceHealth() {
   return await request('appliance-health', undefined, 60000);
 }

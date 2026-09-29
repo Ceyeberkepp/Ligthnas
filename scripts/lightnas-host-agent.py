@@ -2537,6 +2537,68 @@ def share_remove(data: dict) -> dict:
     return {"id": share["id"], "status": "removed", "filesPreserved": True, "path": str(_share_path(share))}
 
 
+
+STORAGE_POOL_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{1,31}$")
+
+
+def storage_prepare(data: dict) -> dict:
+    mount_point = str(data.get("mountPoint") or "").strip()
+    name = str(data.get("name") or "").strip()
+    if not STORAGE_POOL_NAME_RE.fullmatch(name):
+        raise ValueError("invalid storage name")
+    if not mount_point.startswith(("/storage/", "/mnt/", "/media/", "/srv/", "/data/")):
+        raise ValueError("storage mount is outside approved data paths")
+    mount = Path(mount_point).resolve()
+    if not mount.is_dir():
+        raise ValueError("storage mount does not exist")
+    if str(mount) in {"/", "/boot", "/boot/efi"}:
+        raise ValueError("system mount cannot be claimed as data storage")
+
+    # Refuse a genuinely read-only mount, but allow root-owned read/write
+    # mounts whose root directory is not writable by the unprivileged
+    # LightNAS control plane.
+    mounted_ro = False
+    try:
+        for line in Path("/proc/self/mounts").read_text(encoding="utf-8", errors="replace").splitlines():
+            parts = line.split()
+            if len(parts) >= 4 and parts[1].replace("\\040", " ") == str(mount):
+                mounted_ro = "ro" in parts[3].split(",")
+                break
+    except OSError:
+        pass
+    if mounted_ro:
+        raise RuntimeError("selected storage volume is mounted read-only")
+
+    root = mount / ".lightnas" / "storage" / name
+    root.mkdir(parents=True, exist_ok=True, mode=0o770)
+
+    # Ensure the LightNAS service account owns only its managed subtree, never
+    # the whole mounted volume or unrelated user files.
+    try:
+        lightnas_uid = int(run(["id", "-u", "lightnas"], timeout=10))
+        lightnas_gid = int(run(["id", "-g", "lightnas"], timeout=10))
+    except Exception as exc:
+        raise RuntimeError("LightNAS service account is unavailable") from exc
+
+    os.chown(root, lightnas_uid, lightnas_gid)
+    os.chmod(root, 0o770)
+    for directory in (
+        "template/iso",
+        "template/cache",
+        "images",
+        "rootdir",
+        "backup",
+        "snippets",
+        "files",
+    ):
+        target = root / directory
+        target.mkdir(parents=True, exist_ok=True, mode=0o770)
+        os.chown(target, lightnas_uid, lightnas_gid)
+        os.chmod(target, 0o770)
+
+    return {"mountPoint": str(mount), "root": str(root), "writable": True}
+
+
 def dispatch(request: dict) -> dict:
     action = str(request.get("action") or "")
     data = request.get("data") or {}
@@ -2564,6 +2626,8 @@ def dispatch(request: dict) -> dict:
         return share_provision(data)
     if action == "share-remove":
         return share_remove(data)
+    if action == "storage-prepare":
+        return storage_prepare(data)
     if action == "appliance-health":
         return appliance_health()
     if action == "appliance-repair":
