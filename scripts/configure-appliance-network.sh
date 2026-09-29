@@ -71,13 +71,13 @@ EOF
   done
 }
 
-# When LightNAS itself runs inside another container (for example a Proxmox
-# LXC), follow the appliance's real LAN by default. Inner system containers use
-# the same uplink/subnet/gateway as LightNAS, so a LightNAS appliance at
-# 192.168.0.41/24 produces guests on 192.168.0.0/24 via normal LAN DHCP.
+# When LightNAS itself runs inside another container (for example Proxmox
+# LXC), never move the appliance management IP or default route away from the
+# existing outer-provided interface. The outer hypervisor owns that veth
+# topology and moving the address to an inner bridge can disconnect LightNAS.
 #
-# LIGHTNAS_NESTED_LAN_MODE=nat explicitly requests the private 10.77.0.0/24
-# compatibility fallback. The normal/default mode is automatic direct LAN.
+# Direct-LAN inner containers are used only when macvlan can be created on the
+# existing uplink. Otherwise use the reliable private NAT fallback.
 container_kind="$(systemd-detect-virt --container 2>/dev/null || true)"
 if [[ -n "$container_kind" && "$container_kind" != "none" ]]; then
   nested_uplink="$(ip -4 route show default 2>/dev/null | awk 'NR==1 {for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')"
@@ -89,23 +89,14 @@ if [[ -n "$container_kind" && "$container_kind" != "none" ]]; then
     if ip link add link "$nested_uplink" name "$macvlan_probe" type macvlan mode bridge >/dev/null 2>&1; then
       ip link delete "$macvlan_probe" >/dev/null 2>&1 || true
       printf 'LIGHTNAS_NETWORK_MODE=nested-macvlan\nLIGHTNAS_UPLINK=%s\nLIGHTNAS_CONTAINER_PARENT=%s\n' "$nested_uplink" "$nested_uplink" >"$STATE_FILE"
-      echo "LightNAS network: nested appliance detected; system containers will follow the real LAN on $nested_uplink."
+      echo "LightNAS network: nested appliance detected; direct LAN is available on $nested_uplink."
       exit 0
     fi
-
-    # Some nested hypervisors allow Linux bridges/veth but block macvlan.
-    # In that case convert the appliance's existing uplink into a transparent
-    # bridge while preserving the exact LightNAS management address/gateway.
-    # Inner LXC guests then use ordinary veth devices and receive DHCP directly
-    # from the same LAN/router as the LightNAS appliance.
-    BRIDGE="${LIGHTNAS_NESTED_LAN_BRIDGE:-lightnas-lan0}"
-    nested_bridge_requested=1
-    echo "LightNAS network: macvlan is unavailable; trying transparent host-LAN bridge ${BRIDGE} on ${nested_uplink}."
-  else
-    printf 'LIGHTNAS_NETWORK_MODE=lxc-nat\nLIGHTNAS_UPLINK=%s\nLIGHTNAS_CONTAINER_BRIDGE=lightnas0\nLIGHTNAS_VM_NETWORK=default\n' "$nested_uplink" >"$STATE_FILE"
-    echo "LightNAS network: private compatibility NAT was explicitly requested."
-    exit 0
   fi
+
+  printf 'LIGHTNAS_NETWORK_MODE=lxc-nat\nLIGHTNAS_UPLINK=%s\nLIGHTNAS_CONTAINER_BRIDGE=lightnas0\nLIGHTNAS_VM_NETWORK=default\n' "$nested_uplink" >"$STATE_FILE"
+  echo "LightNAS network: nested appliance detected; preserving management networking and using safe container NAT fallback."
+  exit 0
 fi
 
 is_virtual_name() {

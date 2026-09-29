@@ -4,12 +4,12 @@ import { readFile } from 'node:fs/promises';
 
 const read = path => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
-test('nested LightNAS follows the host LAN by default and keeps NAT as compatibility fallback', async () => {
+test('nested LightNAS preserves management networking and uses direct LAN only when supported', async () => {
   const [network, provision, install] = await Promise.all([read('scripts/configure-appliance-network.sh'), read('scripts/provision-runtimes.sh'), read('install.sh')]);
   assert.match(network, /LIGHTNAS_NESTED_LAN_MODE:-auto/);
   assert.match(network, /LIGHTNAS_NETWORK_MODE=nested-macvlan/);
-  assert.match(network, /system containers will follow the real LAN/);
-  assert.match(network, /LIGHTNAS_NETWORK_MODE=lxc-nat/);
+  assert.match(network, /direct LAN is available/);
+  assert.match(network, /preserving management networking and using safe container NAT fallback/);
   assert.match(provision, /lxc\.net\.0\.type = macvlan/);
   assert.match(provision, /lxc\.net\.0\.macvlan\.mode = bridge/);
   assert.match(install, /automatic migration to the LightNAS host LAN/);
