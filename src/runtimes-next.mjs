@@ -568,7 +568,10 @@ export async function runtimeInventory() {
       });
       const managedNames = runtime.docker.containers.filter(item => item.managed).map(item => item.name).filter(Boolean);
       if (managedNames.length) {
-        const inspected = await command('docker', ['inspect', '--format', '{{json .}}', ...managedNames]);
+        const [inspected, stats] = await Promise.all([
+          command('docker', ['inspect', '--format', '{{json .}}', ...managedNames]),
+          command('docker', ['stats', '--no-stream', '--format', '{{json .}}', ...managedNames], 15000)
+        ]);
         if (inspected.ok) {
           const details = new Map(inspected.output.split('\n').filter(Boolean).flatMap(line => {
             try {
@@ -587,6 +590,25 @@ export async function runtimeInventory() {
             } catch { return []; }
           }));
           runtime.docker.containers = runtime.docker.containers.map(item => ({ ...item, ...(details.get(item.name) || {}) }));
+        }
+        if (stats.ok) {
+          const live = new Map(stats.output.split('\n').filter(Boolean).flatMap(line => {
+            try {
+              const value = JSON.parse(line);
+              const name = String(value?.Name || '');
+              const cpuPercent = Number.parseFloat(String(value?.CPUPerc || '').replace('%', '')) || 0;
+              const memoryPercent = Number.parseFloat(String(value?.MemPerc || '').replace('%', '')) || 0;
+              const [usedText = '', limitText = ''] = String(value?.MemUsage || '').split('/').map(part => part.trim());
+              return [[name, {
+                cpuPercent,
+                memoryPercent,
+                memoryUsage: usedText,
+                memoryLimitText: limitText,
+                liveStats: true
+              }]];
+            } catch { return []; }
+          }));
+          runtime.docker.containers = runtime.docker.containers.map(item => ({ ...item, ...(live.get(item.name) || {}) }));
         }
       }
     }
