@@ -87,7 +87,7 @@ function renderStorageManager() {
       <p>${verified
         ? `${sBytes(visible.usedBytes||0)} used · ${sBytes(visible.availableBytes||0)} free across attached data volumes.${sharedLocalExcluded?' The OS/root-backed local storage is shown separately and is not included in this total.':''}`
         : `LightNAS can use the mounted volumes below now. Exact host-provisioned capacity is not available inside this container, so displayed capacity is based on what the guest can currently see.`}</p>
-      <div class="storage-volume-chips">${dataSources.map(source=>`<span class="${source.configured?'configured':''}"><b>${sEsc(source.mountPoint)}</b><small>${sEsc(source.device||source.type||'volume')} · ${source.capacitySource==='proxmox-pct-config'?sBytes(source.totalBytes):sBytes(source.availableBytes)+' free'}${source.configured?' · in use':''}</small></span>`).join('')}</div>
+      <div class="storage-volume-chips">${dataSources.map(source=>`<span class="${source.configured?'configured':''}"><b>${sEsc(source.mountPoint)}</b><small>${sEsc(source.device||source.type||'volume')} · ${source.capacitySource==='proxmox-pct-config'?sBytes(source.totalBytes):sBytes(source.availableBytes)+' free'}${source.configured?' · already in use':''}</small></span>`).join('')}</div>
     </section>
     <div class="storage-section-heading"><div><span class="eyebrow">CONFIGURED STORAGE</span><h2>Storage pools</h2></div><small>${(data.pools||[]).length} configured</small></div>
     <div class="inventory-grid">${(data.pools||[]).map(storageCard).join('')||'<div class="empty"><p>No storage pools are online.</p></div>'}</div>
