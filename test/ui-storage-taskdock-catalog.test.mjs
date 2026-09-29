@@ -88,7 +88,7 @@ test('managed App Store containers show access address and terminal controls', a
   assert.match(app, /http:\/\/\$\{hostAddress\}:\$\{app\.port\}/);
   assert.match(app, /Container IP:/);
   assert.match(runtime, /NetworkSettings\.Networks/);
-  assert.match(runtime, /ip: ips\.get\(item\.name\)/);
+  assert.match(runtime, /details\.get\(item\.name\)/);
   assert.match(server, /\/api\\\/console\\\/app\\\//);
   assert.match(server, /openContainerShell\(appContainer\[1\]\)/);
   assert.match(server, /apps\.manage/);
@@ -204,7 +204,7 @@ test('overview graphs expose CPU count and current resource context', async () =
 test('container summary counts native and App Store containers with resource details', async () => {
   const app = await read('public/app.js');
   assert.match(app, /runtimeResourceSummary\(\[\.\.\.containers, \.\.\.appContainers\], 'containers'\)/);
-  assert.match(app, /Container CPU limits/);
+  assert.match(app, /Allocated vCPU/);
   assert.match(app, /container\$\{uncappedCpu===1\?'':'s'\} uncapped/);
   assert.match(app, /Host resources/);
 });
