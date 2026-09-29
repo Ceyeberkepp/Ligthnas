@@ -2382,6 +2382,161 @@ def appliance_repair() -> dict:
     return appliance_health()
 
 
+
+SHARE_ROOT = Path(os.environ.get("LIGHTNAS_SHARE_ROOT", "/var/lib/lightnas/files/Shares"))
+SAMBA_MAIN = Path("/etc/samba/smb.conf")
+SAMBA_FRAGMENT = Path("/etc/samba/smb.conf.d/lightnas-shares.conf")
+SSH_FRAGMENT = Path("/etc/ssh/sshd_config.d/90-lightnas-sftp.conf")
+SHARE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.-]{1,63}$")
+SHARE_USER_RE = re.compile(r"^[a-z_][a-z0-9_-]{1,30}$")
+
+
+def _share_protocol(value: object) -> str:
+    protocol = str(value or "")
+    if protocol not in {"SMB", "SFTP", "SMB+SFTP"}:
+        raise ValueError("invalid share protocol")
+    return protocol
+
+
+def _share_record(value: object) -> dict:
+    if not isinstance(value, dict):
+        raise ValueError("invalid share record")
+    share_id = str(value.get("id") or "")
+    name = str(value.get("name") or "").strip()
+    username = str(value.get("username") or "").strip().lower()
+    protocol = _share_protocol(value.get("protocol"))
+    if not re.fullmatch(r"[0-9a-fA-F-]{36}", share_id):
+        raise ValueError("invalid share id")
+    if not SHARE_NAME_RE.fullmatch(name):
+        raise ValueError("invalid share name")
+    if not SHARE_USER_RE.fullmatch(username):
+        raise ValueError("invalid share username")
+    return {"id": share_id, "name": name, "username": username, "protocol": protocol}
+
+
+def _share_path(share: dict) -> Path:
+    return SHARE_ROOT / share["id"]
+
+
+def _uses_smb(share: dict) -> bool:
+    return share["protocol"] in {"SMB", "SMB+SFTP"}
+
+
+def _uses_sftp(share: dict) -> bool:
+    return share["protocol"] in {"SFTP", "SMB+SFTP"}
+
+
+def _run_checked(args: list[str], *, input_text: str | None = None, timeout: int = 30) -> subprocess.CompletedProcess:
+    try:
+        return subprocess.run(
+            args,
+            input=input_text,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout,
+            check=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or exc.stdout or str(exc)).strip()
+        raise RuntimeError(f"{args[0]} failed: {detail[:400]}") from exc
+    except FileNotFoundError as exc:
+        raise RuntimeError(f"{args[0]} is not installed; rerun the LightNAS installer") from exc
+
+
+def _ensure_share_user(username: str, password: str) -> None:
+    exists = subprocess.run(["id", "-u", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+    if not exists:
+        _run_checked(["useradd", "--system", "--user-group", "--no-create-home", "--shell", "/usr/sbin/nologin", username])
+    _run_checked(["chpasswd"], input_text=f"{username}:{password}\n")
+    if subprocess.run(["getent", "group", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0:
+        _run_checked(["groupadd", "--system", username])
+        _run_checked(["usermod", "-g", username, username])
+
+
+def _write_share_configs(shares: list[dict]) -> None:
+    smb_shares = [share for share in shares if _uses_smb(share)]
+    SAMBA_FRAGMENT.parent.mkdir(parents=True, exist_ok=True)
+    if SAMBA_MAIN.exists():
+        main = SAMBA_MAIN.read_text(encoding="utf-8", errors="replace")
+    else:
+        main = "[global]\n  server role = standalone server\n  map to guest = never\n"
+        SAMBA_MAIN.parent.mkdir(parents=True, exist_ok=True)
+        SAMBA_MAIN.write_text(main, encoding="utf-8")
+    include_line = f"include = {SAMBA_FRAGMENT}"
+    if include_line not in main:
+        with SAMBA_MAIN.open("a", encoding="utf-8") as handle:
+            handle.write(f"\n# LightNAS managed shares\n{include_line}\n")
+
+    smb_body = ["# Managed by LightNAS. Do not edit manually."]
+    for share in smb_shares:
+        smb_body.extend([
+            "",
+            f"[{share['name']}]",
+            f"  path = {_share_path(share)}",
+            "  browseable = yes",
+            "  read only = no",
+            "  guest ok = no",
+            f"  valid users = {share['username']}",
+            "  create mask = 0660",
+            "  directory mask = 0770",
+            f"  force user = {share['username']}",
+        ])
+    SAMBA_FRAGMENT.write_text("\n".join(smb_body) + "\n", encoding="utf-8")
+    if smb_shares:
+        _run_checked(["testparm", "-s", str(SAMBA_MAIN)])
+        subprocess.run(["systemctl", "reload-or-restart", "smbd"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+
+    sftp_shares = [share for share in shares if _uses_sftp(share)]
+    SSH_FRAGMENT.parent.mkdir(parents=True, exist_ok=True)
+    ssh_lines = ["# Managed by LightNAS. Do not edit manually."]
+    for share in sftp_shares:
+        ssh_lines.extend([
+            "",
+            f"Match User {share['username']}",
+            "  PasswordAuthentication yes",
+            f"  ForceCommand internal-sftp -d {_share_path(share)}",
+            "  PermitTunnel no",
+            "  AllowTcpForwarding no",
+            "  X11Forwarding no",
+        ])
+    SSH_FRAGMENT.write_text("\n".join(ssh_lines) + "\n", encoding="utf-8")
+    if sftp_shares:
+        _run_checked(["sshd", "-t"])
+        subprocess.run(["systemctl", "reload-or-restart", "ssh"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+
+
+def share_provision(data: dict) -> dict:
+    share = _share_record(data.get("share"))
+    existing = data.get("existingShares") or []
+    if not isinstance(existing, list) or len(existing) > 256:
+        raise ValueError("invalid existing shares")
+    existing_shares = [_share_record(item) for item in existing]
+    password = str(data.get("password") or "")
+    if len(password) < 8 or len(password) > 128 or "\x00" in password or "\n" in password:
+        raise ValueError("network password must contain 8-128 valid characters")
+    SHARE_ROOT.mkdir(parents=True, exist_ok=True)
+    path = _share_path(share)
+    path.mkdir(parents=True, exist_ok=True, mode=0o770)
+    _ensure_share_user(share["username"], password)
+    group = subprocess.run(["id", "-gn", share["username"]], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, check=True).stdout.strip()
+    _run_checked(["chown", "-R", f"{share['username']}:{group}", str(path)])
+    if _uses_smb(share):
+        _run_checked(["smbpasswd", "-s", "-a", share["username"]], input_text=f"{password}\n{password}\n")
+    _write_share_configs([*existing_shares, share])
+    return {"id": share["id"], "status": "configured", "path": str(path)}
+
+
+def share_remove(data: dict) -> dict:
+    share = _share_record(data.get("share"))
+    remaining = data.get("remainingShares") or []
+    if not isinstance(remaining, list) or len(remaining) > 256:
+        raise ValueError("invalid remaining shares")
+    remaining_shares = [_share_record(item) for item in remaining]
+    _write_share_configs(remaining_shares)
+    return {"id": share["id"], "status": "removed", "filesPreserved": True, "path": str(_share_path(share))}
+
+
 def dispatch(request: dict) -> dict:
     action = str(request.get("action") or "")
     data = request.get("data") or {}
@@ -2405,6 +2560,10 @@ def dispatch(request: dict) -> dict:
         return network_inventory()
     if action == "network-action":
         return network_action(data)
+    if action == "share-provision":
+        return share_provision(data)
+    if action == "share-remove":
+        return share_remove(data)
     if action == "appliance-health":
         return appliance_health()
     if action == "appliance-repair":

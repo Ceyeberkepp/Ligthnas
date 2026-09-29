@@ -147,3 +147,23 @@ test('Settings and Security do not reserve empty grid space', async () => {
   assert.match(styles, /height: auto !important/);
   assert.match(styles, /grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/);
 });
+
+
+test('network share provisioning uses the privileged host agent', async () => {
+  const [localHost, shares, agent] = await Promise.all([
+    read('src/local-host.mjs'),
+    read('src/network-shares.mjs'),
+    read('scripts/lightnas-host-agent.py')
+  ]);
+  assert.match(localHost, /share-provision/);
+  assert.match(localHost, /share-remove/);
+  assert.match(shares, /localProvisionNetworkShare/);
+  assert.match(shares, /localRemoveNetworkShare/);
+  assert.doesNotMatch(shares, /useradd/);
+  assert.doesNotMatch(shares, /smbpasswd/);
+  assert.match(agent, /def share_provision\(data: dict\)/);
+  assert.match(agent, /useradd/);
+  assert.match(agent, /smbpasswd/);
+  assert.match(agent, /ForceCommand internal-sftp/);
+  assert.match(agent, /if action == "share-provision"/);
+});
