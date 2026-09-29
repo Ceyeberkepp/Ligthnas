@@ -1,6 +1,6 @@
 import os from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { access, constants, readFile, statfs } from 'node:fs/promises';
+import { access, constants, readFile, statfs, writeFile, rm } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
@@ -299,9 +299,21 @@ export async function getFilesystems() {
       const stats = await statfs(mountPoint, { bigint: true });
       const total = Number(stats.blocks * stats.bsize);
       const available = Number(stats.bavail * stats.bsize);
-      let writable = false;
-      try { await access(mountPoint, constants.W_OK); writable = true; } catch {}
       const mountedReadOnly = options.split(',').includes('ro');
+      let writable = false;
+      if (!mountedReadOnly) {
+        // access(W_OK) alone can be misleading for bind mounts and nested LXC
+        // volumes. Verify that LightNAS can really create data on the mount.
+        try {
+          await access(mountPoint, constants.W_OK);
+          const probe = `${mountPoint.replace(/\/$/, '')}/.lightnas-write-test-${process.pid}`;
+          await writeFile(probe, '', { flag: 'wx', mode: 0o600 });
+          await rm(probe, { force: true });
+          writable = true;
+        } catch {
+          writable = false;
+        }
+      }
       entries.push({
         id: Buffer.from(`${device}:${mountPoint}`).toString('base64url'),
         device,
