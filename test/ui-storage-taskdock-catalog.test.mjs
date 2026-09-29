@@ -341,3 +341,20 @@ test('branding uses either text or picture logo and persists site accent color',
   assert.match(styles, /\.accent-color-control/);
   assert.match(styles, /branding-preview\.picture-only/);
 });
+
+
+test('branding follow-up keeps logo mode exclusive and propagates accent safely', async () => {
+  const [app, server, styles] = await Promise.all([
+    read('public/app.js'),
+    read('src/server.mjs'),
+    read('public/enhancements.css')
+  ]);
+  assert.match(app, /\$\$\('\.brand-mark'\)\.forEach/);
+  assert.match(app, /\$\$\('\[data-brand-name\]'\)\.forEach/);
+  assert.match(app, /--accent-contrast/);
+  assert.match(app, /--accent-2/);
+  assert.match(app, /brandName: state\.overview\.appliance\.brandName/);
+  assert.match(server, /input\.logoMode === undefined/);
+  assert.match(styles, /\.primary \{[\s\S]*var\(--accent-contrast/);
+  assert.match(styles, /color-mix\(in srgb, var\(--accent\) 14%/);
+});
