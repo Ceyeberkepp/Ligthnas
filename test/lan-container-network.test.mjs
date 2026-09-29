@@ -85,3 +85,15 @@ test('nested networking falls back to a transparent host-LAN bridge before priva
   assert.match(network, /LIGHTNAS_NETWORK_MODE=bridge/);
   assert.match(network, /transparent nested LAN bridge is unavailable; using private compatibility NAT/);
 });
+
+
+test('legacy 10.77 guest profiles are restored to DHCP during LAN migration', async () => {
+  const provision = await readFile(new URL('../scripts/provision-runtimes.sh', import.meta.url), 'utf8');
+  assert.match(provision, /restore_guest_lan_dhcp\(\)/);
+  assert.match(provision, /Address=10\\\.77\\\.0/);
+  assert.match(provision, /DHCP=ipv4/);
+  assert.match(provision, /ClientIdentifier=mac/);
+  assert.match(provision, /automaticFallback.*False/);
+  assert.match(provision, /lxc\\\.net\\\.0\\\.ipv4\\\.address/);
+  assert.match(provision, /lxc\\\.net\\\.0\\\.ipv4\\\.gateway/);
+});
