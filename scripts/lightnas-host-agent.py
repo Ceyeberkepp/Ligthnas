@@ -2599,6 +2599,77 @@ def storage_prepare(data: dict) -> dict:
     return {"mountPoint": str(mount), "root": str(root), "writable": True}
 
 
+
+def _vm_qemu_user() -> str:
+    for username in ("libvirt-qemu", "qemu"):
+        result = subprocess.run(["getent", "passwd", username], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        if result.returncode == 0 and result.stdout.strip():
+            return username
+    raise RuntimeError("libvirt QEMU service account was not found")
+
+
+def _managed_storage_path(value: object) -> Path:
+    raw = str(value or "").strip()
+    if not raw:
+        raise ValueError("managed storage path is required")
+    path = Path(raw).resolve()
+    text_path = str(path)
+    if "/.lightnas/storage/" not in text_path:
+        raise ValueError("path is outside LightNAS managed storage")
+    if not text_path.startswith(("/storage/", "/mnt/", "/media/", "/srv/", "/data/", "/var/lib/lightnas/")):
+        raise ValueError("path is outside approved storage roots")
+    return path
+
+
+def vm_storage_access(data: dict) -> dict:
+    iso_raw = str(data.get("isoPath") or "").strip()
+    disk_directory = _managed_storage_path(data.get("diskDirectory"))
+    disk_path = _managed_storage_path(data.get("diskPath"))
+    qemu_user = _vm_qemu_user()
+
+    # Grant only path traversal on parents. Do not change ownership or expose
+    # unrelated files on the mounted data volume.
+    managed_paths = [disk_directory]
+    iso_path = None
+    if iso_raw:
+        iso_path = _managed_storage_path(iso_raw)
+        managed_paths.append(iso_path.parent)
+
+    parents: set[Path] = set()
+    for target in managed_paths:
+        current = target
+        while True:
+            parents.add(current)
+            if str(current) in {"/storage", "/mnt", "/media", "/srv", "/data", "/var/lib/lightnas"}:
+                break
+            parent = current.parent
+            if parent == current:
+                break
+            current = parent
+
+    for directory in sorted(parents, key=lambda item: len(str(item))):
+        if directory.exists():
+            _run_checked(["setfacl", "-m", f"u:{qemu_user}:x", str(directory)])
+
+    disk_directory.mkdir(parents=True, exist_ok=True, mode=0o770)
+    _run_checked(["setfacl", "-m", f"u:{qemu_user}:rwx", str(disk_directory)])
+    _run_checked(["setfacl", "-m", f"d:u:{qemu_user}:rwx", str(disk_directory)])
+    if disk_path.exists():
+        _run_checked(["setfacl", "-m", f"u:{qemu_user}:rw", str(disk_path)])
+
+    if iso_path:
+        if not iso_path.is_file():
+            raise RuntimeError("selected installer ISO no longer exists")
+        _run_checked(["setfacl", "-m", f"u:{qemu_user}:r", str(iso_path)])
+
+    return {
+        "qemuUser": qemu_user,
+        "iso": str(iso_path) if iso_path else "",
+        "diskDirectory": str(disk_directory),
+        "prepared": True,
+    }
+
+
 def dispatch(request: dict) -> dict:
     action = str(request.get("action") or "")
     data = request.get("data") or {}
@@ -2628,6 +2699,8 @@ def dispatch(request: dict) -> dict:
         return share_remove(data)
     if action == "storage-prepare":
         return storage_prepare(data)
+    if action == "vm-storage-access":
+        return vm_storage_access(data)
     if action == "appliance-health":
         return appliance_health()
     if action == "appliance-repair":
