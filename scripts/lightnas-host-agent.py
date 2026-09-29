@@ -2454,6 +2454,59 @@ def _ensure_share_user(username: str, password: str) -> None:
         _run_checked(["usermod", "-g", username, username])
 
 
+def _grant_share_path_access(username: str, path: Path) -> None:
+    """Allow the share account to traverse private LightNAS parents safely.
+
+    /var/lib/lightnas is intentionally mode 0700. Samba authenticates as the
+    per-share account, so ownership of the final share directory alone is not
+    enough: the account also needs execute-only ACLs on every parent directory.
+    Execute-only preserves privacy because it allows traversal to the known
+    share path without allowing directory listings of LightNAS state.
+    """
+    if not available("setfacl"):
+        raise RuntimeError("setfacl is not installed; rerun the LightNAS installer")
+
+    resolved = path.resolve()
+    parents = []
+    current = resolved.parent
+    while current != current.parent:
+        parents.append(current)
+        if current == Path("/"):
+            break
+        current = current.parent
+
+    # Grant only traversal on parents. Root and ordinary system parents are
+    # already traversable; applying the ACL repeatedly is harmless and keeps
+    # custom LIGHTNAS_SHARE_ROOT locations working as well.
+    for parent in reversed(parents):
+        if parent.exists():
+            _run_checked(["setfacl", "-m", f"u:{username}:--x", str(parent)])
+
+    path.mkdir(parents=True, exist_ok=True, mode=0o770)
+    _run_checked(["setfacl", "-m", f"u:{username}:rwx", str(path)])
+    _run_checked(["setfacl", "-m", f"d:u:{username}:rwx", str(path)])
+    _run_checked(["chmod", "0770", str(path)])
+
+
+def _repair_share_permissions(shares: list[dict]) -> None:
+    for share in shares:
+        path = _share_path(share)
+        if not path.exists():
+            continue
+        username = share["username"]
+        if subprocess.run(["id", "-u", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0:
+            continue
+        group = subprocess.run(
+            ["id", "-gn", username],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        _run_checked(["chown", "-R", f"{username}:{group}", str(path)])
+        _grant_share_path_access(username, path)
+
+
 def _write_share_configs(shares: list[dict]) -> None:
     smb_shares = [share for share in shares if _uses_smb(share)]
     SAMBA_FRAGMENT.parent.mkdir(parents=True, exist_ok=True)
@@ -2521,10 +2574,22 @@ def share_provision(data: dict) -> dict:
     _ensure_share_user(share["username"], password)
     group = subprocess.run(["id", "-gn", share["username"]], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, check=True).stdout.strip()
     _run_checked(["chown", "-R", f"{share['username']}:{group}", str(path)])
+    _grant_share_path_access(share["username"], path)
     if _uses_smb(share):
         _run_checked(["smbpasswd", "-s", "-a", share["username"]], input_text=f"{password}\n{password}\n")
+        _run_checked(["smbpasswd", "-e", share["username"]])
     _write_share_configs([*existing_shares, share])
     return {"id": share["id"], "status": "configured", "path": str(path)}
+
+
+def share_repair(data: dict) -> dict:
+    shares = data.get("shares") or []
+    if not isinstance(shares, list) or len(shares) > 256:
+        raise ValueError("invalid shares")
+    records = [_share_record(item) for item in shares]
+    _repair_share_permissions(records)
+    _write_share_configs(records)
+    return {"status": "repaired", "shares": len(records)}
 
 
 def share_remove(data: dict) -> dict:
@@ -2695,6 +2760,8 @@ def dispatch(request: dict) -> dict:
         return network_action(data)
     if action == "share-provision":
         return share_provision(data)
+    if action == "share-repair":
+        return share_repair(data)
     if action == "share-remove":
         return share_remove(data)
     if action == "storage-prepare":

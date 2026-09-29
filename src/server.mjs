@@ -12,7 +12,7 @@ import { listFiles, listAllFiles, createFolder, uploadFile, downloadFile, downlo
 import { thumbnailFor } from './thumbnails.mjs';
 import { catalog, runtimeInventory, installCatalogApp, manageCatalogApp, updateCatalogApp, openContainerShell, createContainer, createVm } from './runtimes-next.mjs';
 import { proxmoxConsoleSocket, proxmoxUpdateStorage, proxmoxCleanDisk } from './proxmox.mjs';
-import { localContainerSummary, localContainerInventory, localManageContainer, localContainerConsoleSocket, localContainerCommand, localVmConsoleSocket, localNodeConsoleSocket, localNetworkInventory, localNetworkAction, localApplianceHealth, localApplianceRepair } from './local-host.mjs';
+import { localContainerSummary, localContainerInventory, localManageContainer, localContainerConsoleSocket, localContainerCommand, localVmConsoleSocket, localNodeConsoleSocket, localNetworkInventory, localNetworkAction, localApplianceHealth, localApplianceRepair, localRepairNetworkShares } from './local-host.mjs';
 import { validateSmtp, sendSmtpTest } from './mailer.mjs';
 import { mediaAvailable, convertMedia } from './media.mjs';
 import { createDataset, updateDataset } from './zfs.mjs';
@@ -61,6 +61,21 @@ store.state.security ||= { apiTokens: [], webhooks: [], identityProviders: [] };
 store.state.security.apiTokens ||= [];
 store.state.security.webhooks ||= [];
 store.state.security.identityProviders ||= [];
+
+queueMicrotask(async () => {
+  if (!store.state.shares?.length) return;
+  try {
+    await localRepairNetworkShares(store.state.shares.map(share => ({
+      id:String(share.id || ''),
+      name:String(share.name || ''),
+      protocol:String(share.protocol || ''),
+      username:String(share.username || '')
+    })));
+  } catch (error) {
+    console.warn('LightNAS share permission repair deferred:', error.message);
+  }
+});
+
 const DEFAULT_FEATURES = {
   appStore: true,
   containers: true,
