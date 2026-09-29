@@ -157,12 +157,22 @@ function canView(view, appliance = state.overview?.appliance) {
 function applyApplianceBranding(appliance = state.overview?.appliance) {
   if (!appliance) return;
   const brandName = String(appliance.brandName || 'LightNAS').trim() || 'LightNAS';
-  const logoUrl = appliance.logo ? `url("/api/branding/logo?v=${Date.now()}")` : '';
-  $$('.brand-mark').forEach(mark => {
-    mark.classList.toggle('custom-logo', Boolean(appliance.logo));
+  const logoMode = appliance.logoMode === 'picture' && appliance.logo ? 'picture' : 'text';
+  const logoUrl = logoMode === 'picture' ? `url("/api/branding/logo?v=${Date.now()}")` : '';
+  const accent = /^#[0-9a-f]{6}$/i.test(String(appliance.accentColor || '')) ? appliance.accentColor : '#087b70';
+  document.documentElement.style.setProperty('--accent', accent);
+  document.documentElement.style.setProperty('--accent-soft', `color-mix(in srgb, ${accent} 12%, var(--panel))`);
+  document.documentElement.style.setProperty('--accent-strong', `color-mix(in srgb, ${accent} 82%, black)`);
+  $('.brand-mark').forEach(mark => {
+    mark.classList.toggle('custom-logo', logoMode === 'picture');
+    mark.classList.toggle('text-logo-mode', logoMode === 'text');
     mark.style.backgroundImage = logoUrl;
+    mark.hidden = logoMode === 'text';
   });
-  $$('[data-brand-name]').forEach(node => { node.textContent = brandName; });
+  $('[data-brand-name]').forEach(node => {
+    node.textContent = brandName;
+    node.hidden = logoMode === 'picture';
+  });
 }
 
 async function showConsole() {
@@ -1556,6 +1566,30 @@ function bindViewActions() {
       finally { button.disabled = false; }
     });
   }
+  const settingsForm = $('#settings-form', $('#content'));
+  if (settingsForm) {
+    const syncBrandingControls = () => {
+      const picture = settingsForm.elements.logoMode?.value === 'picture';
+      settingsForm.querySelector('[data-text-logo-field]')?.classList.toggle('hidden', picture);
+      settingsForm.querySelector('[data-picture-logo-actions]')?.classList.toggle('hidden', !picture);
+      const preview = settingsForm.querySelector('[data-branding-preview]');
+      const previewName = settingsForm.querySelector('[data-brand-preview-name]');
+      if (previewName) previewName.hidden = picture;
+      preview?.classList.toggle('picture-only', picture);
+    };
+    settingsForm.elements.logoMode?.addEventListener('change', syncBrandingControls);
+    const color = settingsForm.elements.accentColor;
+    const hex = settingsForm.elements.accentHex;
+    color?.addEventListener('input', () => { if (hex) hex.value = color.value; document.documentElement.style.setProperty('--accent', color.value); });
+    hex?.addEventListener('input', () => {
+      if (/^#[0-9a-f]{6}$/i.test(hex.value)) {
+        if (color) color.value = hex.value;
+        document.documentElement.style.setProperty('--accent', hex.value);
+      }
+    });
+    syncBrandingControls();
+  }
+
   $('#settings-form', $('#content'))?.addEventListener('submit', async event => {
     event.preventDefault();
     const form = event.currentTarget;
