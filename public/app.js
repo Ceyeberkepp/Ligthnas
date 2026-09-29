@@ -189,7 +189,7 @@ async function showConsole() {
   rememberStorageSignature();
   clearInterval(overviewTimer);
   overviewTimer = setInterval(async () => {
-    if (!['home', 'monitoring'].includes(state.view) || $('#console').classList.contains('hidden')) return;
+    if (state.view !== 'home' || $('#console').classList.contains('hidden')) return;
     try {
       state.overview = await request('/api/overview');
       captureOverviewMetrics();
@@ -278,8 +278,38 @@ function overviewNetworkChart(system) {
   return `<article class="overview-chart panel"><div class="overview-chart-head"><div><span>Network throughput</span><strong>↓ ${bytes(received.at(-1) || 0)}/s · ↑ ${bytes(transmitted.at(-1) || 0)}/s</strong></div><div class="overview-chart-context"><b>${system.network?.interfaces || 0} active interface${system.network?.interfaces === 1 ? '' : 's'}</b><small>RX ${bytes(system.network?.receivedBytes || 0)} · TX ${bytes(system.network?.transmittedBytes || 0)}</small></div></div><svg viewBox="0 0 100 40" preserveAspectRatio="none" role="img" aria-label="Network receive and transmit history"><polyline points="${points(received)}" fill="none" stroke="var(--accent)" stroke-width="1.4" vector-effect="non-scaling-stroke"/><polyline points="${points(transmitted)}" fill="none" stroke="#6f7cff" stroke-width="1.4" vector-effect="non-scaling-stroke"/></svg><div class="chart-legend"><span><i></i>Received</span><span><i class="sent"></i>Sent</span></div></article>`;
 }
 
+function overviewComputeInventory() {
+  const runtimes = state.runtimes || {};
+  const nativeContainers = runtimes.containers?.containers || [];
+  const appContainers = (runtimes.docker?.containers || []).filter(item => item.managed && String(item.name || '').startsWith('lightnas-app-'));
+  const machines = runtimes.virtualization?.machineDetails || [];
+  const catalog = runtimes.catalog || [];
+  const entries = [
+    ...machines.map(item => ({
+      type:'VM', name:item.name || item.id, status:item.status || 'unknown',
+      detail:`${item.cpus || '—'} vCPU · ${item.memory ? bytes(item.memory) : 'RAM unknown'}`, view:'vms'
+    })),
+    ...nativeContainers.map(item => ({
+      type:'LXC', name:item.name || item.id, status:item.status || 'unknown',
+      detail:`${item.cpus || '—'} vCPU · ${item.memory ? bytes(item.memory) : 'RAM unknown'} · ${item.ipv4 || 'No IP'}`, view:'containers'
+    })),
+    ...appContainers.map(item => {
+      const appId = String(item.name || '').replace(/^lightnas-app-/, '');
+      const catalogApp = catalog.find(entry => entry.id === appId);
+      const live = item.liveStats ? `${Number(item.cpuPercent || 0).toFixed(1)}% CPU · ${item.memoryUsage || 'RAM —'}` : 'usage unavailable';
+      return {
+        type:'APP', name:catalogApp?.name || appId || item.name, status:item.status || item.state || 'unknown',
+        detail:`${live} · ${item.ip || 'No IP'}`, view:'containers'
+      };
+    })
+  ];
+  if (!state.runtimes) return '<div class="empty compact-empty"><p>Loading virtual machines, containers, and installed apps…</p></div>';
+  if (!entries.length) return '<div class="empty compact-empty"><p>No virtual machines, containers, or App Store applications are installed yet.</p></div>';
+  return `<div class="overview-compute-list">${entries.map(item => `<button class="overview-compute-row" type="button" data-view-link="${item.view}"><span class="overview-compute-type">${escapeHtml(item.type)}</span><div><b>${escapeHtml(item.name)}</b><small>${escapeHtml(item.detail)}</small></div><span class="compute-status"><i class="${/running|active|up/i.test(String(item.status)) ? 'online' : 'offline'}"></i>${escapeHtml(item.status)}</span></button>`).join('')}</div>`;
+}
+
 function homeView() {
-  const { system, filesystems, storage, shares, activity, appliance } = state.overview;
+  const { system, filesystems, storage, activity, appliance } = state.overview;
   const visibleStorage = storage.usableStorage || storage.virtualStorage || storage.local || { totalBytes: 0, usedBytes: 0, availableBytes: 0, usedPercent: 0, count: 0 };
   const total = visibleStorage.totalBytes || 0;
   const used = visibleStorage.usedBytes || 0;
@@ -304,8 +334,8 @@ function homeView() {
       <section class="overview-graph-panel"><nav class="overview-graph-tabs" aria-label="Performance graph">${graphButtons}</nav>${graph}</section>
     </section>
     <section class="dashboard-grid overview-bottom-grid">
-      <article class="panel"><div class="panel-head"><h2>Shares</h2><button class="panel-link" data-view-link="shares">Open shares</button></div>${shares.length ? `<div class="share-list">${shares.slice(0, 4).map(share => `<div class="share-row"><div><h3>${escapeHtml(share.name)}</h3><p>${escapeHtml(share.protocol)} · ${escapeHtml(share.description || 'No description')}</p></div></div>`).join('')}</div>` : '<p class="muted">No shares configured.</p>'}</article>
-      <article class="panel"><div class="panel-head"><h2>Recent activity</h2><button class="panel-link" data-view-link="monitoring">View all</button></div><div class="activity-list">${activity.length ? activity.slice(0, 5).map(item => `<div class="activity"><span class="activity-icon">${item.type === 'setup' ? '✓' : '↗'}</span><div><b>${escapeHtml(item.message)}</b><time>${relativeTime(item.timestamp)}</time></div></div>`).join('') : '<p class="muted">No recent activity.</p>'}</div></article>
+      <article class="panel overview-compute-panel"><div class="panel-head"><div><h2>Installed compute</h2><p class="muted">Virtual machines, native containers, and App Store applications.</p></div><button class="panel-link" data-view-link="containers">Open compute</button></div>${overviewComputeInventory()}</article>
+      <article class="panel"><div class="panel-head"><h2>Recent activity</h2></div><div class="activity-list">${activity.length ? activity.slice(0, 5).map(item => `<div class="activity"><span class="activity-icon">${item.type === 'setup' ? '✓' : '↗'}</span><div><b>${escapeHtml(item.message)}</b><time>${relativeTime(item.timestamp)}</time></div></div>`).join('') : '<p class="muted">No recent activity.</p>'}</div></article>
     </section>`;
 }
 
@@ -917,14 +947,14 @@ function lightnasAgentReply(input) {
     return { text: `Storage currently reports ${bytes(storage.usedBytes || 0)} used of ${bytes(storage.totalBytes || 0)}, with ${bytes(storage.availableBytes || 0)} available. Open Storage or Pools & datasets for disk-level controls.` };
   }
   if (/cpu|memory|ram|performance|slow|load/.test(lower)) {
-    return { text: `Current host CPU usage is ${system.cpu?.loadPercent || 0}% and memory usage is ${system.memory?.usedPercent || 0}% (${bytes(system.memory?.usedBytes || 0)} used). Monitoring has live graphs if you need to inspect a spike.` };
+    return { text: `Current host CPU usage is ${system.cpu?.loadPercent || 0}% and memory usage is ${system.memory?.usedPercent || 0}% (${bytes(system.memory?.usedBytes || 0)} used). Overview has live graphs if you need to inspect a spike.` };
   }
   if (/app|install|software|catalog/.test(lower)) {
     const aiCount = apps.filter(app => String(app.category || '').toLowerCase() === 'ai').length;
     return { text: `The App Store currently has ${apps.length} one-click entries, including ${aiCount} AI tools. AI runtimes and tools live in App Store; this AI page is the LightNAS operations helper.`, action:'open-apps', actionLabel:'Open App Store' };
   }
   if (/health|status|problem|issue|diagnos/.test(lower)) {
-    return { text: `LightNAS is online. CPU is ${system.cpu?.loadPercent || 0}%, memory is ${system.memory?.usedPercent || 0}%, and ${noIp.length ? `${noIp.length} running container(s) need network attention` : 'the current container inventory has no missing IPv4 addresses'}. Use Monitoring for live graphs or ask me about networking, storage, apps, CPU, or memory.` };
+    return { text: `LightNAS is online. CPU is ${system.cpu?.loadPercent || 0}%, memory is ${system.memory?.usedPercent || 0}%, and ${noIp.length ? `${noIp.length} running container(s) need network attention` : 'the current container inventory has no missing IPv4 addresses'}. Use Overview for live graphs or ask me about networking, storage, apps, CPU, or memory.` };
   }
   return { text: 'I am the LightNAS operations helper. Ask me about container networking, storage, CPU or memory, system health, or installed/app-store software. I use the live LightNAS inventory to guide actions instead of showing AI application installers here.' };
 }
@@ -1021,7 +1051,7 @@ function adminView() {
         <span class="eyebrow">OPERATIONS</span>
         <h2>Health & monitoring</h2>
         <p>Live system pressure, appliance diagnostics and managed-service repair.</p>
-        <div class="head-actions"><button class="secondary" data-view-link="monitoring">Monitoring</button><button class="secondary" data-view-link="capabilities">Diagnostics</button></div>
+        <div class="head-actions"><button class="secondary" data-view-link="home">Overview health</button><button class="secondary" data-view-link="capabilities">Diagnostics</button></div>
       </article>
     </section>
 
@@ -1240,7 +1270,8 @@ function integrationsView() {
 
 function render(view) {
   if (view === 'media') view = 'files';
-  state.view = ['home', 'storage', 'pools', 'files', 'users', 'permissions', 'shell', 'smtp', 'admin', 'shares', 'capabilities', 'apps', 'ai', 'containers', 'vms', 'monitoring', 'settings', 'network', 'firewall', 'integrations'].includes(view) ? view : 'home';
+  if (view === 'monitoring') view = 'home';
+  state.view = ['home', 'storage', 'pools', 'files', 'users', 'permissions', 'shell', 'smtp', 'admin', 'shares', 'capabilities', 'apps', 'ai', 'containers', 'vms', 'settings', 'network', 'firewall', 'integrations'].includes(view) ? view : 'home';
   if (!canView(state.view)) state.view = canView('home') ? 'home' : 'files';
   const content = $('#content');
   content.innerHTML = state.view === 'home' ? homeView() : state.view === 'storage' ? storageView() : state.view === 'pools' ? poolsView() : state.view === 'files' ? filesView() : state.view === 'media' ? mediaView() : state.view === 'users' ? usersView() : state.view === 'permissions' ? permissionsView() : state.view === 'shell' ? shellView() : state.view === 'smtp' ? smtpView() : state.view === 'admin' ? adminView() : state.view === 'shares' ? sharesView() : state.view === 'containers' ? containersView() : state.view === 'vms' ? vmsView() : state.view === 'settings' ? settingsView() : state.view === 'capabilities' ? capabilitiesView() : state.view === 'monitoring' ? monitoringView() : state.view === 'ai' ? aiView() : state.view === 'network' ? networkView() : state.view === 'firewall' ? firewallView() : state.view === 'integrations' ? integrationsView() : moduleView(state.view);
@@ -1258,7 +1289,7 @@ function render(view) {
     if (!state.runtimes?.containers && !state.containerError) loadContainers();
     if ((!state.runtimes?.docker || !state.runtimes?.catalog) && !state.runtimeError) loadRuntimes();
   }
-  if (['apps', 'ai', 'vms', 'integrations'].includes(state.view) && (!state.runtimes?.docker || !state.runtimes?.virtualization || !state.runtimes?.catalog) && !state.runtimeError) loadRuntimes();
+  if (['home', 'apps', 'ai', 'vms', 'integrations'].includes(state.view) && (!state.runtimes?.docker || !state.runtimes?.virtualization || !state.runtimes?.catalog) && !state.runtimeError) loadRuntimes();
 }
 
 function bindViewActions() {
