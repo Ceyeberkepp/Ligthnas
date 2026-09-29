@@ -381,3 +381,32 @@ test('branding controls sidebar, main content, and login with a larger picture l
   assert.match(styles, /height: 104px/);
   assert.match(styles, /\.auth-panel \{[\s\S]*--auth-panel-bg/);
 });
+
+
+test('branding supports sidebar and main font colors and themes topbar/cards', async () => {
+  const [app, server, styles] = await Promise.all([
+    read('public/app.js'),
+    read('src/server.mjs'),
+    read('public/enhancements.css')
+  ]);
+  assert.match(app, /Sidebar font color/);
+  assert.match(app, /Main font color/);
+  assert.match(app, /--topbar/);
+  assert.match(app, /--panel/);
+  assert.match(app, /--sidebar-text/);
+  assert.match(server, /sidebarTextColor/);
+  assert.match(server, /contentTextColor/);
+  assert.match(styles, /\.topbar \{[\s\S]*var\(--topbar\)/);
+  assert.match(styles, /\.panel,[\s\S]*background: var\(--panel\)/);
+});
+
+test('Files and media uses dropdowns for view and upload actions', async () => {
+  const app = await read('public/app.js');
+  const styles = await read('public/enhancements.css');
+  assert.match(app, /data-file-view-select/);
+  assert.match(app, /data-file-upload-select/);
+  assert.match(app, /Upload files/);
+  assert.match(app, /Upload folder/);
+  assert.match(app, /event\.target\.value ===?/);
+  assert.match(styles, /\.file-toolbar-select/);
+});
