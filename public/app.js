@@ -551,8 +551,9 @@ function vmsView() {
 }
 function sharesView() {
   const { shares } = state.overview;
-  return `${pageHead('Share plans', 'Saved configurations only. No SMB, NFS, or SFTP service is changed.', '<button class="primary" data-action="new-share">+ New plan</button>')}
-    <div class="share-list">${shares.map(share => `<article class="share-row"><div><h3>${escapeHtml(share.name)}</h3><p>${escapeHtml(share.protocol)} · ${escapeHtml(share.description || 'No description')} · ${relativeTime(share.createdAt)}</p></div><button class="secondary" data-delete-share="${escapeHtml(share.id)}" data-name="${escapeHtml(share.name)}">Remove plan</button></article>`).join('') || '<div class="empty"><p>No share plans saved.</p></div>'}</div>`;
+  return `${pageHead('Network shares', 'Connect directly from Windows, Linux, or macOS over SMB and SFTP.', '<button class="primary" data-action="new-share">+ Create share</button>')}
+    <section class="module-note share-help"><b>Quick connect:</b> Windows File Explorer uses <code>\\\\LIGHTNAS-IP\\share</code>. Linux/macOS can use <code>smb://LIGHTNAS-IP/share</code> or <code>sftp user@LIGHTNAS-IP</code>.</section>
+    <div class="share-list">${shares.map(share => `<article class="share-row network-share-row"><div><div class="volume-title"><h3>${escapeHtml(share.name)}</h3><span class="volume-state writable">ACTIVE</span></div><p>${escapeHtml(share.protocol)} · user ${escapeHtml(share.username || '—')} · ${escapeHtml(share.description || 'No description')}</p><div class="share-addresses">${share.smb ? `<code>${escapeHtml(share.smb)}</code>` : ''}${share.smbUrl ? `<code>${escapeHtml(share.smbUrl)}</code>` : ''}${share.sftp ? `<code>${escapeHtml(share.sftp)}</code>` : ''}</div></div><button class="secondary danger-button" data-delete-share="${escapeHtml(share.id)}" data-name="${escapeHtml(share.name)}">Remove share</button></article>`).join('') || '<div class="empty"><p>No network shares configured yet.</p></div>'}</div>`;
 }
 
 const librarySections = [
@@ -1776,7 +1777,7 @@ function bindViewActions() {
     const path = button.dataset.path || [state.folder, button.dataset.deleteFile].filter(Boolean).join('/');
     try { await request(`/api/files?path=${encodeURIComponent(path)}`, { method: 'DELETE' }); await loadFiles(); toast('Deleted.'); } catch (error) { toast(error.message); }
   }));
-  $$('[data-delete-share]', content).forEach(button => button.addEventListener('click', async () => { if (!confirm(`Remove share plan ${button.dataset.name}?`)) return; try { await request(`/api/shares/${button.dataset.deleteShare}`, { method: 'DELETE' }); state.overview = await request('/api/overview'); render(state.view); toast('Plan removed.'); } catch (error) { toast(error.message); } }));
+  $$('[data-delete-share]', content).forEach(button => button.addEventListener('click', async () => { if (!confirm(`Remove network share ${button.dataset.name}? The shared files will be preserved.`)) return; try { await request(`/api/shares/${button.dataset.deleteShare}`, { method: 'DELETE' }); state.overview = await request('/api/overview'); render(state.view); toast('Share removed. Files were preserved.'); } catch (error) { toast(error.message); } }));
 }
 
 async function submitAuth(form, path) {
@@ -1951,7 +1952,7 @@ $('#share-form').addEventListener('submit', async event => {
     form.reset();
     state.overview = await request('/api/overview');
     render(state.view);
-    toast('Share plan saved. No file service was changed.');
+    toast('Network share created. Connection addresses are shown on the Shares page.');
   } catch (problem) { error.textContent = problem.message; }
 });
 

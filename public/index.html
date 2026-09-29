@@ -152,11 +152,14 @@
   <dialog id="share-dialog">
     <form id="share-form">
       <div class="dialog-head"><div><span class="eyebrow">NEW RESOURCE</span><h2>Create shared folder</h2></div><button type="button" class="close-dialog" aria-label="Close">×</button></div>
-      <p>Save a proposed share configuration. This does not create a folder or enable SMB, NFS, or SFTP.</p>
+      <p>Create a real network share. LightNAS creates the backing folder, configures the selected service, and shows the address to use from Windows, Linux, or macOS.</p>
       <label>Share name<input name="name" required minlength="2" maxlength="64" placeholder="Team Files"></label>
-      <label>Protocol<select name="protocol"><option>SMB</option><option>NFS</option><option>SFTP</option></select></label>
+      <label>Protocol<select name="protocol"><option value="SMB">SMB (Windows file sharing)</option><option value="SFTP">SFTP</option><option value="SMB+SFTP">SMB + SFTP</option></select></label>
+      <label>Network username<input name="username" required minlength="2" maxlength="31" pattern="[a-z_][a-z0-9_-]{1,30}" placeholder="gustavo" autocomplete="username"></label>
+      <label>Network password<input name="password" type="password" required minlength="8" maxlength="128" autocomplete="new-password" placeholder="At least 8 characters"></label>
       <label>Description<textarea name="description" maxlength="160" placeholder="What belongs in this share?"></textarea></label>
-      <div class="dialog-actions"><button type="button" class="secondary close-dialog">Cancel</button><button class="primary" type="submit">Save plan</button></div>
+      <p class="muted">The password is applied to SMB/SFTP on the appliance and is not stored in the LightNAS settings database.</p>
+      <div class="dialog-actions"><button type="button" class="secondary close-dialog">Cancel</button><button class="primary" type="submit">Create share</button></div>
       <div class="form-error" role="alert"></div>
     </form>
   </dialog>

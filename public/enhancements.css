@@ -2057,3 +2057,33 @@
     justify-content: flex-start;
   }
 }
+
+
+/* Network shares */
+.share-help {
+  margin: 0 0 16px;
+}
+.share-help code,
+.share-addresses code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.network-share-row {
+  align-items: center;
+}
+.share-addresses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.share-addresses code {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel-2);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}

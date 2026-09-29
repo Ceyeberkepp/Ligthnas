@@ -80,3 +80,41 @@
   .provider-preset-grid { grid-template-columns:1fr; }
 }
 @media (min-width:721px) and (max-width:1180px) { .provider-preset-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+
+
+/* Keep Settings & Security compact on desktop. */
+.totp-admin {
+  padding: 18px;
+  margin-top: 14px;
+}
+.totp-admin .admin-section-head {
+  margin: 0 0 12px;
+}
+.mfa-method-grid {
+  gap: 10px;
+}
+.mfa-method {
+  padding: 12px;
+}
+.mfa-method p {
+  line-height: 1.35;
+}
+.mfa-config-grid {
+  align-items: start;
+  gap: 10px;
+  margin-top: 10px;
+}
+.mfa-config-grid .mfa-config {
+  align-self: start;
+  min-height: 0;
+  padding: 14px;
+}
+.mfa-config h3 {
+  margin: 0 0 8px;
+}
+.security-stack-form {
+  gap: 8px;
+}
+.security-key-list {
+  margin-top: 10px;
+}
