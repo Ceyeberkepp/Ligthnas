@@ -96,14 +96,15 @@ test('managed App Store containers show access address and terminal controls', a
   assert.match(terminal, /params\.get\('type'\) === 'app'/);
 });
 
-test('General settings owns both text and picture branding', async () => {
+test('General settings owns exclusive text or picture branding', async () => {
   const [app, server, index, styles] = await Promise.all([
     read('public/app.js'),
     read('src/server.mjs'),
     read('public/index.html'),
     read('public/enhancements.css')
   ]);
-  assert.match(app, /Brand \/ logo name/);
+  assert.match(app, /Logo type/);
+  assert.match(app, /Brand name/);
   assert.match(app, /Upload logo picture/);
   assert.doesNotMatch(app, /<span class="eyebrow">BRANDING<\/span>/);
   assert.match(server, /brandName: store\.state\.config\.brandName \|\| 'LightNAS'/);
