@@ -182,3 +182,11 @@ test('nested VM runtime remains usable with TCG and qemu user NAT when tun is mi
   assert.match(runtime, /if \(setupVm && !\/\\bready\\b\/i\.test\(setupVm\)\)/);
   assert.doesNotMatch(dialogs, /catch \(problem\) \{ alert\(problem\.message\); \}\n    return;\n  \}\n\n  const containerEdit/);
 });
+
+
+test('overview graph tabs span the full chart width', async () => {
+  const styles = await read('public/enhancements.css');
+  assert.match(styles, /\.overview-graph-tabs \{[^}]*width:100%/s);
+  assert.match(styles, /\.overview-graph-tabs button \{[^}]*flex:1 1 0/s);
+  assert.doesNotMatch(styles, /\.overview-graph-tabs \{[^}]*width:max-content/s);
+});
