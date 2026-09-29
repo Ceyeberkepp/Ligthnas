@@ -17,8 +17,9 @@ test('container creation is DHCP-first and guarantees managed automatic IPv4 whe
   const agent = await readFile(new URL('../scripts/lightnas-host-agent.py', import.meta.url), 'utf8');
   assert.match(agent, /DHCP is always attempted first/);
   assert.match(agent, /def apply_managed_automatic_address/);
-  assert.match(agent, /lxc\.net\.0\.ipv4\.address/);
-  assert.match(agent, /lxc\.net\.0\.ipv4\.gateway/);
+  assert.match(agent, /def sanitize_nested_lxc_network/);
+  assert.match(agent, /Address=\{address\}/);
+  assert.match(agent, /Gateway=10\.77\.0\.1/);
   assert.match(agent, /automaticFallback/);
   assert.match(agent, /"networkMode": "direct-lan" if direct_macvlan else "managed"/);
 });

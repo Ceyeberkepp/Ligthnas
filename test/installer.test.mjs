@@ -60,9 +60,10 @@ test('installer enables the local App Store engine while keeping System Containe
 });
 
 
-test('existing NAT installs automatically refresh the LightNAS DHCP service', async () => {
+test('existing private NAT installs are automatically reprovisioned toward the host LAN', async () => {
   const installer = await readFile(new URL('../install.sh', import.meta.url), 'utf8');
   assert.match(installer, /LIGHTNAS_NETWORK_MODE=lxc-nat/);
-  assert.match(installer, /--dhcp-authoritative/);
-  assert.match(installer, /Updating LightNAS container DHCP service and migrating legacy DHCP guests/);
+  assert.match(installer, /Existing private container NAT detected/);
+  assert.match(installer, /automatic migration to the LightNAS host LAN/);
+  assert.match(installer, /RUNTIME_PROVISION_NEEDED=1/);
 });
