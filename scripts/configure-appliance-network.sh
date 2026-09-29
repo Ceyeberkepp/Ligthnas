@@ -71,6 +71,36 @@ EOF
   done
 }
 
+derive_managed_lan_pool() {
+  local dev="$1" cidr gateway
+  cidr="$(ip -4 -o addr show dev "$dev" scope global 2>/dev/null | awk 'NR==1{print $4}')"
+  gateway="$(ip -4 route show default dev "$dev" 2>/dev/null | awk 'NR==1{for(i=1;i<=NF;i++) if($i=="via"){print $(i+1); exit}}')"
+  [[ -n "$cidr" && -n "$gateway" ]] || return 1
+  python3 - "$cidr" "$gateway" <<'PY'
+import ipaddress, sys
+iface=ipaddress.ip_interface(sys.argv[1])
+net=iface.network
+host=iface.ip
+gateway=ipaddress.ip_address(sys.argv[2])
+usable=max(0, net.num_addresses-2)
+if usable < 60:
+    raise SystemExit(1)
+start_index=50 if usable >= 200 else max(2, usable//4)
+end_index=200 if usable >= 200 else max(start_index, usable-5)
+start=net.network_address + start_index
+end=net.network_address + end_index
+while start in {host, gateway} and start < end:
+    start += 1
+while end in {host, gateway} and end > start:
+    end -= 1
+print(f"LIGHTNAS_CONTAINER_SUBNET={net.with_prefixlen}")
+print(f"LIGHTNAS_CONTAINER_POOL_START={start}")
+print(f"LIGHTNAS_CONTAINER_POOL_END={end}")
+print(f"LIGHTNAS_CONTAINER_GATEWAY={gateway}")
+print(f"LIGHTNAS_HOST_ADDRESS={host}")
+PY
+}
+
 # When LightNAS itself runs inside another container (for example Proxmox
 # LXC), never move the appliance management IP or default route away from the
 # existing outer-provided interface. The outer hypervisor owns that veth
@@ -88,7 +118,8 @@ if [[ -n "$container_kind" && "$container_kind" != "none" ]]; then
     macvlan_probe="lnmv-probe-$$"
     if ip link add link "$nested_uplink" name "$macvlan_probe" type macvlan mode bridge >/dev/null 2>&1; then
       ip link delete "$macvlan_probe" >/dev/null 2>&1 || true
-      printf 'LIGHTNAS_NETWORK_MODE=nested-macvlan\nLIGHTNAS_UPLINK=%s\nLIGHTNAS_CONTAINER_PARENT=%s\n' "$nested_uplink" "$nested_uplink" >"$STATE_FILE"
+      pool_state="$(derive_managed_lan_pool "$nested_uplink" || true)"
+      printf 'LIGHTNAS_NETWORK_MODE=nested-macvlan\nLIGHTNAS_UPLINK=%s\nLIGHTNAS_CONTAINER_PARENT=%s\n%s\n' "$nested_uplink" "$nested_uplink" "$pool_state" >"$STATE_FILE"
       echo "LightNAS network: nested appliance detected; direct LAN is available through macvlan on $nested_uplink."
       exit 0
     fi
@@ -96,13 +127,15 @@ if [[ -n "$container_kind" && "$container_kind" != "none" ]]; then
     ipvlan_probe="lniv-probe-$$"
     if ip link add link "$nested_uplink" name "$ipvlan_probe" type ipvlan mode l2 >/dev/null 2>&1; then
       ip link delete "$ipvlan_probe" >/dev/null 2>&1 || true
-      printf 'LIGHTNAS_NETWORK_MODE=nested-ipvlan\nLIGHTNAS_UPLINK=%s\nLIGHTNAS_CONTAINER_PARENT=%s\n' "$nested_uplink" "$nested_uplink" >"$STATE_FILE"
+      pool_state="$(derive_managed_lan_pool "$nested_uplink" || true)"
+      printf 'LIGHTNAS_NETWORK_MODE=nested-ipvlan\nLIGHTNAS_UPLINK=%s\nLIGHTNAS_CONTAINER_PARENT=%s\n%s\n' "$nested_uplink" "$nested_uplink" "$pool_state" >"$STATE_FILE"
       echo "LightNAS network: macvlan is unavailable; direct LAN is available through ipvlan on $nested_uplink."
       exit 0
     fi
   fi
 
-  printf 'LIGHTNAS_NETWORK_MODE=lxc-nat\nLIGHTNAS_UPLINK=%s\nLIGHTNAS_CONTAINER_BRIDGE=lightnas0\nLIGHTNAS_VM_NETWORK=default\n' "$nested_uplink" >"$STATE_FILE"
+  pool_state="$(derive_managed_lan_pool "$nested_uplink" || true)"
+  printf 'LIGHTNAS_NETWORK_MODE=lxc-nat\nLIGHTNAS_UPLINK=%s\nLIGHTNAS_CONTAINER_BRIDGE=lightnas0\nLIGHTNAS_VM_NETWORK=default\n%s\n' "$nested_uplink" "$pool_state" >"$STATE_FILE"
   echo "LightNAS network: nested appliance detected; preserving management networking and using safe container NAT fallback."
   exit 0
 fi
