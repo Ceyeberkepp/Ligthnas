@@ -263,11 +263,11 @@ function captureOverviewMetrics() {
   }
 }
 
-function overviewChart(label, value, suffix, history, maximum = 100) {
+function overviewChart(label, value, suffix, history, maximum = 100, detail = '') {
   const points = history.length > 1 ? history : [history[0] || 0, history[0] || 0];
   const ceiling = Math.max(maximum, ...points, 1);
   const coordinates = points.map((item, index) => `${(index / Math.max(points.length - 1, 1)) * 100},${38 - (Math.min(ceiling, item) / ceiling) * 34}`).join(' ');
-  return `<article class="overview-chart panel"><div class="overview-chart-head"><div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}${escapeHtml(suffix)}</strong></div><small>Live · last ${points.length} sample${points.length === 1 ? '' : 's'}</small></div><svg viewBox="0 0 100 40" preserveAspectRatio="none" role="img" aria-label="${escapeHtml(label)} history"><defs><linearGradient id="chart-${escapeHtml(label.replace(/\W/g, ''))}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--accent)" stop-opacity=".52"/><stop offset="1" stop-color="var(--accent)" stop-opacity=".04"/></linearGradient></defs><polygon points="0,40 ${coordinates} 100,40" fill="url(#chart-${escapeHtml(label.replace(/\W/g, ''))})"/><polyline points="${coordinates}" fill="none" stroke="var(--accent)" stroke-width="1.2" vector-effect="non-scaling-stroke"/></svg></article>`;
+  return `<article class="overview-chart panel"><div class="overview-chart-head"><div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}${escapeHtml(suffix)}</strong></div><div class="overview-chart-context">${detail ? `<b>${escapeHtml(detail)}</b>` : ''}<small>Live · last ${points.length} sample${points.length === 1 ? '' : 's'}</small></div></div><svg viewBox="0 0 100 40" preserveAspectRatio="none" role="img" aria-label="${escapeHtml(label)} history"><defs><linearGradient id="chart-${escapeHtml(label.replace(/\W/g, ''))}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--accent)" stop-opacity=".52"/><stop offset="1" stop-color="var(--accent)" stop-opacity=".04"/></linearGradient></defs><polygon points="0,40 ${coordinates} 100,40" fill="url(#chart-${escapeHtml(label.replace(/\W/g, ''))})"/><polyline points="${coordinates}" fill="none" stroke="var(--accent)" stroke-width="1.2" vector-effect="non-scaling-stroke"/></svg></article>`;
 }
 
 function overviewNetworkChart(system) {
@@ -275,7 +275,7 @@ function overviewNetworkChart(system) {
   const transmitted = state.metricHistory.networkOut.length > 1 ? state.metricHistory.networkOut : [0, 0];
   const ceiling = Math.max(...received, ...transmitted, 1024);
   const points = values => values.map((item, index) => `${(index / Math.max(values.length - 1, 1)) * 100},${38 - (Math.min(ceiling, item) / ceiling) * 34}`).join(' ');
-  return `<article class="overview-chart panel"><div class="overview-chart-head"><div><span>Network throughput</span><strong>↓ ${bytes(received.at(-1) || 0)}/s · ↑ ${bytes(transmitted.at(-1) || 0)}/s</strong></div><small>${system.network?.interfaces || 0} active interface${system.network?.interfaces === 1 ? '' : 's'}</small></div><svg viewBox="0 0 100 40" preserveAspectRatio="none" role="img" aria-label="Network receive and transmit history"><polyline points="${points(received)}" fill="none" stroke="var(--accent)" stroke-width="1.4" vector-effect="non-scaling-stroke"/><polyline points="${points(transmitted)}" fill="none" stroke="#6f7cff" stroke-width="1.4" vector-effect="non-scaling-stroke"/></svg><div class="chart-legend"><span><i></i>Received</span><span><i class="sent"></i>Sent</span></div></article>`;
+  return `<article class="overview-chart panel"><div class="overview-chart-head"><div><span>Network throughput</span><strong>↓ ${bytes(received.at(-1) || 0)}/s · ↑ ${bytes(transmitted.at(-1) || 0)}/s</strong></div><div class="overview-chart-context"><b>${system.network?.interfaces || 0} active interface${system.network?.interfaces === 1 ? '' : 's'}</b><small>RX ${bytes(system.network?.receivedBytes || 0)} · TX ${bytes(system.network?.transmittedBytes || 0)}</small></div></div><svg viewBox="0 0 100 40" preserveAspectRatio="none" role="img" aria-label="Network receive and transmit history"><polyline points="${points(received)}" fill="none" stroke="var(--accent)" stroke-width="1.4" vector-effect="non-scaling-stroke"/><polyline points="${points(transmitted)}" fill="none" stroke="#6f7cff" stroke-width="1.4" vector-effect="non-scaling-stroke"/></svg><div class="chart-legend"><span><i></i>Received</span><span><i class="sent"></i>Sent</span></div></article>`;
 }
 
 function homeView() {
@@ -288,10 +288,10 @@ function homeView() {
   const loadAverage = system.cpu.loadAverage || [0, 0, 0];
   const graphButtons = [['cpu','CPU'],['load','Load'],['memory','Memory'],['storage','Storage'],['network','Network']].map(([id, label]) => `<button type="button" class="${state.overviewMetric === id ? 'active' : ''}" data-overview-metric="${id}" aria-pressed="${state.overviewMetric === id}">${label}</button>`).join('');
   const graph = state.overviewMetric === 'network' ? overviewNetworkChart(system)
-    : state.overviewMetric === 'load' ? overviewChart('System load', `${loadAverage[0]}`, '', state.metricHistory.load, Math.max(2, system.cpu.cores))
-    : state.overviewMetric === 'memory' ? overviewChart('Memory usage', `${system.memory.usedPercent}`, '%', state.metricHistory.memory)
-    : state.overviewMetric === 'storage' ? overviewChart('Storage usage', `${storagePercent}`, '%', state.metricHistory.storage)
-    : overviewChart('CPU usage', `${system.cpu.loadPercent}`, '%', state.metricHistory.cpu);
+    : state.overviewMetric === 'load' ? overviewChart('System load', `${loadAverage[0]}`, '', state.metricHistory.load, Math.max(2, system.cpu.cores), `1m ${loadAverage[0]} · 5m ${loadAverage[1]} · 15m ${loadAverage[2]} · ${system.cpu.cores} CPUs`)
+    : state.overviewMetric === 'memory' ? overviewChart('Memory usage', `${system.memory.usedPercent}`, '%', state.metricHistory.memory, 100, `${bytes(system.memory.usedBytes)} used · ${bytes(system.memory.totalBytes)} total · ${bytes(system.memory.freeBytes)} free`)
+    : state.overviewMetric === 'storage' ? overviewChart('Storage usage', `${storagePercent}`, '%', state.metricHistory.storage, 100, `${bytes(used)} used · ${bytes(total)} total · ${bytes(available)} free`)
+    : overviewChart('CPU usage', `${system.cpu.loadPercent}`, '%', state.metricHistory.cpu, 100, `${system.cpu.cores} logical CPUs · ${system.cpu.model || 'CPU model unavailable'}`);
   return `${pageHead('Overview', 'Live system health and storage at a glance.', '<button class="secondary" data-action="refresh">Refresh</button>')}
     <section class="node-overview-grid">
       <article class="panel node-summary-card"><div class="panel-head"><div><span class="eyebrow">${escapeHtml(appliance.deviceName)}</span><h2>System status</h2></div><span class="volume-state writable">ONLINE</span></div>
@@ -463,16 +463,18 @@ function runtimeBanner(kind) {
 
 function runtimeResourceSummary(items = [], label = 'guests') {
   const host = state.overview?.system || {};
-  const running = items.filter(item => /running|active/i.test(String(item.status || '')));
+  const running = items.filter(item => /running|active|up/i.test(String(item.status || item.state || '')));
   const allocatedMemory = items.reduce((total, item) => total + (Number(item.memory) || 0), 0);
   const allocatedCpus = items.reduce((total, item) => total + (Number(item.cpus) || 0), 0);
+  const uncappedCpu = items.filter(item => item.cpuUnlimited).length;
   const hostMemory = Number(host.memory?.totalBytes || 0);
   const allocationPercent = hostMemory ? Math.min(100, Math.round((allocatedMemory / hostMemory) * 100)) : 0;
+  const hostCores = Number(host.cpu?.cores || 0);
   return `<section class="host-monitor-grid runtime-resource-summary">
-    <article class="monitor-card"><span>Total ${label}</span><strong>${items.length}</strong><small>${running.length} running</small></article>
-    <article class="monitor-card"><span>${label === 'containers' ? 'Container memory use' : label === 'virtual machines' ? 'VM memory use' : 'Allocated RAM'}</span><strong>${bytes(allocatedMemory)}</strong><div class="track"><span style="width:${allocationPercent}%"></span></div><small>${hostMemory ? `${allocationPercent}% of ${bytes(hostMemory)} host RAM` : 'Host total unavailable'}</small></article>
-    <article class="monitor-card"><span>Allocated vCPU</span><strong>${allocatedCpus}</strong><small>${host.cpu?.cores || '—'} host logical cores</small></article>
-    <article class="monitor-card"><span>Host CPU use</span><strong>${host.cpu?.loadPercent ?? '—'}% CPU</strong><small>${host.memory?.usedPercent ?? '—'}% host memory currently used</small></article>
+    <article class="monitor-card"><span>Total ${label}</span><strong>${items.length}</strong><small>${running.length} running · ${items.length-running.length} stopped</small></article>
+    <article class="monitor-card"><span>${label === 'containers' ? 'Container memory limits' : label === 'virtual machines' ? 'VM memory allocation' : 'Allocated RAM'}</span><strong>${bytes(allocatedMemory)}</strong><div class="track"><span style="width:${allocationPercent}%"></span></div><small>${hostMemory ? `${allocationPercent}% of ${bytes(hostMemory)} host RAM · ${bytes(host.memory?.usedBytes || 0)} host used` : 'Host total unavailable'}</small></article>
+    <article class="monitor-card"><span>Container CPU limits</span><strong>${allocatedCpus || 0} vCPU</strong><small>${hostCores || '—'} host logical CPUs${uncappedCpu ? ` · ${uncappedCpu} container${uncappedCpu===1?'':'s'} uncapped` : ''}</small></article>
+    <article class="monitor-card"><span>Host resources</span><strong>${host.cpu?.loadPercent ?? '—'}% CPU</strong><small>${hostCores || '—'} CPUs · ${host.memory?.usedPercent ?? '—'}% RAM · load ${host.cpu?.loadAverage?.[0] ?? '—'}</small></article>
   </section>`;
 }
 
@@ -500,16 +502,19 @@ function containersView() {
   const appContainerList = !docker
     ? '<div class="empty compact-empty"><p>Loading App Store containers…</p></div>'
     : appContainers.length
-      ? `<div class="compute-table app-container-table"><div class="compute-table-head"><span>Status</span><span>App / Container</span><span>Access</span><span>Image</span><span>Runtime</span><span></span></div>${appContainers.map(item => {
+      ? `<div class="compute-table app-container-table"><div class="compute-table-head"><span>Status</span><span>App / Container</span><span>Access</span><span>Resources</span><span>Image</span><span></span></div>${appContainers.map(item => {
           const appId = String(item.name || '').replace(/^lightnas-app-/, '');
           const app = state.runtimes?.catalog?.find(entry => entry.id === appId);
           const running = /running|up/i.test(String(item.state || item.status || ''));
           const hostAddress = state.overview?.system?.network?.primaryIpv4 || location.hostname;
           const appUrl = app?.port ? `http://${hostAddress}:${app.port}/` : '';
-          return `<article class="compute-row app-container-row"><span class="compute-status"><i class="${running ? 'online' : 'offline'}"></i>${escapeHtml(item.status || item.state || 'unknown')}</span><div><h3>${escapeHtml(app?.name || appId || item.name)}</h3><small>${escapeHtml(item.name)} · App Store managed</small></div><div class="app-access-cell">${appUrl ? `<a href="${escapeHtml(appUrl)}" target="_blank" rel="noopener">Open: ${escapeHtml(hostAddress)}:${escapeHtml(app.port)}</a>` : '<span>No web port</span>'}<small>Container IP: ${escapeHtml(item.ip || 'not assigned')} ${item.ports ? `· ${escapeHtml(item.ports)}` : ''}</small></div><span class="compute-truncate" title="${escapeHtml(item.image || '')}">${escapeHtml(item.image || '—')}</span><span>Docker / OCI</span><div class="runtime-actions compute-actions">
+          const cpuText = item.cpuUnlimited ? `Unlimited · host ${state.overview?.system?.cpu?.cores || '—'} CPUs` : `${item.cpus || 0} CPU`;
+          const memoryText = item.memory ? bytes(item.memory) : 'No memory cap';
+          return `<article class="compute-row app-container-row"><span class="compute-status"><i class="${running ? 'online' : 'offline'}"></i>${escapeHtml(item.status || item.state || 'unknown')}</span><div><h3>${escapeHtml(app?.name || appId || item.name)}</h3><small>${escapeHtml(item.name)} · App Store managed</small></div><div class="app-access-cell">${appUrl ? `<a href="${escapeHtml(appUrl)}" target="_blank" rel="noopener">Open: ${escapeHtml(hostAddress)}:${escapeHtml(app.port)}</a>` : '<span>No web port</span>'}<small>Container IP: ${escapeHtml(item.ip || 'not assigned')} ${item.ports ? `· ${escapeHtml(item.ports)}` : ''}</small></div><div class="app-resource-cell"><b>${escapeHtml(cpuText)}</b><small>${escapeHtml(memoryText)} · restart ${escapeHtml(item.restartPolicy || 'no')}</small></div><span class="compute-truncate" title="${escapeHtml(item.image || '')}">${escapeHtml(item.image || '—')}</span><div class="runtime-actions compute-actions">
             ${running ? `<button class="primary" type="button" data-app-open="${escapeHtml(appUrl)}">Open</button><button class="secondary" type="button" data-app-terminal="${escapeHtml(item.name)}" data-app-name="${escapeHtml(app?.name || appId || item.name)}">Terminal</button>` : ''}
             <button class="primary ${running ? 'hidden' : ''}" type="button" data-app-action="start" data-app-id="${escapeHtml(appId)}">Start</button>
             <button class="secondary ${running ? '' : 'hidden'}" type="button" data-app-action="stop" data-app-id="${escapeHtml(appId)}">Stop</button>
+            <button class="secondary" type="button" data-app-edit="${escapeHtml(appId)}" data-app-container="${escapeHtml(item.name)}">Edit</button>
             <button class="secondary" type="button" data-app-action="restart" data-app-id="${escapeHtml(appId)}">Restart</button>
             <button class="secondary danger-button" type="button" data-app-action="remove" data-app-id="${escapeHtml(appId)}">Remove</button>
           </div></article>`;
@@ -518,7 +523,7 @@ function containersView() {
 
   return `${pageHead('Containers', 'Create and manage native system containers and App Store application containers.', '<div class="head-actions"><button class="secondary" data-action="refresh-runtime">Refresh</button><button class="primary" data-action="create-container">+ Create system container</button></div>')}
     ${runtimeBanner('containers')}
-    ${runtimeResourceSummary(containers, 'containers')}
+    ${runtimeResourceSummary([...containers, ...appContainers], 'containers')}
     ${runtime?.available && runtime?.enabled && !ready ? '<div class="module-hero"><h2>Container resources needed</h2><p>LightNAS needs a usable container image and network before a new system container can be created.</p></div>' : ''}
     <div class="compute-section-head"><div><span class="eyebrow">SYSTEM CONTAINERS</span><h2>Native LXC inventory</h2></div><small>${containers.length} total</small></div>
     <div class="compute-table-wrap">${containerList}</div>
