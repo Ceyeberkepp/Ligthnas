@@ -2626,21 +2626,32 @@ def share_admin_sync(data: dict) -> dict:
 
 def share_repair(data: dict) -> dict:
     shares = data.get("shares") or []
+    admin_username = str(data.get("adminUsername") or "").strip().lower()
+    if admin_username and not SHARE_ADMIN_RE.fullmatch(admin_username):
+        raise ValueError("administrator username is not compatible with SMB")
     if not isinstance(shares, list) or len(shares) > 256:
         raise ValueError("invalid shares")
     records = [_share_record(item) for item in shares]
     _repair_share_permissions(records)
-    _write_share_configs(records)
-    return {"status": "repaired", "shares": len(records)}
+    if admin_username and subprocess.run(["id", "-u", admin_username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+        for share in records:
+            path = _share_path(share)
+            if path.exists():
+                _grant_share_path_access(admin_username, path)
+    _write_share_configs(records, admin_username)
+    return {"status": "repaired", "shares": len(records), "adminUsername": admin_username or None}
 
 
 def share_remove(data: dict) -> dict:
     share = _share_record(data.get("share"))
     remaining = data.get("remainingShares") or []
+    admin_username = str(data.get("adminUsername") or "").strip().lower()
+    if admin_username and not SHARE_ADMIN_RE.fullmatch(admin_username):
+        raise ValueError("administrator username is not compatible with SMB")
     if not isinstance(remaining, list) or len(remaining) > 256:
         raise ValueError("invalid remaining shares")
     remaining_shares = [_share_record(item) for item in remaining]
-    _write_share_configs(remaining_shares)
+    _write_share_configs(remaining_shares, admin_username)
     return {"id": share["id"], "status": "removed", "filesPreserved": True, "path": str(_share_path(share))}
 
 
