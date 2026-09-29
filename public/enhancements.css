@@ -161,7 +161,7 @@
 
 
 /* Files & media list/grid browser */
-.file-toolbar-actions { display:flex; align-items:center; justify-content:flex-end; gap:8px; flex-wrap:wrap; }
+.file-toolbar-actions { display:flex; align-items:center; justify-content:flex-end; gap:6px; flex-wrap:wrap; }
 .view-toggle { display:flex; gap:5px; padding:3px; border:1px solid var(--line); border-radius:10px; background:var(--panel-2); }
 .view-toggle .secondary { padding:7px 10px; border-color:transparent; }
 .view-toggle .secondary.active { background:var(--panel); border-color:var(--line-strong); color:var(--text); }
@@ -268,7 +268,7 @@
 .file-browser.file-grid { padding:14px; }
 .file-grid .file-row { box-shadow:0 8px 24px rgba(5,18,31,.05); transition:transform .16s ease,border-color .16s ease; }
 .file-grid .file-row:hover { transform:translateY(-2px); border-color:var(--accent); }
-.file-toolbar { padding:14px 0 12px; }
+.file-toolbar { padding:6px 0 8px; }
 .dataset-create-form { margin-bottom:16px; }
 .dataset-create-form[hidden] { display:none; }
 .node-tabs { display:flex; gap:2px; margin:-10px 0 16px; overflow-x:auto; border-bottom:1px solid var(--line); }
@@ -2511,9 +2511,9 @@ small {
 .file-toolbar-select {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  min-height: 42px;
-  padding: 0 10px;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 8px;
   border: 1px solid var(--line);
   border-radius: 11px;
   background: var(--button);
@@ -2522,9 +2522,9 @@ small {
   font-weight: 750;
 }
 .file-toolbar-select select {
-  min-width: 108px;
-  min-height: 34px;
-  padding: 5px 28px 5px 8px;
+  min-width: 96px;
+  min-height: 30px;
+  padding: 4px 26px 4px 6px;
   border: 0;
   background: transparent;
   color: var(--text);
@@ -2549,22 +2549,35 @@ small {
   }
 }
 
-.library-selector-row {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  margin: 0 0 14px;
-}
 .library-selector {
-  min-width: min(320px, 100%);
+  min-width: 138px;
 }
 .library-selector select {
-  min-width: 190px;
+  min-width: 122px;
+}
+.file-toolbar-select.select-only {
+  padding-inline: 5px;
+}
+.file-toolbar-select.select-only select {
+  width: auto;
+}
+.file-toolbar-actions > .secondary,
+.file-toolbar-actions > button {
+  min-height: 36px;
+  padding: 7px 11px;
+}
+.files-page > .page-head {
+  margin-bottom: 6px;
+}
+.files-library-content .breadcrumbs {
+  font-size: 11px;
+}
+.share-managed-label {
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 700;
 }
 @media (max-width: 760px) {
-  .library-selector-row {
-    width: 100%;
-  }
   .library-selector {
     width: 100%;
   }
