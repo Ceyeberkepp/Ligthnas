@@ -320,3 +320,24 @@ test('AI Quick Help panel stretches to the full chat height', async () => {
   assert.match(styles, /\.ai-agent-context,[\s\S]*\.ai-agent-chat \{[\s\S]*height: 100%/);
   assert.match(styles, /\.ai-agent-context > \.primary \{[\s\S]*margin-top: auto/);
 });
+
+
+test('branding uses either text or picture logo and persists site accent color', async () => {
+  const [app, server, styles] = await Promise.all([
+    read('public/app.js'),
+    read('src/server.mjs'),
+    read('public/enhancements.css')
+  ]);
+  assert.match(app, /Logo type/);
+  assert.match(app, /Text logo/);
+  assert.match(app, /Picture logo/);
+  assert.match(app, /Site accent color/);
+  assert.match(app, /node\.hidden = logoMode === 'picture'/);
+  assert.match(app, /mark\.hidden = logoMode === 'text'/);
+  assert.match(app, /document\.documentElement\.style\.setProperty\('--accent'/);
+  assert.match(server, /logoMode === 'picture'/);
+  assert.match(server, /accentColor/);
+  assert.match(server, /Upload a picture logo before switching to Picture logo/);
+  assert.match(styles, /\.accent-color-control/);
+  assert.match(styles, /branding-preview\.picture-only/);
+});
