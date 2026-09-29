@@ -173,6 +173,7 @@ function applyApplianceBranding(appliance = state.overview?.appliance) {
   document.documentElement.style.setProperty('--accent-contrast', luminance > .58 ? '#06201c' : '#ffffff');
   document.documentElement.style.setProperty('--sidebar', sidebarColor);
   document.documentElement.style.setProperty('--brand-content-bg', contentColor);
+  document.documentElement.style.setProperty('--bg', contentColor);
   document.documentElement.style.setProperty('--sidebar-text', sidebarTextColor);
   document.documentElement.style.setProperty('--sidebar-muted', `color-mix(in srgb, ${sidebarTextColor} 68%, transparent)`);
   document.documentElement.style.setProperty('--text', contentTextColor);
@@ -693,8 +694,7 @@ function filesView() {
   const allFiles = state.folder === '';
   const crumbs = [`<button class="panel-link" data-folder="">Files & media</button>`, ...segments.map((segment, index) => `<span> / </span><button class="panel-link" data-folder="${escapeHtml(segments.slice(0, index + 1).join('/'))}">${escapeHtml(segment)}</button>`)].join('');
   const entries = Array.isArray(state.files) ? (allFiles ? state.files.filter(entry => !entry.directory && !isSystemImageFile(entry.name)) : state.files.filter(entry => entry.directory || !isSystemImageFile(entry.name))) : state.files;
-  const tabs = librarySections.map(([folder, label]) => `<button type="button" class="library-tab ${!state.filesSettingsOpen && section === folder ? 'active' : ''}" data-library-tab="${escapeHtml(folder)}" aria-pressed="${!state.filesSettingsOpen && section === folder}">${escapeHtml(label)}</button>`).join('') +
-    `<button type="button" class="library-tab desktop-files-settings-tab ${state.filesSettingsOpen ? 'active' : ''}" data-files-settings-tab aria-pressed="${state.filesSettingsOpen}">⚙ Settings</button>`;
+  const libraryOptions = librarySections.map(([folder, label]) => `<option value="${escapeHtml(folder)}" ${!state.filesSettingsOpen && section === folder ? 'selected' : ''}>${escapeHtml(label)}</option>`).join('');
 
   const item = entry => {
     const path = fileEntryPath(entry);
@@ -739,7 +739,13 @@ function filesView() {
   };
 
   return `<section class="files-page ${state.fileView === 'gallery' ? 'photo-mode' : 'grid-mode'}">${pageHead('Files & media', 'Browse and manage the actual files stored in LightNAS.', '<button class="secondary" data-action="refresh-files">Refresh</button>')}
-    <nav class="library-tabs" aria-label="File library sections">${tabs}</nav>
+    <div class="library-selector-row">
+      <label class="file-toolbar-select library-selector">Library
+        <select data-library-select aria-label="File library section">
+          ${libraryOptions}
+        </select>
+      </label>
+    </div>
     <section class="desktop-files-settings-panel ${state.filesSettingsOpen ? '' : 'hidden'}">
       <article class="panel files-settings-card">
         <div><span class="eyebrow">FILES & MEDIA SETTINGS</span><h2>Library settings</h2><p class="muted">Manage phone library sync and desktop file display preferences.</p></div>
@@ -1887,9 +1893,9 @@ function bindViewActions() {
     link.click();
     link.remove();
   }));
-  document.querySelectorAll('#content [data-library-tab]').forEach(button => button.addEventListener('click', async () => {
+  $('[data-library-select]', $('#content'))?.addEventListener('change', async event => {
     state.filesSettingsOpen = false;
-    const folder = button.dataset.libraryTab || '';
+    const folder = event.target.value || '';
     if (folder && folder !== 'Attached storage') {
       try { await request(`/api/files?path=${encodeURIComponent(folder)}`); }
       catch {
@@ -1900,7 +1906,7 @@ function bindViewActions() {
     state.folder = folder;
     state.files = null;
     render('files');
-  }));
+  });
   $('[data-files-settings-tab]', $('#content'))?.addEventListener('click', () => {
     state.filesSettingsOpen = true;
     render('files');
