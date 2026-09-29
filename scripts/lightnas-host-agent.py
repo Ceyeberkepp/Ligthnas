@@ -2389,6 +2389,7 @@ SAMBA_FRAGMENT = Path("/etc/samba/smb.conf.d/lightnas-shares.conf")
 SSH_FRAGMENT = Path("/etc/ssh/sshd_config.d/90-lightnas-sftp.conf")
 SHARE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.-]{1,63}$")
 SHARE_USER_RE = re.compile(r"^[a-z_][a-z0-9_-]{1,30}$")
+SHARE_ADMIN_RE = re.compile(r"^[a-z0-9._-]{3,32}$")
 
 
 def _share_protocol(value: object) -> str:
@@ -2454,6 +2455,22 @@ def _ensure_share_user(username: str, password: str) -> None:
         _run_checked(["usermod", "-g", username, username])
 
 
+def _ensure_admin_share_user(username: str, password: str) -> str:
+    smb_username = str(username or "").strip().lower()
+    if not SHARE_ADMIN_RE.fullmatch(smb_username):
+        raise ValueError("administrator username is not compatible with SMB")
+    exists = subprocess.run(["id", "-u", smb_username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+    if not exists:
+        _run_checked([
+            "useradd", "--badname", "--system", "--user-group",
+            "--no-create-home", "--shell", "/usr/sbin/nologin", smb_username
+        ])
+    _run_checked(["chpasswd"], input_text=f"{smb_username}:{password}\n")
+    _run_checked(["smbpasswd", "-s", "-a", smb_username], input_text=f"{password}\n{password}\n")
+    _run_checked(["smbpasswd", "-e", smb_username])
+    return smb_username
+
+
 def _grant_share_path_access(username: str, path: Path) -> None:
     """Allow the share account to traverse private LightNAS parents safely.
 
@@ -2507,8 +2524,9 @@ def _repair_share_permissions(shares: list[dict]) -> None:
         _grant_share_path_access(username, path)
 
 
-def _write_share_configs(shares: list[dict]) -> None:
+def _write_share_configs(shares: list[dict], admin_username: str = "") -> None:
     smb_shares = [share for share in shares if _uses_smb(share)]
+    admin_username = str(admin_username or "").strip().lower()
     SAMBA_FRAGMENT.parent.mkdir(parents=True, exist_ok=True)
     if SAMBA_MAIN.exists():
         main = SAMBA_MAIN.read_text(encoding="utf-8", errors="replace")
@@ -2530,7 +2548,8 @@ def _write_share_configs(shares: list[dict]) -> None:
             "  browseable = yes",
             "  read only = no",
             "  guest ok = no",
-            f"  valid users = {share['username']}",
+            f"  valid users = {share['username']}" + (f" {admin_username}" if admin_username and admin_username != share["username"] else ""),
+            *( [f"  admin users = {admin_username}"] if admin_username and admin_username != share["username"] else [] ),
             "  create mask = 0660",
             "  directory mask = 0770",
             f"  force user = {share['username']}",
@@ -2566,6 +2585,9 @@ def share_provision(data: dict) -> dict:
         raise ValueError("invalid existing shares")
     existing_shares = [_share_record(item) for item in existing]
     password = str(data.get("password") or "")
+    admin_username = str(data.get("adminUsername") or "").strip().lower()
+    if admin_username and not SHARE_ADMIN_RE.fullmatch(admin_username):
+        raise ValueError("administrator username is not compatible with SMB")
     if len(password) < 8 or len(password) > 128 or "\x00" in password or "\n" in password:
         raise ValueError("network password must contain 8-128 valid characters")
     SHARE_ROOT.mkdir(parents=True, exist_ok=True)
@@ -2578,27 +2600,58 @@ def share_provision(data: dict) -> dict:
     if _uses_smb(share):
         _run_checked(["smbpasswd", "-s", "-a", share["username"]], input_text=f"{password}\n{password}\n")
         _run_checked(["smbpasswd", "-e", share["username"]])
-    _write_share_configs([*existing_shares, share])
+    if admin_username and admin_username != share["username"] and subprocess.run(["id", "-u", admin_username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+        _grant_share_path_access(admin_username, path)
+    _write_share_configs([*existing_shares, share], admin_username)
     return {"id": share["id"], "status": "configured", "path": str(path)}
+
+
+def share_admin_sync(data: dict) -> dict:
+    username = str(data.get("username") or "").strip()
+    password = str(data.get("password") or "")
+    shares = data.get("shares") or []
+    if len(password) < 10 or len(password) > 128 or "\x00" in password or "\n" in password:
+        raise ValueError("administrator password must contain 10-128 valid characters")
+    if not isinstance(shares, list) or len(shares) > 256:
+        raise ValueError("invalid shares")
+    records = [_share_record(item) for item in shares]
+    smb_username = _ensure_admin_share_user(username, password)
+    for share in records:
+        path = _share_path(share)
+        if path.exists():
+            _grant_share_path_access(smb_username, path)
+    _write_share_configs(records, smb_username)
+    return {"status": "synchronized", "username": smb_username, "shares": len(records)}
 
 
 def share_repair(data: dict) -> dict:
     shares = data.get("shares") or []
+    admin_username = str(data.get("adminUsername") or "").strip().lower()
+    if admin_username and not SHARE_ADMIN_RE.fullmatch(admin_username):
+        raise ValueError("administrator username is not compatible with SMB")
     if not isinstance(shares, list) or len(shares) > 256:
         raise ValueError("invalid shares")
     records = [_share_record(item) for item in shares]
     _repair_share_permissions(records)
-    _write_share_configs(records)
-    return {"status": "repaired", "shares": len(records)}
+    if admin_username and subprocess.run(["id", "-u", admin_username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+        for share in records:
+            path = _share_path(share)
+            if path.exists():
+                _grant_share_path_access(admin_username, path)
+    _write_share_configs(records, admin_username)
+    return {"status": "repaired", "shares": len(records), "adminUsername": admin_username or None}
 
 
 def share_remove(data: dict) -> dict:
     share = _share_record(data.get("share"))
     remaining = data.get("remainingShares") or []
+    admin_username = str(data.get("adminUsername") or "").strip().lower()
+    if admin_username and not SHARE_ADMIN_RE.fullmatch(admin_username):
+        raise ValueError("administrator username is not compatible with SMB")
     if not isinstance(remaining, list) or len(remaining) > 256:
         raise ValueError("invalid remaining shares")
     remaining_shares = [_share_record(item) for item in remaining]
-    _write_share_configs(remaining_shares)
+    _write_share_configs(remaining_shares, admin_username)
     return {"id": share["id"], "status": "removed", "filesPreserved": True, "path": str(_share_path(share))}
 
 
@@ -2760,6 +2813,8 @@ def dispatch(request: dict) -> dict:
         return network_action(data)
     if action == "share-provision":
         return share_provision(data)
+    if action == "share-admin-sync":
+        return share_admin_sync(data)
     if action == "share-repair":
         return share_repair(data)
     if action == "share-remove":
