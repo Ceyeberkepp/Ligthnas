@@ -2463,6 +2463,9 @@ textarea:focus {
 
 
 /* Full main-content theming and compact Files toolbar dropdowns */
+.console {
+  background: var(--brand-content-bg, var(--bg));
+}
 .topbar {
   background: var(--topbar) !important;
   color: var(--text);
@@ -2541,6 +2544,31 @@ small {
     justify-content: space-between;
   }
   .file-toolbar-select select {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+.library-selector-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  margin: 0 0 14px;
+}
+.library-selector {
+  min-width: min(320px, 100%);
+}
+.library-selector select {
+  min-width: 190px;
+}
+@media (max-width: 760px) {
+  .library-selector-row {
+    width: 100%;
+  }
+  .library-selector {
+    width: 100%;
+  }
+  .library-selector select {
     width: 100%;
     min-width: 0;
   }
