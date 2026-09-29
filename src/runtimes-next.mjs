@@ -568,13 +568,25 @@ export async function runtimeInventory() {
       });
       const managedNames = runtime.docker.containers.filter(item => item.managed).map(item => item.name).filter(Boolean);
       if (managedNames.length) {
-        const inspected = await command('docker', ['inspect', '--format', '{{.Name}}|{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}', ...managedNames]);
+        const inspected = await command('docker', ['inspect', '--format', '{{json .}}', ...managedNames]);
         if (inspected.ok) {
-          const ips = new Map(inspected.output.split('\n').filter(Boolean).map(line => {
-            const [rawName, ip = ''] = line.split('|');
-            return [String(rawName || '').replace(/^\//, ''), ip.trim()];
+          const details = new Map(inspected.output.split('\n').filter(Boolean).flatMap(line => {
+            try {
+              const value = JSON.parse(line);
+              const name = String(value?.Name || '').replace(/^\//, '');
+              const networks = Object.values(value?.NetworkSettings?.Networks || {});
+              const nanoCpus = Number(value?.HostConfig?.NanoCpus || 0);
+              return [[name, {
+                ip: String(networks.find(entry => entry?.IPAddress)?.IPAddress || ''),
+                memory: Number(value?.HostConfig?.Memory || 0),
+                cpus: nanoCpus > 0 ? nanoCpus / 1e9 : 0,
+                cpuUnlimited: nanoCpus <= 0,
+                restartPolicy: String(value?.HostConfig?.RestartPolicy?.Name || 'no'),
+                createdAt: value?.Created || null
+              }]];
+            } catch { return []; }
           }));
-          runtime.docker.containers = runtime.docker.containers.map(item => ({ ...item, ip: ips.get(item.name) || '' }));
+          runtime.docker.containers = runtime.docker.containers.map(item => ({ ...item, ...(details.get(item.name) || {}) }));
         }
       }
     }
@@ -668,6 +680,33 @@ export async function installCatalogApp(id, input = {}) {
     access: { scheme: 'http', port: app.port, path: '/' },
     message: ready ? 'Application installed and reachable through LightNAS.' : 'Application was started but is still initializing. LightNAS will keep it running; refresh Installed Apps shortly.'
   };
+}
+
+export async function updateCatalogApp(id, input = {}) {
+  if (process.env.LIGHTNAS_DOCKER_ENABLED !== '1') throw Object.assign(new Error('Docker actions are disabled on this host.'), { status: 409 });
+  const app = catalog.find(item => item.id === id);
+  if (!app) throw Object.assign(new Error('Unknown catalog app.'), { status: 404 });
+  const name = `lightnas-app-${id}`;
+  await assertManagedContainer(name);
+
+  const memoryMiB = Number(input.memoryMiB);
+  const cpus = Number(input.cpus);
+  const restartPolicy = String(input.restartPolicy || 'unless-stopped');
+  if (!Number.isInteger(memoryMiB) || memoryMiB < 128 || memoryMiB > 262144) {
+    throw Object.assign(new Error('Application memory must be 128–262144 MiB.'), { status: 400 });
+  }
+  if (!Number.isFinite(cpus) || cpus < 0 || cpus > 128) {
+    throw Object.assign(new Error('Application CPU limit must be 0–128 CPUs. Use 0 for no CPU limit.'), { status: 400 });
+  }
+  if (!['no', 'always', 'unless-stopped', 'on-failure'].includes(restartPolicy)) {
+    throw Object.assign(new Error('Choose a supported restart policy.'), { status: 400 });
+  }
+
+  const args = ['update', '--memory', `${memoryMiB}m`, '--restart', restartPolicy];
+  args.push('--cpus', cpus === 0 ? '0' : String(cpus));
+  args.push(name);
+  await runDocker(args, 60000);
+  return { id, memoryMiB, cpus, restartPolicy };
 }
 
 export async function manageCatalogApp(id, action) {
