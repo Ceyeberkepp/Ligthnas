@@ -41,3 +41,17 @@ test('container image pull retries transient upstream failures and honors redire
   assert.match(ui, />Pull selected<\/button>/);
   assert.match(ui, /Downloading container image/);
 });
+
+
+test('container image pulls never invoke host network provisioning', async () => {
+  const [templates, server] = await Promise.all([
+    read('src/templates.mjs'),
+    read('src/server.mjs')
+  ]);
+  assert.doesNotMatch(templates, /configure-appliance-network|provision-runtimes|lightnas-network-bootstrap|ip route|ip link/);
+  const routeStart = server.indexOf("url.pathname === '/api/templates/import'");
+  const routeEnd = server.indexOf("url.pathname === '/api/templates'", routeStart + 10);
+  const route = routeEnd > routeStart ? server.slice(routeStart, routeEnd) : server.slice(routeStart, routeStart + 1200);
+  assert.match(route, /importContainerTemplate/);
+  assert.doesNotMatch(route, /configure-appliance-network|provision-runtimes|lightnas-network-bootstrap/);
+});
