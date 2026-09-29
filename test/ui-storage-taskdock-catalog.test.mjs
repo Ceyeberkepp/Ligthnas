@@ -206,7 +206,7 @@ test('container summary counts native and App Store containers with resource det
   assert.match(app, /runtimeResourceSummary\(\[\.\.\.containers, \.\.\.appContainers\], 'containers'\)/);
   assert.match(app, /Allocated vCPU/);
   assert.match(app, /container\$\{uncappedCpu===1\?'':'s'\} uncapped/);
-  assert.match(app, /Host resources/);
+  assert.match(app, /Host CPU use/);
 });
 
 test('managed applications expose real Docker limits and can be edited', async () => {
