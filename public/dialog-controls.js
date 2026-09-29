@@ -784,9 +784,11 @@ async function showContainerManager(id) {
         ? `${access.scheme || 'http'}://${access.targetHost}${((access.scheme || 'http') === 'https' && Number(access.targetPort) === 443) || ((access.scheme || 'http') === 'http' && Number(access.targetPort) === 80) ? '' : `:${access.targetPort}`}/`
         : access?.mode === 'proxy' ? `${access.scheme || 'http'}://${location.hostname}:${access.hostPort}/` : '');
       const ipNote = updateResult?.ipv4 ? ` IPv4: ${updateResult.ipv4}.` : '';
-      const fallbackNote = updateResult?.automaticFallback
-        ? ' DHCP was attempted first; this nested host required LightNAS managed automatic addressing.'
-        : '';
+      const fallbackNote = updateResult?.managedLanPool
+        ? ' LightNAS assigned this container from the managed LAN pool.'
+        : updateResult?.automaticFallback
+          ? ' This host required LightNAS private fallback addressing.'
+          : '';
       progress.succeed(detectedUrl
         ? `${item.name || id} was saved.${ipNote}${fallbackNote} Its application is available at ${detectedUrl}`
         : `${item.name || id} was saved.${ipNote}${fallbackNote}${publishWarning ? ` Application discovery is pending: ${publishWarning}` : ' LightNAS will detect any web application automatically after the service starts.'}`);

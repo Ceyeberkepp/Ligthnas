@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-test('nested container creation always uses the LightNAS LAN parent and DHCP', async () => {
+test('nested container creation uses the LightNAS LAN parent and managed automatic addressing', async () => {
   const agent = await readFile(new URL('../scripts/lightnas-host-agent.py', import.meta.url), 'utf8');
   assert.match(agent, /nested_direct = nested_mode in \{"nested-macvlan", "nested-ipvlan"\}/);
   assert.match(agent, /"network": network/);
@@ -13,14 +13,15 @@ test('nested container creation always uses the LightNAS LAN parent and DHCP', a
   assert.match(agent, /direct_type = "macvlan".*"ipvlan"/);
 });
 
-test('container creation is DHCP-first and guarantees managed automatic IPv4 when nested DHCP fails', async () => {
+test('direct-LAN containers use the host-derived LightNAS managed pool', async () => {
   const agent = await readFile(new URL('../scripts/lightnas-host-agent.py', import.meta.url), 'utf8');
-  assert.match(agent, /DHCP is always attempted first/);
-  assert.match(agent, /def apply_managed_automatic_address/);
-  assert.match(agent, /def sanitize_nested_lxc_network/);
-  assert.match(agent, /Address=\{address\}/);
-  assert.match(agent, /Gateway=10\.77\.0\.1/);
-  assert.match(agent, /automaticFallback/);
+  assert.match(agent, /def managed_container_ipv4_pool/);
+  assert.match(agent, /LIGHTNAS_CONTAINER_POOL_START/);
+  assert.match(agent, /LIGHTNAS_CONTAINER_POOL_END/);
+  assert.match(agent, /LIGHTNAS_CONTAINER_GATEWAY/);
+  assert.match(agent, /managed_pool_direct = direct_lan/);
+  assert.match(agent, /apply_managed_automatic_address\(name, config\)/);
+  assert.match(agent, /managedLanPool/);
   assert.match(agent, /"networkMode": "direct-lan" if direct_lan else "managed"/);
 });
 
@@ -42,4 +43,12 @@ test('nested ipvlan uses a unique DHCP client identity without moving the host I
   assert.match(agent, /ClientIdentifier=\{client_id\}/);
   assert.match(agent, /nested_mode.*nested-ipvlan/);
   assert.match(agent, /client_id = "duid"/);
+});
+
+
+test('private NAT never receives an address from the host LAN pool', async () => {
+  const agent = await readFile(new URL('../scripts/lightnas-host-agent.py', import.meta.url), 'utf8');
+  assert.match(agent, /direct_mode = .*nested-macvlan.*nested-ipvlan.*bridge/);
+  assert.match(agent, /host LAN pool is only valid on direct-LAN container networking/);
+  assert.match(agent, /10\.77\.0\.0\/24/);
 });
