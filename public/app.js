@@ -474,7 +474,7 @@ function runtimeResourceSummary(items = [], label = 'guests') {
     <article class="monitor-card"><span>Total ${label}</span><strong>${items.length}</strong><small>${running.length} running · ${items.length-running.length} stopped</small></article>
     <article class="monitor-card"><span>${label === 'containers' ? 'Container memory use' : label === 'virtual machines' ? 'VM memory use' : 'Allocated RAM'}</span><strong>${bytes(allocatedMemory)}</strong><div class="track"><span style="width:${allocationPercent}%"></span></div><small>${hostMemory ? `${allocationPercent}% of ${bytes(hostMemory)} host RAM · ${bytes(host.memory?.usedBytes || 0)} host used` : 'Host total unavailable'}</small></article>
     <article class="monitor-card"><span>Allocated vCPU</span><strong>${allocatedCpus || 0} vCPU</strong><small>${hostCores || '—'} host logical CPUs${uncappedCpu ? ` · ${uncappedCpu} container${uncappedCpu===1?'':'s'} uncapped` : ''}</small></article>
-    <article class="monitor-card"><span>Host resources</span><strong>${host.cpu?.loadPercent ?? '—'}% CPU</strong><small>${hostCores || '—'} CPUs · ${host.memory?.usedPercent ?? '—'}% RAM · load ${host.cpu?.loadAverage?.[0] ?? '—'}</small></article>
+    <article class="monitor-card"><span>Host CPU use</span><strong>${host.cpu?.loadPercent ?? '—'}% CPU</strong><small>${hostCores || '—'} CPUs · ${host.memory?.usedPercent ?? '—'}% RAM · load ${host.cpu?.loadAverage?.[0] ?? '—'}</small></article>
   </section>`;
 }
 
