@@ -2241,3 +2241,62 @@
     min-width: 0;
   }
 }
+
+
+/* Overview compute inventory */
+.overview-compute-panel {
+  min-width: 0;
+}
+.overview-compute-list {
+  display: grid;
+  gap: 8px;
+}
+.overview-compute-row {
+  display: grid;
+  grid-template-columns: 54px minmax(0,1fr) auto;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--panel);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.overview-compute-row:hover {
+  background: var(--panel-2);
+}
+.overview-compute-row div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+.overview-compute-row b,
+.overview-compute-row small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.overview-compute-row small {
+  color: var(--muted);
+}
+.overview-compute-type {
+  display: inline-flex;
+  justify-content: center;
+  padding: 4px 7px;
+  border-radius: 8px;
+  background: var(--panel-2);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .05em;
+}
+@media (max-width: 700px) {
+  .overview-compute-row {
+    grid-template-columns: 46px minmax(0,1fr);
+  }
+  .overview-compute-row .compute-status {
+    grid-column: 2;
+  }
+}
