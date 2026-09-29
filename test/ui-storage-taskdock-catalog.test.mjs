@@ -359,3 +359,25 @@ test('branding follow-up keeps logo mode exclusive and propagates accent safely'
   assert.match(styles, /\.primary \{[\s\S]*var\(--accent-contrast/);
   assert.match(styles, /color-mix\(in srgb, var\(--accent\) 14%/);
 });
+
+
+test('branding controls sidebar, main content, and login with a larger picture logo', async () => {
+  const [app, server, styles] = await Promise.all([
+    read('public/app.js'),
+    read('src/server.mjs'),
+    read('public/enhancements.css')
+  ]);
+  assert.match(app, /Sidebar color/);
+  assert.match(app, /Main content color/);
+  assert.match(app, /--sidebar-text/);
+  assert.match(app, /--brand-content-bg/);
+  assert.match(app, /request\('\/api\/branding'\)/);
+  assert.match(server, /url\.pathname === '\/api\/branding'/);
+  assert.match(server, /sidebarColor/);
+  assert.match(server, /contentColor/);
+  assert.match(styles, /\.sidebar-brand \.brand-mark\.custom-logo/);
+  assert.match(styles, /height: 72px/);
+  assert.match(styles, /\.auth-story \.brand-mark\.custom-logo/);
+  assert.match(styles, /height: 104px/);
+  assert.match(styles, /\.auth-panel \{[\s\S]*--auth-panel-bg/);
+});
