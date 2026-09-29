@@ -2161,3 +2161,41 @@
     grid-template-columns: 1fr !important;
   }
 }
+
+
+/* Rich runtime and overview telemetry */
+.overview-chart-context {
+  display:grid;
+  justify-items:end;
+  gap:4px;
+  max-width:min(62%, 620px);
+  text-align:right;
+}
+.overview-chart-context b {
+  color:var(--text);
+  font-size:11px;
+  font-weight:750;
+  overflow-wrap:anywhere;
+}
+.app-resource-cell {
+  display:grid;
+  gap:3px;
+  min-width:0;
+}
+.app-resource-cell b,
+.app-resource-cell small {
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.runtime-resource-summary .monitor-card small {
+  min-height:2.7em;
+}
+@media (max-width: 760px) {
+  .overview-chart-head {
+    align-items:flex-start;
+  }
+  .overview-chart-context {
+    max-width:58%;
+  }
+}
