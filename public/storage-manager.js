@@ -19,8 +19,25 @@ async function sRequest(path, options={}) {
   return body;
 }
 function contentCheckboxes(types, selected=[]) {
-  return types.map(type=>`<label class="content-check"><input type="checkbox" value="${sEsc(type.id)}" ${selected.includes(type.id)?'checked':''}> <span><b>${sEsc(type.label)}</b><small>${sEsc(type.id)}</small></span></label>`).join('');
+  const descriptions = {
+    iso:'Operating-system installation media',
+    vztmpl:'Linux system-container images',
+    images:'Virtual-machine disks',
+    rootdir:'Native container root volumes',
+    backup:'VM and container backups',
+    snippets:'Scripts and configuration snippets',
+    files:'General files and media'
+  };
+  return types.map(type=>`<label class="content-check"><input type="checkbox" value="${sEsc(type.id)}" ${selected.includes(type.id)?'checked':''}> <span><b>${sEsc(type.label)}</b><small>${sEsc(descriptions[type.id] || type.id)}</small></span></label>`).join('');
 }
+
+function sourceLabel(source) {
+  const capacity = source.capacitySource === 'proxmox-pct-config'
+    ? sBytes(source.totalBytes)
+    : (source.totalBytes ? `${sBytes(source.totalBytes)} visible` : 'size reported by host');
+  return `${source.mountPoint} · ${source.device || source.type || 'volume'} · ${capacity}`;
+}
+
 function ensureStorageDialog() {
   let dialog=document.querySelector('#lightnas-storage-dialog');
   if(dialog) return dialog;
@@ -63,18 +80,18 @@ function renderStorageManager() {
   const sharedLocalExcluded=Boolean(visible.localExcludedBecauseSharedOs);
   const dataSources=(data.availableSources||[]);
   slot.innerHTML=`
-    <section class="module-hero">
-      <div class="panel-head"><div><span class="eyebrow">LIGHTNAS STORAGE MANAGER</span><h2>${verified?sBytes(visible.totalBytes||0):'Host capacity metadata required'}${verified?' data capacity':''}</h2></div>
+    <section class="module-hero storage-manager-hero">
+      <div class="panel-head"><div><span class="eyebrow">LIGHTNAS STORAGE MANAGER</span><h2>${verified ? `${sBytes(visible.totalBytes||0)} data capacity` : `${dataSources.length} attached volume${dataSources.length===1?'':'s'} detected`}</h2></div>
         <div class="head-actions"><button class="secondary" type="button" data-storage-refresh>Refresh</button>${unconfigured.length?'<button class="primary" type="button" data-create-storage>+ Create storage</button>':''}</div>
       </div>
       <p>${verified
         ? `${sBytes(visible.usedBytes||0)} used · ${sBytes(visible.availableBytes||0)} free across attached data volumes.${sharedLocalExcluded?' The OS/root-backed local storage is shown separately and is not included in this total.':''}`
-        : 'This LightNAS instance is running inside a container and has not received authoritative virtual-disk sizes from its host yet. Guest filesystem geometry is not used for the headline total.'}</p>
-      <div class="storage-capacity-breakdown">${dataSources.map(source=>`<span><b>${sEsc(source.mountPoint)}</b> ${source.capacitySource==='proxmox-pct-config'?sBytes(source.totalBytes):'unverified'}${source.configuredSize?` · host ${sEsc(source.configuredSize)}`:''}${source.configured?' · already in use':''}</span>`).join('')}</div>
+        : `LightNAS can use the mounted volumes below now. Exact host-provisioned capacity is not available inside this container, so displayed capacity is based on what the guest can currently see.`}</p>
+      <div class="storage-volume-chips">${dataSources.map(source=>`<span class="${source.configured?'configured':''}"><b>${sEsc(source.mountPoint)}</b><small>${sEsc(source.device||source.type||'volume')} · ${source.capacitySource==='proxmox-pct-config'?sBytes(source.totalBytes):sBytes(source.availableBytes)+' free'}${source.configured?' · in use':''}</small></span>`).join('')}</div>
     </section>
-    <h2>Storage</h2>
+    <div class="storage-section-heading"><div><span class="eyebrow">CONFIGURED STORAGE</span><h2>Storage pools</h2></div><small>${(data.pools||[]).length} configured</small></div>
     <div class="inventory-grid">${(data.pools||[]).map(storageCard).join('')||'<div class="empty"><p>No storage pools are online.</p></div>'}</div>
-    ${unconfigured.length?`<h2>Available mounted storage</h2><div class="inventory-grid">${unconfigured.map(source=>`<article class="inventory-card"><h3>${sEsc(source.mountPoint)}</h3><p>${sEsc(source.device)} · ${sEsc(source.type)}</p><p><strong>${sBytes(source.availableBytes)} free</strong> of ${sBytes(source.totalBytes)}</p>${source.capacitySource==='proxmox-pct-config'?`<p class="muted">Proxmox configured size: <b>${sEsc(source.configuredSize||sBytes(source.totalBytes))}</b></p>`:''}<button class="primary" type="button" data-create-storage-source="${sEsc(source.id)}">Create storage here</button></article>`).join('')}</div>`:''}
+    ${unconfigured.length?`<div class="storage-section-heading"><div><span class="eyebrow">AVAILABLE VOLUMES</span><h2>Ready to add</h2></div><small>${unconfigured.length} available</small></div><div class="inventory-grid">${unconfigured.map(source=>`<article class="inventory-card available-volume-card"><div class="volume-title"><h3>${sEsc(source.mountPoint)}</h3><span class="volume-state writable">AVAILABLE</span></div><p>${sEsc(source.device)} · ${sEsc(source.type)}</p><div class="storage-volume-capacity"><strong>${sBytes(source.availableBytes)} free</strong><span>${source.capacitySource==='proxmox-pct-config'?`of ${sBytes(source.totalBytes)}`:'guest-visible capacity'}</span></div>${source.capacitySource==='proxmox-pct-config'?`<p class="muted">Host-provisioned size: <b>${sEsc(source.configuredSize||sBytes(source.totalBytes))}</b></p>`:''}<button class="primary" type="button" data-create-storage-source="${sEsc(source.id)}">Use this volume</button></article>`).join('')}</div>`:''}
     ${(data.detectedDisks||[]).length?`<h2>Detected drives</h2><p class="muted">LightNAS automatically detects new physical and virtual disks. It never formats a drive automatically; destructive initialization stays an explicit administrator action.</p><div class="inventory-grid">${data.detectedDisks.map(disk=>`<article class="inventory-card detected-disk-card"><div class="volume-title"><h3>${sEsc(disk.model||disk.name||disk.path)}</h3><span class="volume-state ${disk.system?'readonly':disk.blank?'writable':''}">${disk.system?'SYSTEM':disk.blank?'NEW DRIVE':disk.mounted?'MOUNTED':'DETECTED'}</span></div><p>${sEsc(disk.path||disk.name)} · ${sBytes(disk.sizeBytes)}${disk.transport?` · ${sEsc(disk.transport)}`:''}</p><p class="muted">${disk.system?'Contains the LightNAS operating system and is protected from storage initialization.':disk.blank?'Blank drive detected. It is visible immediately and ready for an explicit storage initialization workflow.':'Partitions: '+((disk.partitions||[]).map(part=>sEsc(part.path)+(part.filesystem?` (${sEsc(part.filesystem)})`:'')).join(' · ')||'none')}</p></article>`).join('')}</div>`:''}
   `;
 }
@@ -92,15 +109,24 @@ function openCreateStorage(sourceId='') {
   dialog.querySelector('[data-storage-dialog-title]').textContent='Create storage';
   dialog.querySelector('[data-storage-dialog-error]').textContent='';
   dialog.querySelector('[data-storage-dialog-body]').innerHTML=`
-    <form data-storage-create-form>
-      <p class="muted">Create a file-level LightNAS storage on an attached virtual volume. Existing files outside the LightNAS storage directory are not formatted or deleted.</p>
-      <label>Storage name<input name="name" required pattern="[A-Za-z][A-Za-z0-9_-]{1,31}" placeholder="fastssd"></label>
-      <label>Virtual storage<select name="sourceId" required>${sources.map(item=>`<option value="${sEsc(item.id)}">${sEsc(item.mountPoint)} · ${sBytes(item.totalBytes)}</option>`).join('')}</select></label>
-      <h3>Allowed content</h3><div class="content-policy-grid">${contentCheckboxes(data.contentTypes||[],['iso','vztmpl','images','rootdir','backup','snippets','files'])}</div>
-      <div class="dialog-actions"><button class="primary" type="submit">Create storage</button></div>
+    <form data-storage-create-form class="storage-create-form">
+      <p class="muted storage-create-intro">Add an attached volume to LightNAS without formatting it. LightNAS creates its own managed folder and leaves existing files outside that folder untouched.</p>
+      <div class="storage-create-grid">
+        <label>Storage name<input name="name" required pattern="[A-Za-z][A-Za-z0-9_-]{1,31}" placeholder="fastssd" autocomplete="off"><small>2–32 letters, numbers, dashes, or underscores.</small></label>
+        <label>Volume<select name="sourceId" required>${sources.map(item=>`<option value="${sEsc(item.id)}">${sEsc(sourceLabel(item))}</option>`).join('')}</select><small>Select the mounted disk or virtual volume LightNAS should use.</small></label>
+      </div>
+      <div class="storage-content-heading"><div><h3>What can this storage hold?</h3><p class="muted">Choose the content types you want available on this pool.</p></div><button class="secondary storage-select-all" type="button" data-storage-toggle-content>Select all</button></div>
+      <div class="content-policy-grid storage-content-policy">${contentCheckboxes(data.contentTypes||[],['iso','vztmpl','images','rootdir','backup','snippets','files'])}</div>
+      <div class="dialog-actions storage-create-actions"><button class="secondary" type="button" data-storage-dialog-close>Cancel</button><button class="primary" type="submit">Create storage</button></div>
     </form>`;
   const select=dialog.querySelector('select[name="sourceId"]');
   if(sourceId&&[...select.options].some(option=>option.value===sourceId)) select.value=sourceId;
+  dialog.querySelector('[data-storage-toggle-content]')?.addEventListener('click', event => {
+    const boxes=[...dialog.querySelectorAll('.storage-content-policy input[type="checkbox"]')];
+    const shouldCheck=boxes.some(box=>!box.checked);
+    boxes.forEach(box=>{ box.checked=shouldCheck; });
+    event.currentTarget.textContent=shouldCheck?'Clear all':'Select all';
+  });
   dialog.querySelector('[data-storage-create-form]').addEventListener('submit',async event=>{
     event.preventDefault();
     const form=event.currentTarget,error=dialog.querySelector('[data-storage-dialog-error]');
