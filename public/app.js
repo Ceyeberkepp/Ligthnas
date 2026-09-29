@@ -267,7 +267,7 @@ function overviewChart(label, value, suffix, history, maximum = 100, detail = ''
   const points = history.length > 1 ? history : [history[0] || 0, history[0] || 0];
   const ceiling = Math.max(maximum, ...points, 1);
   const coordinates = points.map((item, index) => `${(index / Math.max(points.length - 1, 1)) * 100},${38 - (Math.min(ceiling, item) / ceiling) * 34}`).join(' ');
-  return `<article class="overview-chart panel"><div class="overview-chart-head"><div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}${escapeHtml(suffix)}</strong></div><div class="overview-chart-context">${detail ? `<b>${escapeHtml(detail)}</b>` : ''}<small>Live · last ${points.length} sample${points.length === 1 ? '' : 's'}</small></div></div><svg viewBox="0 0 100 40" preserveAspectRatio="none" role="img" aria-label="${escapeHtml(label)} history"><defs><linearGradient id="chart-${escapeHtml(label.replace(/\W/g, ''))}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--accent)" stop-opacity=".52"/><stop offset="1" stop-color="var(--accent)" stop-opacity=".04"/></linearGradient></defs><polygon points="0,40 ${coordinates} 100,40" fill="url(#chart-${escapeHtml(label.replace(/\W/g, ''))})"/><polyline points="${coordinates}" fill="none" stroke="var(--accent)" stroke-width="1.2" vector-effect="non-scaling-stroke"/></svg></article>`;
+  return `<article class="overview-chart panel"><div class="overview-chart-head"><div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}${escapeHtml(suffix)}</strong></div><div class="overview-chart-context">${detail ? `<b>${escapeHtml(detail)}</b>` : ''}<small>Live · last ${points.length} sample${points.length === 1 ? '' : 's'}</small></div></div>${detail ? `<div class="overview-chart-detail-strip">${escapeHtml(detail)}</div>` : ''}<svg viewBox="0 0 100 40" preserveAspectRatio="none" role="img" aria-label="${escapeHtml(label)} history"><defs><linearGradient id="chart-${escapeHtml(label.replace(/\W/g, ''))}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--accent)" stop-opacity=".52"/><stop offset="1" stop-color="var(--accent)" stop-opacity=".04"/></linearGradient></defs><polygon points="0,40 ${coordinates} 100,40" fill="url(#chart-${escapeHtml(label.replace(/\W/g, ''))})"/><polyline points="${coordinates}" fill="none" stroke="var(--accent)" stroke-width="1.2" vector-effect="non-scaling-stroke"/></svg></article>`;
 }
 
 function overviewNetworkChart(system) {
@@ -291,7 +291,7 @@ function homeView() {
     : state.overviewMetric === 'load' ? overviewChart('System load', `${loadAverage[0]}`, '', state.metricHistory.load, Math.max(2, system.cpu.cores), `1m ${loadAverage[0]} · 5m ${loadAverage[1]} · 15m ${loadAverage[2]} · ${system.cpu.cores} CPUs`)
     : state.overviewMetric === 'memory' ? overviewChart('Memory usage', `${system.memory.usedPercent}`, '%', state.metricHistory.memory, 100, `${bytes(system.memory.usedBytes)} used · ${bytes(system.memory.totalBytes)} total · ${bytes(system.memory.freeBytes)} free`)
     : state.overviewMetric === 'storage' ? overviewChart('Storage usage', `${storagePercent}`, '%', state.metricHistory.storage, 100, `${bytes(used)} used · ${bytes(total)} total · ${bytes(available)} free`)
-    : overviewChart('CPU usage', `${system.cpu.loadPercent}`, '%', state.metricHistory.cpu, 100, `${system.cpu.cores} logical CPUs · ${system.cpu.model || 'CPU model unavailable'}`);
+    : overviewChart('CPU usage', `${system.cpu.loadPercent}`, '%', state.metricHistory.cpu, 100, `${system.cpu.cores} logical CPUs · load ${loadAverage[0]} · ${system.cpu.model || 'CPU model unavailable'}`);
   return `${pageHead('Overview', 'Live system health and storage at a glance.', '<button class="secondary" data-action="refresh">Refresh</button>')}
     <section class="node-overview-grid">
       <article class="panel node-summary-card"><div class="panel-head"><div><span class="eyebrow">${escapeHtml(appliance.deviceName)}</span><h2>System status</h2></div><span class="volume-state writable">ONLINE</span></div>
@@ -343,7 +343,7 @@ function poolsView() {
         <label>Quota (GiB)<input name="quotaGiB" type="number" min="0" max="1048576" value="0"><small>Zero means unlimited.</small></label>
         <button class="primary" type="submit">Create dataset</button><div class="form-error" role="alert"></div>
       </form>` : ''}
-      <div class="dataset-grid">${zfs.datasets?.map(dataset => `<article class="panel dataset-card"><div><span class="eyebrow">DATASET</span><h3>${escapeHtml(dataset.name)}</h3><p>${escapeHtml(dataset.mountPoint || 'not mounted')}</p></div><div class="dataset-stats"><span><b>${bytes(dataset.usedBytes)}</b><small>Used</small></span><span><b>${bytes(dataset.availableBytes)}</b><small>Available</small></span><span><b>${escapeHtml(dataset.compression || 'unknown')}</b><small>Compression</small></span></div>${(zfs.pools || []).some(pool => pool.name === dataset.name) ? '' : `<button class="secondary" type="button" data-dataset="${escapeHtml(dataset.name)}">Edit</button>`}</article>`).join('') || ''}</div>
+      <div class="dataset-grid">${zfs.datasets?.map(dataset => `<article class="panel dataset-card"><div><span class="eyebrow">DATASET</span><h3>${escapeHtml(dataset.name)}</h3><p>${escapeHtml(dataset.mountPoint || 'not mounted')}</p></div><div class="dataset-stats"><span><b>${bytes(dataset.usedBytes)}</b><small>Used</small></span><span><b>${bytes(dataset.availableBytes)}</b><small>Available</small></span><span><b>${escapeHtml(dataset.compression || 'unknown')}</b><small>Compression</small></span></div>${(zfs.pools || []).some(pool => pool.name === dataset.name) ? '' : `<button class="secondary" type="button" data-dataset="${escapeHtml(dataset.name)}">Edit resources</button>`}</article>`).join('') || ''}</div>
     </section>` : ''}
     <section class="storage-workspace">
       <div class="section-heading"><div><span class="eyebrow">HARDWARE INVENTORY</span><h2>Physical disks & exposed volumes</h2></div></div>
@@ -467,14 +467,17 @@ function runtimeResourceSummary(items = [], label = 'guests') {
   const allocatedMemory = items.reduce((total, item) => total + (Number(item.memory) || 0), 0);
   const allocatedCpus = items.reduce((total, item) => total + (Number(item.cpus) || 0), 0);
   const uncappedCpu = items.filter(item => item.cpuUnlimited).length;
+  const liveCpuPercent = items.reduce((total, item) => total + (Number(item.cpuPercent) || 0), 0);
+  const liveMemoryBytes = items.reduce((total, item) => total + (Number(item.memoryUsageBytes) || 0), 0);
+  const liveStatsCount = items.filter(item => item.liveStats).length;
   const hostMemory = Number(host.memory?.totalBytes || 0);
-  const allocationPercent = hostMemory ? Math.min(100, Math.round((allocatedMemory / hostMemory) * 100)) : 0;
   const hostCores = Number(host.cpu?.cores || 0);
+  const allocationPercent = hostMemory ? Math.min(100, Math.round((allocatedMemory / hostMemory) * 100)) : 0;
   return `<section class="host-monitor-grid runtime-resource-summary">
-    <article class="monitor-card"><span>Total ${label}</span><strong>${items.length}</strong><small>${running.length} running · ${items.length-running.length} stopped · host ${hostCores || '—'} CPU / ${hostMemory ? bytes(hostMemory) : '—'} RAM</small></article>
-    <article class="monitor-card"><span>${label === 'containers' ? 'Container memory use' : label === 'virtual machines' ? 'VM memory use' : 'Allocated RAM'}</span><strong>${bytes(allocatedMemory)}</strong><div class="track"><span style="width:${allocationPercent}%"></span></div><small>${hostMemory ? `${allocationPercent}% of ${bytes(hostMemory)} host RAM · ${bytes(host.memory?.usedBytes || 0)} host used` : 'Host total unavailable'}</small></article>
-    <article class="monitor-card"><span>Allocated vCPU</span><strong>${allocatedCpus || 0} vCPU</strong><small>${hostCores || '—'} host logical CPUs${uncappedCpu ? ` · ${uncappedCpu} container${uncappedCpu===1?'':'s'} uncapped` : ''}</small></article>
-    <article class="monitor-card"><span>Host CPU use</span><strong>${host.cpu?.loadPercent ?? '—'}% CPU</strong><small>${hostCores || '—'} CPUs · ${host.memory?.usedPercent ?? '—'}% RAM · load ${host.cpu?.loadAverage?.[0] ?? '—'}</small></article>
+    <article class="monitor-card"><span>Total ${label}</span><strong>${items.length}</strong><small>${running.length} running · ${items.length-running.length} stopped · ${liveStatsCount} reporting live usage</small></article>
+    <article class="monitor-card"><span>Live CPU use</span><strong>${liveStatsCount ? liveCpuPercent.toFixed(1) + '%' : '—'}</strong><small>Across managed workloads · host currently ${host.cpu?.loadPercent ?? '—'}% · ${hostCores || '—'} logical CPUs</small></article>
+    <article class="monitor-card"><span>Live RAM use</span><strong>${liveStatsCount ? bytes(liveMemoryBytes) : '—'}</strong><div class="track"><span style="width:${hostMemory && liveMemoryBytes ? Math.min(100, Math.round((liveMemoryBytes / hostMemory) * 100)) : 0}%"></span></div><small>Limits ${bytes(allocatedMemory)}${hostMemory ? ` · host ${bytes(host.memory?.usedBytes || 0)} / ${bytes(hostMemory)} used` : ''}</small></article>
+    <article class="monitor-card host-capacity-card"><span>Host capacity</span><strong>${hostCores || '—'} CPU · ${hostMemory ? bytes(hostMemory) : '—'} RAM</strong><small>${host.cpu?.loadPercent ?? '—'}% CPU now · ${host.memory?.usedPercent ?? '—'}% RAM now · load ${host.cpu?.loadAverage?.[0] ?? '—'}${allocatedCpus ? ` · ${allocatedCpus} vCPU limited` : ''}${uncappedCpu ? ` · ${uncappedCpu} uncapped` : ''}</small></article>
   </section>`;
 }
 
@@ -494,7 +497,7 @@ function containersView() {
   <button class="secondary ${/running|active/i.test(String(item.status || '')) ? '' : 'hidden'}" type="button" data-container-action="reboot" data-container-id="${escapeHtml(item.id || item.name)}">Reboot</button>
   <button class="secondary ${/running|active/i.test(String(item.status || '')) ? '' : 'hidden'}" type="button" data-container-action="stop" data-container-id="${escapeHtml(item.id || item.name)}">Stop</button>
   ${!/\d+\.\d+\.\d+\.\d+/.test(String(item.ipv4 || '')) && /running|active/i.test(String(item.status || '')) ? `<button class="secondary" type="button" data-container-action="repair-network" data-container-id="${escapeHtml(item.id || item.name)}">Repair network</button>` : ''}
-  <button class="secondary" type="button" data-container-edit="${escapeHtml(item.id || item.name)}" data-container-name="${escapeHtml(item.name || item.id)}" data-container-memory="${Math.max(256, Math.round((Number(item.memory) || 0) / 1048576) || 2048)}" data-container-cpus="${item.cpus || 2}">Edit</button>
+  <button class="secondary" type="button" data-container-edit="${escapeHtml(item.id || item.name)}" data-container-name="${escapeHtml(item.name || item.id)}" data-container-memory="${Math.max(256, Math.round((Number(item.memory) || 0) / 1048576) || 2048)}" data-container-cpus="${item.cpus || 2}">Edit resources</button>
   <button class="secondary danger-button" type="button" data-container-action="delete" data-container-id="${escapeHtml(item.id || item.name)}">Delete</button>
 </div></article>`).join('')}</div>`
       : '<div class="empty compact-empty"><p>No native system containers are visible.</p></div>';
@@ -516,7 +519,7 @@ function containersView() {
             ${running ? `<button class="primary" type="button" data-app-open="${escapeHtml(appUrl)}">Open</button><button class="secondary" type="button" data-app-terminal="${escapeHtml(item.name)}" data-app-name="${escapeHtml(app?.name || appId || item.name)}">Terminal</button>` : ''}
             <button class="primary ${running ? 'hidden' : ''}" type="button" data-app-action="start" data-app-id="${escapeHtml(appId)}">Start</button>
             <button class="secondary ${running ? '' : 'hidden'}" type="button" data-app-action="stop" data-app-id="${escapeHtml(appId)}">Stop</button>
-            <button class="secondary" type="button" data-app-edit="${escapeHtml(appId)}" data-app-container="${escapeHtml(item.name)}">Edit</button>
+            <button class="secondary" type="button" data-app-edit="${escapeHtml(appId)}" data-app-container="${escapeHtml(item.name)}">Edit resources</button>
             <button class="secondary" type="button" data-app-action="restart" data-app-id="${escapeHtml(appId)}">Restart</button>
             <button class="secondary danger-button" type="button" data-app-action="remove" data-app-id="${escapeHtml(appId)}">Remove</button>
           </div></article>`;
@@ -543,7 +546,7 @@ function vmsView() {
   <button class="secondary ${/running|active/i.test(String(item.status || '')) ? '' : 'hidden'}" type="button" data-vm-action="shutdown" data-vm-id="${escapeHtml(item.id || item.name)}">Shutdown</button>
   <button class="secondary ${/running|active/i.test(String(item.status || '')) ? '' : 'hidden'}" type="button" data-vm-action="reboot" data-vm-id="${escapeHtml(item.id || item.name)}">Reboot</button>
   <button class="secondary ${/running|active/i.test(String(item.status || '')) ? '' : 'hidden'}" type="button" data-vm-action="stop" data-vm-id="${escapeHtml(item.id || item.name)}">Stop</button>
-  <button class="secondary" type="button" data-vm-edit="${escapeHtml(item.id || item.name)}" data-vm-name="${escapeHtml(item.name)}" data-vm-memory="${Math.max(512, Math.round((Number(item.memory) || 0) / 1048576) || 2048)}" data-vm-cpus="${item.cpus || 2}">Edit</button>
+  <button class="secondary" type="button" data-vm-edit="${escapeHtml(item.id || item.name)}" data-vm-name="${escapeHtml(item.name)}" data-vm-memory="${Math.max(512, Math.round((Number(item.memory) || 0) / 1048576) || 2048)}" data-vm-cpus="${item.cpus || 2}">Edit resources</button>
   <button class="secondary" type="button" data-vm-action="reset" data-vm-id="${escapeHtml(item.id || item.name)}">Reset</button>
   <button class="secondary danger-button" type="button" data-vm-action="delete" data-vm-id="${escapeHtml(item.id || item.name)}">Delete</button>
 </div></article>`).join('')}</div>`
@@ -1062,7 +1065,7 @@ function moduleView(view) {
         const appUrl = `http://${location.hostname}:${app.port}/`;
         const running = instance?.state === 'running';
         const searchText = `${app.name} ${app.category} ${app.description} ${app.image} ${app.source || ''}`.toLowerCase();
-        return `<article class="panel app-card" data-app-card data-category="${escapeHtml(app.category)}" data-search="${escapeHtml(searchText)}"><span class="eyebrow">${escapeHtml(app.category)}</span><h2>${escapeHtml(app.name)}</h2><p class="muted">${escapeHtml(app.description)}</p><p class="muted app-source">${escapeHtml(app.source || 'Open source')} · ${escapeHtml(app.image)} · Port ${app.port}</p>${instance ? `<p class="muted">${escapeHtml(instance.status || instance.state)} · Container IP ${escapeHtml(instance.ip || 'not assigned')}</p><div class="head-actions">${running ? `<a class="primary" href="${escapeHtml(appUrl)}" target="_blank" rel="noopener">Open application</a><button class="secondary" type="button" data-app-terminal="${escapeHtml(instance.name)}" data-app-name="${escapeHtml(app.name)}">Terminal</button>` : ''}<button class="secondary" data-app-action="${running ? 'stop' : 'start'}" data-app-id="${app.id}">${running ? 'Stop' : 'Start'}</button><button class="secondary" type="button" data-app-edit="${app.id}" data-app-container="${escapeHtml(instance.name)}">Edit</button><button class="secondary" data-app-action="restart" data-app-id="${app.id}">Restart</button><button class="secondary" data-app-action="remove" data-app-id="${app.id}">Remove</button></div>` : `<button class="primary" data-install="${app.id}">Install app</button>`}</article>`;
+        return `<article class="panel app-card" data-app-card data-category="${escapeHtml(app.category)}" data-search="${escapeHtml(searchText)}"><span class="eyebrow">${escapeHtml(app.category)}</span><h2>${escapeHtml(app.name)}</h2><p class="muted">${escapeHtml(app.description)}</p><p class="muted app-source">${escapeHtml(app.source || 'Open source')} · ${escapeHtml(app.image)} · Port ${app.port}</p>${instance ? `<p class="muted">${escapeHtml(instance.status || instance.state)} · Container IP ${escapeHtml(instance.ip || 'not assigned')}</p><div class="head-actions">${running ? `<a class="primary" href="${escapeHtml(appUrl)}" target="_blank" rel="noopener">Open application</a><button class="secondary" type="button" data-app-terminal="${escapeHtml(instance.name)}" data-app-name="${escapeHtml(app.name)}">Terminal</button>` : ''}<button class="secondary" data-app-action="${running ? 'stop' : 'start'}" data-app-id="${app.id}">${running ? 'Stop' : 'Start'}</button><button class="secondary" type="button" data-app-edit="${app.id}" data-app-container="${escapeHtml(instance.name)}">Edit resources</button><button class="secondary" data-app-action="restart" data-app-id="${app.id}">Restart</button><button class="secondary" data-app-action="remove" data-app-id="${app.id}">Remove</button></div>` : `<button class="primary" data-install="${app.id}">Install app</button>`}</article>`;
       }).join('') || '<div class="empty"><p>Loading catalog…</p></div>'}</div>
       <section class="module-hero"><h2>Managed app hosting</h2><p>LightNAS downloads each app, creates its persistent storage, publishes its web service on the LightNAS LAN address, starts it after reboot, and verifies that the service is reachable. ${docker?.available && docker?.enabled ? 'The integrated App Store engine is ready.' : 'Rerun the one-click LightNAS installer to provision the integrated App Store engine.'}</p></section>`;
   }
@@ -1136,7 +1139,7 @@ function networkView() {
           <span class="mono-cell">${escapeHtml(ipv4)}</span>
           <span>${escapeHtml(profile?.name || device.connection || '—')}<small>${profile ? `autostart ${profile.autoconnect ? 'yes' : 'no'}` : ''}</small></span>
           <div class="runtime-actions">
-            ${profile ? `<button class="secondary" data-network-edit="${escapeHtml(profile.name)}">Edit</button>` : ''}
+            ${profile ? `<button class="secondary" data-network-edit="${escapeHtml(profile.name)}">Edit resources</button>` : ''}
             ${device.state === 'connected' ? `<button class="secondary" data-network-device="${escapeHtml(device.name)}" data-network-device-action="disconnect">Down</button>` : device.type !== 'kernel' ? `<button class="secondary" data-network-device="${escapeHtml(device.name)}" data-network-device-action="connect">Up</button>` : ''}
           </div>
         </div>`).join('') || '<div class="empty">No managed network interfaces are visible.</div>'}
@@ -1160,9 +1163,9 @@ function networkView() {
             <span>metric ${route.metric ?? '—'}</span>
             <div class="runtime-actions">
               ${persistentEditable
-                ? `<button class="secondary" data-network-edit-route data-route-connection="${escapeHtml(profile.name)}" data-route-destination="${escapeHtml(route.destination)}" data-route-gateway="${escapeHtml(route.gateway || '')}" data-route-device="${escapeHtml(route.device || '')}" data-route-metric="${route.metric ?? 100}" data-route-old="${escapeHtml(oldRoute)}">Edit</button><button class="secondary danger-button" data-network-delete-route data-route-connection="${escapeHtml(profile.name)}" data-route-old="${escapeHtml(oldRoute)}">Delete</button>`
+                ? `<button class="secondary" data-network-edit-route data-route-connection="${escapeHtml(profile.name)}" data-route-destination="${escapeHtml(route.destination)}" data-route-gateway="${escapeHtml(route.gateway || '')}" data-route-device="${escapeHtml(route.device || '')}" data-route-metric="${route.metric ?? 100}" data-route-old="${escapeHtml(oldRoute)}">Edit resources</button><button class="secondary danger-button" data-network-delete-route data-route-connection="${escapeHtml(profile.name)}" data-route-old="${escapeHtml(oldRoute)}">Delete</button>`
                 : runtimeEditable
-                  ? `<button class="secondary" data-network-edit-route data-route-runtime="true" data-route-destination="${escapeHtml(route.destination)}" data-route-gateway="${escapeHtml(route.gateway || '')}" data-route-device="${escapeHtml(route.device || '')}" data-route-metric="${route.metric ?? 100}">Edit</button><span class="muted route-managed-label">runtime</span>`
+                  ? `<button class="secondary" data-network-edit-route data-route-runtime="true" data-route-destination="${escapeHtml(route.destination)}" data-route-gateway="${escapeHtml(route.gateway || '')}" data-route-device="${escapeHtml(route.device || '')}" data-route-metric="${route.metric ?? 100}">Edit resources</button><span class="muted route-managed-label">runtime</span>`
                   : '<span class="muted route-managed-label">system</span>'}
             </div>
           </div>`;
