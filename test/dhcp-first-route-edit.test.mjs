@@ -30,15 +30,16 @@ test('container settings save is not marked failed only because application disc
   const controls = await read('public/dialog-controls.js');
   assert.match(controls, /Application discovery is secondary to saving container settings/);
   assert.match(controls, /publishWarning = problem\.message/);
-  assert.match(controls, /DHCP was attempted first; this nested host required LightNAS managed automatic addressing/);
+  assert.match(controls, /LightNAS assigned this container from the managed LAN pool/);
+  assert.match(controls, /This host required LightNAS private fallback addressing/);
 });
 
 
-test('managed automatic fallback persists inside the guest network profile', async () => {
+test('managed automatic addressing persists the selected pool gateway inside the guest', async () => {
   const agent = await read('scripts/lightnas-host-agent.py');
-  assert.match(agent, /Persist the managed fallback inside systemd-networkd/);
+  assert.match(agent, /def managed_container_ipv4_pool/);
   assert.match(agent, /f"Address=\{address\}"/);
-  assert.match(agent, /"Gateway=10\.77\.0\.1"/);
-  assert.match(agent, /"DNS=10\.77\.0\.1"/);
+  assert.match(agent, /f"Gateway=\{gateway_text\}"/);
+  assert.match(agent, /f"DNS=\{gateway_text\}"/);
   assert.match(agent, /10-lightnas-eth0\.network/);
 });
