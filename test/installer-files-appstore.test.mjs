@@ -126,3 +126,17 @@ test('storage manager presents mounted volumes with a compact create workflow', 
   assert.match(styles, /\.storage-create-grid/);
   assert.match(styles, /\.storage-content-policy/);
 });
+
+
+test('storage create dialog never renders a silently empty volume selector', async () => {
+  const storageUi = await read('public/storage-manager.js');
+  const system = await read('src/system.mjs');
+  assert.match(storageUi, /No writable volumes available/);
+  assert.match(storageUi, /Select a volume…/);
+  assert.match(storageUi, /read only/);
+  assert.match(storageUi, /writableSources\.length===1/);
+  assert.match(storageUi, /No writable volume detected/);
+  assert.match(system, /\.lightnas-write-test-/);
+  assert.match(system, /await writeFile\(probe/);
+  assert.match(system, /await rm\(probe/);
+});
