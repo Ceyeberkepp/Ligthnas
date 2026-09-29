@@ -270,3 +270,30 @@ test('overview and container screens expose CPU count and live resource telemetr
   assert.match(styles, /\.overview-chart-detail-strip/);
   assert.match(styles, /\.host-capacity-card/);
 });
+
+
+test('Overview replaces duplicate Monitoring navigation and shows installed compute', async () => {
+  const [app, index, styles] = await Promise.all([
+    read('public/app.js'),
+    read('public/index.html'),
+    read('public/enhancements.css')
+  ]);
+  assert.doesNotMatch(index, /data-view="monitoring"/);
+  assert.match(app, /Installed compute/);
+  assert.match(app, /overviewComputeInventory/);
+  assert.match(app, /Virtual machines, native containers, and App Store applications/);
+  assert.match(app, /if \(view === 'monitoring'\) view = 'home'/);
+  assert.match(styles, /\.overview-compute-list/);
+});
+
+test('VM creation detects missing UEFI firmware and installer provisions OVMF', async () => {
+  const [runtime, installer] = await Promise.all([
+    read('src/runtimes-next.mjs'),
+    read('install.sh')
+  ]);
+  assert.match(runtime, /async function findUefiFirmware\(\)/);
+  assert.match(runtime, /OVMF_CODE/);
+  assert.match(runtime, /firmwareFallback/);
+  assert.match(runtime, /legacy BIOS because UEFI\/OVMF firmware is not installed/);
+  assert.match(installer, /openssh-server ovmf/);
+});
