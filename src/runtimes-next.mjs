@@ -599,10 +599,17 @@ export async function runtimeInventory() {
               const cpuPercent = Number.parseFloat(String(value?.CPUPerc || '').replace('%', '')) || 0;
               const memoryPercent = Number.parseFloat(String(value?.MemPerc || '').replace('%', '')) || 0;
               const [usedText = '', limitText = ''] = String(value?.MemUsage || '').split('/').map(part => part.trim());
+              const parseDockerBytes = text => {
+                const match = String(text || '').trim().match(/^([0-9.]+)\s*(B|KiB|MiB|GiB|TiB)$/i);
+                if (!match) return 0;
+                const scale = { b:1, kib:1024, mib:1024**2, gib:1024**3, tib:1024**4 }[match[2].toLowerCase()] || 1;
+                return Number(match[1]) * scale;
+              };
               return [[name, {
                 cpuPercent,
                 memoryPercent,
                 memoryUsage: usedText,
+                memoryUsageBytes: parseDockerBytes(usedText),
                 memoryLimitText: limitText,
                 liveStats: true
               }]];

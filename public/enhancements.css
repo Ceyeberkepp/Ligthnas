@@ -2199,3 +2199,45 @@
     max-width:58%;
   }
 }
+
+
+/* Richer overview and runtime telemetry */
+.overview-chart-detail-strip {
+  margin: 0 18px 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+.runtime-resource-summary .monitor-card {
+  min-height: 138px;
+}
+.runtime-resource-summary .monitor-card strong {
+  font-size: 20px;
+}
+.host-capacity-card strong {
+  font-size: 18px !important;
+}
+.app-resource-cell {
+  min-width: 190px;
+}
+.app-resource-cell b {
+  white-space: normal;
+  line-height: 1.35;
+}
+.app-resource-cell small {
+  white-space: normal;
+  line-height: 1.35;
+}
+@media (max-width: 900px) {
+  .overview-chart-detail-strip {
+    margin-inline: 12px;
+  }
+  .app-resource-cell {
+    min-width: 0;
+  }
+}
