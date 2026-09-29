@@ -160,6 +160,8 @@ function applyApplianceBranding(appliance = state.overview?.appliance) {
   const logoMode = appliance.logoMode === 'picture' && appliance.logo ? 'picture' : 'text';
   const logoUrl = logoMode === 'picture' ? `url("/api/branding/logo?v=${Date.now()}")` : '';
   const accent = /^#[0-9a-f]{6}$/i.test(String(appliance.accentColor || '')) ? appliance.accentColor : '#087b70';
+  const sidebarColor = /^#[0-9a-f]{6}$/i.test(String(appliance.sidebarColor || '')) ? appliance.sidebarColor : '#ffffff';
+  const contentColor = /^#[0-9a-f]{6}$/i.test(String(appliance.contentColor || '')) ? appliance.contentColor : '#f2f6fa';
   const rgb = [1,3,5].map(index => Number.parseInt(accent.slice(index,index+2),16));
   const luminance = (0.2126*rgb[0] + 0.7152*rgb[1] + 0.0722*rgb[2]) / 255;
   document.documentElement.style.setProperty('--accent', accent);
@@ -167,6 +169,14 @@ function applyApplianceBranding(appliance = state.overview?.appliance) {
   document.documentElement.style.setProperty('--accent-soft', `color-mix(in srgb, ${accent} 12%, var(--panel))`);
   document.documentElement.style.setProperty('--accent-strong', `color-mix(in srgb, ${accent} 82%, black)`);
   document.documentElement.style.setProperty('--accent-contrast', luminance > .58 ? '#06201c' : '#ffffff');
+  const sidebarRgb = [1,3,5].map(index => Number.parseInt(sidebarColor.slice(index,index+2),16));
+  const sidebarLuminance = (0.2126*sidebarRgb[0] + 0.7152*sidebarRgb[1] + 0.0722*sidebarRgb[2]) / 255;
+  document.documentElement.style.setProperty('--sidebar', sidebarColor);
+  document.documentElement.style.setProperty('--brand-content-bg', contentColor);
+  document.documentElement.style.setProperty('--sidebar-text', sidebarLuminance > .58 ? '#12283b' : '#f4f8fb');
+  document.documentElement.style.setProperty('--sidebar-muted', sidebarLuminance > .58 ? '#536c80' : '#aebdca');
+  document.documentElement.style.setProperty('--auth-brand-bg', sidebarColor);
+  document.documentElement.style.setProperty('--auth-panel-bg', contentColor);
   $$('.brand-mark').forEach(mark => {
     mark.classList.toggle('custom-logo', logoMode === 'picture');
     mark.classList.toggle('text-logo-mode', logoMode === 'text');
@@ -1014,6 +1024,8 @@ function settingsView() {
           <label>Logo type<select name="logoMode"><option value="text" ${appliance.logoMode !== 'picture' ? 'selected' : ''}>Text logo</option><option value="picture" ${appliance.logoMode === 'picture' ? 'selected' : ''}>Picture logo</option></select><small>Only one logo type is displayed at a time.</small></label>
           <label data-text-logo-field>Brand name<input name="brandName" value="${escapeHtml(appliance.brandName || 'LightNAS')}" minlength="2" maxlength="32" autocomplete="off" placeholder="LightNAS"><small>Shown only when Text logo is selected.</small></label>
           <label>Site accent color<div class="accent-color-control"><input name="accentColor" type="color" value="${escapeHtml(appliance.accentColor || '#087b70')}" aria-label="Site accent color"><input name="accentHex" value="${escapeHtml(appliance.accentColor || '#087b70')}" maxlength="7" pattern="#[0-9A-Fa-f]{6}" spellcheck="false"></div><small>Buttons, menus, graphs, badges, and focus colors.</small></label>
+          <label>Sidebar color<div class="accent-color-control"><input name="sidebarColor" type="color" value="${escapeHtml(appliance.sidebarColor || '#ffffff')}" aria-label="Sidebar color"><input name="sidebarHex" value="${escapeHtml(appliance.sidebarColor || '#ffffff')}" maxlength="7" pattern="#[0-9A-Fa-f]{6}" spellcheck="false"></div><small>Left navigation background and login brand side.</small></label>
+          <label>Main content color<div class="accent-color-control"><input name="contentColor" type="color" value="${escapeHtml(appliance.contentColor || '#f2f6fa')}" aria-label="Main content color"><input name="contentHex" value="${escapeHtml(appliance.contentColor || '#f2f6fa')}" maxlength="7" pattern="#[0-9A-Fa-f]{6}" spellcheck="false"></div><small>Main workspace background and login form side.</small></label>
           <label>Display time zone<select name="timezone">${zones.map(([value, label]) => `<option value="${value}" ${appliance.timezone === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
         </div>
         <div class="general-branding-row branding-card">
@@ -1586,6 +1598,10 @@ function bindViewActions() {
     settingsForm.elements.logoMode?.addEventListener('change', syncBrandingControls);
     const color = settingsForm.elements.accentColor;
     const hex = settingsForm.elements.accentHex;
+    const sidebarColor = settingsForm.elements.sidebarColor;
+    const sidebarHex = settingsForm.elements.sidebarHex;
+    const contentColor = settingsForm.elements.contentColor;
+    const contentHex = settingsForm.elements.contentHex;
     color?.addEventListener('input', () => {
       if (hex) hex.value = color.value;
       applyApplianceBranding({ ...state.overview.appliance, accentColor:color.value, logoMode:settingsForm.elements.logoMode?.value });
@@ -1594,6 +1610,26 @@ function bindViewActions() {
       if (/^#[0-9a-f]{6}$/i.test(hex.value)) {
         if (color) color.value = hex.value;
         applyApplianceBranding({ ...state.overview.appliance, accentColor:hex.value, logoMode:settingsForm.elements.logoMode?.value });
+      }
+    });
+    sidebarColor?.addEventListener('input', () => {
+      if (sidebarHex) sidebarHex.value = sidebarColor.value;
+      applyApplianceBranding({ ...state.overview.appliance, sidebarColor:sidebarColor.value, logoMode:settingsForm.elements.logoMode?.value });
+    });
+    sidebarHex?.addEventListener('input', () => {
+      if (/^#[0-9a-f]{6}$/i.test(sidebarHex.value)) {
+        if (sidebarColor) sidebarColor.value = sidebarHex.value;
+        applyApplianceBranding({ ...state.overview.appliance, sidebarColor:sidebarHex.value, logoMode:settingsForm.elements.logoMode?.value });
+      }
+    });
+    contentColor?.addEventListener('input', () => {
+      if (contentHex) contentHex.value = contentColor.value;
+      applyApplianceBranding({ ...state.overview.appliance, contentColor:contentColor.value, logoMode:settingsForm.elements.logoMode?.value });
+    });
+    contentHex?.addEventListener('input', () => {
+      if (/^#[0-9a-f]{6}$/i.test(contentHex.value)) {
+        if (contentColor) contentColor.value = contentHex.value;
+        applyApplianceBranding({ ...state.overview.appliance, contentColor:contentHex.value, logoMode:settingsForm.elements.logoMode?.value });
       }
     });
     syncBrandingControls();
@@ -1632,6 +1668,8 @@ function bindViewActions() {
         brandName: state.overview.appliance.brandName,
         logoMode: state.overview.appliance.logoMode,
         accentColor: state.overview.appliance.accentColor,
+        sidebarColor: state.overview.appliance.sidebarColor,
+        contentColor: state.overview.appliance.contentColor,
         currentPassword: input.currentPassword,
         newPassword: input.newPassword
       }) });
@@ -2047,6 +2085,10 @@ window.addEventListener('hashchange', () => render(location.hash.slice(1) || 'ho
 
 async function boot() {
   try {
+    try {
+      const branding = await request('/api/branding');
+      applyApplianceBranding(branding);
+    } catch {}
     const status = await request('/api/status');
     if (status.setupRequired) return showAuth('setup');
     try { await showConsole(); } catch (error) { if (error.status === 401) showAuth('login'); else throw error; }
