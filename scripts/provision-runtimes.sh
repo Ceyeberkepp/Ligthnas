@@ -49,6 +49,67 @@ report() { printf '%s: %s\n' "$1" "$2" | tee -a "${status_file}"; }
 : > "${status_file}"
 chmod 0644 "${status_file}"
 
+restore_guest_lan_dhcp() {
+  local config="$1" rootfs metadata network_file explicit_mode=""
+  rootfs="$(sed -nE 's#^lxc\.rootfs\.path\s*=\s*(dir:)?(.+?)\s*$#\2#p' "$config" | head -1)"
+  [[ -n "$rootfs" ]] || return 0
+  metadata="$(dirname "$config")/lightnas.json"
+  network_file="$rootfs/etc/systemd/network/10-lightnas-eth0.network"
+
+  if [[ -f "$metadata" ]] && command -v python3 >/dev/null 2>&1; then
+    explicit_mode="$(python3 - "$metadata" <<'PY'
+import json, sys
+try:
+    print(json.load(open(sys.argv[1], encoding="utf-8")).get("ipv4Mode", ""))
+except Exception:
+    print("")
+PY
+)"
+  fi
+
+  # Respect a user-selected manual/static address. Only undo LightNAS's
+  # automatic 10.77 fallback when migrating the guest onto the real LAN.
+  if [[ "$explicit_mode" == "manual" ]]; then
+    return 0
+  fi
+
+  if [[ -f "$network_file" ]] && grep -Eq '^Address=10\.77\.0\.[0-9]+/24$|^Gateway=10\.77\.0\.1$' "$network_file"; then
+    mkdir -p "$(dirname "$network_file")"
+    cat >"$network_file" <<'EOF'
+[Match]
+Name=eth0
+
+[Network]
+DHCP=ipv4
+IPv6AcceptRA=yes
+
+[DHCPv4]
+ClientIdentifier=mac
+EOF
+  fi
+
+  if [[ -f "$metadata" ]] && command -v python3 >/dev/null 2>&1; then
+    python3 - "$metadata" <<'PY'
+import json, os, sys, tempfile
+path=sys.argv[1]
+try:
+    data=json.load(open(path, encoding="utf-8"))
+except Exception:
+    data={}
+if data.get("ipv4Mode") != "manual":
+    data["ipv4Mode"]="dhcp"
+    data["ipv4Address"]=""
+    data["gateway"]=""
+    data["automaticFallback"]=False
+fd,tmp=tempfile.mkstemp(prefix=".lightnas-meta-", dir=os.path.dirname(path))
+with os.fdopen(fd, "w", encoding="utf-8") as handle:
+    json.dump(data, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+os.replace(tmp, path)
+PY
+  fi
+}
+
 # A nested LightNAS appliance should work without a separate operator flag.
 # Enable the feature automatically; the privileged host agent still performs
 # cgroup, namespace and veth capability checks before allowing LXC creation.
@@ -78,8 +139,9 @@ if command -v lxc-create >/dev/null 2>&1 && command -v lxc-start >/dev/null 2>&1
       was_running=0
       [[ "$(lxc-info -n "$name" -sH 2>/dev/null || true)" == "RUNNING" ]] && was_running=1
       [[ "$was_running" == "1" ]] && lxc-stop -n "$name" -t 30 >/dev/null 2>&1 || true
-      sed -i '/^lxc\.net\.0\.type\s*=/d;/^lxc\.net\.0\.link\s*=/d;/^lxc\.net\.0\.macvlan\.mode\s*=/d;/^lxc\.net\.0\.vlan\.id\s*=/d' "$config"
+      sed -i '/^lxc\.net\.0\.type\s*=/d;/^lxc\.net\.0\.link\s*=/d;/^lxc\.net\.0\.macvlan\.mode\s*=/d;/^lxc\.net\.0\.vlan\.id\s*=/d;/^lxc\.net\.0\.ipv4\.address\s*=/d;/^lxc\.net\.0\.ipv4\.gateway\s*=/d' "$config"
       printf '%s\n'         'lxc.net.0.type = macvlan'         "lxc.net.0.link = ${container_parent}"         'lxc.net.0.macvlan.mode = bridge' >>"$config"
+      restore_guest_lan_dhcp "$config"
       [[ "$was_running" == "1" ]] && lxc-start -n "$name" -d >/dev/null 2>&1 || true
     done
     systemctl disable --now lightnas-container-network.service >/dev/null 2>&1 || true
@@ -103,6 +165,8 @@ if command -v lxc-create >/dev/null 2>&1 && command -v lxc-start >/dev/null 2>&1
       [[ "$(lxc-info -n "$name" -sH 2>/dev/null || true)" == "RUNNING" ]] && was_running=1
       [[ "$was_running" == "1" ]] && lxc-stop -n "$name" -t 30 >/dev/null 2>&1 || true
       sed -Ei "s#^(lxc\.net\.[0-9]+\.link\s*=\s*)(lightnas0|lxcbr0)\s*$#\1${lan_bridge}#" "$config"
+      sed -i '/^lxc\.net\.0\.ipv4\.address\s*=/d;/^lxc\.net\.0\.ipv4\.gateway\s*=/d' "$config"
+      restore_guest_lan_dhcp "$config"
       [[ "$was_running" == "1" ]] && lxc-start -n "$name" -d >/dev/null 2>&1 || true
     done
 
