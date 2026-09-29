@@ -75,16 +75,20 @@ test('Settings and MFA have responsive structured layouts', async () => {
 
 
 test('managed App Store containers show access address and terminal controls', async () => {
-  const [app, server, system, terminal] = await Promise.all([
+  const [app, server, system, runtime, terminal] = await Promise.all([
     read('public/app.js'),
     read('src/server.mjs'),
     read('src/system.mjs'),
+    read('src/runtimes-next.mjs'),
     read('public/container-console.js')
   ]);
   assert.match(app, /data-app-terminal/);
   assert.match(app, /data-app-open/);
   assert.match(app, /primaryIpv4 \|\| location\.hostname/);
   assert.match(app, /http:\/\/\$\{hostAddress\}:\$\{app\.port\}/);
+  assert.match(app, /Container IP:/);
+  assert.match(runtime, /NetworkSettings\.Networks/);
+  assert.match(runtime, /ip: ips\.get\(item\.name\)/);
   assert.match(server, /\/api\\\/console\\\/app\\\//);
   assert.match(server, /openContainerShell\(appContainer\[1\]\)/);
   assert.match(server, /apps\.manage/);
