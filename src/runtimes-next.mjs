@@ -574,7 +574,7 @@ export async function runtimeInventory() {
             try {
               const value = JSON.parse(line);
               const name = String(value?.Name || '').replace(/^\//, '');
-              const networks = Object.values(value?.NetworkSettings?.Networks || {});
+              const networks = Object.values(value?.NetworkSettings && value.NetworkSettings.Networks ? value.NetworkSettings.Networks : {});
               const nanoCpus = Number(value?.HostConfig?.NanoCpus || 0);
               return [[name, {
                 ip: String(networks.find(entry => entry?.IPAddress)?.IPAddress || ''),
