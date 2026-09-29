@@ -189,11 +189,27 @@ chown -R root:root "${INSTALL_DIRECTORY}"
 
 echo "[5/6] Installing the systemd services..."
 install -d -m 0755 /run/lightnas
+cat >/etc/systemd/system/lightnas-network-bootstrap.service <<EOF
+[Unit]
+Description=LightNAS automatic host LAN configuration
+Wants=network-online.target
+After=network-online.target
+Before=lightnas-host-agent.service ${SERVICE_NAME}.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash ${INSTALL_DIRECTORY}/scripts/configure-appliance-network.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 cat >/etc/systemd/system/lightnas-host-agent.service <<EOF
 [Unit]
 Description=LightNAS Privileged Local Host Agent
-Wants=network-online.target
-After=network-online.target
+Wants=network-online.target lightnas-network-bootstrap.service
+After=network-online.target lightnas-network-bootstrap.service
 
 [Service]
 Type=simple
@@ -244,6 +260,8 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
+systemctl enable lightnas-network-bootstrap.service
+systemctl restart lightnas-network-bootstrap.service || true
 systemctl enable lightnas-host-agent.service
 systemctl restart lightnas-host-agent.service
 systemctl enable "${SERVICE_NAME}"
