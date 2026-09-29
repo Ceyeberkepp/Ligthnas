@@ -443,7 +443,7 @@ def local_networks() -> list[str]:
         pass
 
     state = lightnas_network_state()
-    if state.get("LIGHTNAS_NETWORK_MODE") == "nested-macvlan":
+    if state.get("LIGHTNAS_NETWORK_MODE") in {"nested-macvlan", "nested-ipvlan"}:
         parent = str(state.get("LIGHTNAS_CONTAINER_PARENT") or state.get("LIGHTNAS_UPLINK") or "eth0")
         if IFACE_RE.fullmatch(parent) and Path("/sys/class/net", parent).exists():
             return [parent]
@@ -843,7 +843,8 @@ def configure_container_guest(config: Path, data: dict) -> None:
 
         network_lines = ["[Match]", "Name=eth0", "", "[Network]"]
         if mode == "dhcp":
-            network_lines += ["DHCP=ipv4", "IPv6AcceptRA=yes", "", "[DHCPv4]", "ClientIdentifier=mac"]
+            client_id = "duid" if lightnas_network_state().get("LIGHTNAS_NETWORK_MODE") == "nested-ipvlan" else "mac"
+            network_lines += ["DHCP=ipv4", "IPv6AcceptRA=yes", "", "[DHCPv4]", f"ClientIdentifier={client_id}"]
         else:
             network_lines.append(f"Address={address}")
             if gateway:
@@ -1005,7 +1006,8 @@ def create_container(data: dict) -> dict:
     requested_network = str(data.get("network") or "").strip()
     networks = local_networks()
     network_state = lightnas_network_state()
-    nested_direct = network_state.get("LIGHTNAS_NETWORK_MODE") == "nested-macvlan"
+    nested_mode = str(network_state.get("LIGHTNAS_NETWORK_MODE") or "")
+    nested_direct = nested_mode in {"nested-macvlan", "nested-ipvlan"}
     if nested_direct:
         # In a nested Proxmox LightNAS appliance, container networking is not
         # a per-app choice. Every new system container uses the already-working
@@ -1072,19 +1074,22 @@ def create_container(data: dict) -> dict:
     append_unique(config, f"lxc.start.auto = {1 if data.get('startOnBoot', True) else 0}")
     append_unique(config, f"lxc.cgroup2.memory.max = {memory * 1024 * 1024}")
     append_unique(config, f"lxc.cgroup2.cpu.max = {cpus * 100000} 100000")
-    direct_macvlan = (
+    direct_lan = (
         nested_direct
         and network == str(network_state.get("LIGHTNAS_CONTAINER_PARENT") or network_state.get("LIGHTNAS_UPLINK") or "eth0")
     )
-    append_unique(config, f"lxc.net.0.type = {'macvlan' if direct_macvlan else 'veth'}")
+    direct_type = "macvlan" if nested_mode == "nested-macvlan" else ("ipvlan" if nested_mode == "nested-ipvlan" else "veth")
+    append_unique(config, f"lxc.net.0.type = {direct_type if direct_lan else 'veth'}")
     append_unique(config, f"lxc.net.0.link = {network}")
-    if direct_macvlan:
+    if direct_lan and direct_type == "macvlan":
         append_unique(config, "lxc.net.0.macvlan.mode = bridge")
+    if direct_lan and direct_type == "ipvlan":
+        append_unique(config, "lxc.net.0.ipvlan.mode = l2")
     append_unique(config, "lxc.net.0.flags = up")
     append_unique(config, "lxc.net.0.name = eth0")
     vlan_tag = data.get("vlanTag")
-    if direct_macvlan and vlan_tag is not None:
-        raise ValueError("nested LAN containers inherit the Proxmox uplink VLAN; do not set a second VLAN tag")
+    if direct_lan and vlan_tag is not None:
+        raise ValueError("nested LAN containers inherit the outer uplink VLAN; do not set a second VLAN tag")
     if vlan_tag is not None:
         try:
             vlan_tag = int(vlan_tag)
@@ -1158,7 +1163,7 @@ def create_container(data: dict) -> dict:
     dhcp_mode = str(data.get("ipv4Mode") or "dhcp") == "dhcp"
     for _attempt in range(20 if dhcp_mode else 30):
         addresses = [address for address in container_addresses(name) if ":" not in address]
-        ipv4 = next((address for address in addresses if not direct_macvlan or not address.startswith("10.77.0.")), "")
+        ipv4 = next((address for address in addresses if not direct_lan or not address.startswith("10.77.0.")), "")
         if ipv4:
             try:
                 default_route = run(
@@ -1210,7 +1215,7 @@ def create_container(data: dict) -> dict:
         "network": network,
         "ipv4": ipv4 or (container_addresses(name)[0] if container_addresses(name) else ""),
         "defaultRoute": default_route,
-        "networkMode": "direct-lan" if direct_macvlan else "managed",
+        "networkMode": "direct-lan" if direct_lan else "managed",
         "automaticFallback": automatic_fallback,
     }
 
@@ -1392,14 +1397,18 @@ def update_container(data: dict) -> dict:
         if requested_network not in networks:
             raise ValueError("selected container network is not available")
         network_state = lightnas_network_state()
-        direct_macvlan = (
-            network_state.get("LIGHTNAS_NETWORK_MODE") == "nested-macvlan"
+        nested_mode = str(network_state.get("LIGHTNAS_NETWORK_MODE") or "")
+        direct_lan = (
+            nested_mode in {"nested-macvlan", "nested-ipvlan"}
             and requested_network == str(network_state.get("LIGHTNAS_CONTAINER_PARENT") or network_state.get("LIGHTNAS_UPLINK") or "eth0")
         )
-        append_unique(config, f"lxc.net.0.type = {'macvlan' if direct_macvlan else 'veth'}")
+        direct_type = "macvlan" if nested_mode == "nested-macvlan" else ("ipvlan" if nested_mode == "nested-ipvlan" else "veth")
+        append_unique(config, f"lxc.net.0.type = {direct_type if direct_lan else 'veth'}")
         append_unique(config, f"lxc.net.0.link = {requested_network}")
-        if direct_macvlan:
+        if direct_lan and direct_type == "macvlan":
             append_unique(config, "lxc.net.0.macvlan.mode = bridge")
+        if direct_lan and direct_type == "ipvlan":
+            append_unique(config, "lxc.net.0.ipvlan.mode = l2")
 
     mode = str(data.get("ipv4Mode") or "dhcp")
     address = str(data.get("ipv4Address") or "").strip()
