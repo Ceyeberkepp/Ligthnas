@@ -88,7 +88,7 @@ test('managed App Store containers show access address and terminal controls', a
   assert.match(app, /http:\/\/\$\{hostAddress\}:\$\{app\.port\}/);
   assert.match(app, /Container IP:/);
   assert.match(runtime, /NetworkSettings\.Networks/);
-  assert.match(runtime, /ip: ips\.get\(item\.name\)/);
+  assert.match(runtime, /details\.get\(item\.name\)/);
   assert.match(server, /\/api\\\/console\\\/app\\\//);
   assert.match(server, /openContainerShell\(appContainer\[1\]\)/);
   assert.match(server, /apps\.manage/);
@@ -189,4 +189,43 @@ test('overview graph tabs span the full chart width', async () => {
   assert.match(styles, /\.overview-graph-tabs \{[^}]*width:100%/s);
   assert.match(styles, /\.overview-graph-tabs button \{[^}]*flex:1 1 0/s);
   assert.doesNotMatch(styles, /\.overview-graph-tabs \{[^}]*width:max-content/s);
+});
+
+
+test('overview graphs expose CPU count and current resource context', async () => {
+  const app = await read('public/app.js');
+  assert.match(app, /logical CPUs/);
+  assert.match(app, /Memory usage[\s\S]*used[\s\S]*total[\s\S]*free/);
+  assert.match(app, /Storage usage[\s\S]*used[\s\S]*total[\s\S]*free/);
+  assert.match(app, /RX \$\{bytes\(system\.network\?\.receivedBytes/);
+  assert.match(app, /overview-chart-context/);
+});
+
+test('container summary counts native and App Store containers with resource details', async () => {
+  const app = await read('public/app.js');
+  assert.match(app, /runtimeResourceSummary\(\[\.\.\.containers, \.\.\.appContainers\], 'containers'\)/);
+  assert.match(app, /Allocated vCPU/);
+  assert.match(app, /container\$\{uncappedCpu===1\?'':'s'\} uncapped/);
+  assert.match(app, /Host CPU use/);
+});
+
+test('managed applications expose real Docker limits and can be edited', async () => {
+  const [app, dialogs, runtime, server] = await Promise.all([
+    read('public/app.js'),
+    read('public/dialog-controls.js'),
+    read('src/runtimes-next.mjs'),
+    read('src/server.mjs')
+  ]);
+  assert.match(runtime, /HostConfig\?\.NanoCpus/);
+  assert.match(runtime, /HostConfig\?\.Memory/);
+  assert.match(runtime, /RestartPolicy\?\.Name/);
+  assert.match(runtime, /export async function updateCatalogApp/);
+  assert.match(runtime, /docker[\s\S]*update/);
+  assert.match(server, /\/update\$/.source ? /updateCatalogApp/ : /updateCatalogApp/);
+  assert.match(app, /data-app-edit/);
+  assert.match(app, /app-resource-cell/);
+  assert.match(dialogs, /Edit \$\{app\.name\}/);
+  assert.match(dialogs, /Memory limit \(MiB\)/);
+  assert.match(dialogs, /CPU limit/);
+  assert.match(dialogs, /Restart policy/);
 });

@@ -10,7 +10,7 @@ import { getFilesystems, getStorageInventory, getSystemSnapshot } from './system
 import { hashPassword, Sessions, verifyPassword } from './auth.mjs';
 import { listFiles, listAllFiles, createFolder, uploadFile, downloadFile, downloadEntry, deleteEntry } from './files.mjs';
 import { thumbnailFor } from './thumbnails.mjs';
-import { catalog, runtimeInventory, installCatalogApp, manageCatalogApp, openContainerShell, createContainer, createVm } from './runtimes-next.mjs';
+import { catalog, runtimeInventory, installCatalogApp, manageCatalogApp, updateCatalogApp, openContainerShell, createContainer, createVm } from './runtimes-next.mjs';
 import { proxmoxConsoleSocket, proxmoxUpdateStorage, proxmoxCleanDisk } from './proxmox.mjs';
 import { localContainerSummary, localContainerInventory, localManageContainer, localContainerConsoleSocket, localContainerCommand, localVmConsoleSocket, localNodeConsoleSocket, localNetworkInventory, localNetworkAction, localApplianceHealth, localApplianceRepair } from './local-host.mjs';
 import { validateSmtp, sendSmtpTest } from './mailer.mjs';
@@ -1309,6 +1309,15 @@ async function api(req, res, url) {
     await store.save();
     return send(res, 201, { ...installed, firewall });
   }
+  if (req.method === 'POST' && /^\/api\/catalog\/[a-z0-9-]+\/update$/.test(url.pathname)) {
+    if (!requirePermission(res, permissions, 'apps.manage')) return;
+    const id = url.pathname.split('/')[3];
+    const result = await updateCatalogApp(id, await bodyJson(req));
+    store.addActivity('app', `App ${id} resource limits were updated.`);
+    await store.save();
+    return send(res, 200, result);
+  }
+
   if (req.method === 'POST' && /^\/api\/catalog\/[a-z0-9-]+\/(start|stop|restart|remove)$/.test(url.pathname)) {
     if (!requirePermission(res, permissions, 'apps.manage')) return;
     const [, , , id, action] = url.pathname.split('/');
