@@ -158,11 +158,11 @@ function applyApplianceBranding(appliance = state.overview?.appliance) {
   if (!appliance) return;
   const brandName = String(appliance.brandName || 'LightNAS').trim() || 'LightNAS';
   const logoUrl = appliance.logo ? `url("/api/branding/logo?v=${Date.now()}")` : '';
-  $('.brand-mark').forEach(mark => {
+  $$('.brand-mark').forEach(mark => {
     mark.classList.toggle('custom-logo', Boolean(appliance.logo));
     mark.style.backgroundImage = logoUrl;
   });
-  $('[data-brand-name]').forEach(node => { node.textContent = brandName; });
+  $$('[data-brand-name]').forEach(node => { node.textContent = brandName; });
 }
 
 async function showConsole() {
@@ -1481,16 +1481,16 @@ function bindViewActions() {
     }
     catch (error) { progress?.fail(error.message); toast(error.message); button.disabled = false; button.textContent = 'Install'; }
   }));
-  $('[data-app-open]', $('#content')).forEach(button => button.addEventListener('click', () => {
+  $$('[data-app-open]', $('#content')).forEach(button => button.addEventListener('click', () => {
     const url = button.dataset.appOpen;
     if (url) window.open(url, '_blank', 'noopener');
   }));
-  $('[data-app-terminal]', $('#content')).forEach(button => button.addEventListener('click', () => {
+  $$('[data-app-terminal]', $('#content')).forEach(button => button.addEventListener('click', () => {
     const id = button.dataset.appTerminal;
     const name = button.dataset.appName || id;
     window.open(`/container-console.html?id=${encodeURIComponent(id)}&name=${encodeURIComponent(name)}&type=app`, '_blank', 'noopener');
   }));
-  $('[data-app-action]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+  $$('[data-app-action]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     const { appId, appAction } = button.dataset;
     if (appAction === 'remove' && !confirm(`Remove ${appId}? Its saved app data will remain on this NAS.`)) return;
     button.disabled = true;
