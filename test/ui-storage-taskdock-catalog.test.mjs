@@ -297,3 +297,26 @@ test('VM creation detects missing UEFI firmware and installer provisions OVMF', 
   assert.match(runtime, /legacy BIOS because UEFI\/OVMF firmware is not installed/);
   assert.match(installer, /openssh-server ovmf/);
 });
+
+
+test('VM creation prepares libvirt ACLs and forces user NAT when tun is unavailable', async () => {
+  const [runtime, localHost, agent] = await Promise.all([
+    read('src/runtimes-next.mjs'),
+    read('src/local-host.mjs'),
+    read('scripts/lightnas-host-agent.py')
+  ]);
+  assert.match(runtime, /localPrepareVmStorageAccess/);
+  assert.match(runtime, /forceUserNat = virtualization\.diagnostics\?\.tun === false/);
+  assert.match(runtime, /type === 'qemu-user'/);
+  assert.match(localHost, /vm-storage-access/);
+  assert.match(agent, /def vm_storage_access\(data: dict\)/);
+  assert.match(agent, /setfacl/);
+  assert.match(agent, /libvirt-qemu/);
+});
+
+test('AI Quick Help panel stretches to the full chat height', async () => {
+  const styles = await read('public/enhancements.css');
+  assert.match(styles, /\.ai-agent-shell \{[\s\S]*align-items: stretch/);
+  assert.match(styles, /\.ai-agent-context,[\s\S]*\.ai-agent-chat \{[\s\S]*height: 100%/);
+  assert.match(styles, /\.ai-agent-context > \.primary \{[\s\S]*margin-top: auto/);
+});

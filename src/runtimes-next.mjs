@@ -6,7 +6,7 @@ import { access, mkdir, mkdtemp, readdir, lstat, readFile, rm, writeFile } from 
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { proxmoxInventory, proxmoxCreateVm, proxmoxManageVm, proxmoxUpdateVm } from './proxmox.mjs';
-import { localContainerInventory, localCreateContainer, localManageContainer, localUpdateContainer } from './local-host.mjs';
+import { localContainerInventory, localCreateContainer, localManageContainer, localUpdateContainer, localPrepareVmStorageAccess } from './local-host.mjs';
 import { listContainerTemplates, resolveContainerTemplate } from './templates.mjs';
 import { listStoragePools, listContentAcrossPools, resolveStoragePool } from './storage-pools.mjs';
 
@@ -867,7 +867,11 @@ export async function createVm(input) {
   const isoEntry = iso ? (await listContentAcrossPools('iso')).find(item => item.id === iso) : null;
   if (iso && !isoEntry) throw Object.assign(new Error('Selected installer ISO is incomplete or no longer available. Upload it again and wait for the transfer to finish.'), { status: 409 });
 
-  const networkDetail = virtualization.networkDetails?.find(item => item.name === input.network);
+  const requestedNetworkDetail = virtualization.networkDetails?.find(item => item.name === input.network);
+  const forceUserNat = virtualization.diagnostics?.tun === false;
+  const networkDetail = forceUserNat
+    ? (virtualization.networkDetails?.find(item => item.type === 'qemu-user') || { name:'qemu-user', type:'qemu-user' })
+    : requestedNetworkDetail;
   const windowsInstaller = isWindowsInstaller(isoEntry);
   const requestedFirmware = windowsInstaller
     ? 'uefi'
@@ -889,6 +893,11 @@ export async function createVm(input) {
       : `network=${input.network},model=${networkModel}`;
   const virtType = virtualization.acceleration === 'kvm' ? 'kvm' : 'qemu';
   const diskController = diskBus === 'scsi' ? ['--controller', 'scsi,model=virtio-scsi'] : [];
+  await localPrepareVmStorageAccess({
+    isoPath: isoEntry?.path || '',
+    diskDirectory,
+    diskPath
+  });
   const args = ['--connect', 'qemu:///system', '--virt-type', virtType, '--name', input.name, '--memory', String(memory), '--vcpus', String(cpus), '--disk', `path=${diskPath},size=${disk},format=qcow2,bus=${diskBus}`, ...diskController, '--network', networkArg, '--graphics', 'vnc,listen=127.0.0.1', '--video', 'vga', '--noautoconsole', '--wait', '0'];
   if (isoEntry) args.push('--cdrom', isoEntry.path, '--osinfo', 'detect=on,require=off');
   else args.push('--import', '--osinfo', 'generic');
@@ -920,6 +929,7 @@ export async function createVm(input) {
     firmwareFallback,
     diskBus,
     networkModel,
+    network: networkDetail?.name || input.network,
     guestProfile: windowsInstaller ? 'windows' : 'generic',
     details: firmwareFallback
       ? 'VM created with legacy BIOS because UEFI/OVMF firmware is not installed on this host. Install the ovmf package for UEFI guests.'
