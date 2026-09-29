@@ -152,3 +152,25 @@ test('large storage uploads retry failed chunks, support cancel, and stay in the
   assert.match(storageUi, /modal:false/);
   assert.match(storageUi, /Chunk retry/);
 });
+
+
+test('root-owned rw mounts can be claimed as LightNAS storage through the host agent', async () => {
+  const [system, pools, localHost, agent, ui] = await Promise.all([
+    read('src/system.mjs'),
+    read('src/storage-pools.mjs'),
+    read('src/local-host.mjs'),
+    read('scripts/lightnas-host-agent.py'),
+    read('public/storage-manager.js')
+  ]);
+  assert.match(system, /mountedReadOnly/);
+  assert.match(system, /needsPrivilegeSetup/);
+  assert.match(pools, /localPrepareStoragePool/);
+  assert.match(pools, /preparedByHostAgent/);
+  assert.match(localHost, /storage-prepare/);
+  assert.match(agent, /def storage_prepare\(data: dict\)/);
+  assert.match(agent, /\.lightnas.*storage/s);
+  assert.match(agent, /os\.chown\(root, lightnas_uid, lightnas_gid\)/);
+  assert.match(ui, /READY TO CLAIM/);
+  assert.match(ui, /item\.mountedReadOnly\?'disabled'/);
+  assert.doesNotMatch(ui, /This mount must be writable before it can become LightNAS storage/);
+});
