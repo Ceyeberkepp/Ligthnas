@@ -43,3 +43,32 @@ test('App Store contains at least ninety unique one-click entries and host ports
   assert.equal(new Set(entries.map(item => item.id)).size, entries.length, 'app IDs must be unique');
   assert.equal(new Set(entries.map(item => item.port)).size, entries.length, 'host ports must be unique');
 });
+
+
+test('Containers inventory includes App Store managed Docker containers', async () => {
+  const app = await read('public/app.js');
+  assert.match(app, /APP STORE CONTAINERS/);
+  assert.match(app, /lightnas-app-/);
+  assert.match(app, /App Store managed/);
+  assert.match(app, /Docker \/ OCI/);
+  assert.match(app, /data-app-action="restart"/);
+  assert.match(app, /Promise\.all\(\[loadContainers\(\), loadRuntimes\(\)\]\)/);
+});
+
+test('non-modal long running work uses the Tasks dock without creating a dialog', async () => {
+  const dialogs = await read('public/dialog-controls.js');
+  assert.match(dialogs, /options\.modal === false \|\| options\.taskOnly === true/);
+  const taskOnlyIndex = dialogs.indexOf('options.modal === false || options.taskOnly === true');
+  const dialogIndex = dialogs.indexOf("document.createElement('dialog')", taskOnlyIndex);
+  assert.ok(taskOnlyIndex >= 0 && dialogIndex > taskOnlyIndex, 'task-only return must happen before dialog creation');
+  assert.match(dialogs, /Creating system container[\s\S]*\{ modal:false \}/);
+  assert.match(dialogs, /Deleting \$\{label\}[\s\S]*\{ modal:false \}/);
+});
+
+test('Settings and MFA have responsive structured layouts', async () => {
+  const styles = await read('public/styles.css');
+  assert.match(styles, /\.settings-dashboard \{/);
+  assert.match(styles, /\.mfa-method-grid,/);
+  assert.match(styles, /\.mfa-config-grid/);
+  assert.match(styles, /@media \(max-width: 1050px\)[\s\S]*\.settings-dashboard/);
+});
