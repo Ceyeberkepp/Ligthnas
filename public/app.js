@@ -160,9 +160,13 @@ function applyApplianceBranding(appliance = state.overview?.appliance) {
   const logoMode = appliance.logoMode === 'picture' && appliance.logo ? 'picture' : 'text';
   const logoUrl = logoMode === 'picture' ? `url("/api/branding/logo?v=${Date.now()}")` : '';
   const accent = /^#[0-9a-f]{6}$/i.test(String(appliance.accentColor || '')) ? appliance.accentColor : '#087b70';
+  const rgb = [1,3,5].map(index => Number.parseInt(accent.slice(index,index+2),16));
+  const luminance = (0.2126*rgb[0] + 0.7152*rgb[1] + 0.0722*rgb[2]) / 255;
   document.documentElement.style.setProperty('--accent', accent);
+  document.documentElement.style.setProperty('--accent-2', `color-mix(in srgb, ${accent} 72%, white)`);
   document.documentElement.style.setProperty('--accent-soft', `color-mix(in srgb, ${accent} 12%, var(--panel))`);
   document.documentElement.style.setProperty('--accent-strong', `color-mix(in srgb, ${accent} 82%, black)`);
+  document.documentElement.style.setProperty('--accent-contrast', luminance > .58 ? '#06201c' : '#ffffff');
   $('.brand-mark').forEach(mark => {
     mark.classList.toggle('custom-logo', logoMode === 'picture');
     mark.classList.toggle('text-logo-mode', logoMode === 'text');
@@ -1582,11 +1586,14 @@ function bindViewActions() {
     settingsForm.elements.logoMode?.addEventListener('change', syncBrandingControls);
     const color = settingsForm.elements.accentColor;
     const hex = settingsForm.elements.accentHex;
-    color?.addEventListener('input', () => { if (hex) hex.value = color.value; document.documentElement.style.setProperty('--accent', color.value); });
+    color?.addEventListener('input', () => {
+      if (hex) hex.value = color.value;
+      applyApplianceBranding({ ...state.overview.appliance, accentColor:color.value, logoMode:settingsForm.elements.logoMode?.value });
+    });
     hex?.addEventListener('input', () => {
       if (/^#[0-9a-f]{6}$/i.test(hex.value)) {
         if (color) color.value = hex.value;
-        document.documentElement.style.setProperty('--accent', hex.value);
+        applyApplianceBranding({ ...state.overview.appliance, accentColor:hex.value, logoMode:settingsForm.elements.logoMode?.value });
       }
     });
     syncBrandingControls();
@@ -1622,6 +1629,9 @@ function bindViewActions() {
       const result = await request('/api/settings', { method:'PATCH', body:JSON.stringify({
         deviceName: state.overview.appliance.deviceName,
         timezone: state.overview.appliance.timezone,
+        brandName: state.overview.appliance.brandName,
+        logoMode: state.overview.appliance.logoMode,
+        accentColor: state.overview.appliance.accentColor,
         currentPassword: input.currentPassword,
         newPassword: input.newPassword
       }) });
