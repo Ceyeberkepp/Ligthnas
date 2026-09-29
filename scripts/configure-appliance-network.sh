@@ -89,7 +89,15 @@ if [[ -n "$container_kind" && "$container_kind" != "none" ]]; then
     if ip link add link "$nested_uplink" name "$macvlan_probe" type macvlan mode bridge >/dev/null 2>&1; then
       ip link delete "$macvlan_probe" >/dev/null 2>&1 || true
       printf 'LIGHTNAS_NETWORK_MODE=nested-macvlan\nLIGHTNAS_UPLINK=%s\nLIGHTNAS_CONTAINER_PARENT=%s\n' "$nested_uplink" "$nested_uplink" >"$STATE_FILE"
-      echo "LightNAS network: nested appliance detected; direct LAN is available on $nested_uplink."
+      echo "LightNAS network: nested appliance detected; direct LAN is available through macvlan on $nested_uplink."
+      exit 0
+    fi
+
+    ipvlan_probe="lniv-probe-$$"
+    if ip link add link "$nested_uplink" name "$ipvlan_probe" type ipvlan mode l2 >/dev/null 2>&1; then
+      ip link delete "$ipvlan_probe" >/dev/null 2>&1 || true
+      printf 'LIGHTNAS_NETWORK_MODE=nested-ipvlan\nLIGHTNAS_UPLINK=%s\nLIGHTNAS_CONTAINER_PARENT=%s\n' "$nested_uplink" "$nested_uplink" >"$STATE_FILE"
+      echo "LightNAS network: macvlan is unavailable; direct LAN is available through ipvlan on $nested_uplink."
       exit 0
     fi
   fi
