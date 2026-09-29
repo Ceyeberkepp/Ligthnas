@@ -2300,3 +2300,20 @@
     grid-column: 2;
   }
 }
+
+
+/* Keep AI helper columns visually balanced. */
+.ai-agent-shell {
+  align-items: stretch;
+}
+.ai-agent-context,
+.ai-agent-chat {
+  height: 100%;
+}
+.ai-agent-context {
+  display: flex;
+  flex-direction: column;
+}
+.ai-agent-context > .primary {
+  margin-top: auto;
+}
