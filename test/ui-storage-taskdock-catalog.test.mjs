@@ -413,3 +413,17 @@ test('Files and media uses dropdowns for view and upload actions', async () => {
   assert.match(app, /if \(action === 'folder'\)/);
   assert.match(styles, /\.file-toolbar-select/);
 });
+
+
+test('branding color preview preserves all current form colors and protects contrast', async () => {
+  const app = await read('public/app.js');
+  assert.match(app, /function readableBrandText\(/);
+  assert.match(app, /colorContrast\(preferred, background\) >= 4\.5/);
+  assert.match(app, /const previewBrandingFromForm = \(\) => applyApplianceBranding\(\{/);
+  assert.match(app, /accentColor: color\?\.value/);
+  assert.match(app, /sidebarColor: sidebarColor\?\.value/);
+  assert.match(app, /contentColor: contentColor\?\.value/);
+  assert.match(app, /sidebarTextColor: sidebarTextColor\?\.value/);
+  assert.match(app, /contentTextColor: contentTextColor\?\.value/);
+  assert.match(app, /bindBrandColor\(contentTextColor, contentTextHex\)/);
+});
