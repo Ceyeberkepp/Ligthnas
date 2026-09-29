@@ -108,3 +108,21 @@ test('first install starts the control panel before slow runtime provisioning co
   assert.doesNotMatch(iso, /After=network-online\.target lightnas-runtime-init\.service/);
   assert.match(iso, /Wants=network-online\.target lightnas-host-agent\.service lightnas-runtime-init\.service/);
 });
+
+
+test('storage manager presents mounted volumes with a compact create workflow', async () => {
+  const [storageUi, styles] = await Promise.all([
+    read('public/storage-manager.js'),
+    read('public/enhancements.css')
+  ]);
+  assert.match(storageUi, /attached volume\$\{dataSources\.length===1\?'':'s'\} detected/);
+  assert.match(storageUi, /Ready to add/);
+  assert.match(storageUi, /Use this volume/);
+  assert.match(storageUi, /function sourceLabel\(source\)/);
+  assert.match(storageUi, /What can this storage hold\?/);
+  assert.match(storageUi, /data-storage-toggle-content/);
+  assert.doesNotMatch(storageUi, /<h2>\$\{verified\?sBytes\(visible\.totalBytes\|\|0\):'Host capacity metadata required'/);
+  assert.match(styles, /#lightnas-storage-dialog/);
+  assert.match(styles, /\.storage-create-grid/);
+  assert.match(styles, /\.storage-content-policy/);
+});
