@@ -99,3 +99,15 @@ test('legacy 10.77 guest profiles are restored to DHCP during LAN migration', as
   assert.match(provision, /lxc\\\.net\\\.0\\\.ipv4\\\.address/);
   assert.match(provision, /lxc\\\.net\\\.0\\\.ipv4\\\.gateway/);
 });
+
+
+test('nested LightNAS derives a managed pool from its own LAN address', async () => {
+  const network = await readFile(new URL('../scripts/configure-appliance-network.sh', import.meta.url), 'utf8');
+  assert.match(network, /derive_managed_lan_pool\(\)/);
+  assert.match(network, /LIGHTNAS_CONTAINER_SUBNET/);
+  assert.match(network, /LIGHTNAS_CONTAINER_POOL_START/);
+  assert.match(network, /LIGHTNAS_CONTAINER_POOL_END/);
+  assert.match(network, /LIGHTNAS_CONTAINER_GATEWAY/);
+  assert.match(network, /start_index=50/);
+  assert.match(network, /end_index=200/);
+});
