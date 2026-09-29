@@ -13,6 +13,9 @@ function safeShareName(value) {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9 _.-]{1,63}$/.test(name)) {
     throw Object.assign(new Error('Share name must contain 2–64 valid characters.'), { status: 400 });
   }
+  if (name.toLowerCase() === 'files') {
+    throw Object.assign(new Error('Files is reserved for the built-in LightNAS Files & media SMB share.'), { status: 400 });
+  }
   return name;
 }
 
@@ -73,4 +76,21 @@ export function publicShare(share, host = '') {
   const smbUrl = smbEnabled ? `smb://${host}/${encodeURIComponent(share.name)}` : null;
   const sftp = sftpEnabled ? `sftp://${share.username}@${host}` : null;
   return { ...share, smb, smbUrl, sftp };
+}
+
+
+export function publicLibraryShare(host = '', adminUsername = '') {
+  const username = String(adminUsername || '').trim().toLowerCase();
+  return {
+    id: 'lightnas-files',
+    name: 'Files',
+    protocol: 'SMB',
+    username,
+    description: 'Built-in Files & media library: Documents, Photos, Videos, and Audio.',
+    createdAt: null,
+    system: true,
+    smb: `\\\\${host}\\Files`,
+    smbUrl: `smb://${host}/Files`,
+    sftp: null
+  };
 }
