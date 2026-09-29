@@ -959,13 +959,13 @@ function settingsView() {
           <label>Brand / logo name<input name="brandName" value="${escapeHtml(appliance.brandName || 'LightNAS')}" required minlength="2" maxlength="32" autocomplete="off" placeholder="LightNAS"><small>Text wordmark shown beside the logo.</small></label>
           <label>Display time zone<select name="timezone">${zones.map(([value, label]) => `<option value="${value}" ${appliance.timezone === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
         </div>
-        <div class="general-branding-row">
+        <div class="general-branding-row branding-card">
           <div class="branding-preview compact-branding-preview">
             <div class="brand-logo-preview ${appliance.logo ? 'has-logo' : ''}" style="${appliance.logo ? `background-image:url('/api/branding/logo?v=${Date.now()}')` : ''}">${appliance.logo ? '' : '<span class="brand-mark small"><span></span><span></span><span></span></span>'}</div>
             <div><b>${escapeHtml(appliance.brandName || 'LightNAS')}</b><p class="muted">${appliance.logo ? 'Uploaded picture logo + brand name' : 'Built-in mark + text brand name'}</p></div>
           </div>
           <div class="general-logo-actions">
-            <label class="primary upload-button">Upload picture logo<input id="logo-upload" type="file" accept="image/png,image/jpeg,image/webp" hidden></label>
+            <label class="primary upload-button">Upload logo picture<input id="logo-upload" type="file" accept="image/png,image/jpeg,image/webp" hidden></label>
             ${appliance.logo ? '<button class="secondary" type="button" data-remove-logo>Remove picture</button>' : ''}
           </div>
         </div>
