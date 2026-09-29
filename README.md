@@ -126,13 +126,13 @@ On the **node shell** (prompt such as `root@pve:~#`), use the
 host preparation/install helper with the LightNAS CTID. Do not run this helper
 from inside the LightNAS appliance.
 
-Example for CTID `117`:
+Extra setting:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Ceyeberkepp/Ligthnas/main/scripts/proxmox-lxc-install.sh \
   -o /root/lightnas-proxmox-install.sh
 chmod +x /root/lightnas-proxmox-install.sh
-bash /root/lightnas-proxmox-install.sh 117
+bash /root/lightnas-proxmox-install.sh
 ```
 
 Replace `117` with the actual LightNAS CTID.
