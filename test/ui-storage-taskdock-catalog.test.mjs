@@ -229,3 +229,23 @@ test('managed applications expose real Docker limits and can be edited', async (
   assert.match(dialogs, /CPU limit/);
   assert.match(dialogs, /Restart policy/);
 });
+
+
+test('managed applications expose live CPU and memory usage plus edit controls', async () => {
+  const [runtime, app, dialogs] = await Promise.all([
+    read('src/runtimes-next.mjs'),
+    read('public/app.js'),
+    read('public/dialog-controls.js')
+  ]);
+  assert.match(runtime, /docker', \['stats', '--no-stream'/);
+  assert.match(runtime, /cpuPercent/);
+  assert.match(runtime, /memoryUsage/);
+  assert.match(runtime, /memoryPercent/);
+  assert.match(app, /CPU now/);
+  assert.match(app, /RAM now/);
+  assert.match(app, /data-app-edit/);
+  assert.match(app, /host \$\{hostCores/);
+  assert.match(dialogs, /Current usage/);
+  assert.match(dialogs, /Memory limit \(MiB\)/);
+  assert.match(dialogs, /CPU limit/);
+});

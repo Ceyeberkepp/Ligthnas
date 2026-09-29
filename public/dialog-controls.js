@@ -862,6 +862,7 @@ document.addEventListener('click', async event => {
         fields: [
           { name:'container', label:'Container', value:item.name, readonly:true },
           { name:'image', label:'Image', value:item.image || app.image, readonly:true },
+          { name:'currentUsage', label:'Current usage', value:item.liveStats ? `${Number(item.cpuPercent || 0).toFixed(1)}% CPU · ${item.memoryUsage || '—'} RAM` : 'Live usage unavailable', readonly:true },
           { name:'memoryMiB', label:'Memory limit (MiB)', type:'number', value:memoryMiB, min:128, max:262144, step:1, required:true },
           { name:'cpus', label:'CPU limit', type:'number', value:item.cpuUnlimited ? 0 : Number(item.cpus || 0), min:0, max:128, step:.25, required:true },
           { name:'restartPolicy', label:'Restart policy', type:'select', value:item.restartPolicy || 'unless-stopped', options:[
