@@ -162,6 +162,8 @@ function applyApplianceBranding(appliance = state.overview?.appliance) {
   const accent = /^#[0-9a-f]{6}$/i.test(String(appliance.accentColor || '')) ? appliance.accentColor : '#087b70';
   const sidebarColor = /^#[0-9a-f]{6}$/i.test(String(appliance.sidebarColor || '')) ? appliance.sidebarColor : '#ffffff';
   const contentColor = /^#[0-9a-f]{6}$/i.test(String(appliance.contentColor || '')) ? appliance.contentColor : '#f2f6fa';
+  const sidebarTextColor = /^#[0-9a-f]{6}$/i.test(String(appliance.sidebarTextColor || '')) ? appliance.sidebarTextColor : '#12283b';
+  const contentTextColor = /^#[0-9a-f]{6}$/i.test(String(appliance.contentTextColor || '')) ? appliance.contentTextColor : '#12283b';
   const rgb = [1,3,5].map(index => Number.parseInt(accent.slice(index,index+2),16));
   const luminance = (0.2126*rgb[0] + 0.7152*rgb[1] + 0.0722*rgb[2]) / 255;
   document.documentElement.style.setProperty('--accent', accent);
@@ -169,14 +171,23 @@ function applyApplianceBranding(appliance = state.overview?.appliance) {
   document.documentElement.style.setProperty('--accent-soft', `color-mix(in srgb, ${accent} 12%, var(--panel))`);
   document.documentElement.style.setProperty('--accent-strong', `color-mix(in srgb, ${accent} 82%, black)`);
   document.documentElement.style.setProperty('--accent-contrast', luminance > .58 ? '#06201c' : '#ffffff');
-  const sidebarRgb = [1,3,5].map(index => Number.parseInt(sidebarColor.slice(index,index+2),16));
-  const sidebarLuminance = (0.2126*sidebarRgb[0] + 0.7152*sidebarRgb[1] + 0.0722*sidebarRgb[2]) / 255;
   document.documentElement.style.setProperty('--sidebar', sidebarColor);
   document.documentElement.style.setProperty('--brand-content-bg', contentColor);
-  document.documentElement.style.setProperty('--sidebar-text', sidebarLuminance > .58 ? '#12283b' : '#f4f8fb');
-  document.documentElement.style.setProperty('--sidebar-muted', sidebarLuminance > .58 ? '#536c80' : '#aebdca');
+  document.documentElement.style.setProperty('--sidebar-text', sidebarTextColor);
+  document.documentElement.style.setProperty('--sidebar-muted', `color-mix(in srgb, ${sidebarTextColor} 68%, transparent)`);
+  document.documentElement.style.setProperty('--text', contentTextColor);
+  document.documentElement.style.setProperty('--muted', `color-mix(in srgb, ${contentTextColor} 68%, transparent)`);
+  document.documentElement.style.setProperty('--panel', contentColor);
+  document.documentElement.style.setProperty('--panel-2', `color-mix(in srgb, ${contentColor} 92%, ${contentTextColor})`);
+  document.documentElement.style.setProperty('--topbar', contentColor);
+  document.documentElement.style.setProperty('--input', `color-mix(in srgb, ${contentColor} 94%, ${contentTextColor})`);
+  document.documentElement.style.setProperty('--button', `color-mix(in srgb, ${contentColor} 88%, ${contentTextColor})`);
+  document.documentElement.style.setProperty('--line', `color-mix(in srgb, ${contentTextColor} 14%, transparent)`);
+  document.documentElement.style.setProperty('--line-strong', `color-mix(in srgb, ${contentTextColor} 24%, transparent)`);
   document.documentElement.style.setProperty('--auth-brand-bg', sidebarColor);
   document.documentElement.style.setProperty('--auth-panel-bg', contentColor);
+  document.documentElement.style.setProperty('--auth-brand-text', sidebarTextColor);
+  document.documentElement.style.setProperty('--auth-panel-text', contentTextColor);
   $$('.brand-mark').forEach(mark => {
     mark.classList.toggle('custom-logo', logoMode === 'picture');
     mark.classList.toggle('text-logo-mode', logoMode === 'text');
@@ -740,14 +751,23 @@ function filesView() {
     </section>
     <div class="files-library-content ${state.filesSettingsOpen ? 'hidden' : ''}">
     <div class="file-toolbar"><div class="breadcrumbs">${crumbs}</div><div class="file-toolbar-actions">
-      <div class="view-toggle" role="group" aria-label="File view">
-        <button class="secondary ${state.fileView === 'list' ? 'active' : ''}" type="button" data-file-view="list" aria-pressed="${state.fileView === 'list'}">☷ List</button>
-        <button class="secondary ${state.fileView === 'grid' ? 'active' : ''}" type="button" data-file-view="grid" aria-pressed="${state.fileView === 'grid'}">▦ Grid</button>
-        <button class="secondary gallery-view-button mobile-photo-view-button ${state.fileView === 'gallery' ? 'active' : ''}" type="button" data-file-view="gallery" aria-pressed="${state.fileView === 'gallery'}">▦ Photos</button>
-      </div>
+      <label class="file-toolbar-select">View
+        <select data-file-view-select aria-label="File view">
+          <option value="list" ${state.fileView === 'list' ? 'selected' : ''}>☷ List</option>
+          <option value="grid" ${state.fileView === 'grid' ? 'selected' : ''}>▦ Grid</option>
+          <option value="gallery" ${state.fileView === 'gallery' ? 'selected' : ''}>▦ Photos</option>
+        </select>
+      </label>
       <button class="secondary" data-action="new-folder">+ Folder</button>
-      <label class="primary upload-button">${section === 'Photos' ? 'Upload photos' : section === 'Videos' ? 'Upload videos' : section === 'Audio' ? 'Upload audio' : 'Upload'}<input id="file-upload" type="file" ${section === 'Photos' ? 'accept="image/*"' : section === 'Videos' ? 'accept="video/*"' : section === 'Audio' ? 'accept="audio/*"' : ''} multiple hidden></label>
-      <label class="secondary upload-button">Upload folder<input id="folder-upload" type="file" webkitdirectory directory multiple hidden></label>
+      <label class="file-toolbar-select">Upload
+        <select data-file-upload-select aria-label="Upload">
+          <option value="">Choose…</option>
+          <option value="files">Upload files</option>
+          <option value="folder">Upload folder</option>
+        </select>
+      </label>
+      <input id="file-upload" type="file" ${section === 'Photos' ? 'accept="image/*"' : section === 'Videos' ? 'accept="video/*"' : section === 'Audio' ? 'accept="audio/*"' : ''} multiple hidden>
+      <input id="folder-upload" type="file" webkitdirectory directory multiple hidden>
       <button class="secondary desktop-files-settings-button" type="button" data-files-settings-tab>⚙ Settings</button>
       ${state.overview.appliance.role === 'administrator' && state.overview.appliance.features?.phoneSync !== false ? '<button class="secondary phone-sync-button files-sync-trigger" type="button" data-phone-sync>Phone sync</button>' : ''}
     </div></div>
@@ -1025,7 +1045,9 @@ function settingsView() {
           <label data-text-logo-field>Brand name<input name="brandName" value="${escapeHtml(appliance.brandName || 'LightNAS')}" minlength="2" maxlength="32" autocomplete="off" placeholder="LightNAS"><small>Shown only when Text logo is selected.</small></label>
           <label>Site accent color<div class="accent-color-control"><input name="accentColor" type="color" value="${escapeHtml(appliance.accentColor || '#087b70')}" aria-label="Site accent color"><input name="accentHex" value="${escapeHtml(appliance.accentColor || '#087b70')}" maxlength="7" pattern="#[0-9A-Fa-f]{6}" spellcheck="false"></div><small>Buttons, menus, graphs, badges, and focus colors.</small></label>
           <label>Sidebar color<div class="accent-color-control"><input name="sidebarColor" type="color" value="${escapeHtml(appliance.sidebarColor || '#ffffff')}" aria-label="Sidebar color"><input name="sidebarHex" value="${escapeHtml(appliance.sidebarColor || '#ffffff')}" maxlength="7" pattern="#[0-9A-Fa-f]{6}" spellcheck="false"></div><small>Left navigation background and login brand side.</small></label>
-          <label>Main content color<div class="accent-color-control"><input name="contentColor" type="color" value="${escapeHtml(appliance.contentColor || '#f2f6fa')}" aria-label="Main content color"><input name="contentHex" value="${escapeHtml(appliance.contentColor || '#f2f6fa')}" maxlength="7" pattern="#[0-9A-Fa-f]{6}" spellcheck="false"></div><small>Main workspace background and login form side.</small></label>
+          <label>Main content color<div class="accent-color-control"><input name="contentColor" type="color" value="${escapeHtml(appliance.contentColor || '#f2f6fa')}" aria-label="Main content color"><input name="contentHex" value="${escapeHtml(appliance.contentColor || '#f2f6fa')}" maxlength="7" pattern="#[0-9A-Fa-f]{6}" spellcheck="false"></div><small>Workspace, top bar, cards/boxes, and login form side.</small></label>
+          <label>Sidebar font color<div class="accent-color-control"><input name="sidebarTextColor" type="color" value="${escapeHtml(appliance.sidebarTextColor || '#12283b')}" aria-label="Sidebar font color"><input name="sidebarTextHex" value="${escapeHtml(appliance.sidebarTextColor || '#12283b')}" maxlength="7" pattern="#[0-9A-Fa-f]{6}" spellcheck="false"></div><small>Navigation labels, device name, and login brand-side text.</small></label>
+          <label>Main font color<div class="accent-color-control"><input name="contentTextColor" type="color" value="${escapeHtml(appliance.contentTextColor || '#12283b')}" aria-label="Main font color"><input name="contentTextHex" value="${escapeHtml(appliance.contentTextColor || '#12283b')}" maxlength="7" pattern="#[0-9A-Fa-f]{6}" spellcheck="false"></div><small>Headings, labels, card text, and login form text.</small></label>
           <label>Display time zone<select name="timezone">${zones.map(([value, label]) => `<option value="${value}" ${appliance.timezone === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
         </div>
         <div class="general-branding-row branding-card">
@@ -1602,6 +1624,10 @@ function bindViewActions() {
     const sidebarHex = settingsForm.elements.sidebarHex;
     const contentColor = settingsForm.elements.contentColor;
     const contentHex = settingsForm.elements.contentHex;
+    const sidebarTextColor = settingsForm.elements.sidebarTextColor;
+    const sidebarTextHex = settingsForm.elements.sidebarTextHex;
+    const contentTextColor = settingsForm.elements.contentTextColor;
+    const contentTextHex = settingsForm.elements.contentTextHex;
     color?.addEventListener('input', () => {
       if (hex) hex.value = color.value;
       applyApplianceBranding({ ...state.overview.appliance, accentColor:color.value, logoMode:settingsForm.elements.logoMode?.value });
@@ -1630,6 +1656,26 @@ function bindViewActions() {
       if (/^#[0-9a-f]{6}$/i.test(contentHex.value)) {
         if (contentColor) contentColor.value = contentHex.value;
         applyApplianceBranding({ ...state.overview.appliance, contentColor:contentHex.value, logoMode:settingsForm.elements.logoMode?.value });
+      }
+    });
+    sidebarTextColor?.addEventListener('input', () => {
+      if (sidebarTextHex) sidebarTextHex.value = sidebarTextColor.value;
+      applyApplianceBranding({ ...state.overview.appliance, sidebarTextColor:sidebarTextColor.value, logoMode:settingsForm.elements.logoMode?.value });
+    });
+    sidebarTextHex?.addEventListener('input', () => {
+      if (/^#[0-9a-f]{6}$/i.test(sidebarTextHex.value)) {
+        if (sidebarTextColor) sidebarTextColor.value = sidebarTextHex.value;
+        applyApplianceBranding({ ...state.overview.appliance, sidebarTextColor:sidebarTextHex.value, logoMode:settingsForm.elements.logoMode?.value });
+      }
+    });
+    contentTextColor?.addEventListener('input', () => {
+      if (contentTextHex) contentTextHex.value = contentTextColor.value;
+      applyApplianceBranding({ ...state.overview.appliance, contentTextColor:contentTextColor.value, logoMode:settingsForm.elements.logoMode?.value });
+    });
+    contentTextHex?.addEventListener('input', () => {
+      if (/^#[0-9a-f]{6}$/i.test(contentTextHex.value)) {
+        if (contentTextColor) contentTextColor.value = contentTextHex.value;
+        applyApplianceBranding({ ...state.overview.appliance, contentTextColor:contentTextHex.value, logoMode:settingsForm.elements.logoMode?.value });
       }
     });
     syncBrandingControls();
@@ -1670,6 +1716,8 @@ function bindViewActions() {
         accentColor: state.overview.appliance.accentColor,
         sidebarColor: state.overview.appliance.sidebarColor,
         contentColor: state.overview.appliance.contentColor,
+        sidebarTextColor: state.overview.appliance.sidebarTextColor,
+        contentTextColor: state.overview.appliance.contentTextColor,
         currentPassword: input.currentPassword,
         newPassword: input.newPassword
       }) });
@@ -1871,6 +1919,17 @@ function bindViewActions() {
     try { const response = await fetch(`/api/files/download?path=${encodeURIComponent(path)}`); if (!response.ok) throw new Error((await response.json()).error); const object = URL.createObjectURL(await response.blob()); const link = document.createElement('a'); link.href = object; link.download = button.dataset.open; link.click(); setTimeout(() => URL.revokeObjectURL(object), 60000); } catch (error) { toast(error.message); }
   }));
   $$('[data-action="new-folder"]', $('#content')).forEach(button => button.addEventListener('click', async () => { const name = prompt('New folder name'); if (name === null) return; try { await request(`/api/files?path=${encodeURIComponent([state.folder, name].filter(Boolean).join('/'))}`, { method: 'POST', body: '{}' }); await loadFiles(); toast('Folder created.'); } catch (error) { toast(error.message); } }));
+  $('[data-file-view-select]', content)?.addEventListener('change', event => {
+    state.fileView = event.target.value;
+    localStorage.setItem('lightnas-file-view', state.fileView);
+    render('files');
+  });
+  $('[data-file-upload-select]', content)?.addEventListener('change', event => {
+    const action = event.target.value;
+    event.target.value = '';
+    if (action === 'files') $('#file-upload', content)?.click();
+    if (action === 'folder') $('#folder-upload', content)?.click();
+  });
   $('#file-upload', content)?.addEventListener('change', async event => {
     const files = [...event.target.files];
     event.target.value = '';

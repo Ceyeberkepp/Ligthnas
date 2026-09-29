@@ -33,7 +33,8 @@ test('current Files UI scopes All Files to library folders and supports multi/fo
   ]);
   assert.match(app, /id="file-upload" type="file"/);
   assert.match(app, /multiple hidden/);
-  assert.match(app, /Upload folder<input id="folder-upload" type="file" webkitdirectory directory multiple/);
+  assert.match(app, /<option value="folder">Upload folder<\/option>/);
+  assert.match(app, /id="folder-upload" type="file" webkitdirectory directory multiple hidden/);
   assert.match(app, /uploadFilesWithProgress/);
   assert.match(app, /XMLHttpRequest/);
   assert.match(app, /All files shows only your Documents, Photos, Videos, and Audio libraries/);

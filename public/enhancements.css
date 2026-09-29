@@ -2460,3 +2460,88 @@ textarea:focus {
     height: 82px;
   }
 }
+
+
+/* Full main-content theming and compact Files toolbar dropdowns */
+.topbar {
+  background: var(--topbar) !important;
+  color: var(--text);
+}
+.content,
+.panel,
+.module-hero,
+.compute-table-wrap,
+.task-dock,
+.task-dock-bar,
+.dialog-body,
+dialog {
+  color: var(--text);
+}
+.panel,
+.module-hero,
+.compute-table-wrap,
+.task-dock,
+.task-dock-bar,
+dialog {
+  background: var(--panel);
+}
+.panel-head,
+.compute-table-head,
+.task-dock-head,
+.files-setting-box,
+.file-drop-zone {
+  color: var(--text);
+}
+.muted,
+.page-head p,
+.panel p.muted,
+small {
+  color: var(--muted);
+}
+.auth-story {
+  color: var(--auth-brand-text, var(--sidebar-text));
+}
+.auth-panel {
+  color: var(--auth-panel-text, var(--text));
+}
+
+.file-toolbar-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 42px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--button);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 750;
+}
+.file-toolbar-select select {
+  min-width: 108px;
+  min-height: 34px;
+  padding: 5px 28px 5px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  box-shadow: none;
+  font: inherit;
+}
+.file-toolbar-select select:focus {
+  box-shadow: none;
+}
+@media (max-width: 760px) {
+  .file-toolbar-actions {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0,1fr)) !important;
+  }
+  .file-toolbar-select {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .file-toolbar-select select {
+    width: 100%;
+    min-width: 0;
+  }
+}

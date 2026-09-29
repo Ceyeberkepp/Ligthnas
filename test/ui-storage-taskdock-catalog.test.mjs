@@ -14,7 +14,8 @@ test('files UI removes attached-storage tab and simplifies upload label', async 
   const app = await read('public/app.js');
   assert.doesNotMatch(app, /\['Attached storage', 'Attached storage'\]/);
   assert.match(app, /id="file-upload" type="file"/);
-  assert.match(app, />Upload folder<input id="folder-upload"/);
+  assert.match(app, /<option value="folder">Upload folder<\/option>/);
+  assert.match(app, /id="folder-upload" type="file" webkitdirectory directory multiple hidden/);
 });
 
 test('bottom task dock records progress and is collapsible', async () => {
@@ -380,4 +381,35 @@ test('branding controls sidebar, main content, and login with a larger picture l
   assert.match(styles, /\.auth-story \.brand-mark\.custom-logo/);
   assert.match(styles, /height: 104px/);
   assert.match(styles, /\.auth-panel \{[\s\S]*--auth-panel-bg/);
+});
+
+
+test('branding supports sidebar and main font colors and themes topbar/cards', async () => {
+  const [app, server, styles] = await Promise.all([
+    read('public/app.js'),
+    read('src/server.mjs'),
+    read('public/enhancements.css')
+  ]);
+  assert.match(app, /Sidebar font color/);
+  assert.match(app, /Main font color/);
+  assert.match(app, /--topbar/);
+  assert.match(app, /--panel/);
+  assert.match(app, /--sidebar-text/);
+  assert.match(server, /sidebarTextColor/);
+  assert.match(server, /contentTextColor/);
+  assert.match(styles, /\.topbar \{[\s\S]*var\(--topbar\)/);
+  assert.match(styles, /\.panel,[\s\S]*background: var\(--panel\)/);
+});
+
+test('Files and media uses dropdowns for view and upload actions', async () => {
+  const app = await read('public/app.js');
+  const styles = await read('public/enhancements.css');
+  assert.match(app, /data-file-view-select/);
+  assert.match(app, /data-file-upload-select/);
+  assert.match(app, /Upload files/);
+  assert.match(app, /Upload folder/);
+  assert.match(app, /const action = event\.target\.value/);
+  assert.match(app, /if \(action === 'files'\)/);
+  assert.match(app, /if \(action === 'folder'\)/);
+  assert.match(styles, /\.file-toolbar-select/);
 });
