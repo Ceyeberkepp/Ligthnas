@@ -496,7 +496,10 @@ def unique_container_mac() -> str:
 def managed_container_ipv4_pool() -> tuple[ipaddress.IPv4Network, ipaddress.IPv4Address, ipaddress.IPv4Address, ipaddress.IPv4Address]:
     """Return the active LightNAS-managed IPv4 pool, preferring the host LAN pool."""
     state = lightnas_network_state()
+    direct_mode = str(state.get("LIGHTNAS_NETWORK_MODE") or "") in {"nested-macvlan", "nested-ipvlan", "bridge"}
     try:
+        if not direct_mode:
+            raise ValueError("host LAN pool is only valid on direct-LAN container networking")
         subnet = ipaddress.ip_network(str(state.get("LIGHTNAS_CONTAINER_SUBNET") or ""), strict=False)
         start = ipaddress.ip_address(str(state.get("LIGHTNAS_CONTAINER_POOL_START") or ""))
         end = ipaddress.ip_address(str(state.get("LIGHTNAS_CONTAINER_POOL_END") or ""))
