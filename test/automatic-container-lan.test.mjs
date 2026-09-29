@@ -40,5 +40,6 @@ test('nested ipvlan uses a unique DHCP client identity without moving the host I
   assert.match(network, /LIGHTNAS_NETWORK_MODE=nested-ipvlan/);
   assert.match(agent, /lxc\.net\.0\.ipvlan\.mode = l2/);
   assert.match(agent, /ClientIdentifier=\{client_id\}/);
-  assert.match(agent, /nested-ipvlan.*duid/);
+  assert.match(agent, /nested_mode.*nested-ipvlan/);
+  assert.match(agent, /client_id = "duid"/);
 });
