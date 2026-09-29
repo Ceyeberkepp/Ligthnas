@@ -1836,3 +1836,165 @@
     justify-content:flex-start;
   }
 }
+
+
+/* Storage manager refinement */
+.storage-manager-hero {
+  max-width: none;
+  margin-top: 0;
+}
+.storage-volume-chips {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  margin-top: 18px;
+}
+.storage-volume-chips > span {
+  display: grid;
+  gap: 4px;
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+}
+.storage-volume-chips > span.configured {
+  opacity: .72;
+}
+.storage-volume-chips small {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.storage-section-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 28px 0 12px;
+}
+.storage-section-heading h2 {
+  margin: 4px 0 0;
+}
+.storage-section-heading small {
+  color: var(--muted);
+}
+.available-volume-card {
+  display: grid;
+  gap: 10px;
+}
+.available-volume-card > p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.storage-volume-capacity {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.storage-volume-capacity strong {
+  font-size: 1.05rem;
+}
+.storage-volume-capacity span {
+  color: var(--muted);
+  font-size: .84rem;
+}
+
+#lightnas-storage-dialog {
+  width: min(900px, calc(100vw - 32px));
+  max-width: 900px;
+  max-height: min(88vh, 860px);
+  padding: 0;
+  overflow: hidden;
+}
+#lightnas-storage-dialog .dialog-body {
+  display: flex;
+  flex-direction: column;
+  max-height: min(88vh, 860px);
+  padding: 24px;
+}
+#lightnas-storage-dialog [data-storage-dialog-body] {
+  min-height: 0;
+  overflow: auto;
+  padding: 2px 6px 2px 2px;
+}
+.storage-create-form {
+  display: grid;
+  gap: 18px;
+}
+.storage-create-intro {
+  margin: 0;
+  max-width: 760px;
+  line-height: 1.55;
+}
+.storage-create-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, .8fr) minmax(320px, 1.2fr);
+  gap: 14px;
+}
+.storage-create-grid label {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+.storage-create-grid label > small {
+  color: var(--muted);
+  font-weight: 400;
+}
+.storage-create-grid select {
+  min-width: 0;
+  text-overflow: ellipsis;
+}
+.storage-content-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 14px;
+}
+.storage-content-heading h3 {
+  margin: 0 0 4px;
+}
+.storage-content-heading p {
+  margin: 0;
+}
+.storage-content-policy {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+}
+.storage-content-policy .content-check {
+  min-height: 78px;
+  align-items: flex-start;
+  padding: 13px;
+}
+.storage-content-policy .content-check b {
+  line-height: 1.25;
+}
+.storage-content-policy .content-check small {
+  margin-top: 4px;
+  line-height: 1.35;
+}
+.storage-create-actions {
+  position: sticky;
+  bottom: 0;
+  margin: 0;
+  padding-top: 14px;
+  background: var(--panel);
+}
+
+@media (max-width: 760px) {
+  #lightnas-storage-dialog {
+    width: calc(100vw - 16px);
+    max-height: 94vh;
+  }
+  #lightnas-storage-dialog .dialog-body {
+    max-height: 94vh;
+    padding: 18px;
+  }
+  .storage-create-grid,
+  .storage-content-policy {
+    grid-template-columns: 1fr;
+  }
+  .storage-content-heading,
+  .storage-section-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
