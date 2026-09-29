@@ -2585,6 +2585,9 @@ def share_provision(data: dict) -> dict:
         raise ValueError("invalid existing shares")
     existing_shares = [_share_record(item) for item in existing]
     password = str(data.get("password") or "")
+    admin_username = str(data.get("adminUsername") or "").strip().lower()
+    if admin_username and not SHARE_ADMIN_RE.fullmatch(admin_username):
+        raise ValueError("administrator username is not compatible with SMB")
     if len(password) < 8 or len(password) > 128 or "\x00" in password or "\n" in password:
         raise ValueError("network password must contain 8-128 valid characters")
     SHARE_ROOT.mkdir(parents=True, exist_ok=True)
@@ -2597,7 +2600,9 @@ def share_provision(data: dict) -> dict:
     if _uses_smb(share):
         _run_checked(["smbpasswd", "-s", "-a", share["username"]], input_text=f"{password}\n{password}\n")
         _run_checked(["smbpasswd", "-e", share["username"]])
-    _write_share_configs([*existing_shares, share])
+    if admin_username and admin_username != share["username"] and subprocess.run(["id", "-u", admin_username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+        _grant_share_path_access(admin_username, path)
+    _write_share_configs([*existing_shares, share], admin_username)
     return {"id": share["id"], "status": "configured", "path": str(path)}
 
 
