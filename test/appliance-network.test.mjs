@@ -34,3 +34,12 @@ test('LXC appliance networking follows the host LAN when direct nested LAN is av
   assert.match(ui, /Proxmox-style host networking/);
   assert.match(ui, /network-table-row/);
 });
+
+
+test('network bootstrap service repairs LAN topology on every boot', async () => {
+  const installer = await readFile(new URL('../install.sh', import.meta.url), 'utf8');
+  assert.match(installer, /lightnas-network-bootstrap\.service/);
+  assert.match(installer, /ExecStart=\/bin\/bash .*configure-appliance-network\.sh/);
+  assert.match(installer, /Before=lightnas-host-agent\.service/);
+  assert.match(installer, /systemctl enable lightnas-network-bootstrap\.service/);
+});
