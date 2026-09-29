@@ -169,3 +169,16 @@ test('network share provisioning uses the privileged host agent', async () => {
   assert.match(agent, /ForceCommand internal-sftp/);
   assert.match(agent, /if action == "share-provision"/);
 });
+
+
+test('nested VM runtime remains usable with TCG and qemu user NAT when tun is missing', async () => {
+  const [runtime, dialogs] = await Promise.all([
+    read('src/runtimes-next.mjs'),
+    read('public/dialog-controls.js')
+  ]);
+  assert.doesNotMatch(runtime, /VM networking requires \/dev\/net\/tun inside this nested LightNAS instance/);
+  assert.match(runtime, /QEMU software emulation \(TCG\) with user-mode NAT/);
+  assert.match(runtime, /qemu-user/);
+  assert.match(runtime, /if \(setupVm && !\/\\bready\\b\/i\.test\(setupVm\)\)/);
+  assert.doesNotMatch(dialogs, /catch \(problem\) \{ alert\(problem\.message\); \}\n    return;\n  \}\n\n  const containerEdit/);
+});

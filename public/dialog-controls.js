@@ -833,7 +833,10 @@ document.addEventListener('click', async event => {
     event.preventDefault();
     event.stopImmediatePropagation();
     try { await showRuntimeWizard(createContainerButton ? 'containers' : 'virtualization'); }
-    catch (problem) { alert(problem.message); }
+    catch (problem) {
+      window.LightNASToast?.show?.(problem.message) || console.warn(problem.message);
+      if (!window.LightNASToast?.show && typeof window.toast === 'function') window.toast(problem.message);
+    }
     return;
   }
 

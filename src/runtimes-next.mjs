@@ -491,16 +491,19 @@ export async function runtimeInventory() {
     runtime.virtualization.diagnostics = runtime.containers.diagnostics || null;
     if (runtime.containers.diagnostics?.nested) {
       const kvm = runtime.containers.diagnostics.kvm;
-      if (!runtime.containers.diagnostics.tun) {
-        runtime.virtualization.available = false;
-        runtime.virtualization.enabled = false;
-        runtime.virtualization.reason = 'VM networking requires /dev/net/tun inside this nested LightNAS instance.';
-      } else if (kvm?.usable) {
+      const tun = Boolean(runtime.containers.diagnostics.tun);
+      if (kvm?.usable) {
         runtime.virtualization.acceleration = 'kvm';
+        runtime.virtualization.provider = 'libvirt-kvm';
+        if (!tun) {
+          runtime.virtualization.warning = 'Hardware acceleration is available, but /dev/net/tun is not exposed to this nested LightNAS instance. VMs will use QEMU user-mode NAT for networking.';
+        }
       } else {
         runtime.virtualization.acceleration = 'tcg';
         runtime.virtualization.provider = 'libvirt-qemu';
-        runtime.virtualization.warning = 'Hardware virtualization is unavailable, so LightNAS will use QEMU software emulation (TCG). VMs work, but they run slower than KVM.';
+        runtime.virtualization.warning = tun
+          ? 'Hardware virtualization is unavailable, so LightNAS will use QEMU software emulation (TCG). VMs work, but they run slower than KVM.'
+          : 'Hardware virtualization and /dev/net/tun are unavailable. LightNAS will use QEMU software emulation (TCG) with user-mode NAT. VMs still work, but they run slower than KVM and use NAT networking.';
       }
     } else if (runtime.virtualization.acceleration === 'tcg') {
       runtime.virtualization.provider = 'libvirt-qemu';
@@ -578,7 +581,10 @@ export async function runtimeInventory() {
   }
   const setup = await readFile(join(dataRoot, 'runtime-status.txt'), 'utf8').catch(() => '');
   if (!runtime.docker.available && setup) runtime.docker.reason = setup.split('\n').find(line => line.startsWith('Apps: '))?.slice(6) || runtime.docker.reason;
-  if (!runtime.virtualization.available && setup) runtime.virtualization.reason = setup.split('\n').find(line => line.startsWith('VMs: '))?.slice(5) || runtime.virtualization.reason;
+  if (!runtime.virtualization.available && setup) {
+    const setupVm = setup.split('\n').find(line => line.startsWith('VMs: '))?.slice(5) || '';
+    if (setupVm && !/\bready\b/i.test(setupVm)) runtime.virtualization.reason = setupVm;
+  }
   if (process.env.LIGHTNAS_ENABLE_PROXMOX_PROVIDER === '1' && Object.keys(process.env).some(key => key.startsWith('LIGHTNAS_PVE_'))) {
     try { runtime.virtualization = await proxmoxInventory() || runtime.virtualization; }
     catch (error) { runtime.virtualization = { available: false, enabled: true, provider: 'proxmox', reason: `Optional Proxmox provider failed: ${error.message}`, machines: [], machineDetails: [], pools: [], networks: [], images: [] }; }
