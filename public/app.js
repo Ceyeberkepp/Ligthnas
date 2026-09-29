@@ -343,7 +343,7 @@ function poolsView() {
         <label>Quota (GiB)<input name="quotaGiB" type="number" min="0" max="1048576" value="0"><small>Zero means unlimited.</small></label>
         <button class="primary" type="submit">Create dataset</button><div class="form-error" role="alert"></div>
       </form>` : ''}
-      <div class="dataset-grid">${zfs.datasets?.map(dataset => `<article class="panel dataset-card"><div><span class="eyebrow">DATASET</span><h3>${escapeHtml(dataset.name)}</h3><p>${escapeHtml(dataset.mountPoint || 'not mounted')}</p></div><div class="dataset-stats"><span><b>${bytes(dataset.usedBytes)}</b><small>Used</small></span><span><b>${bytes(dataset.availableBytes)}</b><small>Available</small></span><span><b>${escapeHtml(dataset.compression || 'unknown')}</b><small>Compression</small></span></div>${(zfs.pools || []).some(pool => pool.name === dataset.name) ? '' : `<button class="secondary" type="button" data-dataset="${escapeHtml(dataset.name)}">Edit resources</button>`}</article>`).join('') || ''}</div>
+      <div class="dataset-grid">${zfs.datasets?.map(dataset => `<article class="panel dataset-card"><div><span class="eyebrow">DATASET</span><h3>${escapeHtml(dataset.name)}</h3><p>${escapeHtml(dataset.mountPoint || 'not mounted')}</p></div><div class="dataset-stats"><span><b>${bytes(dataset.usedBytes)}</b><small>Used</small></span><span><b>${bytes(dataset.availableBytes)}</b><small>Available</small></span><span><b>${escapeHtml(dataset.compression || 'unknown')}</b><small>Compression</small></span></div>${(zfs.pools || []).some(pool => pool.name === dataset.name) ? '' : `<button class="secondary" type="button" data-dataset="${escapeHtml(dataset.name)}">Edit</button>`}</article>`).join('') || ''}</div>
     </section>` : ''}
     <section class="storage-workspace">
       <div class="section-heading"><div><span class="eyebrow">HARDWARE INVENTORY</span><h2>Physical disks & exposed volumes</h2></div></div>
@@ -497,7 +497,7 @@ function containersView() {
   <button class="secondary ${/running|active/i.test(String(item.status || '')) ? '' : 'hidden'}" type="button" data-container-action="reboot" data-container-id="${escapeHtml(item.id || item.name)}">Reboot</button>
   <button class="secondary ${/running|active/i.test(String(item.status || '')) ? '' : 'hidden'}" type="button" data-container-action="stop" data-container-id="${escapeHtml(item.id || item.name)}">Stop</button>
   ${!/\d+\.\d+\.\d+\.\d+/.test(String(item.ipv4 || '')) && /running|active/i.test(String(item.status || '')) ? `<button class="secondary" type="button" data-container-action="repair-network" data-container-id="${escapeHtml(item.id || item.name)}">Repair network</button>` : ''}
-  <button class="secondary" type="button" data-container-edit="${escapeHtml(item.id || item.name)}" data-container-name="${escapeHtml(item.name || item.id)}" data-container-memory="${Math.max(256, Math.round((Number(item.memory) || 0) / 1048576) || 2048)}" data-container-cpus="${item.cpus || 2}">Edit resources</button>
+  <button class="secondary" type="button" data-container-edit="${escapeHtml(item.id || item.name)}" data-container-name="${escapeHtml(item.name || item.id)}" data-container-memory="${Math.max(256, Math.round((Number(item.memory) || 0) / 1048576) || 2048)}" data-container-cpus="${item.cpus || 2}">Edit</button>
   <button class="secondary danger-button" type="button" data-container-action="delete" data-container-id="${escapeHtml(item.id || item.name)}">Delete</button>
 </div></article>`).join('')}</div>`
       : '<div class="empty compact-empty"><p>No native system containers are visible.</p></div>';
@@ -546,7 +546,7 @@ function vmsView() {
   <button class="secondary ${/running|active/i.test(String(item.status || '')) ? '' : 'hidden'}" type="button" data-vm-action="shutdown" data-vm-id="${escapeHtml(item.id || item.name)}">Shutdown</button>
   <button class="secondary ${/running|active/i.test(String(item.status || '')) ? '' : 'hidden'}" type="button" data-vm-action="reboot" data-vm-id="${escapeHtml(item.id || item.name)}">Reboot</button>
   <button class="secondary ${/running|active/i.test(String(item.status || '')) ? '' : 'hidden'}" type="button" data-vm-action="stop" data-vm-id="${escapeHtml(item.id || item.name)}">Stop</button>
-  <button class="secondary" type="button" data-vm-edit="${escapeHtml(item.id || item.name)}" data-vm-name="${escapeHtml(item.name)}" data-vm-memory="${Math.max(512, Math.round((Number(item.memory) || 0) / 1048576) || 2048)}" data-vm-cpus="${item.cpus || 2}">Edit resources</button>
+  <button class="secondary" type="button" data-vm-edit="${escapeHtml(item.id || item.name)}" data-vm-name="${escapeHtml(item.name)}" data-vm-memory="${Math.max(512, Math.round((Number(item.memory) || 0) / 1048576) || 2048)}" data-vm-cpus="${item.cpus || 2}">Edit</button>
   <button class="secondary" type="button" data-vm-action="reset" data-vm-id="${escapeHtml(item.id || item.name)}">Reset</button>
   <button class="secondary danger-button" type="button" data-vm-action="delete" data-vm-id="${escapeHtml(item.id || item.name)}">Delete</button>
 </div></article>`).join('')}</div>`
@@ -1139,7 +1139,7 @@ function networkView() {
           <span class="mono-cell">${escapeHtml(ipv4)}</span>
           <span>${escapeHtml(profile?.name || device.connection || '—')}<small>${profile ? `autostart ${profile.autoconnect ? 'yes' : 'no'}` : ''}</small></span>
           <div class="runtime-actions">
-            ${profile ? `<button class="secondary" data-network-edit="${escapeHtml(profile.name)}">Edit resources</button>` : ''}
+            ${profile ? `<button class="secondary" data-network-edit="${escapeHtml(profile.name)}">Edit</button>` : ''}
             ${device.state === 'connected' ? `<button class="secondary" data-network-device="${escapeHtml(device.name)}" data-network-device-action="disconnect">Down</button>` : device.type !== 'kernel' ? `<button class="secondary" data-network-device="${escapeHtml(device.name)}" data-network-device-action="connect">Up</button>` : ''}
           </div>
         </div>`).join('') || '<div class="empty">No managed network interfaces are visible.</div>'}
@@ -1163,9 +1163,9 @@ function networkView() {
             <span>metric ${route.metric ?? '—'}</span>
             <div class="runtime-actions">
               ${persistentEditable
-                ? `<button class="secondary" data-network-edit-route data-route-connection="${escapeHtml(profile.name)}" data-route-destination="${escapeHtml(route.destination)}" data-route-gateway="${escapeHtml(route.gateway || '')}" data-route-device="${escapeHtml(route.device || '')}" data-route-metric="${route.metric ?? 100}" data-route-old="${escapeHtml(oldRoute)}">Edit resources</button><button class="secondary danger-button" data-network-delete-route data-route-connection="${escapeHtml(profile.name)}" data-route-old="${escapeHtml(oldRoute)}">Delete</button>`
+                ? `<button class="secondary" data-network-edit-route data-route-connection="${escapeHtml(profile.name)}" data-route-destination="${escapeHtml(route.destination)}" data-route-gateway="${escapeHtml(route.gateway || '')}" data-route-device="${escapeHtml(route.device || '')}" data-route-metric="${route.metric ?? 100}" data-route-old="${escapeHtml(oldRoute)}">Edit</button><button class="secondary danger-button" data-network-delete-route data-route-connection="${escapeHtml(profile.name)}" data-route-old="${escapeHtml(oldRoute)}">Delete</button>`
                 : runtimeEditable
-                  ? `<button class="secondary" data-network-edit-route data-route-runtime="true" data-route-destination="${escapeHtml(route.destination)}" data-route-gateway="${escapeHtml(route.gateway || '')}" data-route-device="${escapeHtml(route.device || '')}" data-route-metric="${route.metric ?? 100}">Edit resources</button><span class="muted route-managed-label">runtime</span>`
+                  ? `<button class="secondary" data-network-edit-route data-route-runtime="true" data-route-destination="${escapeHtml(route.destination)}" data-route-gateway="${escapeHtml(route.gateway || '')}" data-route-device="${escapeHtml(route.device || '')}" data-route-metric="${route.metric ?? 100}">Edit</button><span class="muted route-managed-label">runtime</span>`
                   : '<span class="muted route-managed-label">system</span>'}
             </div>
           </div>`;
