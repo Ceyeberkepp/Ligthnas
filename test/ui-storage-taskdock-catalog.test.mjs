@@ -14,7 +14,8 @@ test('files UI removes attached-storage tab and simplifies upload label', async 
   const app = await read('public/app.js');
   assert.doesNotMatch(app, /\['Attached storage', 'Attached storage'\]/);
   assert.match(app, /id="file-upload" type="file"/);
-  assert.match(app, />Upload folder<input id="folder-upload"/);
+  assert.match(app, /<option value="folder">Upload folder<\/option>/);
+  assert.match(app, /id="folder-upload" type="file" webkitdirectory directory multiple hidden/);
 });
 
 test('bottom task dock records progress and is collapsible', async () => {
@@ -407,6 +408,8 @@ test('Files and media uses dropdowns for view and upload actions', async () => {
   assert.match(app, /data-file-upload-select/);
   assert.match(app, /Upload files/);
   assert.match(app, /Upload folder/);
-  assert.match(app, /event\.target\.value ===?/);
+  assert.match(app, /const action = event\.target\.value/);
+  assert.match(app, /if \(action === 'files'\)/);
+  assert.match(app, /if \(action === 'folder'\)/);
   assert.match(styles, /\.file-toolbar-select/);
 });
