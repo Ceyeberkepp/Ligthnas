@@ -240,7 +240,13 @@ document.addEventListener('submit',async event=>{
     const id=upload.dataset.storageId,type=upload.dataset.storageType;
     const dialog=ensureStorageDialog(),error=dialog.querySelector('[data-storage-dialog-error]');
     error.textContent=`Uploading ${file.name}…`;
-    const progress=window.LightNASProgress?.open(type==='iso'?'Uploading VM installer image':'Uploading storage image',file.name);
+    const controller=new AbortController();
+    let canceled=false;
+    const progress=window.LightNASProgress?.open(
+      type==='iso'?'Uploading VM installer image':'Uploading storage image',
+      file.name,
+      { modal:false, cancel:()=>{ canceled=true; controller.abort(); } }
+    );
     try{
       // Blob.slice() is lazy, so a larger chunk reduces HTTP round trips
       // without buffering the whole ISO in browser or server memory.
@@ -251,28 +257,52 @@ document.addEventListener('submit',async event=>{
       while(offset<file.size){
         const end=Math.min(file.size,offset+chunkSize);
         const chunk=file.slice(offset,end);
-        await sRequest(`/api/storage/pools/${encodeURIComponent(id)}/upload?type=${encodeURIComponent(type)}&name=${encodeURIComponent(file.name)}`,{
-          method:'PUT',
-          headers:{
-            'Content-Type':'application/octet-stream',
-            'Content-Range':`bytes ${offset}-${end-1}/${file.size}`,
-            'X-LightNAS-Upload-Id':uploadId
-          },
-          body:chunk
-        });
+        let uploaded=false;
+        let lastProblem=null;
+        for(let attempt=1;attempt<=3&&!uploaded;attempt+=1){
+          if(canceled) throw Object.assign(new Error('Upload canceled.'),{name:'AbortError'});
+          try{
+            await sRequest(`/api/storage/pools/${encodeURIComponent(id)}/upload?type=${encodeURIComponent(type)}&name=${encodeURIComponent(file.name)}`,{
+              method:'PUT',
+              headers:{
+                'Content-Type':'application/octet-stream',
+                'Content-Range':`bytes ${offset}-${end-1}/${file.size}`,
+                'X-LightNAS-Upload-Id':uploadId
+              },
+              body:chunk,
+              signal:controller.signal
+            });
+            uploaded=true;
+          }catch(problem){
+            lastProblem=problem;
+            if(canceled||problem?.name==='AbortError') throw problem;
+            if(attempt<3){
+              const retryMessage=`Chunk retry ${attempt}/2 · ${sBytes(offset)} of ${sBytes(file.size)} uploaded`;
+              error.textContent=retryMessage;
+              progress?.update(Math.round((offset/file.size)*100),retryMessage);
+              await new Promise(resolve=>setTimeout(resolve,attempt*750));
+            }
+          }
+        }
+        if(!uploaded) throw lastProblem||new Error('Upload chunk failed after retries.');
         offset=end;
         const percent=Math.round((offset/file.size)*100);
         const elapsed=Math.max(0.001,(performance.now()-startedAt)/1000);
         const rate=offset/elapsed;
         const remaining=Math.max(0,file.size-offset);
         const eta=rate>0?Math.ceil(remaining/rate):0;
-        const transfer=`${sBytes(rate)}/s${eta? ` · about ${eta}s remaining`:''}`;
+        const elapsedText=elapsed>=60?`${Math.floor(elapsed/60)}m ${Math.floor(elapsed%60)}s`:`${Math.floor(elapsed)}s`;
+        const transfer=`${sBytes(rate)}/s · ${elapsedText} elapsed${eta? ` · about ${eta}s remaining`:''}`;
         error.textContent=`Uploading ${file.name}… ${percent}% · ${transfer}`;
         progress?.update(percent,`${sBytes(offset)} of ${sBytes(file.size)} · ${transfer}`);
       }
       error.textContent='';await renderManageStorage(id,type);
       progress?.succeed(`${file.name} uploaded successfully and is ready to use.`);
-    }catch(problem){error.textContent=problem.message;progress?.fail(problem.message);}
+    }catch(problem){
+      const message=canceled||problem?.name==='AbortError'?'Upload canceled.':problem.message;
+      error.textContent=message;
+      if(!canceled) progress?.fail(message);
+    }
     return;
   }
   const importer=event.target.closest('[data-storage-import-form]');
@@ -281,7 +311,7 @@ document.addEventListener('submit',async event=>{
     const id=importer.dataset.storageId,type=importer.dataset.storageType;
     const dialog=ensureStorageDialog(),error=dialog.querySelector('[data-storage-dialog-error]');
     error.textContent='Downloading…';
-    const progress=window.LightNASProgress?.open(type==='iso'?'Downloading VM installer image':'Downloading storage image',importer.elements.url.value);
+    const progress=window.LightNASProgress?.open(type==='iso'?'Downloading VM installer image':'Downloading storage image',importer.elements.url.value,{modal:false});
     try{
       await sRequest(`/api/storage/pools/${encodeURIComponent(id)}/import`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type,url:importer.elements.url.value})});
       error.textContent='';await renderManageStorage(id,type);
