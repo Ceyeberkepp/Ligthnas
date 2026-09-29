@@ -252,18 +252,19 @@ test('managed applications expose live CPU and memory usage plus edit controls',
 
 
 test('overview and container screens expose CPU count and live resource telemetry', async () => {
-  const [app, runtime, styles] = await Promise.all([
+  const [app, runtime, dialogs, styles] = await Promise.all([
     read('public/app.js'),
     read('src/runtimes-next.mjs'),
+    read('public/dialog-controls.js'),
     read('public/enhancements.css')
   ]);
   assert.match(app, /logical CPUs · load/);
   assert.match(app, /overview-chart-detail-strip/);
-  assert.match(app, /Live CPU use/);
-  assert.match(app, /Live RAM use/);
+  assert.match(app, /Container memory use/);
+  assert.match(app, /Allocated vCPU/);
   assert.match(app, /Host capacity/);
   assert.match(app, /Edit resources/);
-  assert.match(app, /Current usage/);
+  assert.match(dialogs, /Current usage/);
   assert.match(runtime, /memoryUsageBytes/);
   assert.match(runtime, /docker', \['stats'/);
   assert.match(styles, /\.overview-chart-detail-strip/);
