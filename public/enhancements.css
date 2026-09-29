@@ -2362,3 +2362,30 @@
     grid-template-columns: 1fr;
   }
 }
+
+
+/* Custom branding color propagation */
+.primary {
+  color: var(--accent-contrast, #06201c);
+}
+.sidebar nav a.active {
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--accent) 14%, transparent),
+    color-mix(in srgb, var(--accent) 4%, transparent));
+}
+input:focus,
+select:focus,
+textarea:focus {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.module-icon {
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+}
+.avatar {
+  color: var(--accent-contrast, #06201c);
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+}
+.activity-icon {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+}
