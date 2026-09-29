@@ -1004,18 +1004,20 @@ function settingsView() {
   return `${pageHead('Settings & security', 'Brand the appliance, manage general settings, and control account security.')}
     <section class="settings-dashboard">
       <form id="settings-form" class="panel settings-general-card">
-        <div class="settings-card-head"><div><span class="eyebrow">GENERAL</span><h2>Appliance identity & branding</h2><p class="muted">Set the device name, brand/logo name, time zone, and optional picture logo together.</p></div></div>
-        <div class="settings-general-grid">
+        <div class="settings-card-head"><div><span class="eyebrow">GENERAL</span><h2>Appliance identity & branding</h2><p class="muted">Use either a text logo or a picture logo, then match the interface color to your brand.</p></div></div>
+        <div class="settings-general-grid branding-settings-grid">
           <label>Device name<input name="deviceName" value="${escapeHtml(appliance.deviceName)}" required minlength="2" maxlength="32" autocomplete="off"><small>System name shown in administration views.</small></label>
-          <label>Brand / logo name<input name="brandName" value="${escapeHtml(appliance.brandName || 'LightNAS')}" required minlength="2" maxlength="32" autocomplete="off" placeholder="LightNAS"><small>Text wordmark shown beside the logo.</small></label>
+          <label>Logo type<select name="logoMode"><option value="text" ${appliance.logoMode !== 'picture' ? 'selected' : ''}>Text logo</option><option value="picture" ${appliance.logoMode === 'picture' ? 'selected' : ''}>Picture logo</option></select><small>Only one logo type is displayed at a time.</small></label>
+          <label data-text-logo-field>Brand name<input name="brandName" value="${escapeHtml(appliance.brandName || 'LightNAS')}" minlength="2" maxlength="32" autocomplete="off" placeholder="LightNAS"><small>Shown only when Text logo is selected.</small></label>
+          <label>Site accent color<div class="accent-color-control"><input name="accentColor" type="color" value="${escapeHtml(appliance.accentColor || '#087b70')}" aria-label="Site accent color"><input name="accentHex" value="${escapeHtml(appliance.accentColor || '#087b70')}" maxlength="7" pattern="#[0-9A-Fa-f]{6}" spellcheck="false"></div><small>Buttons, menus, graphs, badges, and focus colors.</small></label>
           <label>Display time zone<select name="timezone">${zones.map(([value, label]) => `<option value="${value}" ${appliance.timezone === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
         </div>
         <div class="general-branding-row branding-card">
-          <div class="branding-preview compact-branding-preview">
+          <div class="branding-preview compact-branding-preview" data-branding-preview>
             <div class="brand-logo-preview ${appliance.logo ? 'has-logo' : ''}" style="${appliance.logo ? `background-image:url('/api/branding/logo?v=${Date.now()}')` : ''}">${appliance.logo ? '' : '<span class="brand-mark small"><span></span><span></span><span></span></span>'}</div>
-            <div><b>${escapeHtml(appliance.brandName || 'LightNAS')}</b><p class="muted">${appliance.logo ? 'Uploaded picture logo + brand name' : 'Built-in mark + text brand name'}</p></div>
+            <div><b data-brand-preview-name>${escapeHtml(appliance.brandName || 'LightNAS')}</b><p class="muted">${appliance.logoMode === 'picture' ? 'Picture logo only' : 'Text logo only'}</p></div>
           </div>
-          <div class="general-logo-actions">
+          <div class="general-logo-actions" data-picture-logo-actions>
             <label class="primary upload-button">Upload logo picture<input id="logo-upload" type="file" accept="image/png,image/jpeg,image/webp" hidden></label>
             ${appliance.logo ? '<button class="secondary" type="button" data-remove-logo>Remove picture</button>' : ''}
           </div>
