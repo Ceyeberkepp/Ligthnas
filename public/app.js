@@ -477,6 +477,8 @@ function runtimeResourceSummary(items = [], label = 'guests') {
 function containersView() {
   const runtime = state.runtimes?.containers;
   const containers = runtime?.containers || [];
+  const docker = state.runtimes?.docker;
+  const appContainers = (docker?.containers || []).filter(item => item.managed && String(item.name || '').startsWith('lightnas-app-'));
   const ready = runtime?.available && runtime?.enabled && runtime.images?.length && runtime.networks?.length;
   const containerList = !runtime
     ? '<div class="empty compact-empty"><p>Loading existing system containers…</p></div>'
@@ -492,12 +494,31 @@ function containersView() {
   <button class="secondary danger-button" type="button" data-container-action="delete" data-container-id="${escapeHtml(item.id || item.name)}">Delete</button>
 </div></article>`).join('')}</div>`
       : '<div class="empty compact-empty"><p>No native system containers are visible.</p></div>';
-  return `${pageHead('System containers', 'Create, monitor and manage native Linux system containers.', '<div class="head-actions"><button class="secondary" data-action="refresh-runtime">Refresh</button><button class="primary" data-action="create-container">+ Create container</button></div>')}
+
+  const appContainerList = !docker
+    ? '<div class="empty compact-empty"><p>Loading App Store containers…</p></div>'
+    : appContainers.length
+      ? `<div class="compute-table app-container-table"><div class="compute-table-head"><span>Status</span><span>App / Container</span><span>Image</span><span>Ports</span><span>Runtime</span><span></span></div>${appContainers.map(item => {
+          const appId = String(item.name || '').replace(/^lightnas-app-/, '');
+          const app = state.runtimes?.catalog?.find(entry => entry.id === appId);
+          const running = /running|up/i.test(String(item.state || item.status || ''));
+          return `<article class="compute-row app-container-row"><span class="compute-status"><i class="${running ? 'online' : 'offline'}"></i>${escapeHtml(item.status || item.state || 'unknown')}</span><div><h3>${escapeHtml(app?.name || appId || item.name)}</h3><small>${escapeHtml(item.name)} · App Store managed</small></div><span class="compute-truncate" title="${escapeHtml(item.image || '')}">${escapeHtml(item.image || '—')}</span><span class="compute-truncate" title="${escapeHtml(item.ports || '')}">${escapeHtml(item.ports || 'No published ports')}</span><span>Docker / OCI</span><div class="runtime-actions compute-actions">
+            <button class="primary ${running ? 'hidden' : ''}" type="button" data-app-action="start" data-app-id="${escapeHtml(appId)}">Start</button>
+            <button class="secondary ${running ? '' : 'hidden'}" type="button" data-app-action="stop" data-app-id="${escapeHtml(appId)}">Stop</button>
+            <button class="secondary" type="button" data-app-action="restart" data-app-id="${escapeHtml(appId)}">Restart</button>
+            <button class="secondary danger-button" type="button" data-app-action="remove" data-app-id="${escapeHtml(appId)}">Remove</button>
+          </div></article>`;
+        }).join('')}</div>`
+      : '<div class="empty compact-empty"><p>No App Store containers are installed.</p></div>';
+
+  return `${pageHead('Containers', 'Create and manage native system containers and App Store application containers.', '<div class="head-actions"><button class="secondary" data-action="refresh-runtime">Refresh</button><button class="primary" data-action="create-container">+ Create system container</button></div>')}
     ${runtimeBanner('containers')}
     ${runtimeResourceSummary(containers, 'containers')}
-    ${runtime?.available && runtime?.enabled && !ready ? '<div class="module-hero"><h2>Container resources needed</h2><p>LightNAS needs a usable container image and network before a new container can be created.</p></div>' : ''}
-    <div class="compute-section-head"><div><span class="eyebrow">SYSTEM CONTAINERS</span><h2>Inventory</h2></div><small>${containers.length} total</small></div>
-    <div class="compute-table-wrap">${containerList}</div>`;
+    ${runtime?.available && runtime?.enabled && !ready ? '<div class="module-hero"><h2>Container resources needed</h2><p>LightNAS needs a usable container image and network before a new system container can be created.</p></div>' : ''}
+    <div class="compute-section-head"><div><span class="eyebrow">SYSTEM CONTAINERS</span><h2>Native LXC inventory</h2></div><small>${containers.length} total</small></div>
+    <div class="compute-table-wrap">${containerList}</div>
+    <div class="compute-section-head app-managed-heading"><div><span class="eyebrow">APP STORE CONTAINERS</span><h2>Managed applications</h2><p class="muted">Applications installed from App Store run as Docker/OCI containers and are managed separately from native LXC containers.</p></div><small>${appContainers.length} total</small></div>
+    <div class="compute-table-wrap">${appContainerList}</div>`;
 }
 function vmsView() {
   const runtime = state.runtimes?.virtualization;
@@ -1211,7 +1232,10 @@ function render(view) {
   if (['smtp','integrations'].includes(state.view) && state.smtp === undefined) loadSmtp();
   if (['files', 'media'].includes(state.view) && state.media === null) loadMedia();
   if (['network', 'firewall'].includes(state.view) && !state.network) loadNetwork();
-  if (state.view === 'containers' && !state.runtimes?.containers && !state.containerError) loadContainers();
+  if (state.view === 'containers') {
+    if (!state.runtimes?.containers && !state.containerError) loadContainers();
+    if ((!state.runtimes?.docker || !state.runtimes?.catalog) && !state.runtimeError) loadRuntimes();
+  }
   if (['apps', 'ai', 'vms', 'integrations'].includes(state.view) && (!state.runtimes?.docker || !state.runtimes?.virtualization || !state.runtimes?.catalog) && !state.runtimeError) loadRuntimes();
 }
 
@@ -1420,7 +1444,7 @@ function bindViewActions() {
   $$('[data-action="refresh-runtime"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     button.disabled = true;
     button.textContent = 'Refreshing…';
-    if (state.view === 'containers') await loadContainers();
+    if (state.view === 'containers') await Promise.all([loadContainers(), loadRuntimes()]);
     else await loadRuntimes();
   }));
   $$('[data-install]', $('#content')).forEach(button => button.addEventListener('click', async () => {
