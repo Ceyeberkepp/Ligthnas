@@ -65,6 +65,15 @@ export async function localNetworkAction(input) {
   return await request('network-action', input, 60000);
 }
 
+
+export async function localProvisionNetworkShare(input) {
+  return await request('share-provision', input, 60000);
+}
+
+export async function localRemoveNetworkShare(input) {
+  return await request('share-remove', input, 60000);
+}
+
 export async function localApplianceHealth() {
   return await request('appliance-health', undefined, 60000);
 }
