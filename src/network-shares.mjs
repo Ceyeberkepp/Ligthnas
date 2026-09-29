@@ -37,6 +37,7 @@ export async function provisionNetworkShare(input, existingShares = []) {
   await localProvisionNetworkShare({
     share,
     password,
+    adminUsername: String(input.adminUsername || '').trim().toLowerCase(),
     existingShares: existingShares.map(item => ({
       id:String(item.id || ''),
       name:String(item.name || ''),
