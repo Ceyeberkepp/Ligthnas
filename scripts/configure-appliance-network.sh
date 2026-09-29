@@ -92,12 +92,20 @@ if [[ -n "$container_kind" && "$container_kind" != "none" ]]; then
       echo "LightNAS network: nested appliance detected; system containers will follow the real LAN on $nested_uplink."
       exit 0
     fi
-    echo "LightNAS network: direct nested LAN is unavailable; using private compatibility NAT." >&2
-  fi
 
-  printf 'LIGHTNAS_NETWORK_MODE=lxc-nat\nLIGHTNAS_UPLINK=%s\nLIGHTNAS_CONTAINER_BRIDGE=lightnas0\nLIGHTNAS_VM_NETWORK=default\n' "$nested_uplink" >"$STATE_FILE"
-  echo "LightNAS network: using private compatibility NAT because direct LAN is unavailable or explicitly disabled."
-  exit 0
+    # Some nested hypervisors allow Linux bridges/veth but block macvlan.
+    # In that case convert the appliance's existing uplink into a transparent
+    # bridge while preserving the exact LightNAS management address/gateway.
+    # Inner LXC guests then use ordinary veth devices and receive DHCP directly
+    # from the same LAN/router as the LightNAS appliance.
+    BRIDGE="${LIGHTNAS_NESTED_LAN_BRIDGE:-lightnas-lan0}"
+    nested_bridge_requested=1
+    echo "LightNAS network: macvlan is unavailable; trying transparent host-LAN bridge ${BRIDGE} on ${nested_uplink}."
+  else
+    printf 'LIGHTNAS_NETWORK_MODE=lxc-nat\nLIGHTNAS_UPLINK=%s\nLIGHTNAS_CONTAINER_BRIDGE=lightnas0\nLIGHTNAS_VM_NETWORK=default\n' "$nested_uplink" >"$STATE_FILE"
+    echo "LightNAS network: private compatibility NAT was explicitly requested."
+    exit 0
+  fi
 fi
 
 is_virtual_name() {
@@ -225,7 +233,7 @@ fi
 
 # libvirt's stock default network owns virbr0. Retire it before making virbr0
 # the actual appliance LAN bridge.
-if command -v virsh >/dev/null 2>&1; then
+if [[ "${BRIDGE}" == "virbr0" ]] && command -v virsh >/dev/null 2>&1; then
   if virsh -c qemu:///system net-info default >/dev/null 2>&1; then
     virsh -c qemu:///system net-destroy default >/dev/null 2>&1 || true
     virsh -c qemu:///system net-autostart default --disable >/dev/null 2>&1 || true
@@ -355,6 +363,10 @@ if ! ip -4 route show default dev "${BRIDGE}" 2>/dev/null | grep -q .; then
   ip link set "${uplink}" nomaster >/dev/null 2>&1 || true
   ip addr replace "${address}" dev "${uplink}" >/dev/null 2>&1 || true
   [[ -n "${default_gw}" ]] && ip route replace default via "${default_gw}" dev "${uplink}" >/dev/null 2>&1 || true
+  if [[ "${nested_bridge_requested:-0}" == "1" ]]; then
+    printf 'LIGHTNAS_NETWORK_MODE=lxc-nat\nLIGHTNAS_UPLINK=%s\nLIGHTNAS_CONTAINER_BRIDGE=lightnas0\nLIGHTNAS_VM_NETWORK=default\n' "${uplink}" >"${STATE_FILE}"
+    echo "LightNAS network: transparent nested LAN bridge is unavailable; using private compatibility NAT." >&2
+  fi
   exit 1
 fi
 

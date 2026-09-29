@@ -67,3 +67,12 @@ test('existing private NAT installs are automatically reprovisioned toward the h
   assert.match(installer, /automatic migration to the LightNAS host LAN/);
   assert.match(installer, /RUNTIME_PROVISION_NEEDED=1/);
 });
+
+
+test('nested bridge migration keeps the appliance LAN address and only uses NAT last', async () => {
+  const network = await readFile(new URL('../scripts/configure-appliance-network.sh', import.meta.url), 'utf8');
+  assert.match(network, /ip addr replace "\$\{address\}" dev "\$\{BRIDGE\}"/);
+  assert.match(network, /ip route replace default via "\$\{default_gw\}" dev "\$\{BRIDGE\}"/);
+  assert.match(network, /ip addr del "\$\{address\}" dev "\$\{uplink\}"/);
+  assert.match(network, /LIGHTNAS_NETWORK_MODE=lxc-nat/);
+});
