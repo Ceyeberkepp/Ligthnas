@@ -556,12 +556,25 @@ export async function runtimeInventory() {
 
   if (dockerInfo.ok) {
     const list = await command('docker', ['ps', '-a', '--format', '{{json .}}']);
-    if (list.ok) runtime.docker.containers = list.output.split('\n').filter(Boolean).flatMap(row => {
-      try {
-        const item = JSON.parse(row);
-        return [{ name: item.Names, image: item.Image, state: item.State, status: item.Status, ports: item.Ports, managed: item.Names?.startsWith('lightnas-') }];
-      } catch { return []; }
-    });
+    if (list.ok) {
+      runtime.docker.containers = list.output.split('\n').filter(Boolean).flatMap(row => {
+        try {
+          const item = JSON.parse(row);
+          return [{ name: item.Names, image: item.Image, state: item.State, status: item.Status, ports: item.Ports, ip: '', managed: item.Names?.startsWith('lightnas-') }];
+        } catch { return []; }
+      });
+      const managedNames = runtime.docker.containers.filter(item => item.managed).map(item => item.name).filter(Boolean);
+      if (managedNames.length) {
+        const inspected = await command('docker', ['inspect', '--format', '{{.Name}}|{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}', ...managedNames]);
+        if (inspected.ok) {
+          const ips = new Map(inspected.output.split('\n').filter(Boolean).map(line => {
+            const [rawName, ip = ''] = line.split('|');
+            return [String(rawName || '').replace(/^\//, ''), ip.trim()];
+          }));
+          runtime.docker.containers = runtime.docker.containers.map(item => ({ ...item, ip: ips.get(item.name) || '' }));
+        }
+      }
+    }
   }
   const setup = await readFile(join(dataRoot, 'runtime-status.txt'), 'utf8').catch(() => '');
   if (!runtime.docker.available && setup) runtime.docker.reason = setup.split('\n').find(line => line.startsWith('Apps: '))?.slice(6) || runtime.docker.reason;
