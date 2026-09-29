@@ -794,9 +794,9 @@ function filesView() {
         </select>
       </label>
       <button class="secondary" data-action="new-folder">+ Folder</button>
-      <label class="file-toolbar-select">Upload
+      <label class="file-toolbar-select upload-select-only">
         <select data-file-upload-select aria-label="Upload">
-          <option value="">Choose…</option>
+          <option value="">Upload…</option>
           <option value="files">Upload files</option>
           <option value="folder">Upload folder</option>
         </select>
