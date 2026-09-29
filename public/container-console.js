@@ -1,12 +1,13 @@
 const params = new URLSearchParams(location.search);
 const id = params.get('id') || '';
 const name = params.get('name') || id;
+const type = params.get('type') === 'app' ? 'app' : 'container';
 const title = document.querySelector('#title');
 const status = document.querySelector('#status');
 const terminalElement = document.querySelector('#terminal');
 title.textContent = `${name || id} · root terminal`;
 
-if (!/^[A-Za-z][A-Za-z0-9-]{1,39}$/.test(id)) {
+if (!(type === 'app' ? /^lightnas-app-[a-z0-9][a-z0-9-]{0,60}$/.test(id) : /^[A-Za-z][A-Za-z0-9-]{1,39}$/.test(id))) {
   status.textContent = 'Invalid container name';
   status.classList.add('error');
   throw new Error('Invalid container name');
@@ -74,7 +75,7 @@ function connect() {
   attempts += 1;
   status.classList.remove('error');
   status.textContent = attempts === 1 ? 'Connecting…' : 'Reconnecting…';
-  socket = new WebSocket(`${protocol}//${location.host}/api/console/container/${encodeURIComponent(id)}`);
+  socket = new WebSocket(`${protocol}//${location.host}/api/console/${type}/${encodeURIComponent(id)}`);
   socket.binaryType = 'arraybuffer';
 
   socket.addEventListener('open', () => {

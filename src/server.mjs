@@ -10,7 +10,7 @@ import { getFilesystems, getStorageInventory, getSystemSnapshot } from './system
 import { hashPassword, Sessions, verifyPassword } from './auth.mjs';
 import { listFiles, listAllFiles, createFolder, uploadFile, downloadFile, downloadEntry, deleteEntry } from './files.mjs';
 import { thumbnailFor } from './thumbnails.mjs';
-import { catalog, runtimeInventory, installCatalogApp, manageCatalogApp, createContainer, createVm } from './runtimes-next.mjs';
+import { catalog, runtimeInventory, installCatalogApp, manageCatalogApp, openContainerShell, createContainer, createVm } from './runtimes-next.mjs';
 import { proxmoxConsoleSocket, proxmoxUpdateStorage, proxmoxCleanDisk } from './proxmox.mjs';
 import { localContainerSummary, localContainerInventory, localManageContainer, localContainerConsoleSocket, localContainerCommand, localVmConsoleSocket, localNodeConsoleSocket, localNetworkInventory, localNetworkAction, localApplianceHealth, localApplianceRepair } from './local-host.mjs';
 import { validateSmtp, sendSmtpTest } from './mailer.mjs';
@@ -1229,19 +1229,22 @@ async function api(req, res, url) {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/settings') {
-    const { username: owner, deviceName, timezone, logoExt } = store.state.config;
-    return send(res, 200, { username: owner, deviceName, timezone, logo: Boolean(logoExt) });
+    const { username: owner, deviceName, timezone, logoExt, brandName } = store.state.config;
+    return send(res, 200, { username: owner, deviceName, brandName: brandName || 'LightNAS', timezone, logo: Boolean(logoExt) });
   }
   if (req.method === 'PATCH' && url.pathname === '/api/settings') {
     const input = await bodyJson(req);
     if (!/^[a-zA-Z0-9][a-zA-Z0-9-]{1,31}$/.test(input.deviceName || '')) return send(res, 400, { error: 'Device name must contain 2–32 letters, numbers, or hyphens.' });
     if (!['UTC', 'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles'].includes(input.timezone)) return send(res, 400, { error: 'Choose a supported time zone.' });
+    const brandName = String(input.brandName || store.state.config.brandName || 'LightNAS').trim();
+    if (brandName.length < 2 || brandName.length > 32 || /[<>\r\n]/.test(brandName)) return send(res, 400, { error: 'Brand / logo name must contain 2–32 characters.' });
     const changedPassword = Boolean(input.newPassword);
     if (changedPassword) {
       if (typeof input.currentPassword !== 'string' || !(await verifyPassword(input.currentPassword, store.state.config.passwordHash))) return send(res, 403, { error: 'Current administrator password is required to change the password.' });
       if (typeof input.newPassword !== 'string' || input.newPassword.length < 10) return send(res, 400, { error: 'New password must contain at least 10 characters.' });
     }
     store.state.config.deviceName = input.deviceName;
+    store.state.config.brandName = brandName;
     store.state.config.timezone = input.timezone;
     if (changedPassword) store.state.config.passwordHash = await hashPassword(input.newPassword);
     store.addActivity('settings', changedPassword ? 'Administrator password was changed.' : 'Appliance settings were updated.');
@@ -1434,7 +1437,7 @@ async function api(req, res, url) {
     const storage = overviewStorageCache || quickStorageSummary(filesystems);
     if (!overviewStorageCache || Date.now() - overviewStorageCacheAt >= OVERVIEW_STORAGE_TTL_MS) warmOverviewStorage();
     return send(res, 200, {
-      appliance: { deviceName: store.state.config.deviceName, username, role: isAdmin ? 'administrator' : context.apiToken ? 'api' : 'user', permissions, timezone: store.state.config.timezone, avatar: Boolean(account.avatarExt), logo: Boolean(store.state.config.logoExt), features: { ...DEFAULT_FEATURES, ...(store.state.config.features || {}) } },
+      appliance: { deviceName: store.state.config.deviceName, brandName: store.state.config.brandName || 'LightNAS', username, role: isAdmin ? 'administrator' : context.apiToken ? 'api' : 'user', permissions, timezone: store.state.config.timezone, avatar: Boolean(account.avatarExt), logo: Boolean(store.state.config.logoExt), features: { ...DEFAULT_FEATURES, ...(store.state.config.features || {}) } },
       system, filesystems, storage, host: null,
       shares: store.state.shares, activity: store.state.activity.slice(0, 8)
     });
@@ -1834,15 +1837,22 @@ export function createServer() {
       const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
       const vm = url.pathname.match(/^\/api\/console\/vm\/([A-Za-z][A-Za-z0-9-]{1,39}|[1-9][0-9]{1,5})$/);
       const container = url.pathname.match(/^\/api\/console\/container\/([A-Za-z][A-Za-z0-9-]{1,39})$/);
+      const appContainer = url.pathname.match(/^\/api\/console\/app\/(lightnas-app-[a-z0-9][a-z0-9-]{0,60})$/);
       const nodeShell = url.pathname === '/api/console/node';
-      if (!vm && !container && !nodeShell) return rejectUpgrade(socket, 403, 'Unknown console endpoint.');
+      if (!vm && !container && !appContainer && !nodeShell) return rejectUpgrade(socket, 403, 'Unknown console endpoint.');
       if (vm && !context.permissions.includes('vms.manage')) return rejectUpgrade(socket, 403, 'VM management permission required.');
       if (container && !context.permissions.includes('containers.manage')) return rejectUpgrade(socket, 403, 'Container management permission required.');
+      if (appContainer && !context.permissions.includes('apps.manage')) return rejectUpgrade(socket, 403, 'App management permission required.');
       // A host shell is equivalent to root access to the NAS. It is therefore
       // intentionally limited to the interactive appliance owner session and
       // cannot be delegated to an API token or ordinary user.
       if (nodeShell && (context.apiToken || (!context.isAdmin && !context.permissions.includes('system.shell')))) return rejectUpgrade(socket, 403, 'Node shell permission required.');
       const useExternalProxmox = process.env.LIGHTNAS_ENABLE_PROXMOX_PROVIDER === '1';
+      if (appContainer) {
+        const process = await openContainerShell(appContainer[1]);
+        wss.handleUpgrade(req, socket, head, ws => bridgeWebSocketToProcess(ws, process));
+        return;
+      }
       const backend = nodeShell
         ? await localNodeConsoleSocket()
         : vm

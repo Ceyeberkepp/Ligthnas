@@ -156,11 +156,13 @@ function canView(view, appliance = state.overview?.appliance) {
 
 function applyApplianceBranding(appliance = state.overview?.appliance) {
   if (!appliance) return;
+  const brandName = String(appliance.brandName || 'LightNAS').trim() || 'LightNAS';
   const logoUrl = appliance.logo ? `url("/api/branding/logo?v=${Date.now()}")` : '';
   $$('.brand-mark').forEach(mark => {
     mark.classList.toggle('custom-logo', Boolean(appliance.logo));
     mark.style.backgroundImage = logoUrl;
   });
+  $$('[data-brand-name]').forEach(node => { node.textContent = brandName; });
 }
 
 async function showConsole() {
@@ -498,11 +500,14 @@ function containersView() {
   const appContainerList = !docker
     ? '<div class="empty compact-empty"><p>Loading App Store containers…</p></div>'
     : appContainers.length
-      ? `<div class="compute-table app-container-table"><div class="compute-table-head"><span>Status</span><span>App / Container</span><span>Image</span><span>Ports</span><span>Runtime</span><span></span></div>${appContainers.map(item => {
+      ? `<div class="compute-table app-container-table"><div class="compute-table-head"><span>Status</span><span>App / Container</span><span>Access</span><span>Image</span><span>Runtime</span><span></span></div>${appContainers.map(item => {
           const appId = String(item.name || '').replace(/^lightnas-app-/, '');
           const app = state.runtimes?.catalog?.find(entry => entry.id === appId);
           const running = /running|up/i.test(String(item.state || item.status || ''));
-          return `<article class="compute-row app-container-row"><span class="compute-status"><i class="${running ? 'online' : 'offline'}"></i>${escapeHtml(item.status || item.state || 'unknown')}</span><div><h3>${escapeHtml(app?.name || appId || item.name)}</h3><small>${escapeHtml(item.name)} · App Store managed</small></div><span class="compute-truncate" title="${escapeHtml(item.image || '')}">${escapeHtml(item.image || '—')}</span><span class="compute-truncate" title="${escapeHtml(item.ports || '')}">${escapeHtml(item.ports || 'No published ports')}</span><span>Docker / OCI</span><div class="runtime-actions compute-actions">
+          const hostAddress = state.overview?.system?.network?.primaryIpv4 || location.hostname;
+          const appUrl = app?.port ? `http://${hostAddress}:${app.port}/` : '';
+          return `<article class="compute-row app-container-row"><span class="compute-status"><i class="${running ? 'online' : 'offline'}"></i>${escapeHtml(item.status || item.state || 'unknown')}</span><div><h3>${escapeHtml(app?.name || appId || item.name)}</h3><small>${escapeHtml(item.name)} · App Store managed</small></div><div class="app-access-cell">${appUrl ? `<a href="${escapeHtml(appUrl)}" target="_blank" rel="noopener">${escapeHtml(hostAddress)}:${escapeHtml(app.port)}</a><small>${escapeHtml(item.ports || '')}</small>` : '<span>No web port</span>'}</div><span class="compute-truncate" title="${escapeHtml(item.image || '')}">${escapeHtml(item.image || '—')}</span><span>Docker / OCI</span><div class="runtime-actions compute-actions">
+            ${running ? `<button class="primary" type="button" data-app-open="${escapeHtml(appUrl)}">Open</button><button class="secondary" type="button" data-app-terminal="${escapeHtml(item.name)}" data-app-name="${escapeHtml(app?.name || appId || item.name)}">Terminal</button>` : ''}
             <button class="primary ${running ? 'hidden' : ''}" type="button" data-app-action="start" data-app-id="${escapeHtml(appId)}">Start</button>
             <button class="secondary ${running ? '' : 'hidden'}" type="button" data-app-action="stop" data-app-id="${escapeHtml(appId)}">Stop</button>
             <button class="secondary" type="button" data-app-action="restart" data-app-id="${escapeHtml(appId)}">Restart</button>
@@ -948,20 +953,26 @@ function settingsView() {
   return `${pageHead('Settings & security', 'Brand the appliance, manage general settings, and control account security.')}
     <section class="settings-dashboard">
       <form id="settings-form" class="panel settings-general-card">
-        <div class="settings-card-head"><div><span class="eyebrow">GENERAL</span><h2>Appliance identity</h2><p class="muted">Changing the device name or time zone does not require your password.</p></div></div>
+        <div class="settings-card-head"><div><span class="eyebrow">GENERAL</span><h2>Appliance identity & branding</h2><p class="muted">Set the device name, brand/logo name, time zone, and optional picture logo together.</p></div></div>
         <div class="settings-general-grid">
-          <label>Device name<input name="deviceName" value="${escapeHtml(appliance.deviceName)}" required minlength="2" maxlength="32" autocomplete="off"></label>
+          <label>Device name<input name="deviceName" value="${escapeHtml(appliance.deviceName)}" required minlength="2" maxlength="32" autocomplete="off"><small>System name shown in administration views.</small></label>
+          <label>Brand / logo name<input name="brandName" value="${escapeHtml(appliance.brandName || 'LightNAS')}" required minlength="2" maxlength="32" autocomplete="off" placeholder="LightNAS"><small>Text wordmark shown beside the logo.</small></label>
           <label>Display time zone<select name="timezone">${zones.map(([value, label]) => `<option value="${value}" ${appliance.timezone === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
         </div>
-        <button class="primary" type="submit">Save general settings</button><div class="form-error" role="alert"></div>
-      </form>
-
-      <section class="panel branding-card">
-        <div class="settings-card-head"><div><span class="eyebrow">BRANDING</span><h2>LightNAS logo</h2><p class="muted">Upload a PNG, JPEG, or WebP logo. It will replace the default mark in the LightNAS interface.</p></div></div>
-        <div class="branding-preview"><div class="brand-logo-preview ${appliance.logo ? 'has-logo' : ''}" style="${appliance.logo ? `background-image:url('/api/branding/logo?v=${Date.now()}')` : ''}">${appliance.logo ? '' : '<span class="brand-mark small"><span></span><span></span><span></span></span>'}</div><div><b>Current appliance logo</b><p class="muted">${appliance.logo ? 'Custom logo active' : 'Using the built-in LightNAS mark'}</p></div></div>
-        <div class="head-actions"><label class="primary upload-button">Upload logo<input id="logo-upload" type="file" accept="image/png,image/jpeg,image/webp" hidden></label>${appliance.logo ? '<button class="secondary" type="button" data-remove-logo>Use default logo</button>' : ''}</div>
+        <div class="general-branding-row branding-card">
+          <div class="branding-preview compact-branding-preview">
+            <div class="brand-logo-preview ${appliance.logo ? 'has-logo' : ''}" style="${appliance.logo ? `background-image:url('/api/branding/logo?v=${Date.now()}')` : ''}">${appliance.logo ? '' : '<span class="brand-mark small"><span></span><span></span><span></span></span>'}</div>
+            <div><b>${escapeHtml(appliance.brandName || 'LightNAS')}</b><p class="muted">${appliance.logo ? 'Uploaded picture logo + brand name' : 'Built-in mark + text brand name'}</p></div>
+          </div>
+          <div class="general-logo-actions">
+            <label class="primary upload-button">Upload logo picture<input id="logo-upload" type="file" accept="image/png,image/jpeg,image/webp" hidden></label>
+            ${appliance.logo ? '<button class="secondary" type="button" data-remove-logo>Remove picture</button>' : ''}
+          </div>
+        </div>
         <div class="form-error" data-logo-error role="alert"></div>
-      </section>
+        <div class="settings-save-row"><button class="primary" type="submit">Save general settings</button></div>
+        <div class="form-error" role="alert"></div>
+      </form>
 
       <form id="password-form" class="panel password-card">
         <div class="settings-card-head"><div><span class="eyebrow">PASSWORD</span><h2>Change administrator password</h2><p class="muted">Password verification is required only when changing the password.</p></div></div>
@@ -1469,6 +1480,15 @@ function bindViewActions() {
       toast(`${app.name} installed. Use Open application to access it.`);
     }
     catch (error) { progress?.fail(error.message); toast(error.message); button.disabled = false; button.textContent = 'Install'; }
+  }));
+  $$('[data-app-open]', $('#content')).forEach(button => button.addEventListener('click', () => {
+    const url = button.dataset.appOpen;
+    if (url) window.open(url, '_blank', 'noopener');
+  }));
+  $$('[data-app-terminal]', $('#content')).forEach(button => button.addEventListener('click', () => {
+    const id = button.dataset.appTerminal;
+    const name = button.dataset.appName || id;
+    window.open(`/container-console.html?id=${encodeURIComponent(id)}&name=${encodeURIComponent(name)}&type=app`, '_blank', 'noopener');
   }));
   $$('[data-app-action]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     const { appId, appAction } = button.dataset;

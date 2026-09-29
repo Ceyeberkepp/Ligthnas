@@ -241,6 +241,7 @@ export async function getSystemSnapshot() {
   const loadAverages = os.loadavg();
   const load = loadAverages[0];
   const loadPercent = Math.min(100, Math.round((load / Math.max(cores.length, 1)) * 100));
+  const primaryIpv4 = Object.values(os.networkInterfaces()).flat().find(item => item?.family === 'IPv4' && !item.internal)?.address || '';
   const networkText = await readText('/proc/net/dev');
   const network = networkText.split('\n').slice(2).reduce((result, line) => {
     const [namePart, countersPart] = line.split(':');
@@ -252,6 +253,7 @@ export async function getSystemSnapshot() {
     result.interfaces += 1;
     return result;
   }, { receivedBytes: 0, transmittedBytes: 0, interfaces: 0 });
+  network.primaryIpv4 = primaryIpv4;
 
   return {
     hostname: os.hostname(),
