@@ -154,6 +154,33 @@ function canView(view, appliance = state.overview?.appliance) {
   return Array.isArray(required) && (!required.length || required.some(permission => allowed.has(permission)));
 }
 
+
+function hexRgb(hex) {
+  const value = /^#[0-9a-f]{6}$/i.test(String(hex || '')) ? String(hex) : '#000000';
+  return [1, 3, 5].map(index => Number.parseInt(value.slice(index, index + 2), 16));
+}
+
+function colorLuminance(hex) {
+  const channels = hexRgb(hex).map(value => {
+    const channel = value / 255;
+    return channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+}
+
+function colorContrast(first, second) {
+  const high = Math.max(colorLuminance(first), colorLuminance(second));
+  const low = Math.min(colorLuminance(first), colorLuminance(second));
+  return (high + 0.05) / (low + 0.05);
+}
+
+function readableBrandText(preferred, background) {
+  if (colorContrast(preferred, background) >= 4.5) return preferred;
+  const dark = '#12283b';
+  const light = '#f7fbff';
+  return colorContrast(dark, background) >= colorContrast(light, background) ? dark : light;
+}
+
 function applyApplianceBranding(appliance = state.overview?.appliance) {
   if (!appliance) return;
   const brandName = String(appliance.brandName || 'LightNAS').trim() || 'LightNAS';
@@ -162,8 +189,10 @@ function applyApplianceBranding(appliance = state.overview?.appliance) {
   const accent = /^#[0-9a-f]{6}$/i.test(String(appliance.accentColor || '')) ? appliance.accentColor : '#087b70';
   const sidebarColor = /^#[0-9a-f]{6}$/i.test(String(appliance.sidebarColor || '')) ? appliance.sidebarColor : '#ffffff';
   const contentColor = /^#[0-9a-f]{6}$/i.test(String(appliance.contentColor || '')) ? appliance.contentColor : '#f2f6fa';
-  const sidebarTextColor = /^#[0-9a-f]{6}$/i.test(String(appliance.sidebarTextColor || '')) ? appliance.sidebarTextColor : '#12283b';
-  const contentTextColor = /^#[0-9a-f]{6}$/i.test(String(appliance.contentTextColor || '')) ? appliance.contentTextColor : '#12283b';
+  const requestedSidebarTextColor = /^#[0-9a-f]{6}$/i.test(String(appliance.sidebarTextColor || '')) ? appliance.sidebarTextColor : '#12283b';
+  const requestedContentTextColor = /^#[0-9a-f]{6}$/i.test(String(appliance.contentTextColor || '')) ? appliance.contentTextColor : '#12283b';
+  const sidebarTextColor = readableBrandText(requestedSidebarTextColor, sidebarColor);
+  const contentTextColor = readableBrandText(requestedContentTextColor, contentColor);
   const rgb = [1,3,5].map(index => Number.parseInt(accent.slice(index,index+2),16));
   const luminance = (0.2126*rgb[0] + 0.7152*rgb[1] + 0.0722*rgb[2]) / 255;
   document.documentElement.style.setProperty('--accent', accent);
@@ -1634,56 +1663,34 @@ function bindViewActions() {
     const sidebarTextHex = settingsForm.elements.sidebarTextHex;
     const contentTextColor = settingsForm.elements.contentTextColor;
     const contentTextHex = settingsForm.elements.contentTextHex;
-    color?.addEventListener('input', () => {
-      if (hex) hex.value = color.value;
-      applyApplianceBranding({ ...state.overview.appliance, accentColor:color.value, logoMode:settingsForm.elements.logoMode?.value });
+    const previewBrandingFromForm = () => applyApplianceBranding({
+      ...state.overview.appliance,
+      brandName: settingsForm.elements.brandName?.value || state.overview.appliance.brandName,
+      logoMode: settingsForm.elements.logoMode?.value || state.overview.appliance.logoMode,
+      accentColor: color?.value || state.overview.appliance.accentColor,
+      sidebarColor: sidebarColor?.value || state.overview.appliance.sidebarColor,
+      contentColor: contentColor?.value || state.overview.appliance.contentColor,
+      sidebarTextColor: sidebarTextColor?.value || state.overview.appliance.sidebarTextColor,
+      contentTextColor: contentTextColor?.value || state.overview.appliance.contentTextColor
     });
-    hex?.addEventListener('input', () => {
-      if (/^#[0-9a-f]{6}$/i.test(hex.value)) {
-        if (color) color.value = hex.value;
-        applyApplianceBranding({ ...state.overview.appliance, accentColor:hex.value, logoMode:settingsForm.elements.logoMode?.value });
-      }
-    });
-    sidebarColor?.addEventListener('input', () => {
-      if (sidebarHex) sidebarHex.value = sidebarColor.value;
-      applyApplianceBranding({ ...state.overview.appliance, sidebarColor:sidebarColor.value, logoMode:settingsForm.elements.logoMode?.value });
-    });
-    sidebarHex?.addEventListener('input', () => {
-      if (/^#[0-9a-f]{6}$/i.test(sidebarHex.value)) {
-        if (sidebarColor) sidebarColor.value = sidebarHex.value;
-        applyApplianceBranding({ ...state.overview.appliance, sidebarColor:sidebarHex.value, logoMode:settingsForm.elements.logoMode?.value });
-      }
-    });
-    contentColor?.addEventListener('input', () => {
-      if (contentHex) contentHex.value = contentColor.value;
-      applyApplianceBranding({ ...state.overview.appliance, contentColor:contentColor.value, logoMode:settingsForm.elements.logoMode?.value });
-    });
-    contentHex?.addEventListener('input', () => {
-      if (/^#[0-9a-f]{6}$/i.test(contentHex.value)) {
-        if (contentColor) contentColor.value = contentHex.value;
-        applyApplianceBranding({ ...state.overview.appliance, contentColor:contentHex.value, logoMode:settingsForm.elements.logoMode?.value });
-      }
-    });
-    sidebarTextColor?.addEventListener('input', () => {
-      if (sidebarTextHex) sidebarTextHex.value = sidebarTextColor.value;
-      applyApplianceBranding({ ...state.overview.appliance, sidebarTextColor:sidebarTextColor.value, logoMode:settingsForm.elements.logoMode?.value });
-    });
-    sidebarTextHex?.addEventListener('input', () => {
-      if (/^#[0-9a-f]{6}$/i.test(sidebarTextHex.value)) {
-        if (sidebarTextColor) sidebarTextColor.value = sidebarTextHex.value;
-        applyApplianceBranding({ ...state.overview.appliance, sidebarTextColor:sidebarTextHex.value, logoMode:settingsForm.elements.logoMode?.value });
-      }
-    });
-    contentTextColor?.addEventListener('input', () => {
-      if (contentTextHex) contentTextHex.value = contentTextColor.value;
-      applyApplianceBranding({ ...state.overview.appliance, contentTextColor:contentTextColor.value, logoMode:settingsForm.elements.logoMode?.value });
-    });
-    contentTextHex?.addEventListener('input', () => {
-      if (/^#[0-9a-f]{6}$/i.test(contentTextHex.value)) {
-        if (contentTextColor) contentTextColor.value = contentTextHex.value;
-        applyApplianceBranding({ ...state.overview.appliance, contentTextColor:contentTextHex.value, logoMode:settingsForm.elements.logoMode?.value });
-      }
-    });
+    const bindBrandColor = (picker, textInput) => {
+      picker?.addEventListener('input', () => {
+        if (textInput) textInput.value = picker.value;
+        previewBrandingFromForm();
+      });
+      textInput?.addEventListener('input', () => {
+        if (!/^#[0-9a-f]{6}$/i.test(textInput.value)) return;
+        if (picker) picker.value = textInput.value;
+        previewBrandingFromForm();
+      });
+    };
+    bindBrandColor(color, hex);
+    bindBrandColor(sidebarColor, sidebarHex);
+    bindBrandColor(contentColor, contentHex);
+    bindBrandColor(sidebarTextColor, sidebarTextHex);
+    bindBrandColor(contentTextColor, contentTextHex);
+    settingsForm.elements.logoMode?.addEventListener('change', previewBrandingFromForm);
+    settingsForm.elements.brandName?.addEventListener('input', previewBrandingFromForm);
     syncBrandingControls();
   }
 
