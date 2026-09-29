@@ -76,3 +76,11 @@ test('nested bridge migration keeps the appliance LAN address and only uses NAT 
   assert.match(network, /ip addr del "\$\{address\}" dev "\$\{uplink\}"/);
   assert.match(network, /LIGHTNAS_NETWORK_MODE=lxc-nat/);
 });
+
+
+test('routine updates never restart live network bootstrap', async () => {
+  const installer = await readFile(new URL('../install.sh', import.meta.url), 'utf8');
+  assert.match(installer, /LIGHTNAS_REPAIR_NETWORK:-0/);
+  assert.match(installer, /Existing network configuration detected; skipping live network changes during update/);
+  assert.match(installer, /Set LIGHTNAS_REPAIR_NETWORK=1/);
+});
