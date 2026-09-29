@@ -96,14 +96,15 @@ test('managed App Store containers show access address and terminal controls', a
   assert.match(terminal, /params\.get\('type'\) === 'app'/);
 });
 
-test('General settings owns both text and picture branding', async () => {
+test('General settings owns exclusive text or picture branding', async () => {
   const [app, server, index, styles] = await Promise.all([
     read('public/app.js'),
     read('src/server.mjs'),
     read('public/index.html'),
     read('public/enhancements.css')
   ]);
-  assert.match(app, /Brand \/ logo name/);
+  assert.match(app, /Logo type/);
+  assert.match(app, /Brand name/);
   assert.match(app, /Upload logo picture/);
   assert.doesNotMatch(app, /<span class="eyebrow">BRANDING<\/span>/);
   assert.match(server, /brandName: store\.state\.config\.brandName \|\| 'LightNAS'/);
@@ -340,4 +341,21 @@ test('branding uses either text or picture logo and persists site accent color',
   assert.match(server, /Upload a picture logo before switching to Picture logo/);
   assert.match(styles, /\.accent-color-control/);
   assert.match(styles, /branding-preview\.picture-only/);
+});
+
+
+test('branding follow-up keeps logo mode exclusive and propagates accent safely', async () => {
+  const [app, server, styles] = await Promise.all([
+    read('public/app.js'),
+    read('src/server.mjs'),
+    read('public/enhancements.css')
+  ]);
+  assert.match(app, /\$\$\('\.brand-mark'\)\.forEach/);
+  assert.match(app, /\$\$\('\[data-brand-name\]'\)\.forEach/);
+  assert.match(app, /--accent-contrast/);
+  assert.match(app, /--accent-2/);
+  assert.match(app, /brandName: state\.overview\.appliance\.brandName/);
+  assert.match(server, /input\.logoMode === undefined/);
+  assert.match(styles, /\.primary \{[\s\S]*var\(--accent-contrast/);
+  assert.match(styles, /color-mix\(in srgb, var\(--accent\) 14%/);
 });
