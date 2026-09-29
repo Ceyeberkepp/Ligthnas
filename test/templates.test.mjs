@@ -39,5 +39,5 @@ test('container image pull retries transient upstream failures and honors redire
   assert.match(templates, /await delay\(attempt \* 750\)/);
   assert.match(ui, />Pull image<\/button>/);
   assert.match(ui, />Pull selected<\/button>/);
-  assert.match(ui, /Pulling container image/);
+  assert.match(ui, /Downloading container image/);
 });
