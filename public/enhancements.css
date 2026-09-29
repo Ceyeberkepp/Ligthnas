@@ -2087,3 +2087,77 @@
   color: var(--text);
   overflow-wrap: anywhere;
 }
+
+
+/* Eliminate empty space in Settings & Security. */
+.settings-dashboard {
+  display: block !important;
+}
+.settings-dashboard > .panel,
+.settings-dashboard > form.panel,
+.settings-general-card,
+.password-card,
+.totp-admin {
+  width: 100%;
+  max-width: none !important;
+  min-height: 0 !important;
+  height: auto !important;
+  margin-bottom: 12px;
+}
+.settings-general-card,
+.password-card {
+  grid-column: auto !important;
+  grid-row: auto !important;
+}
+.settings-general-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: start;
+}
+.general-branding-row {
+  align-items: center;
+}
+
+/* Summary tiles stay side-by-side; the actual setup forms stack naturally. */
+.totp-admin .mfa-method-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  align-items: start !important;
+}
+.totp-admin .mfa-config-grid {
+  display: flex !important;
+  flex-direction: column;
+  align-items: stretch !important;
+  gap: 10px;
+}
+.totp-admin .mfa-config-grid > .mfa-config {
+  width: 100%;
+  height: auto !important;
+  min-height: 0 !important;
+  align-self: auto !important;
+  margin: 0 !important;
+}
+.totp-admin .mfa-config-grid > .mfa-config .security-stack-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: end;
+}
+.totp-admin .mfa-config-grid > .mfa-config .security-stack-form > button,
+.totp-admin .mfa-config-grid > .mfa-config .security-stack-form > .form-error,
+.totp-admin .mfa-config-grid > .mfa-config [data-totp-enrollment],
+.totp-admin .mfa-config-grid > .mfa-config [data-sms-enrollment],
+.totp-admin .mfa-config-grid > .mfa-config .security-key-list,
+.totp-admin .mfa-config-grid > .mfa-config > p {
+  grid-column: 1 / -1;
+}
+.totp-admin .mfa-config-grid > .mfa-config .security-key-list {
+  margin-top: 8px;
+}
+.totp-admin .mfa-config-grid > .mfa-config .security-key-list > p {
+  margin: 0;
+}
+
+@media (max-width: 900px) {
+  .settings-general-grid,
+  .totp-admin .mfa-method-grid,
+  .totp-admin .mfa-config-grid > .mfa-config .security-stack-form {
+    grid-template-columns: 1fr !important;
+  }
+}

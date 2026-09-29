@@ -136,3 +136,14 @@ test('network shares provision SMB and SFTP instead of saving plans only', async
   assert.match(securityCss, /align-items: start/);
   assert.doesNotMatch(app, /Saved configurations only\. No SMB, NFS, or SFTP service is changed/);
 });
+
+
+test('Settings and Security do not reserve empty grid space', async () => {
+  const styles = await read('public/enhancements.css');
+  assert.match(styles, /\.settings-dashboard \{[\s\S]*display: block !important/);
+  assert.match(styles, /\.settings-general-card,[\s\S]*\.password-card,[\s\S]*\.totp-admin/);
+  assert.match(styles, /\.totp-admin \.mfa-config-grid \{[\s\S]*display: flex !important/);
+  assert.match(styles, /flex-direction: column/);
+  assert.match(styles, /height: auto !important/);
+  assert.match(styles, /grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/);
+});
