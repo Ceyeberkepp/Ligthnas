@@ -41,7 +41,7 @@ import {
 } from './identity-providers.mjs';
 import { ContainerPublisher } from './container-publish.mjs';
 import { discoverContainerApplication } from './container-app-access.mjs';
-import { provisionNetworkShare, removeNetworkShare, publicShare } from './network-shares.mjs';
+import { provisionNetworkShare, removeNetworkShare, publicShare, publicLibraryShare } from './network-shares.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const publicRoot = join(root, 'public');
@@ -1580,7 +1580,10 @@ async function api(req, res, url) {
         features: { ...DEFAULT_FEATURES, ...(store.state.config.features || {}) }
       },
       system, filesystems, storage, host: null,
-      shares: store.state.shares.map(share => publicShare(share, system?.network?.primaryIpv4 || String(req.headers.host || '').split(':')[0] || 'lightnas')), activity: store.state.activity.slice(0, 8)
+      shares: [
+        publicLibraryShare(system?.network?.primaryIpv4 || String(req.headers.host || '').split(':')[0] || 'lightnas', store.state.config.username),
+        ...store.state.shares.map(share => publicShare(share, system?.network?.primaryIpv4 || String(req.headers.host || '').split(':')[0] || 'lightnas'))
+      ], activity: store.state.activity.slice(0, 8)
     });
   }
   if (req.method === 'GET' && url.pathname === '/api/storage/scan') {
@@ -1841,7 +1844,10 @@ async function api(req, res, url) {
     if (!requirePermission(res, permissions, 'files.read')) return;
     const snapshot = await getSystemSnapshot().catch(() => ({}));
     const host = snapshot?.network?.primaryIpv4 || String(req.headers.host || '').split(':')[0] || 'lightnas';
-    return send(res, 200, { shares: store.state.shares.map(share => publicShare(share, host)) });
+    return send(res, 200, { shares: [
+      publicLibraryShare(host, store.state.config.username),
+      ...store.state.shares.map(share => publicShare(share, host))
+    ] });
   }
   if (req.method === 'POST' && url.pathname === '/api/shares') {
     if (!requirePermission(res, permissions, 'shares.manage')) return;
