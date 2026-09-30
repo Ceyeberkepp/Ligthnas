@@ -55,7 +55,7 @@ The storage screen displays the real available capacity of the appliance file di
 
 ## Container and VM runtimes
 
-LightNAS now treats virtualization as a **built-in OS function**, not as a dependency on Proxmox or another hypervisor control plane.
+LightNAS treats virtualization as a **built-in OS function**. Native system-container and VM management run locally on the LightNAS host.
 
 - **System containers:** native LXC/liblxc. LightNAS creates full Linux system containers with their own userspace, init/services, filesystem and network namespace while sharing the LightNAS kernel. Docker is not the Containers backend.
 - **Virtual machines:** native QEMU/KVM managed through libvirt. LightNAS creates qcow2-backed guests, attaches ISO media, uses VirtIO devices, controls lifecycle through libvirt and exposes the guest console through embedded noVNC.
@@ -65,7 +65,7 @@ LightNAS now treats virtualization as a **built-in OS function**, not as a depen
 
 On bare metal or a normal VM, `install.sh` installs the native LXC and KVM/libvirt stack automatically. Hardware virtualization requires `/dev/kvm`; if it is missing, LightNAS reports VMs as unavailable instead of silently delegating creation to another host.
 
-When LightNAS itself is installed inside a container or nested virtualized environment, nested LXC/KVM depends on capabilities granted by the outer platform. LightNAS remains the local runtime manager after installation. Platform-specific helpers, including the optional Proxmox deployment helper, exist only to prepare the outer environment and are not part of normal LightNAS compute operations.
+When LightNAS itself is installed inside a container or nested virtualized environment, nested LXC/KVM depends on capabilities granted by the outer platform. LightNAS remains the local runtime manager after installation. Platform-specific helpers exist only to prepare the outer environment when required and are not part of normal LightNAS compute operations.
 
 This mirrors the underlying open-source architecture used by virtualization appliances: LXC-style kernel isolation for system containers and QEMU/KVM for full virtual machines. Incus is another open-source implementation of the same distinction, using LXC for system containers and QEMU for VMs.
 
@@ -83,7 +83,7 @@ The build writes `dist/LightNAS-amd64.iso` and a SHA-256 file. A successful GitH
 
 ## App interoperability
 
-The built-in App Store uses reviewed Docker/OCI recipes for services such as Nginx, Jellyfin, Uptime Kuma, Heimdall, OpenSpeedTest, and Ansible Semaphore. Installing an app from LightNAS downloads it, creates its persistent storage, publishes its web service on the LightNAS LAN address, authorizes the reviewed firewall port, starts it after reboot, checks that the service is reachable, and displays an **Open application** button. App installation does not require a Proxmox command, a nested LXC, or a manual `socat` port forward. The engine is optional and intentionally separated from **System Containers**. Native LXC containers are for full Linux environments; OCI app containers are the application deployment mechanism. Persistent app settings under `/var/lib/lightnas/apps` remain separate from LXC root filesystems.
+The built-in App Store uses reviewed Docker/OCI recipes for services such as Nginx, Jellyfin, Uptime Kuma, Heimdall, OpenSpeedTest, and Ansible Semaphore. Installing an app from LightNAS downloads it, creates its persistent storage, publishes its web service on the LightNAS LAN address, authorizes the reviewed firewall port, starts it after reboot, checks that the service is reachable, and displays an **Open application** button. App installation uses the integrated LightNAS application engine and does not require external hypervisor commands or manual `socat` port forwarding. The engine is optional and intentionally separated from **System Containers**. Native LXC containers are for full Linux environments; OCI app containers are the application deployment mechanism. Persistent app settings under `/var/lib/lightnas/apps` remain separate from LXC root filesystems.
 
 ## Run locally
 
@@ -125,9 +125,9 @@ The installer prepares native LXC/liblxc plus QEMU/libvirt. It uses KVM accelera
 
 ### Optional platform-specific deployment helpers
 
-LightNAS does not require Proxmox, VMware, Hyper-V, or another named hypervisor
-for normal operation. Install LightNAS directly on supported Linux hardware or
-inside a standard Linux VM using the normal installer above.
+LightNAS does not require a specific hypervisor for normal operation. Install
+LightNAS directly on supported Linux hardware or inside a standard Linux VM
+using the normal installer above.
 
 If an operator intentionally deploys LightNAS inside a platform that requires
 extra nesting or device-passthrough preparation, a platform-specific helper may
