@@ -14,7 +14,7 @@ function closeDialog(dialog) {
 
 function showEditor({ eyebrow, title, description, fields, submitLabel = 'Save changes', danger = false, wide = false, onSubmit }) {
   const dialog = document.createElement('dialog');
-  dialog.className = `lightnas-dialog\${wide ? ' runtime-dialog hardware-editor-dialog' : ''}`;
+  dialog.className = `lightnas-dialog${wide ? ' runtime-dialog hardware-editor-dialog' : ''}`;
   dialog.innerHTML = `
     <form class="dialog-body">
       <div class="dialog-head">
@@ -25,7 +25,8 @@ function showEditor({ eyebrow, title, description, fields, submitLabel = 'Save c
       <div data-dialog-fields></div>
       <div class="form-error" role="alert"></div>
       <div class="dialog-actions">
-        <button class="secondary" type="button" data-editor-revert>Revert changes</button>\n        <button class="secondary" type="button" data-dialog-close>Cancel</button>
+        <button class="secondary" type="button" data-editor-revert>Revert changes</button>
+        <button class="secondary" type="button" data-dialog-close>Cancel</button>
         <button class="${danger ? 'secondary danger-button' : 'primary'}" type="submit">${submitLabel}</button>
       </div>
     </form>`;
@@ -64,7 +65,11 @@ function showEditor({ eyebrow, title, description, fields, submitLabel = 'Save c
   }
 
   dialog.querySelectorAll('[data-dialog-close]').forEach(button => button.addEventListener('click', () => closeDialog(dialog)));
-  dialog.querySelector('[data-editor-revert]')?.addEventListener('click', () => {\n    dialog.querySelector('form')?.reset();\n    window.LightNASToast?.show?.('Unsaved changes reverted.');\n  });\n  dialog.addEventListener('close', () => dialog.remove(), { once: true });
+  dialog.querySelector('[data-editor-revert]')?.addEventListener('click', () => {
+    dialog.querySelector('form')?.reset();
+    window.LightNASToast?.show?.('Unsaved changes reverted.');
+  });
+  dialog.addEventListener('close', () => dialog.remove(), { once: true });
   dialog.querySelector('form').addEventListener('submit', async event => {
     event.preventDefault();
     const form = event.currentTarget;
@@ -758,7 +763,8 @@ async function showContainerManager(id) {
       </div>
       <div class="form-error" role="alert"></div>
       <div class="dialog-actions">
-        <button class="secondary" type="button" data-manager-revert>Revert changes</button>\n        <button class="secondary" type="button" data-manager-close>Cancel</button>
+        <button class="secondary" type="button" data-manager-revert>Revert changes</button>
+        <button class="secondary" type="button" data-manager-close>Cancel</button>
         <button class="primary" type="submit">Save changes</button>
       </div>
     </form>`;
@@ -1017,19 +1023,29 @@ document.addEventListener('click', async event => {
     const recommendedNetworkModel = windowsMedia && item.networkModel === 'virtio' ? 'e1000' : (item.networkModel || 'virtio');
     showEditor({
       eyebrow: 'VIRTUAL MACHINE SETTINGS',
-      wide: true,\n      title: `Edit ${vmEdit.dataset.vmName || id}`,
+      wide: true,
+      title: `Edit ${vmEdit.dataset.vmName || id}`,
       description: 'Manage VM hardware, installation media, and boot priority. Changing the ISO or boot drive automatically restarts a running VM so noVNC opens the selected boot media.',
       fields: [
         { name: 'name', label: 'VM name', value: item.name || vmEdit.dataset.vmName || id, required: true },
         { name: 'memoryMiB', label: 'Memory (MiB)', type: 'number', value: Math.max(512, Math.round((item.memory || 0) / 1048576) || Number(vmEdit.dataset.vmMemory) || 2048), min: 512, max: 262144, step: 1, required: true },
         { name: 'cpus', label: 'Virtual CPUs', type: 'number', value: item.cpus || vmEdit.dataset.vmCpus || '2', min: 1, max: 128, step: 1, required: true },
-        { name: 'diskSizeGiB', label: 'Primary disk size (GiB) · grow only', type:'number', value:item.primaryDiskSizeGiB || '', min:1, max:16384, step:1 },\n        { name: 'existingDisks', label: 'Current virtual disks', value:existingDisks, readonly:true },\n        { name: 'addDiskPool', label: 'Add data disk · storage', type:'select', value:'', options:vmPoolOptions },\n        { name: 'addDiskGiB', label: 'Add data disk · size (GiB)', type:'number', value:'', min:1, max:16384, step:1, placeholder:'Leave blank unless adding a disk' },\n        { name: 'firmwareInfo', label: 'BIOS / firmware', value: item.firmware === 'uefi' ? 'UEFI' : 'SeaBIOS', readonly: true },
+        { name: 'diskSizeGiB', label: 'Primary disk size (GiB) · grow only', type:'number', value:item.primaryDiskSizeGiB || '', min:1, max:16384, step:1 },
+        { name: 'existingDisks', label: 'Current virtual disks', value:existingDisks, readonly:true },
+        { name: 'addDiskPool', label: 'Add data disk · storage', type:'select', value:'', options:vmPoolOptions },
+        { name: 'addDiskGiB', label: 'Add data disk · size (GiB)', type:'number', value:'', min:1, max:16384, step:1, placeholder:'Leave blank unless adding a disk' },
+        { name: 'firmwareInfo', label: 'BIOS / firmware', value: item.firmware === 'uefi' ? 'UEFI' : 'SeaBIOS', readonly: true },
         { name: 'machineInfo', label: 'Machine type', value: item.machineType || 'Default', readonly: true },
         { name: 'displayModel', label: 'Display adapter', type: 'select', value: recommendedDisplay, options: [{ value: 'vga', label: 'Standard VGA · recommended for installers' }, { value: 'qxl', label: 'QXL display' }, { value: 'virtio', label: 'VirtIO GPU · requires guest drivers' }] },
         { name: 'scsiController', label: 'SCSI controller', type: 'select', value: item.scsiController || 'virtio-scsi', options: [{ value: 'virtio-scsi', label: 'VirtIO SCSI' }, { value: 'virtio-scsi-single', label: 'VirtIO SCSI single' }, { value: 'lsilogic', label: 'LSI Logic' }] },
         { name: 'diskBus', label: 'Virtual disk bus', type: 'select', value: recommendedDiskBus, options: [{ value: 'sata', label: 'SATA / AHCI · Windows compatible' }, { value: 'scsi', label: 'VirtIO SCSI · Linux/performance' }, { value: 'virtio', label: 'VirtIO block · Linux/performance' }] },
         { name: 'networkModel', label: 'Primary network adapter model', type: 'select', value: recommendedNetworkModel, options: [{ value: 'e1000', label: 'Intel E1000 · Windows compatible' }, { value: 'virtio', label: 'VirtIO · Linux/performance' }, { value: 'rtl8139', label: 'Realtek RTL8139' }] },
-        { name:'existingNics', label:'Current virtual NICs', value:existingNics, readonly:true },\n        { name:'addNicNetwork', label:'Add virtual NIC · network / bridge', type:'select', value:'', options:vmNetworkOptions },\n        { name:'addNicModel', label:'Add virtual NIC · model', type:'select', value:'virtio', options:[{value:'virtio',label:'VirtIO'},{value:'e1000',label:'Intel E1000'},{value:'rtl8139',label:'Realtek RTL8139'}] },\n        { name:'existingHostDevices', label:'Current PCI / GPU passthrough', value:existingHostDevices, readonly:true },\n        { name:'addPciDevice', label:'Add PCI / GPU passthrough', value:'', placeholder:'0000:65:00.0 · VM must be stopped' },\n        { name: 'iso', label: 'CD/DVD drive · installer ISO', type: 'select', value: item.installationMediaId || '', options: isoOptions },
+        { name:'existingNics', label:'Current virtual NICs', value:existingNics, readonly:true },
+        { name:'addNicNetwork', label:'Add virtual NIC · network / bridge', type:'select', value:'', options:vmNetworkOptions },
+        { name:'addNicModel', label:'Add virtual NIC · model', type:'select', value:'virtio', options:[{value:'virtio',label:'VirtIO'},{value:'e1000',label:'Intel E1000'},{value:'rtl8139',label:'Realtek RTL8139'}] },
+        { name:'existingHostDevices', label:'Current PCI / GPU passthrough', value:existingHostDevices, readonly:true },
+        { name:'addPciDevice', label:'Add PCI / GPU passthrough', value:'', placeholder:'0000:65:00.0 · VM must be stopped' },
+        { name: 'iso', label: 'CD/DVD drive · installer ISO', type: 'select', value: item.installationMediaId || '', options: isoOptions },
         { name: 'bootOrder', label: 'First boot drive', type: 'select', value: item.bootOrder || (item.installationMediaId ? 'iso' : 'disk'), options: [{ value: 'iso', label: 'CD/DVD installer ISO' }, { value: 'disk', label: 'Virtual hard disk' }] },
         { name: 'startOnBoot', label: 'Start automatically with LightNAS', type: 'select', value: String(item.startOnBoot !== false), options: [{ value: 'true', label: 'Enabled' }, { value: 'false', label: 'Disabled' }] }
       ],
