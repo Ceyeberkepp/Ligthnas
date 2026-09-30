@@ -6,7 +6,7 @@ import { access, mkdir, mkdtemp, readdir, lstat, readFile, rm, writeFile } from 
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { proxmoxInventory, proxmoxCreateVm, proxmoxManageVm, proxmoxUpdateVm } from './proxmox.mjs';
-import { localContainerInventory, localCreateContainer, localManageContainer, localUpdateContainer, localPrepareVmStorageAccess } from './local-host.mjs';
+import { localContainerInventory, localCreateContainer, localManageContainer, localUpdateContainer, localPrepareVmStorageAccess, localPrepareVmIsoAccess } from './local-host.mjs';
 import { listContainerTemplates, resolveContainerTemplate } from './templates.mjs';
 import { listStoragePools, listContentAcrossPools, resolveStoragePool } from './storage-pools.mjs';
 import { ensureWindowsVirtioDrivers, vmGuestToolsInventory } from './guest-tools.mjs';
@@ -376,7 +376,7 @@ async function localAttachVmGuestDrivers(id) {
   const name = String(id || '');
   if (!/^[A-Za-z][A-Za-z0-9-]{1,39}$/.test(name)) throw Object.assign(new Error('Invalid VM name.'), { status: 400 });
   const drivers = await ensureWindowsVirtioDrivers('');
-  await localPrepareVmStorageAccess({ isoPath: drivers.path });
+  await localPrepareVmIsoAccess({ isoPath: drivers.path });
 
   const block = await command('virsh', ['-c', 'qemu:///system', 'domblklist', name, '--details'], 15000);
   if (!block.ok) throw Object.assign(new Error(`Unable to inspect VM optical drives: ${block.error}`), { status: 409 });
