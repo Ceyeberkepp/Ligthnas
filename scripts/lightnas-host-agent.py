@@ -287,8 +287,55 @@ def container_settings(name: str) -> dict:
         metadata = json.loads((config.parent / "lightnas.json").read_text(encoding="utf-8"))
     except (OSError, ValueError, TypeError):
         pass
+    # Saved LightNAS metadata is the authoritative fallback for settings that
+    # may not be readable from a stopped guest rootfs yet.
+    mode = str(metadata.get("ipv4Mode") or mode or "dhcp")
+    address = address or str(metadata.get("ipv4Address") or "")
+    gateway = gateway or str(metadata.get("gateway") or "")
+    if not dns:
+        dns = [item.strip() for item in str(metadata.get("dns") or "").split(",") if item.strip()]
+
+    extra_nics = []
+    nic_indexes = sorted({
+        int(match.group(1))
+        for match in re.finditer(r"^lxc\.net\.(\d+)\.", text, re.MULTILINE)
+        if int(match.group(1)) > 0
+    })
+    for index in nic_indexes:
+        def nic_value(field: str) -> str:
+            match = re.search(rf"^lxc\.net\.{index}\.{re.escape(field)}\s*=\s*(.+?)\s*$", text, re.MULTILINE)
+            return match.group(1).strip() if match else ""
+        extra_nics.append({
+            "index": index,
+            "type": nic_value("type") or "veth",
+            "network": nic_value("link"),
+            "name": nic_value("name") or f"eth{index}",
+            "macAddress": nic_value("hwaddr"),
+            "vlanTag": nic_value("vlan.id"),
+        })
+
+    mount_points = []
+    device_paths = []
+    for match in re.finditer(r"^lxc\.mount\.entry\s*=\s*(.+?)\s*$", text, re.MULTILINE):
+        raw = match.group(1).strip()
+        parts = raw.split()
+        if len(parts) < 2:
+            continue
+        source, target = parts[0], parts[1]
+        options = parts[3] if len(parts) > 3 else ""
+        record = {
+            "source": source,
+            "target": target,
+            "readOnly": "ro" in options.split(","),
+            "raw": raw,
+        }
+        if source.startswith("/dev/"):
+            device_paths.append(record)
+        else:
+            mount_points.append(record)
+
     return {
-        "network": config_value("lxc.net.0.link"),
+        "network": config_value("lxc.net.0.link") or str(metadata.get("network") or ""),
         "macAddress": config_value("lxc.net.0.hwaddr"),
         "startOnBoot": config_value("lxc.start.auto") != "0",
         "ipv4Mode": mode,
@@ -298,6 +345,14 @@ def container_settings(name: str) -> dict:
         "storageId": str(metadata.get("storageId") or ""),
         "diskGiB": int(metadata.get("diskGiB") or 0),
         "imageId": str(metadata.get("imageId") or ""),
+        "rootfsPath": str(rootfs or ""),
+        "extraNics": extra_nics,
+        "mountPoints": mount_points,
+        "devicePaths": device_paths,
+        "unprivileged": config_value("lxc.idmap") != "",
+        "nesting": "nesting=1" in text,
+        "ttyCount": config_value("lxc.tty.max") or "",
+        "consolePath": config_value("lxc.console.path") or "",
     }
 
 
@@ -1539,7 +1594,64 @@ def update_container(data: dict) -> dict:
         pass
     metadata["ipv4Mode"] = mode
     metadata["network"] = requested_network or metadata.get("network") or ""
+    metadata["ipv4Address"] = address
+    metadata["gateway"] = gateway
+    metadata["dns"] = ", ".join(dns_values)
     metadata_path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+
+    # Additional NICs are managed as lxc.net.1+ while lxc.net.0 remains the
+    # primary LightNAS interface.
+    if "extraNics" in data:
+        extra_nics = data.get("extraNics")
+        if not isinstance(extra_nics, list) or len(extra_nics) > 7:
+            raise ValueError("extraNics must be a list of at most 7 interfaces")
+        config_text = config.read_text(encoding="utf-8")
+        config_text = re.sub(r"^lxc\.net\.[1-9][0-9]*\..*\n?", "", config_text, flags=re.MULTILINE)
+        config.write_text(config_text.rstrip() + "\n", encoding="utf-8")
+        available_networks = local_networks()
+        for offset, nic in enumerate(extra_nics, start=1):
+            if not isinstance(nic, dict):
+                raise ValueError("invalid extra NIC configuration")
+            link = str(nic.get("network") or "").strip()
+            if link not in available_networks:
+                raise ValueError(f"extra NIC network {link or '(blank)'} is not available")
+            mac = str(nic.get("macAddress") or "").strip().lower() or unique_container_mac()
+            if not re.fullmatch(r"(?:[A-Fa-f0-9]{2}:){5}[A-Fa-f0-9]{2}", mac):
+                raise ValueError("invalid extra NIC MAC address")
+            append_unique(config, f"lxc.net.{offset}.type = veth")
+            append_unique(config, f"lxc.net.{offset}.link = {link}")
+            append_unique(config, f"lxc.net.{offset}.flags = up")
+            append_unique(config, f"lxc.net.{offset}.name = eth{offset}")
+            append_unique(config, f"lxc.net.{offset}.hwaddr = {mac}")
+            vlan = str(nic.get("vlanTag") or "").strip()
+            if vlan:
+                vlan_id = int(vlan)
+                if not 1 <= vlan_id <= 4094:
+                    raise ValueError("invalid extra NIC VLAN tag")
+                append_unique(config, f"lxc.net.{offset}.vlan.id = {vlan_id}")
+
+    # Add requested host-directory mount points and device pass-through entries.
+    # Existing non-LightNAS entries are preserved.
+    for mount in data.get("addMountPoints") or []:
+        if not isinstance(mount, dict):
+            raise ValueError("invalid mount point")
+        source = str(mount.get("source") or "").strip()
+        target = str(mount.get("target") or "").strip().lstrip("/")
+        if not source.startswith("/") or ".." in Path(source).parts or not target or ".." in Path(target).parts:
+            raise ValueError("mount points require absolute host source and safe container target")
+        if not Path(source).exists():
+            raise ValueError(f"mount source does not exist: {source}")
+        options = "bind,create=dir" + (",ro" if mount.get("readOnly") else "")
+        with config.open("a", encoding="utf-8") as handle:
+            handle.write(f"lxc.mount.entry = {source} {target} none {options} 0 0\n")
+
+    for device in data.get("addDevicePaths") or []:
+        path = str(device.get("path") if isinstance(device, dict) else device or "").strip()
+        if not path.startswith("/dev/") or ".." in Path(path).parts or not Path(path).exists():
+            raise ValueError("device passthrough must reference an existing /dev path")
+        target = path.lstrip("/")
+        with config.open("a", encoding="utf-8") as handle:
+            handle.write(f"lxc.mount.entry = {path} {target} none bind,optional,create=file 0 0\n")
 
     interfaces = rootfs / "etc" / "network" / "interfaces"
     if interfaces.parent.exists():
