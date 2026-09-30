@@ -21,6 +21,7 @@ import {
   listContainerTemplates, proxmoxTemplateCatalog, uploadContainerTemplate,
   importContainerTemplate, deleteContainerTemplate, proxmoxTemplateSource
 } from './templates.mjs';
+import { ensureWindowsVirtioDrivers, vmGuestToolsInventory } from './guest-tools.mjs';
 import {
   listStoragePools, createStoragePool, updateStoragePool, deleteStoragePool,
   listStorageContent, uploadStorageContent, importStorageContent, deleteStorageContent
@@ -1708,14 +1709,27 @@ async function api(req, res, url) {
     return send(res, 200, result);
   }
 
+  if (req.method === 'GET' && url.pathname === '/api/vm/guest-tools') {
+    if (!requireAnyPermission(res, permissions, ['vms.view', 'vms.manage'])) return;
+    return send(res, 200, await vmGuestToolsInventory());
+  }
+  if (req.method === 'POST' && url.pathname === '/api/vm/guest-tools/windows') {
+    if (!requirePermission(res, permissions, 'vms.manage')) return;
+    const input = await bodyJson(req);
+    const media = await ensureWindowsVirtioDrivers(String(input.storageId || ''));
+    store.addActivity('vm', `Windows VirtIO guest driver media ${media.name} is ready for virtual machines.`);
+    await store.save();
+    return send(res, media.downloaded ? 201 : 200, { media });
+  }
+
   if (req.method === 'GET' && url.pathname === '/api/templates') {
     if (!requireAnyPermission(res, permissions, ['storage.view', 'containers.manage'])) return;
     const library = await listContainerTemplates();
-    return send(res, 200, { ...library, proxmoxSource: proxmoxTemplateSource });
+    return send(res, 200, library);
   }
   if (req.method === 'GET' && url.pathname === '/api/templates/catalog') {
     if (!requirePermission(res, permissions, 'containers.manage')) return;
-    return send(res, 200, { source: proxmoxTemplateSource, templates: await proxmoxTemplateCatalog() });
+    return send(res, 200, { source: 'System image catalog', templates: await proxmoxTemplateCatalog() });
   }
   if (req.method === 'PUT' && url.pathname === '/api/templates/upload') {
     if (!requirePermission(res, permissions, 'containers.manage')) return;
