@@ -1490,7 +1490,9 @@ function bindViewActions() {
       const result = await request('/api/vms', { method:'POST', body:JSON.stringify({ id, vmid:id, action:'guest-drivers' }) });
       state.runtimes = await request('/api/runtimes');
       render('vms');
-      toast(result.alreadyAttached ? 'VirtIO driver CD is already attached.' : 'VirtIO driver CD attached to the VM.');
+      toast(result.alreadyAttached
+        ? (result.requiresRestart ? 'VirtIO driver CD is saved to this VM and will appear after reboot.' : 'VirtIO driver CD is already attached.')
+        : (result.requiresRestart ? 'VirtIO driver CD added. Reboot the VM once for Windows to see it.' : 'VirtIO driver CD attached to the running VM.'));
     } catch (error) {
       target.disabled = false;
       target.textContent = 'Attach VirtIO Drivers';
