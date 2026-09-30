@@ -1386,6 +1386,66 @@ function integrationsView() {
     </section>`;
 }
 
+function backupsView() {
+  const pools = state.overview?.storage?.configuredPools || [];
+  const eligible = pools.filter(pool => Array.isArray(pool.content) ? pool.content.includes('backups') : /backup/i.test((pool.contentLabels || []).join(' ')));
+  const activity = (state.logs || state.overview?.activity || []).filter(item => /backup|restore|snapshot/i.test(`${item.type || ''} ${item.message || ''}`));
+  return `${pageHead('Backups', 'Backup storage, restore activity and protection status.', '<div class="head-actions"><button class="secondary" data-action="refresh-storage">Refresh storage</button><button class="secondary" data-action="refresh-logs">Refresh activity</button></div>')}
+    <section class="metric-grid">
+      ${metric('Backup-capable pools', String(eligible.length), eligible.length ? 100 : 0, eligible.length ? 'Ready for backup content' : 'No pool currently advertises backup content')}
+      ${metric('Recent backup events', String(activity.length), Math.min(100, activity.length * 10), 'Recorded in the LightNAS activity log')}
+      ${metric('Configured storage pools', String(pools.length), pools.length ? 100 : 0, 'Available storage targets')}
+      ${metric('Protection status', eligible.length ? 'Ready' : 'Needs target', eligible.length ? 100 : 0, eligible.length ? 'At least one backup target is available' : 'Add or edit storage to allow Backups')}
+    </section>
+    <section class="panel"><div class="panel-head"><div><span class="eyebrow">BACKUP TARGETS</span><h2>Storage available for backups</h2></div><button class="secondary" data-view-link="storage">Manage storage</button></div>
+      <div class="storage-list">${eligible.length ? eligible.map(pool => `<article class="storage-row"><div><h3>${escapeHtml(pool.name)}</h3><p>${escapeHtml(pool.provider || pool.type || 'storage')} · ${escapeHtml(pool.mountPoint || 'managed storage')}</p></div><span class="volume-state writable">READY</span></article>`).join('') : '<div class="empty compact-empty"><h3>No backup target configured</h3><p>Open Storage and add or edit a pool with Backups enabled in its content policy.</p></div>'}</div>
+    </section>
+    <section class="panel"><div class="panel-head"><div><span class="eyebrow">HISTORY</span><h2>Backup & restore activity</h2></div></div>
+      <div class="activity-list">${activity.length ? activity.slice(0,50).map(item => `<div class="activity"><span class="activity-icon">↶</span><div><b>${escapeHtml(item.message || item.type)}</b><time>${relativeTime(item.timestamp)}</time></div></div>`).join('') : '<p class="muted">No backup or restore activity has been recorded yet.</p>'}</div>
+    </section>`;
+}
+
+function analyticsView() {
+  const system = state.overview?.system || {};
+  const storage = state.overview?.storage?.usableStorage || state.overview?.storage?.virtualStorage || state.overview?.storage?.local || {};
+  const network = system.network || {};
+  const activity = state.logs || state.overview?.activity || [];
+  const counts = activity.reduce((map,item) => { const key=String(item.type || 'other'); map[key]=(map[key]||0)+1; return map; }, {});
+  return `${pageHead('Analytics', 'Live host performance and operational activity.', '<button class="secondary" data-action="refresh">Refresh analytics</button>')}
+    <section class="analytics-grid">
+      ${overviewChart('CPU usage', `${system.cpu?.loadPercent || 0}`, '%', state.metricHistory.cpu, 100)}
+      ${overviewChart('Memory usage', `${system.memory?.usedPercent || 0}`, '%', state.metricHistory.memory, 100)}
+      ${overviewChart('Storage usage', `${storage.usedPercent || 0}`, '%', state.metricHistory.storage, 100)}
+      ${overviewNetworkChart(system)}
+    </section>
+    <section class="panel"><div class="panel-head"><div><span class="eyebrow">ACTIVITY ANALYTICS</span><h2>Operations by category</h2></div><small>${activity.length} recorded events</small></div>
+      <div class="analytics-bars">${Object.entries(counts).sort((a,b)=>b[1]-a[1]).map(([type,count]) => `<div class="analytics-bar-row"><span>${escapeHtml(type)}</span><div class="track"><span style="width:${Math.min(100,(count/Math.max(1,activity.length))*100)}%"></span></div><b>${count}</b></div>`).join('') || '<p class="muted">No activity data yet.</p>'}</div>
+    </section>
+    <section class="metric-grid">
+      ${metric('Network interfaces', String(network.interfaces || 0), 0, `RX ${bytes(network.receivedBytes || 0)} · TX ${bytes(network.transmittedBytes || 0)}`)}
+      ${metric('Uptime', duration(system.uptimeSeconds || 0), 0, system.kernel || '')}
+      ${metric('Logical CPUs', String(system.cpu?.cores || 0), 0, system.cpu?.model || '')}
+      ${metric('Memory available', bytes(system.memory?.freeBytes || 0), 0, `${bytes(system.memory?.totalBytes || 0)} total`)}
+    </section>`;
+}
+
+function logsView() {
+  const logs = state.logs || [];
+  return `${pageHead('Logs', 'Persisted LightNAS activity and audit events.', '<button class="secondary" data-action="refresh-logs">Refresh logs</button>')}
+    <section class="panel logs-panel"><div class="panel-head"><div><span class="eyebrow">AUDIT & ACTIVITY</span><h2>System activity log</h2></div><small>${logs.length} events loaded</small></div>
+      <div class="logs-table">
+        <div class="logs-head"><span>Time</span><span>Type</span><span>Severity</span><span>Message</span></div>
+        ${logs.length ? logs.map(item => `<div class="logs-row"><time>${escapeHtml(new Date(item.timestamp).toLocaleString())}</time><span>${escapeHtml(item.type || 'event')}</span><span class="log-severity ${escapeHtml(item.severity || 'info')}">${escapeHtml((item.severity || 'info').toUpperCase())}</span><b>${escapeHtml(item.message || '')}</b></div>`).join('') : '<div class="empty compact-empty"><p>No persisted activity has been recorded yet.</p></div>'}
+      </div>
+    </section>`;
+}
+
+async function loadLogs() {
+  try {
+    state.logs = (await request('/api/logs?limit=500')).logs || [];
+    if (['logs','backups','analytics'].includes(state.view)) render(state.view);
+  } catch (error) { toast(error.message); }
+}
 function render(view) {
   if (view === 'media') view = 'files';
   if (view === 'monitoring') view = 'home';
