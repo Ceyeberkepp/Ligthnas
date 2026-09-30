@@ -21,9 +21,9 @@ test('viewer close no longer rewrites gallery thumbnail sources', async () => {
   assert.doesNotMatch(close, /thumbnail\?path/);
 });
 
-test('desktop keeps Photos and exposes Files Settings in tab and toolbar', async () => {
+test('desktop keeps Photos and exposes Files Settings in the toolbar', async () => {
   const [app, css] = await Promise.all([read('public/app.js'), read('public/enhancements.css')]);
-  assert.match(app, /desktop-files-settings-tab/);
+  assert.match(app, /data-files-settings-tab/);
   assert.match(app, /desktop-files-settings-button/);
   assert.match(app, /data-file-view="gallery"/);
   assert.match(css, /\.mobile-photo-view-button \{ display:inline-flex; \}/);
