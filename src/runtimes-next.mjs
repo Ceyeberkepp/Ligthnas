@@ -280,13 +280,40 @@ function vmBootOrder(source) {
 
 function vmHardwareDetails(source) {
   const xml = String(source || '');
+  const disks = [...xml.matchAll(/<disk\b[^>]*device=(['"])disk\1[^>]*>([\s\S]*?)<\/disk>/gi)].map((match, index) => {
+    const body = match[2] || '';
+    return {
+      index,
+      source: body.match(/<source\b[^>]*(?:file|dev)=(['"])([^'"]+)\1/i)?.[2] || '',
+      target: body.match(/<target\b[^>]*dev=(['"])([^'"]+)\1/i)?.[2] || '',
+      bus: body.match(/<target\b[^>]*bus=(['"])([^'"]+)\1/i)?.[2] || '',
+      format: body.match(/<driver\b[^>]*type=(['"])([^'"]+)\1/i)?.[2] || ''
+    };
+  });
+  const interfaces = [...xml.matchAll(/<interface\b[^>]*>([\s\S]*?)<\/interface>/gi)].map((match, index) => {
+    const body = match[1] || '';
+    return {
+      index,
+      network: body.match(/<source\b[^>]*(?:network|bridge)=(['"])([^'"]+)\1/i)?.[2] || '',
+      model: body.match(/<model\b[^>]*type=(['"])([^'"]+)\1/i)?.[2] || 'virtio',
+      macAddress: body.match(/<mac\b[^>]*address=(['"])([^'"]+)\1/i)?.[2] || ''
+    };
+  });
+  const hostDevices = [...xml.matchAll(/<hostdev\b[^>]*type=(['"])pci\1[^>]*>([\s\S]*?)<\/hostdev>/gi)].map(match => {
+    const body = match[2] || '';
+    const address = body.match(/<address\b[^>]*domain=(['"])0x([0-9a-f]+)\1[^>]*bus=(['"])0x([0-9a-f]+)\3[^>]*slot=(['"])0x([0-9a-f]+)\5[^>]*function=(['"])0x([0-9a-f]+)\7/i);
+    return address ? `${address[2].padStart(4,'0')}:${address[4].padStart(2,'0')}:${address[6].padStart(2,'0')}.${address[8]}` : '';
+  }).filter(Boolean);
   return {
     firmware: /<loader\b/i.test(xml) || /firmware=(['"])efi\1/i.test(xml) ? 'uefi' : 'bios',
     machineType: xml.match(/<type\b[^>]*machine=(['"])([^'"]+)\1/i)?.[2] || 'default',
     displayModel: xml.match(/<video>[\s\S]*?<model\b[^>]*type=(['"])([^'"]+)\1/i)?.[2] || 'vga',
-    networkModel: xml.match(/<interface\b[\s\S]*?<model\b[^>]*type=(['"])([^'"]+)\1/i)?.[2] || 'virtio',
+    networkModel: interfaces[0]?.model || 'virtio',
     scsiController: xml.match(/<controller\b[^>]*type=(['"])scsi\1[^>]*model=(['"])([^'"]+)\2/i)?.[3] || 'virtio-scsi',
-    diskBus: xml.match(/<disk\b[^>]*device=(['"])disk\1[^>]*>[\s\S]*?<target\b[^>]*bus=(['"])([^'"]+)\2/i)?.[3] || 'scsi'
+    diskBus: disks[0]?.bus || 'scsi',
+    disks,
+    interfaces,
+    hostDevices
   };
 }
 
@@ -354,6 +381,14 @@ async function localVmDetails(names) {
     ]);
     if (!info.ok) continue;
     const parsed = parseDomInfo(info.output);
+    const hardware = domainXml.ok ? vmHardwareDetails(domainXml.output) : { disks:[], interfaces:[], hostDevices:[] };
+    let primaryDiskSizeGiB = 0;
+    const primaryTarget = hardware.disks?.[0]?.target || '';
+    if (primaryTarget) {
+      const blockInfo = await command('virsh', ['-c', 'qemu:///system', 'domblkinfo', name, primaryTarget], 10000);
+      const capacity = blockInfo.ok ? Number(blockInfo.output.match(/Capacity:\s*(\d+)/i)?.[1] || 0) : 0;
+      primaryDiskSizeGiB = capacity ? Math.round((capacity / (1024 ** 3)) * 100) / 100 : 0;
+    }
     details.push({
       id: name,
       name,
@@ -365,7 +400,8 @@ async function localVmDetails(names) {
       installationMedia: blockDevices.ok && hasInstallerMedia(blockDevices.output),
       installationMediaPath: blockDevices.ok ? installerMediaPath(blockDevices.output) : '',
       bootOrder: domainXml.ok ? vmBootOrder(domainXml.output) : 'disk',
-      ...(domainXml.ok ? vmHardwareDetails(domainXml.output) : {}),
+      ...hardware,
+      primaryDiskSizeGiB,
       startOnBoot: parsed.autostart === 'enable'
     });
   }
@@ -599,6 +635,67 @@ async function localUpdateVm(input) {
     }
     queueInstallerBootKey(target);
   }
+  // Grow the primary disk when requested. Shrinking is intentionally blocked.
+  const requestedDiskSize = Number(input.diskSizeGiB || 0);
+  if (requestedDiskSize > 0) {
+    const hardware = vmHardwareDetails(updatedXml);
+    const primaryDisk = hardware.disks?.[0];
+    if (!primaryDisk?.target || !primaryDisk?.source) throw Object.assign(new Error('The VM primary disk could not be identified.'), { status:409 });
+    const blockInfo = await command('virsh', ['-c', 'qemu:///system', 'domblkinfo', target, primaryDisk.target], 10000);
+    const currentBytes = blockInfo.ok ? Number(blockInfo.output.match(/Capacity:\s*(\d+)/i)?.[1] || 0) : 0;
+    const currentGiB = currentBytes / (1024 ** 3);
+    if (requestedDiskSize + 0.001 < currentGiB) throw Object.assign(new Error('Disk shrinking is not supported. Choose a size equal to or larger than the current disk.'), { status:400 });
+    if (requestedDiskSize > currentGiB + 0.01) {
+      const stateNow = await command('virsh', ['-c', 'qemu:///system', 'domstate', target], 10000);
+      if (/running/i.test(stateNow.output || '')) {
+        const resize = await command('virsh', ['-c', 'qemu:///system', 'blockresize', target, primaryDisk.target, `${requestedDiskSize}G`], 60000);
+        if (!resize.ok) throw Object.assign(new Error(`Unable to grow VM disk: ${resize.error}`), { status:409 });
+      } else {
+        const resize = await command('qemu-img', ['resize', primaryDisk.source, `${requestedDiskSize}G`], 60000);
+        if (!resize.ok) throw Object.assign(new Error(`Unable to grow VM disk: ${resize.error}`), { status:409 });
+      }
+    }
+  }
+
+  // Add one additional virtual NIC when requested.
+  const addNicNetwork = String(input.addNicNetwork || '').trim();
+  if (addNicNetwork) {
+    const model = ['virtio','e1000','rtl8139'].includes(input.addNicModel) ? input.addNicModel : 'virtio';
+    const networkList = await command('virsh', ['-c','qemu:///system','net-list','--all','--name'], 10000);
+    const bridgeList = await command('ip', ['-j','link','show','type','bridge'], 10000);
+    const libvirtNetworks = new Set(String(networkList.output || '').split(/\r?\n/).map(v => v.trim()).filter(Boolean));
+    let bridgeNames = new Set();
+    try { bridgeNames = new Set(JSON.parse(bridgeList.output || '[]').map(item => String(item.ifname || ''))); } catch {}
+    const sourceArgs = libvirtNetworks.has(addNicNetwork)
+      ? ['--type','network','--source',addNicNetwork]
+      : bridgeNames.has(addNicNetwork)
+        ? ['--type','bridge','--source',addNicNetwork]
+        : null;
+    if (!sourceArgs) throw Object.assign(new Error('The selected VM network/bridge is not available.'), { status:400 });
+    const stateNow = await command('virsh', ['-c','qemu:///system','domstate',target], 10000);
+    const args = ['-c','qemu:///system','attach-interface',target,...sourceArgs,'--model',model,'--config'];
+    if (/running/i.test(stateNow.output || '')) args.push('--live');
+    const attached = await command('virsh', args, 30000);
+    if (!attached.ok) throw Object.assign(new Error(`Unable to add VM network adapter: ${attached.error}`), { status:409 });
+  }
+
+  // PCI/GPU pass-through uses the standard libvirt hostdev definition.
+  const addPciDevice = String(input.addPciDevice || '').trim().toLowerCase();
+  if (addPciDevice) {
+    const pci = addPciDevice.match(/^([0-9a-f]{4}):([0-9a-f]{2}):([0-9a-f]{2})\.([0-7])$/);
+    if (!pci) throw Object.assign(new Error('PCI/GPU address must use 0000:65:00.0 format.'), { status:400 });
+    const stateNow = await command('virsh', ['-c','qemu:///system','domstate',target], 10000);
+    if (/running/i.test(stateNow.output || '')) throw Object.assign(new Error('Shut down the VM before adding a PCI/GPU passthrough device.'), { status:409 });
+    const xml = `<hostdev mode='subsystem' type='pci' managed='yes'><source><address domain='0x${pci[1]}' bus='0x${pci[2]}' slot='0x${pci[3]}' function='0x${pci[4]}'/></source></hostdev>`;
+    const directory = await mkdtemp(join(tmpdir(), 'lightnas-hostdev-'));
+    const path = join(directory,'hostdev.xml');
+    try {
+      await writeFile(path, xml, { mode:0o600 });
+      const attached = await command('virsh', ['-c','qemu:///system','attach-device',target,path,'--config'], 30000);
+      if (!attached.ok) throw Object.assign(new Error(`Unable to add PCI/GPU passthrough device: ${attached.error}`), { status:409 });
+    } finally { await rm(directory,{recursive:true,force:true}).catch(()=>{}); }
+  }
+
   const autostart = input.startOnBoot === false || input.startOnBoot === 'false' ? 'disable' : 'enable';
   const autostartResult = await command('virsh', ['-c', 'qemu:///system', 'autostart', target, ...(autostart === 'disable' ? ['--disable'] : [])], 30000);
   if (!autostartResult.ok) throw Object.assign(new Error(`VM settings were saved, but autostart could not be updated: ${autostartResult.error}`), { status: 409 });
