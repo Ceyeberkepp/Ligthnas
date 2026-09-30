@@ -187,7 +187,7 @@ function openCreateStorage(sourceId='', provider='directory') {
         <label>Storage name<input name="name" required pattern="[A-Za-z][A-Za-z0-9_-]{1,31}" placeholder="fastssd" autocomplete="off"><small>2–32 letters, numbers, dashes, or underscores.</small></label>
         ${providerFields}
         <label>${localTypes.has(provider)?'Volume':'Mounted backing path'}<select name="sourceId" required ${writableSources.length?'':'disabled'}>
-          ${writableSources.length?'<option value="">Select a mounted source…</option>':'<option value="">No writable mounted sources available</option>'}
+          ${writableSources.length?'<option value="">Select a mounted source…</option>':'<option value="">No writable volumes available</option>'}
           ${sources.map(item=>`<option value="${sEsc(item.id)}" ${item.mountedReadOnly?'disabled':''}>${sEsc(sourceLabel(item))}${item.mountedReadOnly?' · read only':item.writable?'':' · ready to claim'}</option>`).join('')}
         </select><small>${writableSources.length?'Choose the mounted source LightNAS will use for actual data. Provider connection details are saved with the storage definition.':'Expose or mount this storage to the LightNAS OS first, then rescan.'}</small></label>
       </div>
