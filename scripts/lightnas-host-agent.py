@@ -2163,24 +2163,36 @@ def vm_console_target(name: str) -> tuple[str, int]:
 
 def open_vm_console(data: dict):
     name = str(data.get("id") or data.get("name") or "")
-    host, port = vm_console_target(name)
-    # A newly-started domain may be reported as running just before QEMU's VNC
-    # listener is ready. Retry that short race instead of accepting the browser
-    # session and immediately closing it.
-    last_error = None
-    for _attempt in range(20):
-        try:
-            backend = socket.create_connection((host, port), timeout=2)
-            # create_connection leaves the connect timeout on the socket. A
-            # quiet framebuffer can legitimately send no data for much longer
-            # than that; retaining the timeout made every idle console close.
-            backend.settimeout(None)
-            return backend
-        except OSError as exc:
-            last_error = exc
-            time.sleep(0.25)
-    raise RuntimeError(f"VM display is not ready on {host}:{port}: {last_error}")
+    if not NAME_RE.fullmatch(name):
+        raise ValueError("invalid VM name")
 
+    # A reboot/power-cycle briefly removes both the domain's running state and
+    # its VNC listener. Keep this single console request alive while QEMU comes
+    # back instead of forcing the browser through repeated failed WebSockets.
+    deadline = time.monotonic() + 75
+    last_error = None
+    while time.monotonic() < deadline:
+        try:
+            state = run(["virsh", "-c", "qemu:///system", "domstate", name], timeout=8, check=False).lower()
+            if "running" not in state:
+                last_error = RuntimeError(f"VM state is {state.strip() or 'unavailable'}")
+                time.sleep(0.75)
+                continue
+
+            host, port = vm_console_target(name)
+            try:
+                backend = socket.create_connection((host, port), timeout=3)
+                # A quiet framebuffer can legitimately have no traffic for a
+                # long time; never retain the connect timeout after success.
+                backend.settimeout(None)
+                return backend
+            except OSError as exc:
+                last_error = exc
+        except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            last_error = exc
+        time.sleep(0.75)
+
+    raise RuntimeError(f"VM console did not become ready within 75 seconds: {last_error}")
 
 def stream_vm_console(connection, backend) -> None:
 
