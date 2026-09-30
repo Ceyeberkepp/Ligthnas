@@ -1491,8 +1491,8 @@ function bindViewActions() {
       state.runtimes = await request('/api/runtimes');
       render('vms');
       toast(result.alreadyAttached
-        ? (result.requiresRestart ? 'VirtIO driver CD is saved to this VM and will appear after reboot.' : 'VirtIO driver CD is already attached.')
-        : (result.requiresRestart ? 'VirtIO driver CD added. Reboot the VM once for Windows to see it.' : 'VirtIO driver CD attached to the running VM.'));
+        ? (result.requiresRestart ? 'VirtIO driver CD is saved to this VM. Fully shut down the VM, then start it again to load the new CD/DVD hardware.' : 'VirtIO driver CD is already attached.')
+        : (result.requiresRestart ? 'VirtIO driver CD added. Fully shut down the VM, then start it again so Windows can see the new CD/DVD drive.' : 'VirtIO driver CD attached to the running VM.'));
     } catch (error) {
       target.disabled = false;
       target.textContent = 'Attach VirtIO Drivers';
