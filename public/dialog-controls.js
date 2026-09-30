@@ -743,11 +743,18 @@ async function showContainerManager(id) {
           <section data-container-panel="options" hidden>
             <h3>Options</h3>
             <label class="check-line"><input name="startOnBoot" type="checkbox" ${item.startOnBoot !== false ? 'checked' : ''}> Start container automatically when LightNAS starts</label>
-            <div class="manager-summary">
+            <div class="manager-summary manager-options-grid">
               <div><span>Provider</span><b>${dialogEsc(item.provider || 'local-lxc')}</b></div>
               <div><span>Status</span><b>${dialogEsc(item.status || 'unknown')}</b></div>
               <div><span>PID</span><b>${dialogEsc(item.pid || 'Not running')}</b></div>
+              <div><span>System image</span><b>${dialogEsc(item.imageId || 'Installed Linux system')}</b></div>
+              <div><span>Unprivileged container</span><b>${item.unprivileged ? 'Yes' : 'No / not detected'}</b></div>
+              <div><span>Nesting feature</span><b>${item.nesting ? 'Enabled' : 'Disabled'}</b></div>
+              <div><span>TTY count</span><b>${dialogEsc(item.ttyCount || 'Default')}</b></div>
+              <div><span>Console path</span><b>${dialogEsc(item.consolePath || 'Default LXC console')}</b></div>
+              <div><span>Primary MAC</span><b>${dialogEsc(item.macAddress || 'Automatically assigned')}</b></div>
             </div>
+            <p class="module-note">Start at boot is editable here. Security identity, nesting and console topology reflect the actual LXC configuration and are shown read-only so LightNAS does not silently weaken the container boundary.</p>
           </section>
           <section data-container-panel="tasks" hidden><h3>Task history</h3><div class="manager-events">${taskRows}</div></section>
           <section data-container-panel="backups" hidden>${unavailable('Backups', 'Backup jobs require a configured LightNAS backup target. The container root filesystem is not copied until that storage workflow is enabled.')}</section>
