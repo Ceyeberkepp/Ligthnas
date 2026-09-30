@@ -110,14 +110,14 @@ function dialogEsc(value) {
 const lightnasTasks = (() => {
   let items = [];
   const cancelHandlers = new Map();
-  try { items = JSON.parse(localStorage.getItem('lightnas-tasks') || '[]'); } catch {}
+  try { items = JSON.parse(localStorage.getItem('lightnas-tasks') || sessionStorage.getItem('lightnas-tasks') || '[]'); } catch {}
   if (!Array.isArray(items)) items = [];
   items = items.slice(-80).map(item => item?.status === 'running'
     ? { ...item, status:'canceled', detail:item.detail ? `${item.detail} · interrupted by page reload` : 'Interrupted by page reload' }
     : item);
 
   const save = () => {
-    try { localStorage.setItem('lightnas-tasks', JSON.stringify(items.slice(-80))); } catch {}
+    try { const saved = JSON.stringify(items.slice(-80)); localStorage.setItem('lightnas-tasks', saved); sessionStorage.setItem('lightnas-tasks', saved); } catch {}
   };
   const statusLabel = item => item.status === 'success' ? 'OK'
     : item.status === 'error' ? 'Error'
