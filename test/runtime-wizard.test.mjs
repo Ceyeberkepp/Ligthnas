@@ -101,7 +101,7 @@ test('container backend requires credentials and selected root storage', async (
   assert.match(agent, /"verified": True/);
 });
 
-test('files and media share one tabbed library with sequential previews', async () => {
+test('files and media share one selectable library with sequential previews', async () => {
   const [page, app, enhancements] = await Promise.all([
     readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
     readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
@@ -109,7 +109,7 @@ test('files and media share one tabbed library with sequential previews', async 
   ]);
   assert.match(page, />Files & media</);
   assert.doesNotMatch(page, /data-view="media"/);
-  assert.match(app, /data-library-tab/);
+  assert.match(app, /data-library-select/);
   assert.match(app, /\['Photos', 'Photos'\]/);
   assert.doesNotMatch(app, /\['ISO', 'ISO images'\]/);
   assert.match(app, /id="file-upload" type="file"/);
