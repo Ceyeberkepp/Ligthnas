@@ -10,6 +10,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { listStoragePools } from './storage-pools.mjs';
 
 const PROXMOX_IMAGES_BASE = 'https://download.proxmox.com/images/';
+const SYSTEM_IMAGES_URL = `${PROXMOX_IMAGES_BASE}system/`;
 const PVE_APLINFO_MAJOR = String(process.env.LIGHTNAS_PVE_APLINFO_MAJOR || '9').replace(/[^0-9]/g, '') || '9';
 const PROXMOX_APLINFO_URL = `${PROXMOX_IMAGES_BASE}aplinfo-pve-${PVE_APLINFO_MAJOR}.dat`;
 const PROXMOX_FALLBACK_APLINFO_URL = `${PROXMOX_IMAGES_BASE}aplinfo.dat`;
@@ -175,21 +176,72 @@ async function fetchCatalogSource(url, baseUrl, sourceName) {
   return parseAplInfo(await response.text(), baseUrl, sourceName);
 }
 
+function friendlyTemplateName(filename) {
+  return String(filename || '')
+    .replace(/\.(?:tar\.zst|tar\.xz|tar\.gz|tgz)$/i, '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\bamd64\b|\bx86_64\b|\barm64\b|\baarch64\b/gi, match => match.toUpperCase())
+    .trim();
+}
+
+async function fetchSystemDirectoryCatalog() {
+  const { response } = await safeFetch(SYSTEM_IMAGES_URL);
+  if (!response.ok) throw new Error(`System image catalog returned HTTP ${response.status}`);
+  const html = await response.text();
+  const seen = new Set();
+  const records = [];
+  for (const match of html.matchAll(/href=["']([^"'?#]+)["']/gi)) {
+    let href = String(match[1] || '').trim();
+    if (!href || href === '../' || href.endsWith('/')) continue;
+    try { href = decodeURIComponent(href); } catch {}
+    const filename = href.split('/').pop();
+    if (!templateName.test(filename || '') || seen.has(filename)) continue;
+    seen.add(filename);
+    const base = friendlyTemplateName(filename);
+    const osMatch = filename.match(/^([a-z0-9]+)[-_]/i);
+    records.push({
+      id: `system:${filename}`,
+      filename,
+      type: 'lxc',
+      section: 'system',
+      package: base,
+      version: filename.match(/(?:^|[-_])(\d+(?:\.\d+){0,3})(?=[-_.])/i)?.[1] || '',
+      architecture: /(?:amd64|x86_64)/i.test(filename) ? 'amd64' : /(?:arm64|aarch64)/i.test(filename) ? 'arm64' : '',
+      name: base,
+      description: `${base} system container image`,
+      os: osMatch?.[1]?.toLowerCase() || null,
+      url: new URL(href, SYSTEM_IMAGES_URL).toString(),
+      source: 'System catalog',
+      sha512: null
+    });
+  }
+  return records;
+}
+
 export async function proxmoxTemplateCatalog() {
-  let proxmox = [];
+  let systemDirectory = [];
+  try { systemDirectory = await fetchSystemDirectoryCatalog(); }
+  catch {}
+
+  let primary = [];
   try {
-    proxmox = await fetchCatalogSource(PROXMOX_APLINFO_URL, PROXMOX_IMAGES_BASE, 'Proxmox');
+    primary = await fetchCatalogSource(PROXMOX_APLINFO_URL, PROXMOX_IMAGES_BASE, 'System catalog');
   } catch {
-    try { proxmox = await fetchCatalogSource(PROXMOX_FALLBACK_APLINFO_URL, PROXMOX_IMAGES_BASE, 'Proxmox'); }
+    try { primary = await fetchCatalogSource(PROXMOX_FALLBACK_APLINFO_URL, PROXMOX_IMAGES_BASE, 'System catalog'); }
     catch {}
   }
 
-  let turnkey = [];
-  try { turnkey = await fetchCatalogSource(TURNKEY_APLINFO_URL, TURNKEY_BASE, 'TurnKey Linux'); }
+  let appliances = [];
+  try { appliances = await fetchCatalogSource(TURNKEY_APLINFO_URL, TURNKEY_BASE, 'Appliance catalog'); }
   catch {}
 
-  const combined = [...proxmox, ...turnkey];
-  if (!combined.length) throw Object.assign(new Error('The upstream Proxmox/TurnKey template catalogs are currently unavailable.'), { status: 502 });
+  const byFilename = new Map();
+  for (const item of [...systemDirectory, ...primary, ...appliances]) {
+    const existing = byFilename.get(item.filename);
+    if (!existing || (!existing.sha512 && item.sha512)) byFilename.set(item.filename, { ...existing, ...item });
+  }
+  const combined = [...byFilename.values()];
+  if (!combined.length) throw Object.assign(new Error('The system container image catalogs are currently unavailable.'), { status: 502 });
   return combined.sort((a, b) =>
     a.section.localeCompare(b.section) ||
     a.package.localeCompare(b.package, undefined, { numeric: true }) ||
