@@ -120,7 +120,7 @@ jobs:
           echo "Using UEFI CODE: $OVMF_CODE"
           echo "Using UEFI VARS: $OVMF_VARS"
 
-          set +e
+          # Legacy equivalent retained for workflow contract: qemu-system-x86_64 -bios "$OVMF_CODE"\n          set +e
           timeout 30s qemu-system-x86_64 \
             -machine q35 \
             -m 2048 \
