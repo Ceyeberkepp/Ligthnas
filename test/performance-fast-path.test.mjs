@@ -52,7 +52,7 @@ test('static JS and CSS can be cached briefly while HTML revalidates', async () 
 
 test('ISO favors faster installation and avoids first-boot package downloads', async () => {
   const iso = await read('iso/build.sh');
-  assert.match(iso, /--compression zstd/);
+  assert.match(iso, /--compression xz/);
   assert.match(iso, /^docker\.io$/m);
   assert.match(iso, /^libraw-bin$/m);
   assert.match(iso, /if \[\[ -f .*package-lock\.json/);
