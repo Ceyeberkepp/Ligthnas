@@ -90,6 +90,10 @@ export async function localPrepareVmStorageAccess(input) {
   return await request('vm-storage-access', input, 60000);
 }
 
+export async function localPrepareVmIsoAccess(input) {
+  return await request('vm-iso-access', input, 60000);
+}
+
 export async function localApplianceHealth() {
   return await request('appliance-health', undefined, 60000);
 }
