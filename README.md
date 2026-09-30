@@ -123,18 +123,15 @@ when installation finishes.
 
 The installer prepares native LXC/liblxc plus QEMU/libvirt. It uses KVM acceleration when available and automatically falls back to QEMU TCG software virtualization when hardware virtualization is unavailable. Docker is never the System Containers backend; it is used only by the App Store and can be disabled with `LIGHTNAS_ENABLE_DOCKER_APPS=0`.
 
-### Optional platform-specific deployment helpers
+### Optional external-platform integrations
 
 LightNAS does not require a specific hypervisor for normal operation. Install
-LightNAS directly on supported Linux hardware or inside a standard Linux VM
-using the normal installer above.
+it directly on supported Linux hardware or inside a standard Linux VM using the
+normal installer above.
 
-If an operator intentionally deploys LightNAS inside a platform that requires
-extra nesting or device-passthrough preparation, a platform-specific helper may
-be used. For example, the repository includes
-`scripts/proxmox-lxc-install.sh` for users who specifically choose a Proxmox
-LXC deployment. That helper prepares the outer Proxmox container; it does not
-turn LightNAS into a Proxmox product or dependency.
+Platform-specific deployment or migration helpers are documented separately so
+the main LightNAS installation path remains platform-neutral. See
+**[docs/INTEGRATIONS.md](docs/INTEGRATIONS.md)**.
 
 Imported LXC templates are unpacked with nested-LXC-safe handling: archived
 `/dev/*` device nodes are skipped because LXC supplies the runtime `/dev`.
