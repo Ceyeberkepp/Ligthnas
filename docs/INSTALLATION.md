@@ -2,8 +2,8 @@
 
 This guide documents the normal LightNAS installation flow for bare metal and
 standard Linux virtual machines, plus optional platform-specific deployment
-helpers for nested environments. LightNAS does not require Proxmox or another
-named hypervisor for normal operation.
+helpers for nested environments. LightNAS does not require a specific
+hypervisor for normal operation.
 
 The intended user experience is:
 
@@ -30,10 +30,9 @@ LightNAS supports these deployment styles:
 - Nested/containerized installations when the outer platform exposes the
   capabilities LightNAS needs.
 
-A normal LightNAS installation is platform-neutral. VMware, Hyper-V, KVM,
-VirtualBox, Proxmox, and other hypervisors are external infrastructure choices,
-not LightNAS dependencies. Platform-specific helpers are optional and are used
-only when that outer environment needs extra preparation.
+A normal LightNAS installation is platform-neutral. The outer hypervisor is an
+infrastructure choice, not a LightNAS dependency. Platform-specific helpers are
+optional and are used only when that outer environment needs extra preparation.
 
 The main installer is:
 
