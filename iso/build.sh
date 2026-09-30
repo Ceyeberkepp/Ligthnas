@@ -94,7 +94,6 @@ SVG
       -e 's/Graphical Debian Installer/Install LightNAS (Graphical)/g' \
       -e 's/Debian Installer/Install LightNAS (Text fallback)/g' \
       -e 's/Graphical installer/Install LightNAS (Graphical)/g' \
-      -e 's/Install/Install LightNAS/g' \
       -e 's/splash\.svg/splash.png/g' \
       "$menu"
   done < <(find config/bootloaders -type f \( -name '*.cfg' -o -name '*.conf' \) -print0)
