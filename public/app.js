@@ -585,7 +585,16 @@ function containersView() {
   const containerList = !runtime
     ? '<div class="empty compact-empty"><p>Loading existing system containers…</p></div>'
     : containers.length
-      ? `<div class="compute-table"><div class="compute-table-head"><span>Status</span><span>Name / ID</span><span>CPU</span><span>Memory</span><span>Network</span><span></span></div>${containers.map(item => `<article class="compute-row"><span class="compute-status"><i class="${/running|active/i.test(String(item.status || '')) ? 'online' : 'offline'}"></i>${escapeHtml(item.status || 'unknown')}</span><div><h3>${escapeHtml(item.name || item.id)}</h3><small>LXC · ID ${escapeHtml(item.id || item.name)}</small></div><span>${item.cpus || '—'} vCPU</span><span>${bytes(item.memory || 0)}</span><span>${escapeHtml(item.ipv4 || 'No IP')}</span><div class="runtime-actions compute-actions">
+      ? `<div class="compute-table"><div class="compute-table-head"><span>Status</span><span>Name / ID</span><span>CPU</span><span>Memory</span><span>Network</span><span></span></div>${containers.map(item => {
+          const publication = item.publication || null;
+          const hostAddress = state.overview?.system?.network?.primaryIpv4 || location.hostname;
+          const publishedUrl = publication?.mode === 'proxy' && publication?.hostPort
+            ? `${publication.scheme === 'https' ? 'https' : 'http'}://${hostAddress}:${publication.hostPort}/`
+            : publication?.mode === 'direct' && publication?.targetHost && publication?.targetPort
+              ? `${publication.scheme === 'https' ? 'https' : 'http'}://${publication.targetHost}${(publication.scheme === 'https' && Number(publication.targetPort) === 443) || (publication.scheme !== 'https' && Number(publication.targetPort) === 80) ? '' : `:${publication.targetPort}`}/`
+              : '';
+          return `<article class="compute-row"><span class="compute-status"><i class="${/running|active/i.test(String(item.status || '')) ? 'online' : 'offline'}"></i>${escapeHtml(item.status || 'unknown')}</span><div><h3>${escapeHtml(item.name || item.id)}</h3><small>LXC · ID ${escapeHtml(item.id || item.name)}</small></div><span>${item.cpus || '—'} vCPU</span><span>${bytes(item.memory || 0)}</span><span>${escapeHtml(item.ipv4 || 'No IP')}${publishedUrl ? `<small><a href="${escapeHtml(publishedUrl)}" target="_blank" rel="noopener">Open: ${escapeHtml(publishedUrl.replace(/\/$/, ''))}</a></small>` : ''}</span><div class="runtime-actions compute-actions">
+  ${publishedUrl ? `<button class="primary" type="button" data-app-open="${escapeHtml(publishedUrl)}">Open app</button>` : ''}
   <button class="primary ${/running|active/i.test(String(item.status || '')) ? '' : 'hidden'}" type="button" data-container-console="${escapeHtml(item.id || item.name)}" data-container-name="${escapeHtml(item.name || item.id)}">Terminal</button>
   <button class="primary ${/running|active/i.test(String(item.status || '')) ? 'hidden' : ''}" type="button" data-container-action="start" data-container-id="${escapeHtml(item.id || item.name)}">Start</button>
   <button class="secondary ${/running|active/i.test(String(item.status || '')) ? '' : 'hidden'}" type="button" data-container-action="shutdown" data-container-id="${escapeHtml(item.id || item.name)}">Shutdown</button>
@@ -594,7 +603,8 @@ function containersView() {
   ${!/\d+\.\d+\.\d+\.\d+/.test(String(item.ipv4 || '')) && /running|active/i.test(String(item.status || '')) ? `<button class="secondary" type="button" data-container-action="repair-network" data-container-id="${escapeHtml(item.id || item.name)}">Repair network</button>` : ''}
   <button class="secondary" type="button" data-container-edit="${escapeHtml(item.id || item.name)}" data-container-name="${escapeHtml(item.name || item.id)}" data-container-memory="${Math.max(256, Math.round((Number(item.memory) || 0) / 1048576) || 2048)}" data-container-cpus="${item.cpus || 2}">Edit</button>
   <button class="secondary danger-button" type="button" data-container-action="delete" data-container-id="${escapeHtml(item.id || item.name)}">Delete</button>
-</div></article>`).join('')}</div>`
+</div></article>`;
+        }).join('')}</div>`
       : '<div class="empty compact-empty"><p>No native system containers are visible.</p></div>';
 
   const appContainerList = !docker
