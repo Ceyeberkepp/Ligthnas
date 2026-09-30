@@ -35,6 +35,12 @@ export class ContainerPublisher {
     return this.list().find(item => item.id === id) || null;
   }
 
+  isListening(port, id = '') {
+    const listener = this.listeners.get(Number(port));
+    if (!listener) return false;
+    return !id || listener.record?.id === id;
+  }
+
   decorate(inventory) {
     if (!inventory?.containers) return inventory;
     inventory.containers = inventory.containers.map(item => ({ ...item, publication: this.forContainer(String(item.id || item.name || '')) }));
