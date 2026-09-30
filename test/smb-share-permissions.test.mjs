@@ -37,3 +37,24 @@ test('LightNAS administrator is synchronized as SMB admin for every share', asyn
   assert.match(shares, /adminUsername: String\(input\.adminUsername/);
   assert.match(shares, /removeNetworkShare\(share, remainingShares = \[\], adminUsername = ''\)/);
 });
+
+
+test('built-in Files SMB share is authenticated and uses the web library storage', async () => {
+  const [agent, server, shares] = await Promise.all([
+    readFile(new URL('../scripts/lightnas-host-agent.py', import.meta.url), 'utf8'),
+    readFile(new URL('../src/server.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../src/network-shares.mjs', import.meta.url), 'utf8')
+  ]);
+
+  assert.match(agent, /LIBRARY_ROOT = Path\(os\.environ\.get\("LIGHTNAS_LIBRARY_ROOT", "\/var\/lib\/lightnas\/files"\)\)/);
+  assert.match(agent, /"\[global\]"/);
+  assert.match(agent, /"  restrict anonymous = 2"/);
+  assert.match(agent, /"  map to guest = never"/);
+  assert.match(agent, /"\[Files\]"/);
+  assert.match(agent, /f"  path = \{LIBRARY_ROOT\}"/);
+  assert.match(agent, /"  force user = lightnas"/);
+  assert.match(agent, /"  veto files = \/Shares\/"/);
+  assert.match(server, /publicLibraryShare/);
+  assert.match(shares, /name: 'Files'/);
+  assert.match(shares, /system: true/);
+});
