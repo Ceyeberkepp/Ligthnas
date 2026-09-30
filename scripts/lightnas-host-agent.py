@@ -1313,7 +1313,20 @@ def repair_container_network(name: str) -> dict:
         if existing.is_file() or existing.is_symlink():
             existing.unlink()
 
-    if state.get("LIGHTNAS_NETWORK_MODE") == "lxc-nat":
+    direct_mode = str(state.get("LIGHTNAS_NETWORK_MODE") or "")
+    direct_lan = direct_mode in {"nested-macvlan", "nested-ipvlan"}
+    if direct_lan:
+        parent = str(state.get("LIGHTNAS_CONTAINER_PARENT") or state.get("LIGHTNAS_UPLINK") or "eth0")
+        direct_type = "macvlan" if direct_mode == "nested-macvlan" else "ipvlan"
+        append_unique(config, f"lxc.net.0.type = {direct_type}")
+        append_unique(config, f"lxc.net.0.link = {parent}")
+        if direct_type == "macvlan":
+            append_unique(config, "lxc.net.0.macvlan.mode = bridge")
+        else:
+            append_unique(config, "lxc.net.0.ipvlan.mode = l2")
+        append_unique(config, "lxc.net.0.flags = up")
+        append_unique(config, "lxc.net.0.name = eth0")
+    elif state.get("LIGHTNAS_NETWORK_MODE") == "lxc-nat":
         append_unique(config, "lxc.net.0.type = veth")
         append_unique(config, "lxc.net.0.link = lightnas0")
 
@@ -1359,10 +1372,15 @@ def repair_container_network(name: str) -> dict:
     if lxc_state(name) == "running":
         run(["lxc-stop", "-n", name, "-t", "20"], timeout=35, check=False)
     run(["lxc-start", "-n", name, "-d"], timeout=60)
-    if mode == "dhcp":
-        kick_container_dhcp(name)
+    managed_pool_assignment = False
+    if mode == "dhcp" and direct_lan and state.get("LIGHTNAS_CONTAINER_POOL_START") and state.get("LIGHTNAS_CONTAINER_POOL_END"):
+        ipv4 = apply_managed_automatic_address(name, config)
+        managed_pool_assignment = True
+    else:
+        ipv4 = ""
+        if mode == "dhcp":
+            kick_container_dhcp(name)
 
-    ipv4 = ""
     default_route = ""
     automatic_fallback = False
     for _attempt in range(20 if mode == "dhcp" else 30):
@@ -1403,7 +1421,9 @@ def repair_container_network(name: str) -> dict:
     return {
         "id": name, "action": "repair-network", "status": "running",
         "ipv4": ipv4, "ipv4Mode": mode, "defaultRoute": default_route,
+        "networkMode": "direct-lan" if direct_lan else "managed",
         "automaticFallback": automatic_fallback,
+        "managedLanPool": managed_pool_assignment,
     }
 
 
@@ -1573,6 +1593,82 @@ def parse_nmcli(text: str, count: int) -> list[list[str]]:
     return rows
 
 
+def _derive_nested_lan_state(uplink: str, mode: str) -> dict:
+    result = {
+        "LIGHTNAS_NETWORK_MODE": mode,
+        "LIGHTNAS_UPLINK": uplink,
+        "LIGHTNAS_CONTAINER_PARENT": uplink,
+    }
+    try:
+        cidr = run(["ip", "-4", "-o", "addr", "show", "dev", uplink, "scope", "global"], timeout=5, check=False)
+        cidr_match = re.search(r"\binet\s+([^\s]+)", cidr)
+        routes = run(["ip", "-4", "route", "show", "default", "dev", uplink], timeout=5, check=False)
+        gateway_match = re.search(r"\bvia\s+([0-9.]+)", routes)
+        if not cidr_match or not gateway_match:
+            return result
+        iface = ipaddress.ip_interface(cidr_match.group(1))
+        network = iface.network
+        gateway = ipaddress.ip_address(gateway_match.group(1))
+        usable = max(0, network.num_addresses - 2)
+        if usable < 60:
+            return result
+        start_index = 50 if usable >= 200 else max(2, usable // 4)
+        end_index = 200 if usable >= 200 else max(start_index, usable - 5)
+        start = network.network_address + start_index
+        end = network.network_address + end_index
+        while start in {iface.ip, gateway} and start < end:
+            start += 1
+        while end in {iface.ip, gateway} and end > start:
+            end -= 1
+        result.update({
+            "LIGHTNAS_CONTAINER_SUBNET": network.with_prefixlen,
+            "LIGHTNAS_CONTAINER_POOL_START": str(start),
+            "LIGHTNAS_CONTAINER_POOL_END": str(end),
+            "LIGHTNAS_CONTAINER_GATEWAY": str(gateway),
+            "LIGHTNAS_HOST_ADDRESS": str(iface.ip),
+        })
+    except Exception:
+        pass
+    return result
+
+
+def _upgrade_nested_lan_state(state: dict, path: Path) -> dict:
+    """Replace a stale private-NAT state when the nested host can do direct L2."""
+    if not in_container() or str(state.get("LIGHTNAS_NETWORK_MODE") or "") != "lxc-nat":
+        return state
+    if os.environ.get("LIGHTNAS_NESTED_LAN_MODE", "auto") == "nat":
+        return state
+
+    uplink = str(state.get("LIGHTNAS_UPLINK") or "").strip()
+    if not uplink:
+        try:
+            routes = json.loads(run(["ip", "-j", "-4", "route", "show", "default"], timeout=5, check=False) or "[]")
+            uplink = str(routes[0].get("dev") or "") if routes else ""
+        except Exception:
+            uplink = ""
+    if not uplink or not IFACE_RE.fullmatch(uplink) or not Path("/sys/class/net", uplink).exists():
+        return state
+
+    probes = [
+        ("nested-macvlan", ["ip", "link", "add", "link", uplink, "name", f"lnmv{os.getpid() % 10000}", "type", "macvlan", "mode", "bridge"]),
+        ("nested-ipvlan", ["ip", "link", "add", "link", uplink, "name", f"lniv{os.getpid() % 10000}", "type", "ipvlan", "mode", "l2"]),
+    ]
+    for mode, command_args in probes:
+        probe_name = command_args[command_args.index("name") + 1]
+        probe = subprocess.run(command_args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if probe.returncode != 0:
+            continue
+        subprocess.run(["ip", "link", "delete", probe_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        upgraded = _derive_nested_lan_state(uplink, mode)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("\n".join(f"{key}={value}" for key, value in upgraded.items()) + "\n", encoding="utf-8")
+        except OSError:
+            pass
+        return upgraded
+    return state
+
+
 def lightnas_network_state() -> dict:
     state = {}
     path = Path("/etc/lightnas/network.env")
@@ -1585,6 +1681,7 @@ def lightnas_network_state() -> dict:
                 state[key.strip()] = value.strip().strip('"').strip("'")
     except OSError:
         pass
+    state = _upgrade_nested_lan_state(state, path)
     return state
 
 
