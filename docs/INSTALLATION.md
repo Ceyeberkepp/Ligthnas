@@ -1,7 +1,9 @@
-# LightNAS Installation and Proxmox LXC Guide
+# LightNAS Installation Guide
 
-This guide documents the supported LightNAS installation flow, including the
-nested-Proxmox configuration used for native LXC system containers.
+This guide documents the normal LightNAS installation flow for bare metal and
+standard Linux virtual machines, plus optional platform-specific deployment
+helpers for nested environments. LightNAS does not require Proxmox or another
+named hypervisor for normal operation.
 
 The intended user experience is:
 
@@ -24,8 +26,14 @@ the private `10.77.0.0/24` network when direct LAN networking is supported.
 LightNAS supports these deployment styles:
 
 - Bare metal Debian/Ubuntu.
-- Debian/Ubuntu virtual machine.
-- Proxmox LXC appliance with nested LightNAS system containers.
+- Debian/Ubuntu virtual machine on a standard hypervisor.
+- Nested/containerized installations when the outer platform exposes the
+  capabilities LightNAS needs.
+
+A normal LightNAS installation is platform-neutral. VMware, Hyper-V, KVM,
+VirtualBox, Proxmox, and other hypervisors are external infrastructure choices,
+not LightNAS dependencies. Platform-specific helpers are optional and are used
+only when that outer environment needs extra preparation.
 
 The main installer is:
 
@@ -99,9 +107,13 @@ exposes.
 
 ---
 
-## 3. Recommended Proxmox LXC deployment
+## 3. Optional Proxmox LXC deployment helper
 
-When LightNAS itself runs inside Proxmox LXC, use the Proxmox helper from the
+This section applies only when the operator intentionally chooses to deploy
+LightNAS inside a Proxmox LXC. It is not part of the normal LightNAS install
+path and does not make Proxmox a LightNAS dependency.
+
+When LightNAS itself runs inside Proxmox LXC, use the optional helper from the
 **Proxmox node shell**, not from inside the LightNAS container.
 
 Example for LightNAS CTID `117`:
@@ -556,3 +568,22 @@ Users should not need to repair each LXC after creation.
 For supported Proxmox nested installs, creating a LightNAS system container
 should feel like creating a normal Proxmox LXC: create it, start it, receive a
 LAN IP, and use the application.
+
+
+---
+
+## Operator responsibility
+
+LightNAS can create and manage virtual machines, containers, applications,
+storage, networking, and services on infrastructure controlled by the operator.
+The operator is responsible for the security, availability, configuration,
+licensing, backups, data, cost, compliance, and ongoing maintenance of those
+resources and of the underlying servers or third-party platforms.
+
+LightNAS and Cyverax LLC do not become the hosting provider, managed-service
+provider, administrator, backup provider, or custodian of independently
+operated instances merely because LightNAS can create or manage them.
+
+See the repository [LICENSE](../LICENSE) and
+[DISCLAIMER.md](../DISCLAIMER.md) for the applicable software license and
+responsibility notice.

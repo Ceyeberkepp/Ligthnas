@@ -297,7 +297,11 @@ function looksLikeWindowsMedia(value) {
 
 async function showRuntimeWizard(kind) {
   const isContainer = kind === 'containers';
-  const loading = openProgressDialog(isContainer ? 'Opening container wizard' : 'Opening VM wizard', 'Loading live storage, image, network, and runtime choices…');
+  const loading = openProgressDialog(
+    isContainer ? 'Opening container wizard' : 'Opening VM wizard',
+    'Loading live storage, image, network, and runtime choices…',
+    { modal:false }
+  );
   let inventory;
   try {
     if (isContainer) {
@@ -308,8 +312,10 @@ async function showRuntimeWizard(kind) {
       inventory = window.LightNASRuntimeInventory || await dialogApi('/api/runtimes');
       window.LightNASRuntimeInventory = inventory;
     }
-  } finally {
-    loading.close();
+    loading.succeed('Runtime choices loaded.');
+  } catch (problem) {
+    loading.fail(problem.message || 'Runtime inventory could not be loaded.');
+    throw problem;
   }
   const runtime = inventory?.[kind];
   if (!runtime?.available || !runtime?.enabled) throw new Error(runtime?.reason || `${isContainer ? 'Container' : 'VM'} runtime is unavailable.`);

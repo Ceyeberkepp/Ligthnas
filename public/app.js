@@ -1155,6 +1155,15 @@ function adminView() {
     <section class="panel admin-service-links">
       <div><span class="eyebrow">SERVICES</span><h2>Notifications & integrations</h2><p class="muted">Configure SMTP, identity providers, API automation and external integrations without duplicating the full navigation tree.</p></div>
       <div class="head-actions"><button class="secondary" data-view-link="smtp">SMTP</button><button class="secondary" data-view-link="integrations">Integrations</button></div>
+    </section>
+
+    <section class="panel legal-notice-panel">
+      <div>
+        <span class="eyebrow">LICENSE & RESPONSIBILITY</span>
+        <h2>LightNAS · Apache License 2.0</h2>
+        <p class="muted">LightNAS is an independent product from Cyverax LLC. Third-party platform names are used only when describing optional deployment, migration, compatibility, or integration features.</p>
+        <p class="muted">Virtual machines, containers, applications, storage, services, networks, data, backups, security, third-party licenses, and other instances created or managed on your infrastructure remain the operator's responsibility.</p>
+      </div>
     </section>`;
 }
 
@@ -1167,7 +1176,7 @@ function moduleView(view) {
     return `${pageHead('App Store', 'Install curated open-source applications directly from LightNAS.', '<button class="secondary" data-action="refresh-runtime">Refresh apps</button>')}
       ${runtimeBanner('docker')}
       <section class="app-catalog-toolbar panel">
-        <div><span class="eyebrow">LIGHTNAS APPLICATION CATALOG</span><h2>${apps.length} one-click apps</h2><p class="muted">A broad NAS app catalog sourced from official upstream and community container images, including many apps commonly found in TrueNAS-style catalogs. LightNAS only lists entries its current one-click engine can actually launch; complex multi-service stacks will join as Compose support expands. No Proxmox configuration or manual port forwarding is required for managed catalog apps.</p></div>
+        <div><span class="eyebrow">LIGHTNAS APPLICATION CATALOG</span><h2>${apps.length} one-click apps</h2><p class="muted">A broad NAS app catalog sourced from official upstream and community container images, including many apps commonly found in TrueNAS-style catalogs. LightNAS only lists entries its current one-click engine can actually launch; complex multi-service stacks will join as Compose support expands. No external hypervisor configuration or manual port forwarding is required for managed catalog apps.</p></div>
         <div class="app-filter-controls">
           <label>Search<input id="app-search" type="search" placeholder="Search apps, categories, or images…"></label>
           <label>Category<select id="app-category"><option value="">All categories</option>${categories.map(category => `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`).join('')}</select></label>
@@ -1233,7 +1242,7 @@ function networkView() {
   const routes = (info.routes || []).filter(route => !/^docker|^veth|^tap|^tun/i.test(route.device || ''));
   const wifiDevices = devices.filter(item => item.type === 'wifi' && !['unavailable','unmanaged'].includes(item.state));
 
-  return `${pageHead('Networking', 'Proxmox-style host networking for the LightNAS node. Create configuration first, then explicitly activate changes that could affect management connectivity.', '<div class="head-actions"><button class="secondary" data-action="refresh-network">Refresh</button><button class="primary" data-network-add-bridge>+ Bridge</button><button class="secondary" data-network-add-vlan>+ VLAN</button><button class="secondary" data-network-add-bond>+ Bond</button><button class="secondary" data-network-add-route>+ Route</button></div>')}
+  return `${pageHead('Networking', 'LightNAS host networking. Create configuration first, then explicitly activate changes that could affect management connectivity.', '<div class="head-actions"><button class="secondary" data-action="refresh-network">Refresh</button><button class="primary" data-network-add-bridge>+ Bridge</button><button class="secondary" data-network-add-vlan>+ VLAN</button><button class="secondary" data-network-add-bond>+ Bond</button><button class="secondary" data-network-add-route>+ Route</button></div>')}
     <section class="network-status-strip">
       <div><span>Manager</span><strong>${escapeHtml(control?.manager || 'Kernel')}</strong></div>
       <div><span>Connectivity</span><strong>${escapeHtml(control?.connectivity || 'unknown')}</strong></div>
