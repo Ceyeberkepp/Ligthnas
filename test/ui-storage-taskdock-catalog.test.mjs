@@ -436,3 +436,15 @@ test('Files upload control renders as a single dropdown', async () => {
   assert.match(app, /<option value="files">Upload files<\/option>/);
   assert.match(app, /<option value="folder">Upload folder<\/option>/);
 });
+
+
+test('compact Files toolbar combines library selector and removes Upload wording', async () => {
+  const app = await read('public/app.js');
+  const css = await read('public/enhancements.css');
+  assert.doesNotMatch(app, /<div class="library-selector-row">/);
+  assert.match(app, /file-toolbar-select select-only library-selector/);
+  assert.match(app, /<option value="">Choose…<\/option>/);
+  assert.doesNotMatch(app, />Upload\s*<select data-file-upload-select/);
+  assert.match(css, /\.file-toolbar \{ padding:6px 0 8px; \}/);
+  assert.match(css, /\.library-selector \{\s*min-width: 138px;/);
+});
