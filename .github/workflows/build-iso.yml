@@ -79,26 +79,43 @@ jobs:
         run: |
           set -Eeuo pipefail
 
-          OVMF_CODE="$(find /usr/share/OVMF /usr/share/qemu \
-            -maxdepth 2 -type f \
-            \( -name 'OVMF_CODE*.fd' -o -name 'OVMF*.fd' \) \
-            2>/dev/null | sort | head -n 1 || true)"
+          # Ubuntu 24.04 ships OVMF as split CODE/VARS pflash images. Using
+          # -bios with an arbitrary OVMF*.fd can select a Secure Boot image or
+          # a 4 MiB firmware layout without its matching variable store and
+          # cause QEMU to exit even though the ISO itself is valid.
+          OVMF_CODE=""
+          OVMF_VARS=""
+          for pair in \
+            "/usr/share/OVMF/OVMF_CODE_4M.fd|/usr/share/OVMF/OVMF_VARS_4M.fd" \
+            "/usr/share/OVMF/OVMF_CODE.fd|/usr/share/OVMF/OVMF_VARS.fd"; do
+            code="${pair%%|*}"
+            vars="${pair##*|}"
+            if [ -f "$code" ] && [ -f "$vars" ]; then
+              OVMF_CODE="$code"
+              OVMF_VARS="$vars"
+              break
+            fi
+          done
 
-          if [ -z "$OVMF_CODE" ]; then
-            echo "No usable OVMF firmware image was found." >&2
+          if [ -z "$OVMF_CODE" ] || [ -z "$OVMF_VARS" ]; then
+            echo "No matching OVMF CODE/VARS firmware pair was found." >&2
             dpkg -L ovmf || true
             exit 1
           fi
 
-          echo "Using UEFI firmware: $OVMF_CODE"
+          cp "$OVMF_VARS" /tmp/LightNAS-OVMF-VARS.fd
+          echo "Using UEFI CODE: $OVMF_CODE"
+          echo "Using UEFI VARS: $OVMF_VARS"
 
           set +e
           timeout 30s qemu-system-x86_64 \
+            -machine q35 \
             -m 2048 \
             -smp 2 \
-            -bios "$OVMF_CODE" \
-            -cdrom dist/LightNAS-amd64.iso \
-            -boot d \
+            -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
+            -drive if=pflash,format=raw,file=/tmp/LightNAS-OVMF-VARS.fd \
+            -drive media=cdrom,format=raw,file=dist/LightNAS-amd64.iso \
+            -boot order=d \
             -display none \
             -serial stdio \
             -no-reboot
