@@ -650,6 +650,15 @@ function vmsView() {
     ${runtimeBanner('virtualization')}
     ${runtimeResourceSummary(machines, 'virtual machines')}
     ${runtime?.warning ? `<div class="module-note"><b>Virtualization note:</b> ${escapeHtml(runtime.warning)}</div>` : ''}
+    <section class="panel vm-guest-tools-card">
+      <div class="panel-head"><div><span class="eyebrow">VM GUEST DRIVERS</span><h2>VirtIO guest support</h2></div>
+        <div class="head-actions">${runtime?.guestTools?.windows?.available
+          ? '<span class="volume-state writable">WINDOWS DRIVERS READY</span>'
+          : '<button class="secondary" type="button" data-vm-prepare-drivers>Prepare Windows drivers</button>'}</div>
+      </div>
+      <p class="muted">Windows VMs can use the attached VirtIO driver CD for optimized storage, network, balloon, and guest drivers. Linux guests use the VirtIO drivers included with the Linux kernel, so no separate driver ISO is normally required.</p>
+      ${runtime?.guestTools?.windows?.available ? `<p class="muted">Driver media: ${escapeHtml(runtime.guestTools.windows.name || 'VirtIO Windows drivers')} · ${escapeHtml(runtime.guestTools.windows.storageName || 'ISO storage')}</p>` : ''}
+    </section>
     ${runtime?.available && runtime?.enabled && !ready ? '<div class="module-hero"><h2>VM resources needed</h2><p>LightNAS needs an active VM storage location and network before a VM can be created.</p></div>' : ''}
     <div class="compute-section-head"><div><span class="eyebrow">VIRTUAL MACHINES</span><h2>Inventory</h2></div><small>${machines.length} total</small></div>
     <div class="compute-table-wrap">${rows}</div>`;
@@ -1455,6 +1464,21 @@ function bindViewActions() {
   }));
   $('[data-open-node-shell]', $('#content'))?.addEventListener('click', () => {
     window.open(`/node-shell.html?v=${Date.now()}`, '_blank', 'noopener,width=1200,height=800');
+  });
+  $('[data-vm-prepare-drivers]', $('#content'))?.addEventListener('click', async event => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    button.textContent = 'Preparing…';
+    try {
+      await request('/api/vm/guest-tools/windows', { method:'POST', body:'{}' });
+      state.runtimes = await request('/api/runtimes');
+      render('vms');
+      toast('Windows VirtIO guest drivers are ready.');
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = 'Prepare Windows drivers';
+      toast(error.message);
+    }
   });
     $('[data-appliance-health]', $('#content'))?.addEventListener('click', async event => {
     const button = event.currentTarget; button.disabled = true; button.textContent = 'Checking…';
