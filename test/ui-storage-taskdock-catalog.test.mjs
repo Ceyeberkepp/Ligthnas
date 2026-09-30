@@ -432,7 +432,7 @@ test('branding color preview preserves all current form colors and protects cont
 test('Files upload control renders as a single dropdown', async () => {
   const app = await read('public/app.js');
   assert.doesNotMatch(app, /<label class="file-toolbar-select">Upload\s*<select data-file-upload-select/);
-  assert.match(app, /<label class="file-toolbar-select upload-select-only">\s*<select data-file-upload-select aria-label="Upload">\s*<option value="">Upload…<\/option>/);
+  assert.match(app, /<label class="file-toolbar-select upload-select-only">\s*<select data-file-upload-select aria-label="Upload">\s*<option value="">Choose…<\/option>/);
   assert.match(app, /<option value="files">Upload files<\/option>/);
   assert.match(app, /<option value="folder">Upload folder<\/option>/);
 });
