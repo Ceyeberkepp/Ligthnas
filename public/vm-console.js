@@ -30,7 +30,7 @@ function fitConsole() {
   // Once an OS is running, allow noVNC/QEMU to negotiate a display size that
   // matches the actual browser viewport instead of leaving a small centered
   // framebuffer surrounded by black space.
-  rfb.resizeSession = true;
+  rfb.resizeSession = false;
   rfb.focus();
 }
 
@@ -50,7 +50,7 @@ function connectConsole() {
   try { rfb?.disconnect(); } catch {}
   rfb = new RFB(screen, socketUrl, { shared:true });
   rfb.scaleViewport = true;
-  rfb.resizeSession = true;
+  rfb.resizeSession = false;
   rfb.clipViewport = false;
   rfb.viewOnly = false;
   rfb.background = '#000';
