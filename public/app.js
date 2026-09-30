@@ -600,7 +600,7 @@ function containersView() {
   <button class="secondary ${/running|active/i.test(String(item.status || '')) ? '' : 'hidden'}" type="button" data-container-action="shutdown" data-container-id="${escapeHtml(item.id || item.name)}">Shutdown</button>
   <button class="secondary ${/running|active/i.test(String(item.status || '')) ? '' : 'hidden'}" type="button" data-container-action="reboot" data-container-id="${escapeHtml(item.id || item.name)}">Reboot</button>
   <button class="secondary ${/running|active/i.test(String(item.status || '')) ? '' : 'hidden'}" type="button" data-container-action="stop" data-container-id="${escapeHtml(item.id || item.name)}">Stop</button>
-  ${!/\d+\.\d+\.\d+\.\d+/.test(String(item.ipv4 || '')) && /running|active/i.test(String(item.status || '')) ? `<button class="secondary" type="button" data-container-action="repair-network" data-container-id="${escapeHtml(item.id || item.name)}">Repair network</button>` : ''}
+  ${(!/\d+\.\d+\.\d+\.\d+/.test(String(item.ipv4 || '')) || /^10\.77\.0\./.test(String(item.ipv4 || ''))) && /running|active/i.test(String(item.status || '')) ? `<button class="secondary" type="button" data-container-action="repair-network" data-container-id="${escapeHtml(item.id || item.name)}">Move to LAN</button>` : ''}
   <button class="secondary" type="button" data-container-edit="${escapeHtml(item.id || item.name)}" data-container-name="${escapeHtml(item.name || item.id)}" data-container-memory="${Math.max(256, Math.round((Number(item.memory) || 0) / 1048576) || 2048)}" data-container-cpus="${item.cpus || 2}">Edit</button>
   <button class="secondary danger-button" type="button" data-container-action="delete" data-container-id="${escapeHtml(item.id || item.name)}">Delete</button>
 </div></article>`;
@@ -1436,7 +1436,7 @@ function bindViewActions() {
     if (action === 'open-apps') { location.hash = 'apps'; return; }
     if (action === 'repair-noip') {
       const containers = state.runtimes?.containers?.containers || [];
-      const targets = containers.filter(item => /running|active/i.test(String(item.status || '')) && !/^\d+\.\d+\.\d+\.\d+$/.test(String(item.ipv4 || '')));
+      const targets = containers.filter(item => /running|active/i.test(String(item.status || '')) && (!/^\d+\.\d+\.\d+\.\d+$/.test(String(item.ipv4 || '')) || /^10\.77\.0\./.test(String(item.ipv4 || ''))));
       if (!targets.length) return toast('No running containers currently need IPv4 repair.');
       if (!confirm(`Repair networking for ${targets.length} container${targets.length === 1 ? '' : 's'}? Each affected container will restart.`)) return;
       button.disabled = true;
