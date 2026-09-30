@@ -2384,6 +2384,7 @@ def appliance_repair() -> dict:
 
 
 SHARE_ROOT = Path(os.environ.get("LIGHTNAS_SHARE_ROOT", "/var/lib/lightnas/files/Shares"))
+LIBRARY_ROOT = Path(os.environ.get("LIGHTNAS_LIBRARY_ROOT", "/var/lib/lightnas/files"))
 SAMBA_MAIN = Path("/etc/samba/smb.conf")
 SAMBA_FRAGMENT = Path("/etc/samba/smb.conf.d/lightnas-shares.conf")
 SSH_FRAGMENT = Path("/etc/ssh/sshd_config.d/90-lightnas-sftp.conf")
@@ -2539,7 +2540,46 @@ def _write_share_configs(shares: list[dict], admin_username: str = "") -> None:
         with SAMBA_MAIN.open("a", encoding="utf-8") as handle:
             handle.write(f"\n# LightNAS managed shares\n{include_line}\n")
 
-    smb_body = ["# Managed by LightNAS. Do not edit manually."]
+    smb_body = [
+        "# Managed by LightNAS. Do not edit manually.",
+        "",
+        "[global]",
+        "  security = user",
+        "  map to guest = never",
+        "  restrict anonymous = 2",
+        "  usershare allow guests = no",
+        "  server min protocol = SMB2",
+    ]
+
+    # The built-in Files share is the exact filesystem used by the web
+    # Files & media library. It is intentionally administrator-only. Samba
+    # performs file IO as the LightNAS service account so files created from
+    # Windows remain immediately readable/writable by the web application.
+    if admin_username:
+        LIBRARY_ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
+        for folder in ("Documents", "Photos", "Videos", "Audio"):
+            target = LIBRARY_ROOT / folder
+            target.mkdir(parents=True, exist_ok=True, mode=0o700)
+        _grant_share_path_access(admin_username, LIBRARY_ROOT)
+        smb_body.extend([
+            "",
+            "[Files]",
+            f"  path = {LIBRARY_ROOT}",
+            "  browseable = yes",
+            "  read only = no",
+            "  guest ok = no",
+            f"  valid users = {admin_username}",
+            f"  admin users = {admin_username}",
+            "  force user = lightnas",
+            "  force group = lightnas",
+            "  create mask = 0660",
+            "  force create mode = 0600",
+            "  directory mask = 0770",
+            "  force directory mode = 0700",
+            "  veto files = /Shares/",
+            "  delete veto files = no",
+        ])
+
     for share in smb_shares:
         smb_body.extend([
             "",
