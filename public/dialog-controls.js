@@ -385,6 +385,7 @@ async function showRuntimeWizard(kind) {
             <label>Disk controller<select name="diskBus"><option value="scsi">VirtIO SCSI · Linux/performance</option><option value="virtio">VirtIO block · Linux/performance</option><option value="sata">SATA · Windows/Linux installer compatible</option></select></label>
             <label>Network adapter<select name="networkModel"><option value="virtio">VirtIO · Linux/performance</option><option value="e1000">Intel E1000 · Windows compatible</option><option value="rtl8139">Realtek RTL8139</option></select></label>
             <p class="module-note" data-vm-guest-profile>LightNAS automatically selects Windows-compatible hardware when a Windows installer ISO is selected.</p>
+            <label class="wizard-check"><input name="attachGuestDrivers" type="checkbox" checked> <span>Attach guest driver media automatically when needed</span></label>
           `}
           <label class="wizard-check"><input name="startOnBoot" type="checkbox" checked> <span>Start automatically when LightNAS boots</span></label>
         </div>
@@ -476,8 +477,8 @@ async function showRuntimeWizard(kind) {
       form.elements.networkModel.value = windows ? 'e1000' : 'virtio';
       const note = form.querySelector('[data-vm-guest-profile]');
       if (note) note.textContent = windows
-        ? 'Windows installer detected: LightNAS selected UEFI, SATA/AHCI storage, and Intel E1000 networking so Setup works without VirtIO drivers.'
-        : 'Linux/generic installer profile: LightNAS uses VirtIO hardware for better performance.';
+        ? 'Windows installer detected: LightNAS uses installer-compatible hardware and automatically attaches the VirtIO driver ISO as a second CD so optimized drivers are available during or after setup.'
+        : 'Linux/generic installer profile: LightNAS uses VirtIO hardware for better performance. Modern Linux kernels include the required VirtIO drivers, so a separate driver ISO is not normally needed.';
     };
     form.elements.iso.addEventListener('change', applyVmGuestProfile);
     applyVmGuestProfile();
@@ -497,7 +498,8 @@ async function showRuntimeWizard(kind) {
       memoryMiB: Number(values.memoryMiB),
       cpus: Number(values.cpus),
       diskGiB: Number(values.diskGiB),
-      startOnBoot: form.elements.startOnBoot.checked
+      startOnBoot: form.elements.startOnBoot.checked,
+      ...(!isContainer ? { attachGuestDrivers: Boolean(form.elements.attachGuestDrivers?.checked) } : {})
     };
     delete payload.passwordConfirm;
     create.disabled = true;
