@@ -32,7 +32,7 @@ test('LXC appliance networking follows the host LAN when direct nested LAN is av
   assert.match(agent, /lxc\.net\.0\.ipvlan\.mode = l2/);
   assert.match(agent, /LIGHTNAS_NETWORK_MODE.*lxc-nat/);
   assert.match(runtime, /LightNAS managed NAT/);
-  assert.match(ui, /Proxmox-style host networking/);
+  assert.match(ui, /LightNAS host networking/);
   assert.match(ui, /network-table-row/);
 });
 
