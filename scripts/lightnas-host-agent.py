@@ -2293,7 +2293,7 @@ def open_vm_console(data: dict):
 
             host, port = vm_console_target(name)
             try:
-                backend = socket.create_connection((host, port), timeout=3)
+                backend = socket.create_connection((host, port), timeout=2)
                 # A quiet framebuffer can legitimately have no traffic for a
                 # long time; never retain the connect timeout after success.
                 backend.settimeout(None)
