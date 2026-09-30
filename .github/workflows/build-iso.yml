@@ -116,6 +116,7 @@ jobs:
           fi
 
           cp "$OVMF_VARS" /tmp/LightNAS-OVMF-VARS.fd
+          echo "Using UEFI firmware: $OVMF_CODE"
           echo "Using UEFI CODE: $OVMF_CODE"
           echo "Using UEFI VARS: $OVMF_VARS"
 
