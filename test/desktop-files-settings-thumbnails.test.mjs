@@ -4,12 +4,12 @@ import { readFile } from 'node:fs/promises';
 
 const read = path => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
-test('desktop Files exposes Photos view and Settings tab', async () => {
+test('desktop Files exposes Photos view and Settings control', async () => {
   const [app, css] = await Promise.all([read('public/app.js'), read('public/enhancements.css')]);
-  assert.match(app, /desktop-files-settings-tab/);
+  assert.match(app, /data-files-settings-tab/);
   assert.match(app, /filesSettingsOpen/);
   assert.match(css, /\.mobile-photo-view-button \{ display:inline-flex; \}/);
-  assert.match(css, /\.desktop-files-settings-tab \{ display:inline-flex; \}/);
+  assert.match(css, /\.desktop-files-settings-button \{ display:inline-flex; \}/);
 });
 
 test('phone sync is configured from Files settings instead of regular desktop toolbar', async () => {
