@@ -27,6 +27,11 @@ export const STORAGE_CONTENT = Object.freeze([
 ]);
 
 const CONTENT_BY_ID = new Map(STORAGE_CONTENT.map(item => [item.id, item]));
+const STORAGE_PROVIDERS = Object.freeze([
+  'directory','lvm','lvm-thin','btrfs','nfs','smb-cifs','glusterfs','iscsi',
+  'cephfs','rbd','zfs-over-iscsi','zfs','proxmox-backup-server','esxi'
+]);
+const STORAGE_PROVIDER_SET = new Set(STORAGE_PROVIDERS);
 const poolName = /^[A-Za-z][A-Za-z0-9_-]{1,31}$/;
 const extensions = {
   iso: ['.iso'],
@@ -134,7 +139,10 @@ function publicPool(pool, source) {
     online: Boolean(source),
     local: pool.id === 'local',
     dedicated: pool.id === 'local' ? Boolean(source?.dedicated) : true,
-    createdAt: pool.createdAt || null
+    createdAt: pool.createdAt || null,
+    provider: STORAGE_PROVIDER_SET.has(String(pool.provider || '').toLowerCase())
+      ? String(pool.provider).toLowerCase()
+      : (source?.type === 'zfs' ? 'zfs' : 'directory')
   };
 }
 
@@ -194,6 +202,10 @@ export async function listStoragePools() {
 export async function createStoragePool(input) {
   const name = String(input?.name || '').trim();
   const sourceId = String(input?.sourceId || '').trim();
+  const provider = String(input?.provider || 'directory').trim().toLowerCase();
+  if (!STORAGE_PROVIDER_SET.has(provider)) {
+    throw Object.assign(new Error('Unknown storage provider type.'), { status: 400 });
+  }
   if (!poolName.test(name)) throw Object.assign(new Error('Storage name must contain 2–32 letters, numbers, underscores, or hyphens and start with a letter.'), { status: 400 });
   if (name.toLowerCase() === 'local') throw Object.assign(new Error('local is reserved for the default LightNAS storage.'), { status: 409 });
   const content = normalizeContent(input?.content, ['iso', 'vztmpl', 'images', 'rootdir', 'backup']);
@@ -224,6 +236,7 @@ export async function createStoragePool(input) {
     mountPoint: source.mountPoint,
     root,
     content,
+    provider,
     preparedByHostAgent,
     createdAt: new Date().toISOString()
   };
