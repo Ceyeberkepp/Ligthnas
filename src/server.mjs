@@ -336,7 +336,9 @@ async function reconcilePrivateNatPublications() {
     });
     for (const item of candidates) {
       const id = String(item.id || item.name || '');
-      await automaticContainerApplication(id, { attempts: 1 }).catch(() => null);
+      await automaticContainerApplication(id, { attempts: 1 }).catch(error => {
+        console.warn(`Automatic application publishing failed for ${id}: ${error.message}`);
+      });
     }
   } finally {
     publicationReconcileRunning = false;
