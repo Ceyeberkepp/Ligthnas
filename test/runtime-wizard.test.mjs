@@ -122,3 +122,12 @@ test('files and media share one tabbed library with sequential previews', async 
   assert.match(enhancements, /ArrowRight/);
   assert.match(enhancements, /previewItems\(\)/);
 });
+
+
+test('runtime wizard loading never leaves a stuck task or blocking overlay', async () => {
+  const dialogs = await readFile(new URL('../public/dialog-controls.js', import.meta.url), 'utf8');
+  assert.match(dialogs, /Opening container wizard[\s\S]*\{ modal:false \}/);
+  assert.match(dialogs, /loading\.succeed\('Runtime choices loaded\.'\)/);
+  assert.match(dialogs, /loading\.fail\(problem\.message \|\| 'Runtime inventory could not be loaded\.'\)/);
+  assert.doesNotMatch(dialogs, /finally \{\s*loading\.close\(\);\s*\}/);
+});
