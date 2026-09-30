@@ -41,7 +41,7 @@ import {
   normalizeIdentityProvider, publicIdentityProvider, testIdentityProvider
 } from './identity-providers.mjs';
 import { ContainerPublisher } from './container-publish.mjs';
-import { discoverContainerApplication } from './container-app-access.mjs';
+import { discoverContainerApplication, probeContainerWebApplication } from './container-app-access.mjs';
 import { provisionNetworkShare, removeNetworkShare, publicShare, publicLibraryShare } from './network-shares.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -308,7 +308,20 @@ async function automaticContainerApplication(id, { preferredPort = 0, requestedH
     if (detected) break;
     if (attempt + 1 < totalAttempts) await pause(1000);
   }
-  if (!detected) return { ...ready, publication: null };
+  if (!detected && containerUsesPrivateNat(ready.item)) {
+    detected = await probeContainerWebApplication({
+      id,
+      targetHost: ready.targetHost,
+      preferredPort
+    }).catch(error => {
+      console.warn(`Host-side web probe failed for ${id}: ${error.message}`);
+      return null;
+    });
+  }
+  if (!detected) {
+    console.warn(`No HTTP/HTTPS application detected for ${id} at ${ready.targetHost}.`);
+    return { ...ready, publication: null };
+  }
 
   const previous = containerPublisher.forContainer(id);
   let publication;
