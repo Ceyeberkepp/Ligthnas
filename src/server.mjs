@@ -788,6 +788,31 @@ async function api(req, res, url) {
     return send(res, 201, { ok: true, path: target, library: folder });
   }
 
+  if (req.method === 'GET' && url.pathname === '/api/profile') {
+    if (context.apiToken) return send(res, 403, { error: 'Profile settings require an interactive user session.' });
+    return send(res, 200, {
+      username,
+      displayName: String(account.displayName || ''),
+      email: String(account.email || ''),
+      avatar: Boolean(account.avatarExt),
+      createdAt: account.createdAt || null,
+      isAdmin: Boolean(context.isAdmin)
+    });
+  }
+  if (req.method === 'PUT' && url.pathname === '/api/profile') {
+    if (context.apiToken) return send(res, 403, { error: 'Profile settings require an interactive user session.' });
+    const input = await bodyJson(req);
+    const displayName = String(input.displayName || '').trim();
+    const email = String(input.email || '').trim();
+    if (displayName.length > 80) return send(res, 400, { error: 'Display name must be 80 characters or fewer.' });
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return send(res, 400, { error: 'Enter a valid email address.' });
+    account.displayName = displayName;
+    account.email = email;
+    store.addActivity('profile', `Profile updated for ${username}.`, 'success');
+    await store.save();
+    return send(res, 200, { ok: true, username, displayName, email, avatar: Boolean(account.avatarExt) });
+  }
+
   if (req.method === 'GET' && url.pathname === '/api/profile/avatar') {
     if (context.apiToken || !account.avatarExt) return send(res, 404, { error: 'No profile picture is configured.' });
     const path = avatarPath(username, account.avatarExt);
