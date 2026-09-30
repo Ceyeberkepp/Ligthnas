@@ -3,33 +3,86 @@ name: Build LightNAS ISO
 on:
   push:
     branches: [main]
+    paths:
+      - 'iso/**'
+      - '.github/workflows/build-iso.yml'
+      - 'src/**'
+      - 'public/**'
+      - 'scripts/**'
+      - 'package.json'
+      - 'install.sh'
   pull_request:
     paths:
       - 'iso/**'
       - '.github/workflows/build-iso.yml'
+      - 'src/**'
+      - 'public/**'
+      - 'scripts/**'
+      - 'package.json'
+      - 'install.sh'
   workflow_dispatch:
+
+concurrency:
+  group: lightnas-iso-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   iso:
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
+
       - name: Install image tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y debootstrap xorriso squashfs-tools debian-archive-keyring cpio curl
-          curl -fsSLo /tmp/live-build.deb https://deb.debian.org/debian/pool/main/l/live-build/live-build_20250505+deb13u1_all.deb
+          sudo apt-get install -y \
+            debootstrap xorriso squashfs-tools debian-archive-keyring cpio curl \
+            qemu-system-x86
+          curl -fsSLo /tmp/live-build.deb \
+            https://deb.debian.org/debian/pool/main/l/live-build/live-build_20250505+deb13u1_all.deb
+          echo "58e09779881cbcc631c49ceb703413e0247a87db01823e597b2a1c40a2afd8f4  /tmp/live-build.deb" | sha256sum -c -
           sudo apt-get install -y /tmp/live-build.deb
+
+      - name: Validate ISO builder syntax
+        run: |
+          bash -n iso/build.sh
+          grep -q -- '--compression xz' iso/build.sh
+          grep -q '16384 18432 20480 ext4' iso/preseed.cfg
+          grep -q '8192 12000 1000000000 ext4' iso/preseed.cfg
+
       - name: Build installer image
-        run: sudo bash iso/build.sh
+        run: sudo env LIGHTNAS_ISO_CLEAN=1 bash iso/build.sh
+
       - name: Check ISO format
         run: |
           file dist/LightNAS-amd64.iso
           sha256sum -c dist/LightNAS-amd64.iso.sha256
+          xorriso -indev dist/LightNAS-amd64.iso -report_el_torito plain
+
+      - name: BIOS boot smoke test
+        run: |
+          set +e
+          timeout 30s qemu-system-x86_64 \
+            -m 2048 \
+            -smp 2 \
+            -cdrom dist/LightNAS-amd64.iso \
+            -boot d \
+            -display none \
+            -serial stdio \
+            -no-reboot
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ]; then
+            echo "QEMU boot smoke test failed with exit code $rc"
+            exit "$rc"
+          fi
+          echo "ISO remained bootable for the smoke-test window."
+
       - uses: actions/upload-artifact@v4
         with:
           name: LightNAS-amd64-iso
+          retention-days: 14
           path: |
             dist/LightNAS-amd64.iso
             dist/LightNAS-amd64.iso.sha256
