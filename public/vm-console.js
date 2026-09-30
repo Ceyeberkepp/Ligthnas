@@ -34,6 +34,8 @@ function fitConsole() {
   rfb.focus();
 }
 
+const redraw = fitConsole;
+
 function scheduleReconnect() {
   if (closing || reconnectTimer) return;
   status.textContent = 'VM console reconnecting…';
@@ -61,6 +63,7 @@ function connectConsole() {
     status.classList.remove('error');
     fitConsole();
     setTimeout(fitConsole, 250);
+    setTimeout(redraw, 500);
     setTimeout(fitConsole, 1000);
   });
 
