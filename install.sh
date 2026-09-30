@@ -160,6 +160,29 @@ done
 install -d -o lightnas -g lightnas -m 0700 "${DATA_DIRECTORY}"
 install -d -o lightnas -g lightnas -m 0700 "${DATA_DIRECTORY}/files"
 install -d -o lightnas -g lightnas -m 0770 "${DATA_DIRECTORY}/storage" "${DATA_DIRECTORY}/storage/local"
+install -d -o root -g lightnas -m 0750 /etc/lightnas
+if [[ ! -e /etc/lightnas/feature-gates.json ]]; then
+  cat >/etc/lightnas/feature-gates.json <<'EOF'
+{
+  "edition": "community-preview",
+  "enforce": false,
+  "features": {
+    "advanced-backups": true,
+    "replication": true,
+    "multi-node": true,
+    "enterprise-storage": true,
+    "sso": true,
+    "audit-export": true,
+    "advanced-analytics": true,
+    "priority-support": true,
+    "branding": true,
+    "gpu-passthrough": true
+  }
+}
+EOF
+  chown root:lightnas /etc/lightnas/feature-gates.json
+  chmod 0640 /etc/lightnas/feature-gates.json
+fi
 for vm_user in libvirt-qemu qemu; do
   if id "$vm_user" >/dev/null 2>&1; then
     # QEMU must be able to traverse the private LightNAS data root before it
