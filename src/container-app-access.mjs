@@ -2,7 +2,7 @@ import net from 'node:net';
 import tls from 'node:tls';
 
 const WEB_PORT_PRIORITY = Object.freeze([
-  443, 80, 8443, 8080, 8000, 3000, 5000, 8888, 9443, 9090,
+  443, 80, 8443, 8080, 8000, 3000, 5000, 5173, 8888, 9443, 9090,
   3001, 5001, 8008, 8081, 8082, 8083, 8096, 9000, 10000, 12320, 12321
 ]);
 
@@ -83,6 +83,37 @@ async function openGuestWebFirewall(runCommand, id, port) {
     'exit 0'
   ].join('; ');
   await runCommand(id, command).catch(() => null);
+}
+
+export async function probeContainerWebApplication({ id, targetHost, preferredPort = 0, probe = probeWebPort }) {
+  const name = String(id || '').trim();
+  const host = String(targetHost || '').trim();
+  if (!/^[A-Za-z][A-Za-z0-9-]{1,39}$/.test(name)) throw inputError('Invalid container ID.');
+  if (net.isIP(host) !== 4) throw inputError('The container does not have a usable IPv4 address yet.', 409);
+
+  const ports = [...new Set([
+    Number(preferredPort) || 0,
+    ...WEB_PORT_PRIORITY
+  ])].filter(port => Number.isInteger(port) && port >= 1 && port <= 65535 && !NON_WEB_PORTS.has(port));
+
+  for (const port of ports) {
+    const schemes = HTTPS_FIRST.has(port) ? ['https', 'http'] : ['http', 'https'];
+    for (const scheme of schemes) {
+      if (await probe(host, port, scheme)) {
+        return {
+          id: name,
+          mode: 'direct',
+          targetHost: host,
+          hostPort: null,
+          targetPort: port,
+          scheme,
+          accessUrl: urlFor(host, port, scheme),
+          detected: true
+        };
+      }
+    }
+  }
+  return null;
 }
 
 export async function discoverContainerApplication({
