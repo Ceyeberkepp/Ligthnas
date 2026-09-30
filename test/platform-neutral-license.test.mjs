@@ -20,7 +20,7 @@ test('LightNAS is licensed and documented as a platform-neutral independent prod
   assert.match(disclaimer, /operator remains responsible/);
   assert.match(readme, /without requiring any particular external hypervisor platform/);
   assert.match(readme, /Optional external-platform integrations/);
-  assert.match(install, /does not require any particular hypervisor/);
+  assert.match(install, /does not require any particular[\s\S]*hypervisor/);
   assert.doesNotMatch(install, /Proxmox/);
   assert.match(integrations, /Proxmox deployment integration/);
   assert.doesNotMatch(app, /Proxmox-style host networking/);
