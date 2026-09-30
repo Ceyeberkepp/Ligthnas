@@ -1,5 +1,36 @@
 const storageUi = { data: null };
 
+const STORAGE_ADD_TYPES = [
+  ['directory','Directory'],
+  ['lvm','LVM'],
+  ['lvm-thin','LVM-Thin'],
+  ['btrfs','BTRFS'],
+  ['nfs','NFS'],
+  ['smb-cifs','SMB/CIFS'],
+  ['glusterfs','GlusterFS'],
+  ['iscsi','iSCSI'],
+  ['cephfs','CephFS'],
+  ['rbd','RBD'],
+  ['zfs-over-iscsi','ZFS over iSCSI'],
+  ['zfs','ZFS'],
+  ['proxmox-backup-server','Proxmox Backup Server'],
+  ['esxi','ESXi']
+];
+
+function storageAddMenu() {
+  return '<div class="storage-add-menu" data-storage-add-menu>' +
+    '<button class="secondary storage-add-toggle" type="button" data-storage-add-toggle aria-haspopup="menu" aria-expanded="false">Add <span aria-hidden="true">⌄</span></button>' +
+    '<div class="storage-add-dropdown" role="menu" hidden>' +
+      STORAGE_ADD_TYPES.map(([id,label]) =>
+        '<button type="button" role="menuitem" data-storage-add-type="' + sEsc(id) + '">' +
+          '<span class="storage-type-icon" aria-hidden="true">▣</span><span>' + sEsc(label) + '</span>' +
+        '</button>'
+      ).join('') +
+    '</div>' +
+  '</div>';
+}
+
+
 function sEsc(value) {
   return String(value ?? '').replace(/[&<>'"]/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' })[ch]);
 }
@@ -82,7 +113,7 @@ function renderStorageManager() {
   slot.innerHTML=`
     <section class="module-hero storage-manager-hero">
       <div class="panel-head"><div><span class="eyebrow">LIGHTNAS STORAGE MANAGER</span><h2>${verified ? `${sBytes(visible.totalBytes||0)} data capacity` : `${dataSources.length} attached volume${dataSources.length===1?'':'s'} detected`}</h2></div>
-        <div class="head-actions"><button class="secondary" type="button" data-storage-refresh>Refresh</button>${unconfigured.length?'<button class="primary" type="button" data-create-storage>+ Create storage</button>':''}</div>
+        <div class="head-actions"><button class="secondary" type="button" data-storage-refresh>Refresh</button>${storageAddMenu()}</div>
       </div>
       <p>${verified
         ? `${sBytes(visible.usedBytes||0)} used · ${sBytes(visible.availableBytes||0)} free across attached data volumes.${sharedLocalExcluded?' The OS/root-backed local storage is shown separately and is not included in this total.':''}`
@@ -101,17 +132,21 @@ async function refreshStorageManager() {
   try{await loadStoragePools();renderStorageManager();}
   catch(error){if(slot) slot.innerHTML=`<div class="module-note">Storage manager unavailable: ${sEsc(error.message)}</div>`;}
 }
-function openCreateStorage(sourceId='') {
+function openCreateStorage(sourceId='', provider='directory') {
   const data=storageUi.data;
   if(!data) return;
+  const providerEntry=STORAGE_ADD_TYPES.find(([id])=>id===provider)||STORAGE_ADD_TYPES[0];
+  provider=providerEntry[0];
+  const providerLabel=providerEntry[1];
   const sources=(data.availableSources||[]).filter(item=>!item.configured);
   const writableSources=sources.filter(item=>!item.mountedReadOnly);
   const dialog=ensureStorageDialog();
-  dialog.querySelector('[data-storage-dialog-title]').textContent='Create storage';
+  dialog.querySelector('[data-storage-dialog-title]').textContent=`Add ${providerLabel} storage`;
   dialog.querySelector('[data-storage-dialog-error]').textContent='';
   dialog.querySelector('[data-storage-dialog-body]').innerHTML=`
     <form data-storage-create-form class="storage-create-form">
-      <p class="muted storage-create-intro">Add an attached volume to LightNAS without formatting it. LightNAS creates its own managed folder and leaves existing files outside that folder untouched.</p>
+      <p class="muted storage-create-intro"><b>${sEsc(providerLabel)}</b> storage will use the selected volume or mount already visible to LightNAS. LightNAS creates its own managed folder and leaves existing files outside that folder untouched.</p>
+      <input type="hidden" name="provider" value="${sEsc(provider)}">
       <div class="storage-create-grid">
         <label>Storage name<input name="name" required pattern="[A-Za-z][A-Za-z0-9_-]{1,31}" placeholder="fastssd" autocomplete="off"><small>2–32 letters, numbers, dashes, or underscores.</small></label>
         <label>Volume<select name="sourceId" required ${writableSources.length?'':'disabled'}>
@@ -139,7 +174,7 @@ function openCreateStorage(sourceId='') {
     error.textContent='Creating storage…';
     const content=[...form.querySelectorAll('.content-policy-grid input:checked')].map(input=>input.value);
     try{
-      await sRequest('/api/storage/pools',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:form.elements.name.value,sourceId:form.elements.sourceId.value,content})});
+      await sRequest('/api/storage/pools',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:form.elements.name.value,sourceId:form.elements.sourceId.value,provider:form.elements.provider.value,content})});
       dialog.close();await refreshStorageManager();
     }catch(problem){error.textContent=problem.message;}
   },{once:true});
@@ -204,10 +239,27 @@ ${selectedType==='vztmpl'? `<div class="head-actions"><button class="primary" ty
 document.addEventListener('click',async event=>{
   const refresh=event.target.closest('[data-storage-refresh]');
   if(refresh){await refreshStorageManager();return;}
+  const addToggle=event.target.closest('[data-storage-add-toggle]');
+  if(addToggle){
+    const menu=addToggle.closest('[data-storage-add-menu]');
+    const dropdown=menu?.querySelector('.storage-add-dropdown');
+    if(dropdown){
+      dropdown.hidden=!dropdown.hidden;
+      addToggle.setAttribute('aria-expanded', dropdown.hidden?'false':'true');
+    }
+    return;
+  }
+  const addType=event.target.closest('[data-storage-add-type]');
+  if(addType){
+    const dropdown=addType.closest('.storage-add-dropdown');
+    if(dropdown) dropdown.hidden=true;
+    openCreateStorage('',addType.dataset.storageAddType);
+    return;
+  }
   const create=event.target.closest('[data-create-storage]');
   if(create){openCreateStorage();return;}
   const source=event.target.closest('[data-create-storage-source]');
-  if(source){openCreateStorage(source.dataset.createStorageSource);return;}
+  if(source){openCreateStorage(source.dataset.createStorageSource,'directory');return;}
   const manage=event.target.closest('[data-manage-storage]');
   if(manage){await renderManageStorage(manage.dataset.manageStorage);return;}
   const card=event.target.closest('[data-storage-card]');
@@ -356,4 +408,12 @@ document.addEventListener('keydown',async event=>{
   if(!card||!['Enter',' '].includes(event.key)) return;
   event.preventDefault();
   await renderManageStorage(card.dataset.storageCard);
+});
+
+document.addEventListener('click', event => {
+  if (event.target.closest('[data-storage-add-menu]')) return;
+  document.querySelectorAll('.storage-add-dropdown:not([hidden])').forEach(menu => {
+    menu.hidden = true;
+    menu.closest('[data-storage-add-menu]')?.querySelector('[data-storage-add-toggle]')?.setAttribute('aria-expanded','false');
+  });
 });
