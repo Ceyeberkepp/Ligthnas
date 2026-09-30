@@ -411,7 +411,7 @@ function storageAddMenuHeader() {
 
 function storageView() {
   const spaces = Array.isArray(state.spaces) ? state.spaces : [];
-  const actions = `<div class="head-actions"><button class="secondary" type="button" data-storage-refresh>Refresh</button><button class="secondary" data-action="refresh-storage">Rescan drives</button>${storageAddMenuHeader()}<button class="primary" data-view-link="pools">Manage storage</button></div>`;
+  const actions = `<div class="head-actions"><button class="secondary" type="button" data-storage-refresh>Refresh</button><button class="secondary" data-action="refresh-storage">Rescan drives</button><button class="primary" data-view-link="pools">Manage storage</button>${storageAddMenuHeader()}</div>`;
   return `${pageHead('Storage', 'LightNAS storage pools, capacity and content libraries.', actions)}
     <div id="storage-manager"></div>
     ${spaces.length ? `<section class="storage-spaces-section"><div class="section-heading"><div><span class="eyebrow">FILE STORAGE</span><h2>LightNAS storage spaces</h2></div></div><div class="storage-list">${spaces.map(space => `<article class="storage-row"><div><h3>${escapeHtml(space.label)}</h3><p>Spaces/${escapeHtml(space.name)}</p></div><button class="secondary" data-open-space="${escapeHtml(space.name)}">Open</button></article>`).join('')}</div></section>` : ''}`;
@@ -1411,21 +1411,27 @@ function analyticsView() {
   const network = system.network || {};
   const activity = state.logs || state.overview?.activity || [];
   const counts = activity.reduce((map,item) => { const key=String(item.type || 'other'); map[key]=(map[key]||0)+1; return map; }, {});
-  return `${pageHead('Analytics', 'Live host performance and operational activity.', '<button class="secondary" data-action="refresh">Refresh analytics</button>')}
-    <section class="analytics-grid">
-      ${overviewChart('CPU usage', `${system.cpu?.loadPercent || 0}`, '%', state.metricHistory.cpu, 100)}
-      ${overviewChart('Memory usage', `${system.memory?.usedPercent || 0}`, '%', state.metricHistory.memory, 100)}
-      ${overviewChart('Storage usage', `${storage.usedPercent || 0}`, '%', state.metricHistory.storage, 100)}
-      ${overviewNetworkChart(system)}
+  const successful = activity.filter(item => !/error|fail|warning/i.test(String(item.severity || ''))).length;
+  const warnings = activity.filter(item => /warning/i.test(String(item.severity || ''))).length;
+  const errors = activity.filter(item => /error|fail/i.test(String(item.severity || ''))).length;
+  return `${pageHead('Analytics', 'Operational analytics, capacity and recorded activity.', '<button class="secondary" data-action="refresh-logs">Refresh analytics</button>')}
+    <section class="metric-grid">
+      ${metric('Recorded operations', String(activity.length), activity.length ? 100 : 0, 'Persisted LightNAS activity events')}
+      ${metric('Successful / informational', String(successful), activity.length ? Math.round((successful/activity.length)*100) : 0, 'Operations without warning or error severity')}
+      ${metric('Warnings', String(warnings), activity.length ? Math.round((warnings/activity.length)*100) : 0, 'Events marked warning')}
+      ${metric('Errors', String(errors), activity.length ? Math.round((errors/activity.length)*100) : 0, 'Events marked error or failure')}
     </section>
-    <section class="panel"><div class="panel-head"><div><span class="eyebrow">ACTIVITY ANALYTICS</span><h2>Operations by category</h2></div><small>${activity.length} recorded events</small></div>
+    <section class="panel"><div class="panel-head"><div><span class="eyebrow">OPERATIONS</span><h2>Activity by category</h2></div><small>${activity.length} recorded events</small></div>
       <div class="analytics-bars">${Object.entries(counts).sort((a,b)=>b[1]-a[1]).map(([type,count]) => `<div class="analytics-bar-row"><span>${escapeHtml(type)}</span><div class="track"><span style="width:${Math.min(100,(count/Math.max(1,activity.length))*100)}%"></span></div><b>${count}</b></div>`).join('') || '<p class="muted">No activity data yet.</p>'}</div>
     </section>
     <section class="metric-grid">
+      ${metric('Storage used', bytes(storage.usedBytes || 0), Number(storage.usedPercent || 0), `${bytes(storage.availableBytes || 0)} available`)}
+      ${metric('Configured capacity', bytes(storage.totalBytes || 0), 0, 'Usable LightNAS storage')}
       ${metric('Network interfaces', String(network.interfaces || 0), 0, `RX ${bytes(network.receivedBytes || 0)} · TX ${bytes(network.transmittedBytes || 0)}`)}
-      ${metric('Uptime', duration(system.uptimeSeconds || 0), 0, system.kernel || '')}
-      ${metric('Logical CPUs', String(system.cpu?.cores || 0), 0, system.cpu?.model || '')}
-      ${metric('Memory available', bytes(system.memory?.freeBytes || 0), 0, `${bytes(system.memory?.totalBytes || 0)} total`)}
+      ${metric('System uptime', duration(system.uptimeSeconds || 0), 0, system.kernel || '')}
+    </section>
+    <section class="panel"><div class="panel-head"><div><span class="eyebrow">RECENT OPERATIONS</span><h2>Latest activity</h2></div><button class="secondary" data-view-link="logs">Open logs</button></div>
+      <div class="activity-list">${activity.length ? activity.slice(0,20).map(item => `<div class="activity"><span class="activity-icon">↗</span><div><b>${escapeHtml(item.message || item.type)}</b><time>${relativeTime(item.timestamp)}</time></div></div>`).join('') : '<p class="muted">No activity recorded yet.</p>'}</div>
     </section>`;
 }
 
