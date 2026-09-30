@@ -62,7 +62,7 @@ async function loadTemplateLibrary() {
 function renderTemplateLibrary() {
   const slot = document.querySelector('#container-template-library');
   if (!slot || !templateState.library) return;
-  const { templates = [], targets = [], proxmoxSource } = templateState.library;
+  const { templates = [], targets = [] } = templateState.library;
   const virtualTargets = targets.filter(item => item.kind === 'virtual');
   slot.innerHTML = `
     <section class="panel">
@@ -73,14 +73,13 @@ function renderTemplateLibrary() {
           <button class="secondary" type="button" data-template-url>Import URL</button>
         </div>
       </div>
-      <p class="muted">LightNAS reads the upstream appliance metadata feeds used by Proxmox pveam and downloads the selected archive from its published source. Templates are stored on the LightNAS storage you choose and become selectable for native LXC creation.</p>
+      <p class="muted">LightNAS loads the available system-container image catalog and downloads the selected archive into the storage you choose. Downloaded images become selectable immediately when creating native LXC containers.</p>
       <div class="inventory-grid">
         <article class="inventory-card"><h3>${templates.length}</h3><p>templates stored locally</p></article>
         <article class="inventory-card"><h3>${virtualTargets.length}</h3><p>assigned virtual storage target${virtualTargets.length === 1 ? '' : 's'}</p></article>
         <article class="inventory-card"><h3>vztmpl</h3><p>container-template content role</p></article>
       </div>
       ${templates.length ? `<div class="storage-list">${templates.map(item => `<article class="storage-row"><div><h3>${tEsc(item.filename)}</h3><p>${tEsc(item.storageLabel)} · ${tBytes(item.sizeBytes)}</p></div><div class="runtime-actions"><button class="secondary danger-button" type="button" data-template-delete="${tEsc(item.id)}">Delete</button></div></article>`).join('')}</div>` : '<div class="empty"><p>No saved container templates yet.</p></div>'}
-      <p class="muted">Primary metadata source: ${tEsc(proxmoxSource || 'https://download.proxmox.com/images/aplinfo-pve-9.dat')}</p>
     </section>`;
 }
 
@@ -102,7 +101,7 @@ async function openUploadDialog(preferredStorageId = '') {
   dialog.querySelector('[data-template-error]').textContent = '';
   dialog.querySelector('[data-template-body]').innerHTML = `
     <form data-template-upload-form>
-      <p class="muted">Upload a Proxmox/LXC rootfs template archive into the selected LightNAS storage.</p>
+      <p class="muted">Upload an LXC rootfs template archive into the selected LightNAS storage.</p>
       <label>Storage<select name="storageId" required>${targetOptions(library.targets)}</select></label>
       <label>Template file<input name="file" type="file" accept=".tar.zst,.tar.xz,.tar.gz,.tgz" required></label>
       <div class="dialog-actions"><button class="primary" type="submit">Upload template</button></div>
@@ -208,8 +207,8 @@ function renderCatalog(dialog, query = '') {
 async function openCatalogDialog(preferredStorageId = '') {
   const library = templateState.library || await loadTemplateLibrary();
   const dialog = ensureTemplateDialog();
-  dialog.querySelector('[data-template-title]').textContent = 'Upstream system template catalog';
-  dialog.querySelector('[data-template-error]').textContent = 'Loading official catalog…';
+  dialog.querySelector('[data-template-title]').textContent = 'System container image catalog';
+  dialog.querySelector('[data-template-error]').textContent = 'Loading system image catalog…';
   document.querySelector('#lightnas-storage-dialog')?.close();
   templateState.selectedCatalogId = null;
   dialog.querySelector('[data-template-body]').innerHTML = `
@@ -268,7 +267,7 @@ document.addEventListener('click', async event => {
     const storageId = dialog.querySelector('[data-template-catalog-storage]')?.value;
     const error = dialog.querySelector('[data-template-error]');
     catalogFile.disabled = true;
-    error.textContent = 'Pulling selected upstream image…';
+    error.textContent = 'Pulling selected system image…';
     const selected = templateState.catalog?.find(item => (item.id || item.filename) === catalogFile.dataset.templateCatalogFile);
     const progress = window.LightNASProgress?.open('Downloading container image', selected?.filename || selected?.package || 'Selected system template');
     try {
