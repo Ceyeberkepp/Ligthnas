@@ -598,7 +598,7 @@ async function showContainerManager(id) {
   ]);
   const item = (runtime.containers || []).find(entry => String(entry.id || entry.name) === id);
   if (!item) throw new Error('Container is no longer available.');
-  const networks = runtime.networks || [];
+  const networks = [...new Set([...(runtime.networks || []), item.network].filter(Boolean))];
   const currentNetwork = item.network || networks[0] || '';
   let publication = item.publication || null;
   const privateNatAddress = /^10\.77\.0\.(?:\d{1,3})$/.test(String(item.ipv4 || publication?.targetHost || ''));
@@ -622,6 +622,22 @@ async function showContainerManager(id) {
     ? tasks.map(entry => `<article class="manager-event"><b>${dialogEsc(entry.message || entry.detail || entry.type || 'Container task')}</b><span>${dialogEsc(entry.createdAt || entry.timestamp || '')}</span></article>`).join('')
     : '<p class="muted">No recorded LightNAS tasks for this container yet.</p>';
 
+  const extraNicRows = (item.extraNics || []).map((nic, index) => `
+    <div class="hardware-row" data-extra-nic-row>
+      <label>Network<select name="extraNicNetwork">${networks.map(value => `<option value="${dialogEsc(value)}" ${value === nic.network ? 'selected' : ''}>${dialogEsc(value)}</option>`).join('')}</select></label>
+      <label>MAC address<input name="extraNicMac" value="${dialogEsc(nic.macAddress || '')}" placeholder="Automatically assigned"></label>
+      <label>VLAN<input name="extraNicVlan" value="${dialogEsc(nic.vlanTag || '')}" type="number" min="1" max="4094" placeholder="None"></label>
+      <button class="secondary danger-button compact-button" type="button" data-remove-hardware-row>Remove</button>
+    </div>`).join('');
+
+  const mountRows = (item.mountPoints || []).length
+    ? (item.mountPoints || []).map(mount => `<div class="hardware-readout"><b>${dialogEsc(mount.source)}</b><span>→ /${dialogEsc(mount.target)}${mount.readOnly ? ' · read only' : ''}</span></div>`).join('')
+    : '<p class="muted">No additional host storage is mounted into this container.</p>';
+  const deviceRows = (item.devicePaths || []).length
+    ? (item.devicePaths || []).map(device => `<div class="hardware-readout"><b>${dialogEsc(device.source)}</b><span>→ /${dialogEsc(device.target)}</span></div>`).join('')
+    : '<p class="muted">No host devices are currently passed through.</p>';
+
+
   const unavailable = (title, detail) => `
     <div class="manager-capability">
       <h3>${title}</h3><p>${detail}</p>
@@ -639,7 +655,7 @@ async function showContainerManager(id) {
       <div class="container-manager-layout">
         <nav class="container-manager-tabs" aria-label="Container settings">
           ${[
-            ['resources','Resources'],['network','Network'],['dns','DNS'],['application','Application access'],['options','Options'],
+            ['resources','Resources'],['storageDevices','Storage & devices'],['network','Network'],['dns','DNS'],['application','Application access'],['options','Options'],
             ['tasks','Task history'],['backups','Backups'],['replication','Replication'],
             ['snapshots','Snapshots'],['firewall','Firewall'],['permissions','Permissions']
           ].map(([key,label], index) => `<button type="button" class="${index ? '' : 'active'}" data-container-tab="${key}">${label}</button>`).join('')}
@@ -657,6 +673,27 @@ async function showContainerManager(id) {
               <label>Image<input value="${dialogEsc(item.imageId || 'Installed system image')}" readonly></label>
             </div>
           </section>
+
+          <section data-container-panel="storageDevices" hidden>
+            <h3>Storage & device passthrough</h3>
+            <p class="muted">This container uses a directory-backed root filesystem. Its usable space follows the selected storage pool; add mount points for dedicated data locations instead of resizing a virtual disk file.</p>
+            <div class="manager-summary">
+              <div><span>Root filesystem</span><b>${dialogEsc(item.rootfsPath || 'Directory-backed rootfs')}</b></div>
+              <div><span>Configured allocation</span><b>${Number(item.diskGiB) ? `${Number(item.diskGiB)} GiB` : 'Pool-backed'}</b></div>
+              <div><span>Storage</span><b>${dialogEsc(item.storageId || 'Local container storage')}</b></div>
+            </div>
+            <h4>Current mount points</h4>
+            <div class="hardware-list">${mountRows}</div>
+            <div class="form-grid manager-add-block">
+              <label>Host path to mount<input name="addMountSource" placeholder="/mnt/storage/data"></label>
+              <label>Container path<input name="addMountTarget" placeholder="/data"></label>
+              <label class="check-line"><input name="addMountReadOnly" type="checkbox"> Read-only mount</label>
+            </div>
+            <h4>Current device passthrough</h4>
+            <div class="hardware-list">${deviceRows}</div>
+            <label>Pass through another host device<input name="addDevicePath" placeholder="/dev/dri/renderD128"></label>
+            <p class="module-note">GPU acceleration for containers normally uses a device such as <code>/dev/dri/renderD128</code>. The device must already exist on the LightNAS host.</p>
+          </section>
           <section data-container-panel="network" hidden>
             <h3>Network</h3>
             <div class="form-grid">
@@ -666,7 +703,12 @@ async function showContainerManager(id) {
               <label>Gateway<input name="gateway" value="${dialogEsc(item.gateway || '')}" placeholder="192.168.1.1"></label>
               <label>MAC address<input value="${dialogEsc(item.macAddress || 'Automatically assigned')}" readonly></label>
             </div>
-            <p class="module-note">Changing a running container’s address may temporarily interrupt its application connections. The LightNAS terminal uses the local host channel and remains available.</p>
+            
+            <div class="manager-subsection">
+              <div class="subsection-head"><div><h4>Additional virtual NICs</h4><p class="muted">Existing adapters are loaded from the real LXC configuration.</p></div><button class="secondary" type="button" data-add-extra-nic>+ Add NIC</button></div>
+              <div class="hardware-list" data-extra-nics>${extraNicRows || '<p class="muted" data-no-extra-nics>No additional NICs configured.</p>'}</div>
+            </div>
+<p class="module-note">Changing a running container’s address may temporarily interrupt its application connections. The LightNAS terminal uses the local host channel and remains available.</p>
           </section>
           <section data-container-panel="dns" hidden>
             <h3>DNS</h3>
@@ -716,7 +758,7 @@ async function showContainerManager(id) {
       </div>
       <div class="form-error" role="alert"></div>
       <div class="dialog-actions">
-        <button class="secondary" type="button" data-manager-close>Cancel</button>
+        <button class="secondary" type="button" data-manager-revert>Revert changes</button>\n        <button class="secondary" type="button" data-manager-close>Cancel</button>
         <button class="primary" type="submit">Save changes</button>
       </div>
     </form>`;
@@ -727,6 +769,28 @@ async function showContainerManager(id) {
   };
   dialog.querySelectorAll('[data-container-tab]').forEach(button => button.addEventListener('click', () => showTab(button.dataset.containerTab)));
   dialog.querySelectorAll('[data-manager-close]').forEach(button => button.addEventListener('click', () => dialog.close()));
+
+  dialog.querySelector('[data-manager-revert]')?.addEventListener('click', async () => {
+    dialog.close();
+    try { await showContainerManager(id); } catch (problem) { alert(problem.message); }
+  });
+  dialog.querySelector('[data-add-extra-nic]')?.addEventListener('click', () => {
+    const root = dialog.querySelector('[data-extra-nics]');
+    root.querySelector('[data-no-extra-nics]')?.remove();
+    const row = document.createElement('div');
+    row.className = 'hardware-row';
+    row.dataset.extraNicRow = '';
+    row.innerHTML = `
+      <label>Network<select name="extraNicNetwork">${networks.map(value => `<option value="${dialogEsc(value)}">${dialogEsc(value)}</option>`).join('')}</select></label>
+      <label>MAC address<input name="extraNicMac" placeholder="Automatically assigned"></label>
+      <label>VLAN<input name="extraNicVlan" type="number" min="1" max="4094" placeholder="None"></label>
+      <button class="secondary danger-button compact-button" type="button" data-remove-hardware-row>Remove</button>`;
+    root.append(row);
+  });
+  dialog.addEventListener('click', event => {
+    const remove = event.target.closest('[data-remove-hardware-row]');
+    if (remove) remove.closest('[data-extra-nic-row]')?.remove();
+  });
   dialog.addEventListener('close', () => dialog.remove(), { once: true });
 
   const mode = dialog.querySelector('[name="ipv4Mode"]');
@@ -739,11 +803,6 @@ async function showContainerManager(id) {
     addressField.disabled = !manual;
     gatewayField.disabled = !manual;
     dnsField.disabled = !manual;
-    if (!manual) {
-      addressField.value = '';
-      gatewayField.value = '';
-      dnsField.value = '';
-    }
   };
   mode.addEventListener('change', updateNetworkFields);
   updateNetworkFields();
@@ -764,7 +823,17 @@ async function showContainerManager(id) {
         memoryMiB: Number(values.memoryMiB), cpus: Number(values.cpus),
         network: values.network, ipv4Mode: values.ipv4Mode,
         ipv4Address: values.ipv4Address || '', gateway: values.gateway || '',
-        dns: values.dns || '', startOnBoot: form.elements.startOnBoot.checked
+        dns: values.dns || '', startOnBoot: form.elements.startOnBoot.checked,
+        extraNics: [...form.querySelectorAll('[data-extra-nic-row]')].map(row => ({
+          network: row.querySelector('[name="extraNicNetwork"]')?.value || '',
+          macAddress: row.querySelector('[name="extraNicMac"]')?.value || '',
+          vlanTag: row.querySelector('[name="extraNicVlan"]')?.value || ''
+        })),
+        addMountPoints: values.addMountSource && values.addMountTarget ? [{
+          source:values.addMountSource, target:values.addMountTarget,
+          readOnly:Boolean(form.elements.addMountReadOnly?.checked)
+        }] : [],
+        addDevicePaths: values.addDevicePath ? [{ path:values.addDevicePath }] : []
       };
       if (!Number.isInteger(payload.memoryMiB) || !Number.isInteger(payload.cpus)) throw new Error('Memory and CPU values must be whole numbers.');
       const settingsChanged = payload.memoryMiB !== memoryMiB
@@ -774,7 +843,10 @@ async function showContainerManager(id) {
         || payload.ipv4Address.trim() !== String(item.ipv4Address || '').trim()
         || payload.gateway.trim() !== String(item.gateway || '').trim()
         || payload.dns.trim() !== String(item.dns || '').trim()
-        || payload.startOnBoot !== (item.startOnBoot !== false);
+        || payload.startOnBoot !== (item.startOnBoot !== false)
+        || JSON.stringify(payload.extraNics) !== JSON.stringify((item.extraNics || []).map(nic => ({network:nic.network || '',macAddress:nic.macAddress || '',vlanTag:String(nic.vlanTag || '')})))
+        || payload.addMountPoints.length > 0
+        || payload.addDevicePaths.length > 0;
       let updateResult = null;
       if (settingsChanged) {
         updateResult = await dialogApi('/api/containers', { method: 'POST', body: JSON.stringify(payload) });
