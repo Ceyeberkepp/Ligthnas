@@ -38,6 +38,13 @@ fi
 mkdir -p "${BUILD_DIR}" "$(dirname "${OUTPUT}")"
 cd "${BUILD_DIR}"
 
+# Stage the Debian Installer preseed before lb config. live-build detects this
+# file while configuring the installer and automatically wires it into the
+# installer boot parameters. Staging it later can leave the file on the ISO
+# without actually applying the LightNAS partition recipe.
+mkdir -p config/binary_debian-installer
+cp "${REPO_ROOT}/iso/preseed.cfg" config/binary_debian-installer/preseed.cfg
+
 echo "=== Configuring LightNAS Debian 13 live image ==="
 
 lb config \
@@ -48,6 +55,7 @@ lb config \
   --bootloaders 'syslinux,grub-efi' \
   --debian-installer live \
   --debian-installer-gui true \
+  --debian-installer-preseedfile preseed.cfg \
   --firmware-binary true \
   --firmware-chroot true \
   --uefi-secure-boot auto \
@@ -230,10 +238,6 @@ cp -a \
 if [[ -f "${REPO_ROOT}/package-lock.json" ]]; then
   cp "${REPO_ROOT}/package-lock.json" config/includes.chroot/opt/lightnas/
 fi
-
-cp \
-  "${REPO_ROOT}/iso/preseed.cfg" \
-  config/binary_debian-installer/preseed.cfg
 
 #
 # First-boot host network bootstrap.
@@ -707,6 +711,16 @@ if [[ ! -f binary/install/preseed.cfg && ! -f binary/preseed.cfg && ! -f config/
   exit 1
 fi
 echo "Installer kernel/initrd and LightNAS preseed confirmed."
+
+if ! grep -Rqs -- 'Install LightNAS (Graphical)' binary 2>/dev/null; then
+  echo "ERROR: final ISO tree does not contain the branded graphical LightNAS installer entry." >&2
+  exit 1
+fi
+if ! grep -Rqs -- 'Install LightNAS (Text fallback)' binary 2>/dev/null; then
+  echo "ERROR: final ISO tree does not contain the text installer fallback entry." >&2
+  exit 1
+fi
+echo "Graphical LightNAS installer and text fallback menu entries confirmed."
 
 #
 # Verify the final SquashFS actually contains ZFS.
