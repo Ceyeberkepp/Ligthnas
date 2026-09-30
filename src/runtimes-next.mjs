@@ -378,23 +378,66 @@ async function localAttachVmGuestDrivers(id) {
   const drivers = await ensureWindowsVirtioDrivers('');
   await localPrepareVmIsoAccess({ isoPath: drivers.path });
 
-  const block = await command('virsh', ['-c', 'qemu:///system', 'domblklist', name, '--details'], 15000);
-  if (!block.ok) throw Object.assign(new Error(`Unable to inspect VM optical drives: ${block.error}`), { status: 409 });
-  const lower = block.output.toLowerCase();
-  if (lower.includes(String(drivers.path || '').toLowerCase()) || lower.includes('virtio-win')) {
-    return { id:name, action:'guest-drivers', attached:true, alreadyAttached:true, name:drivers.name };
+  const persistentBlock = await command('virsh', ['-c', 'qemu:///system', 'domblklist', name, '--details', '--inactive'], 15000);
+  const liveBlock = await command('virsh', ['-c', 'qemu:///system', 'domblklist', name, '--details'], 15000);
+  if (!liveBlock.ok) throw Object.assign(new Error(`Unable to inspect VM optical drives: ${liveBlock.error}`), { status: 409 });
+
+  const combined = `${persistentBlock.output || ''}\n${liveBlock.output || ''}`.toLowerCase();
+  if (combined.includes(String(drivers.path || '').toLowerCase()) || combined.includes('virtio-win')) {
+    const liveAttached = String(liveBlock.output || '').toLowerCase().includes(String(drivers.path || '').toLowerCase()) ||
+      String(liveBlock.output || '').toLowerCase().includes('virtio-win');
+    return {
+      id:name, action:'guest-drivers', attached:true, alreadyAttached:true,
+      liveAttached, requiresRestart:!liveAttached, name:drivers.name
+    };
   }
 
-  const used = new Set([...block.output.matchAll(/\b(sd[a-z]|vd[a-z]|hd[a-z])\b/g)].map(match => match[1]));
-  const target = Array.from({ length:25 }, (_, index) => `sd${String.fromCharCode(98 + index)}`).find(candidate => !used.has(candidate)) || 'sdz';
+  const allBlockOutput = `${persistentBlock.output || ''}\n${liveBlock.output || ''}`;
+  const used = new Set([...allBlockOutput.matchAll(/\b(sd[a-z]|vd[a-z]|hd[a-z])\b/g)].map(match => match[1]));
+  const persistentTarget = Array.from({ length:25 }, (_, index) => `sd${String.fromCharCode(98 + index)}`).find(candidate => !used.has(candidate)) || 'sdz';
+
+  // SATA optical media is reliable at boot, but libvirt/QEMU generally cannot
+  // hotplug a SATA disk into an already-running guest. Always save the SATA CD
+  // in the persistent definition first.
+  const configured = await command('virsh', [
+    '-c', 'qemu:///system', 'attach-disk', name, drivers.path, persistentTarget,
+    '--type', 'cdrom', '--mode', 'readonly', '--targetbus', 'sata', '--config'
+  ], 30000);
+  if (!configured.ok) throw Object.assign(new Error(`Could not add the VirtIO driver CD to the VM configuration: ${configured.error}`), { status: 409 });
+
   const state = await command('virsh', ['-c', 'qemu:///system', 'domstate', name], 10000);
   const running = state.ok && /running|paused|idle/i.test(state.output || '');
-  const args = ['-c', 'qemu:///system', 'attach-disk', name, drivers.path, target, '--type', 'cdrom', '--mode', 'readonly', '--targetbus', 'sata', '--config'];
-  if (running) args.push('--live');
+  if (!running) {
+    return {
+      id:name, action:'guest-drivers', attached:true, alreadyAttached:false,
+      liveAttached:false, requiresRestart:false, target:persistentTarget,
+      name:drivers.name, storageName:drivers.storageName || ''
+    };
+  }
 
-  const attached = await command('virsh', args, 30000);
-  if (!attached.ok) throw Object.assign(new Error(`Could not attach the VirtIO driver CD: ${attached.error}`), { status: 409 });
-  return { id:name, action:'guest-drivers', attached:true, alreadyAttached:false, target, name:drivers.name, storageName:drivers.storageName || '' };
+  // For a running VM, try a SCSI optical device for the live domain because
+  // SCSI is hot-pluggable on common virtio-scsi configurations. If this host
+  // or guest lacks a hot-pluggable SCSI controller, keep the persistent SATA
+  // attachment and tell the UI that one reboot is required.
+  const liveUsed = new Set([...String(liveBlock.output || '').matchAll(/\b(sd[a-z]|vd[a-z]|hd[a-z])\b/g)].map(match => match[1]));
+  const liveTarget = Array.from({ length:25 }, (_, index) => `sd${String.fromCharCode(98 + index)}`).find(candidate => !liveUsed.has(candidate)) || 'sdz';
+  const live = await command('virsh', [
+    '-c', 'qemu:///system', 'attach-disk', name, drivers.path, liveTarget,
+    '--type', 'cdrom', '--mode', 'readonly', '--targetbus', 'scsi', '--live'
+  ], 30000);
+
+  return {
+    id:name,
+    action:'guest-drivers',
+    attached:true,
+    alreadyAttached:false,
+    liveAttached:Boolean(live.ok),
+    requiresRestart:!live.ok,
+    target:live.ok ? liveTarget : persistentTarget,
+    name:drivers.name,
+    storageName:drivers.storageName || '',
+    liveWarning:live.ok ? '' : (live.error || 'The running VM does not support optical-media hotplug; the driver CD will appear after reboot.')
+  };
 }
 
 async function localManageVm(id, action) {
