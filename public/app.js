@@ -1430,9 +1430,32 @@ function analyticsView() {
       ${metric('Network interfaces', String(network.interfaces || 0), 0, `RX ${bytes(network.receivedBytes || 0)} · TX ${bytes(network.transmittedBytes || 0)}`)}
       ${metric('System uptime', duration(system.uptimeSeconds || 0), 0, system.kernel || '')}
     </section>
-    <section class="panel"><div class="panel-head"><div><span class="eyebrow">RECENT OPERATIONS</span><h2>Latest activity</h2></div><button class="secondary" data-view-link="logs">Open logs</button></div>
+    <section class="panel"><div class="panel-head"><div><span class="eyebrow">RECENT OPERATIONS</span><h2>Latest activity</h2></div><button class="secondary" data-action="open-logs-modal">View logs</button></div>
       <div class="activity-list">${activity.length ? activity.slice(0,20).map(item => `<div class="activity"><span class="activity-icon">↗</span><div><b>${escapeHtml(item.message || item.type)}</b><time>${relativeTime(item.timestamp)}</time></div></div>`).join('') : '<p class="muted">No activity recorded yet.</p>'}</div>
     </section>`;
+}
+
+function openLogsModal() {
+  let dialog = document.querySelector('#lightnas-logs-dialog');
+  if (!dialog) {
+    dialog = document.createElement('dialog');
+    dialog.id = 'lightnas-logs-dialog';
+    dialog.className = 'lightnas-dialog runtime-dialog logs-dialog';
+    dialog.innerHTML = `<div class="dialog-body"><div class="dialog-head"><div><span class="eyebrow">AUDIT & ACTIVITY</span><h2>LightNAS logs</h2></div><button class="icon-button" type="button" data-logs-close>×</button></div><div data-logs-modal-body></div><div class="dialog-actions"><button class="secondary" type="button" data-logs-refresh>Refresh</button><button class="primary" type="button" data-logs-close>Close</button></div></div>`;
+    document.body.append(dialog);
+    dialog.addEventListener('click', event => { if (event.target.closest('[data-logs-close]')) dialog.close(); });
+    dialog.querySelector('[data-logs-refresh]')?.addEventListener('click', async () => {
+      try { state.logs = (await request('/api/logs?limit=500')).logs || []; renderLogsModal(dialog); } catch (error) { toast(error.message); }
+    });
+  }
+  renderLogsModal(dialog);
+  if (!dialog.open) dialog.showModal();
+}
+
+function renderLogsModal(dialog) {
+  const logs = state.logs || [];
+  const body = dialog.querySelector('[data-logs-modal-body]');
+  body.innerHTML = `<div class="logs-table"><div class="logs-head"><span>Time</span><span>Type</span><span>Severity</span><span>Message</span></div>${logs.length ? logs.map(item => `<div class="logs-row"><time>${escapeHtml(new Date(item.timestamp).toLocaleString())}</time><span>${escapeHtml(item.type || 'event')}</span><span class="log-severity ${escapeHtml(item.severity || 'info')}">${escapeHtml((item.severity || 'info').toUpperCase())}</span><b>${escapeHtml(item.message || '')}</b></div>`).join('') : '<div class="empty compact-empty"><p>No persisted activity has been recorded yet.</p></div>'}</div>`;
 }
 
 function logsView() {
@@ -1478,6 +1501,7 @@ function render(view) {
 }
 
 function bindViewActions() {
+  $('[data-action="open-logs-modal"]', $('#content'))?.addEventListener('click', async () => { if (state.logs === null) { try { state.logs = (await request('/api/logs?limit=500')).logs || []; } catch (error) { toast(error.message); return; } } openLogsModal(); });
   $('[data-action="refresh-logs"]', $('#content'))?.addEventListener('click', async event => { event.currentTarget.disabled = true; try { state.logs = (await request('/api/logs?limit=500')).logs || []; render(state.view); } catch (error) { toast(error.message); } });
   const renderHealth = result => {
     const target = $('[data-appliance-health-result]', $('#content'));
