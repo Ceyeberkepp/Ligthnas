@@ -113,7 +113,7 @@ function renderStorageManager() {
   slot.innerHTML=`
     <section class="module-hero storage-manager-hero">
       <div class="panel-head"><div><span class="eyebrow">LIGHTNAS STORAGE MANAGER</span><h2>${verified ? `${sBytes(visible.totalBytes||0)} data capacity` : `${dataSources.length} attached volume${dataSources.length===1?'':'s'} detected`}</h2></div>
-        <div class="head-actions"><button class="secondary" type="button" data-storage-refresh>Refresh</button>${storageAddMenu()}</div>
+        <div class="head-actions"></div>
       </div>
       <p>${verified
         ? `${sBytes(visible.usedBytes||0)} used · ${sBytes(visible.availableBytes||0)} free across attached data volumes.${sharedLocalExcluded?' The OS/root-backed local storage is shown separately and is not included in this total.':''}`
