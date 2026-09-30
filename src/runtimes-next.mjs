@@ -372,6 +372,31 @@ async function localVmDetails(names) {
   return details;
 }
 
+async function localAttachVmGuestDrivers(id) {
+  const name = String(id || '');
+  if (!/^[A-Za-z][A-Za-z0-9-]{1,39}$/.test(name)) throw Object.assign(new Error('Invalid VM name.'), { status: 400 });
+  const drivers = await ensureWindowsVirtioDrivers('');
+  await localPrepareVmStorageAccess({ isoPath: drivers.path, diskDirectory: '', diskPath: '' });
+
+  const block = await command('virsh', ['-c', 'qemu:///system', 'domblklist', name, '--details'], 15000);
+  if (!block.ok) throw Object.assign(new Error(`Unable to inspect VM optical drives: ${block.error}`), { status: 409 });
+  const lower = block.output.toLowerCase();
+  if (lower.includes(String(drivers.path || '').toLowerCase()) || lower.includes('virtio-win')) {
+    return { id:name, action:'guest-drivers', attached:true, alreadyAttached:true, name:drivers.name };
+  }
+
+  const used = new Set([...block.output.matchAll(/\b(sd[a-z]|vd[a-z]|hd[a-z])\b/g)].map(match => match[1]));
+  const target = Array.from({ length:25 }, (_, index) => `sd${String.fromCharCode(98 + index)}`).find(candidate => !used.has(candidate)) || 'sdz';
+  const state = await command('virsh', ['-c', 'qemu:///system', 'domstate', name], 10000);
+  const running = state.ok && /running|paused|idle/i.test(state.output || '');
+  const args = ['-c', 'qemu:///system', 'attach-disk', name, drivers.path, target, '--type', 'cdrom', '--mode', 'readonly', '--targetbus', 'sata', '--config'];
+  if (running) args.push('--live');
+
+  const attached = await command('virsh', args, 30000);
+  if (!attached.ok) throw Object.assign(new Error(`Could not attach the VirtIO driver CD: ${attached.error}`), { status: 409 });
+  return { id:name, action:'guest-drivers', attached:true, alreadyAttached:false, target, name:drivers.name, storageName:drivers.storageName || '' };
+}
+
 async function localManageVm(id, action) {
   const name = String(id || '');
   if (!/^[A-Za-z][A-Za-z0-9-]{1,39}$/.test(name)) throw Object.assign(new Error('Invalid VM name.'), { status: 400 });
@@ -845,9 +870,11 @@ export async function createVm(input) {
     if (input.action === 'delete') requireDeletionConfirmation(input, id, 'virtual machine');
     if (virtualization.provider?.startsWith('proxmox')) {
       if (input.action === 'update') return await proxmoxUpdateVm(input);
+      if (input.action === 'guest-drivers') throw Object.assign(new Error('Guest driver attachment is currently available on LightNAS local QEMU/libvirt VMs.'), { status:409 });
       return await proxmoxManageVm(id, input.action);
     }
     if (input.action === 'update') return await localUpdateVm(input);
+    if (input.action === 'guest-drivers') return await localAttachVmGuestDrivers(id);
     return await localManageVm(id, input.action);
   }
 
