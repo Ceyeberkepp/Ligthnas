@@ -27,6 +27,7 @@ import time
 from pathlib import Path
 
 SOCKET_PATH = Path(os.environ.get("LIGHTNAS_HOST_SOCKET", "/run/lightnas/host-agent.sock"))
+LOCAL_STORAGE_ROOT = Path(os.environ.get("LIGHTNAS_LOCAL_STORAGE_ROOT", "/var/lib/lightnas/storage/local")).resolve()
 MAX_REQUEST = 64 * 1024
 NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9-]{1,39}$")
 IFACE_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,32}$")
@@ -2772,6 +2773,17 @@ def _managed_storage_path(value: object) -> Path:
         raise ValueError("managed storage path is required")
     path = Path(raw).resolve()
     text_path = str(path)
+
+    # LightNAS has two managed-storage layouts:
+    # 1. Built-in local storage under /var/lib/lightnas/storage/local.
+    # 2. Assigned volumes under <mount>/.lightnas/storage/<pool>.
+    # Accept only those managed subtrees, never arbitrary host paths.
+    try:
+        if path == LOCAL_STORAGE_ROOT or path.is_relative_to(LOCAL_STORAGE_ROOT):
+            return path
+    except ValueError:
+        pass
+
     if "/.lightnas/storage/" not in text_path:
         raise ValueError("path is outside LightNAS managed storage")
     if not text_path.startswith(("/storage/", "/mnt/", "/media/", "/srv/", "/data/", "/var/lib/lightnas/")):
@@ -2781,13 +2793,18 @@ def _managed_storage_path(value: object) -> Path:
 
 def vm_storage_access(data: dict) -> dict:
     iso_raw = str(data.get("isoPath") or "").strip()
-    disk_directory = _managed_storage_path(data.get("diskDirectory"))
-    disk_path = _managed_storage_path(data.get("diskPath"))
+    disk_directory_raw = str(data.get("diskDirectory") or "").strip()
+    disk_path_raw = str(data.get("diskPath") or "").strip()
+    disk_directory = _managed_storage_path(disk_directory_raw) if disk_directory_raw else None
+    disk_path = _managed_storage_path(disk_path_raw) if disk_path_raw else None
     qemu_user = _vm_qemu_user()
+
+    if not iso_raw and not disk_directory:
+        raise ValueError("an installer ISO or VM disk path is required")
 
     # Grant only path traversal on parents. Do not change ownership or expose
     # unrelated files on the mounted data volume.
-    managed_paths = [disk_directory]
+    managed_paths = [disk_directory] if disk_directory else []
     iso_path = None
     if iso_raw:
         iso_path = _managed_storage_path(iso_raw)
@@ -2809,10 +2826,11 @@ def vm_storage_access(data: dict) -> dict:
         if directory.exists():
             _run_checked(["setfacl", "-m", f"u:{qemu_user}:x", str(directory)])
 
-    disk_directory.mkdir(parents=True, exist_ok=True, mode=0o770)
-    _run_checked(["setfacl", "-m", f"u:{qemu_user}:rwx", str(disk_directory)])
-    _run_checked(["setfacl", "-m", f"d:u:{qemu_user}:rwx", str(disk_directory)])
-    if disk_path.exists():
+    if disk_directory:
+        disk_directory.mkdir(parents=True, exist_ok=True, mode=0o770)
+        _run_checked(["setfacl", "-m", f"u:{qemu_user}:rwx", str(disk_directory)])
+        _run_checked(["setfacl", "-m", f"d:u:{qemu_user}:rwx", str(disk_directory)])
+    if disk_path and disk_path.exists():
         _run_checked(["setfacl", "-m", f"u:{qemu_user}:rw", str(disk_path)])
 
     if iso_path:
@@ -2823,7 +2841,7 @@ def vm_storage_access(data: dict) -> dict:
     return {
         "qemuUser": qemu_user,
         "iso": str(iso_path) if iso_path else "",
-        "diskDirectory": str(disk_directory),
+        "diskDirectory": str(disk_directory) if disk_directory else "",
         "prepared": True,
     }
 
