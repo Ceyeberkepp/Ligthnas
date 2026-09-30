@@ -1,4 +1,4 @@
-const state = { overview: null, view: 'home', folder: '', files: null, fileError: null, filesSettingsOpen: false, aiMessages: [], fileView: ['list','grid','gallery'].includes(localStorage.getItem('lightnas-file-view')) ? localStorage.getItem('lightnas-file-view') : 'grid', fileTruncated: false, overviewMetric: localStorage.getItem('lightnas-overview-metric') || 'cpu', lastNetworkSample: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, smtp: undefined, media: null, network: null, metricHistory: { cpu: [], load: [], memory: [], storage: [], networkIn: [], networkOut: [] } };
+const state = { overview: null, view: 'home', folder: '', files: null, fileError: null, filesSettingsOpen: false, aiMessages: [], logs: null, fileView: ['list','grid','gallery'].includes(localStorage.getItem('lightnas-file-view')) ? localStorage.getItem('lightnas-file-view') : 'grid', fileTruncated: false, overviewMetric: localStorage.getItem('lightnas-overview-metric') || 'cpu', lastNetworkSample: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, smtp: undefined, media: null, network: null, metricHistory: { cpu: [], load: [], memory: [], storage: [], networkIn: [], networkOut: [] } };
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
 const themeChoices = ['system', 'light', 'dark'];
@@ -146,9 +146,9 @@ function canView(view, appliance = state.overview?.appliance) {
   if (appliance.role === 'administrator') return true;
   const allowed = new Set(appliance.permissions || []);
   const required = {
-    home: ['overview.view'], files: ['files.read'], media: ['files.read'], storage: ['storage.view'], pools: ['pools.view', 'storage.manage'], shares: ['shares.view', 'shares.manage'],
+    home: ['overview.view'], files: ['files.read'], media: ['files.read'], storage: ['storage.view'], pools: ['pools.view', 'storage.manage'], shares: ['shares.view', 'shares.manage'], backups: ['backup.manage', 'storage.view'],
     apps: ['apps.view', 'apps.manage'], ai: ['apps.view', 'apps.manage', 'system.view'], containers: ['containers.view', 'containers.manage', 'containers.console'], vms: ['vms.view', 'vms.manage', 'vms.console'],
-    network: ['network.view'], firewall: ['firewall.view', 'firewall.manage', 'network.manage'], monitoring: ['monitoring.view', 'system.view'], capabilities: ['capabilities.view', 'system.view'],
+    network: ['network.view'], firewall: ['firewall.view', 'firewall.manage', 'network.manage'], monitoring: ['monitoring.view', 'system.view'], analytics: ['monitoring.view', 'system.view'], logs: ['audit.view'], capabilities: ['capabilities.view', 'system.view'],
     integrations: ['integrations.view', 'integrations.manage'], assistant: ['admin.view', 'system.view'], users: ['users.manage'], permissions: ['users.manage'], shell: ['system.shell'], smtp: ['smtp.manage'], settings: ['settings.manage'], admin: ['admin.view']
   }[view];
   return Array.isArray(required) && (!required.length || required.some(permission => allowed.has(permission)));
@@ -404,9 +404,15 @@ function homeView() {
     </section>`;
 }
 
+function storageAddMenuHeader() {
+  const items = [['directory','Directory'],['lvm','LVM'],['lvm-thin','LVM-Thin'],['btrfs','BTRFS'],['nfs','NFS'],['smb-cifs','SMB/CIFS'],['glusterfs','GlusterFS'],['iscsi','iSCSI'],['cephfs','CephFS'],['rbd','RBD'],['zfs-over-iscsi','ZFS over iSCSI'],['zfs','ZFS'],['proxmox-backup-server','Proxmox Backup Server'],['esxi','ESXi']];
+  return `<div class="storage-add-menu" data-storage-add-menu><button class="secondary storage-add-toggle" type="button" data-storage-add-toggle aria-expanded="false">Add <span>⌄</span></button><div class="storage-add-dropdown" role="menu" hidden>${items.map(([id,label]) => `<button type="button" role="menuitem" data-storage-add-type="${id}"><span class="storage-type-icon">▣</span><span>${label}</span></button>`).join('')}</div></div>`;
+}
+
 function storageView() {
   const spaces = Array.isArray(state.spaces) ? state.spaces : [];
-  return `${pageHead('Storage', 'LightNAS storage pools, capacity and content libraries.', '<div class="head-actions"><button class="secondary" data-action="refresh-storage">Rescan drives</button><button class="primary" data-view-link="pools">Manage storage</button></div>')}
+  const actions = `<div class="head-actions"><button class="secondary" type="button" data-storage-refresh>Refresh</button><button class="secondary" data-action="refresh-storage">Rescan drives</button>${storageAddMenuHeader()}<button class="primary" data-view-link="pools">Manage storage</button></div>`;
+  return `${pageHead('Storage', 'LightNAS storage pools, capacity and content libraries.', actions)}
     <div id="storage-manager"></div>
     ${spaces.length ? `<section class="storage-spaces-section"><div class="section-heading"><div><span class="eyebrow">FILE STORAGE</span><h2>LightNAS storage spaces</h2></div></div><div class="storage-list">${spaces.map(space => `<article class="storage-row"><div><h3>${escapeHtml(space.label)}</h3><p>Spaces/${escapeHtml(space.name)}</p></div><button class="secondary" data-open-space="${escapeHtml(space.name)}">Open</button></article>`).join('')}</div></section>` : ''}`;
 }
