@@ -18,7 +18,7 @@ test('catalog apps publish and verify their LightNAS endpoint automatically', as
   for (const port of [3000, 3001, 8081, 8082, 8083, 8096]) assert.match(installer, new RegExp(`\\b${port}\\b`));
   assert.match(installer, /LightNAS managed app/);
   assert.match(app, /Open application/);
-  assert.match(app, /No Proxmox configuration or manual port forwarding is required/);
+  assert.match(app, /No external hypervisor configuration or manual port forwarding is required/);
   assert.match(agent, /args \+= \["to", "any"\]/);
   assert.match(agent, /"delete", "allow", "to", "any", "port"/);
   assert.match(network, /else args\.push\('to', 'any'\)/);
