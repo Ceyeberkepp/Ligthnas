@@ -6,6 +6,7 @@ set -Eeuo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUTPUT="${1:-${REPO_ROOT}/dist/LightNAS-amd64.iso}"
 BUILD_DIR="${LIGHTNAS_ISO_BUILD_DIR:-${REPO_ROOT}/.iso-build}"
+LIGHTNAS_ISO_CLEAN="${LIGHTNAS_ISO_CLEAN:-1}"
 
 [[ "${EUID}" -eq 0 ]] || {
   echo 'Run as root on a Debian/Ubuntu build machine.' >&2
@@ -23,10 +24,16 @@ if [[ "$missing_build_tools" -eq 1 ]]; then
   DEBIAN_FRONTEND=noninteractive apt-get install -y "${BUILD_PACKAGES[@]}"
 fi
 
-[[ ! -e "${BUILD_DIR}" ]] || {
-  echo "Build directory already exists: ${BUILD_DIR}" >&2
-  exit 1
-}
+if [[ -e "${BUILD_DIR}" ]]; then
+  if [[ "${LIGHTNAS_ISO_CLEAN}" == "1" ]]; then
+    echo "=== Removing previous LightNAS ISO build directory ==="
+    rm -rf -- "${BUILD_DIR}"
+  else
+    echo "Build directory already exists: ${BUILD_DIR}" >&2
+    echo "Set LIGHTNAS_ISO_CLEAN=1 to rebuild from a clean generated directory." >&2
+    exit 1
+  fi
+fi
 
 mkdir -p "${BUILD_DIR}" "$(dirname "${OUTPUT}")"
 cd "${BUILD_DIR}"
@@ -53,7 +60,7 @@ lb config \
   --security false \
   --linux-packages linux-image \
   --linux-flavours amd64 \
-  --compression zstd
+  --compression xz
 
 # Brand both BIOS and UEFI boot menus as LightNAS.
 # live-build ships known-good bootloader templates for the installed version;
@@ -86,6 +93,8 @@ SVG
       -e 's/Debian Live/LightNAS Live\/Recovery/g' \
       -e 's/Graphical Debian Installer/Install LightNAS (Graphical)/g' \
       -e 's/Debian Installer/Install LightNAS (Text fallback)/g' \
+      -e 's/Graphical installer/Install LightNAS (Graphical)/g' \
+      -e 's/Install/Install LightNAS/g' \
       -e 's/splash\.svg/splash.png/g' \
       "$menu"
   done < <(find config/bootloaders -type f \( -name '*.cfg' -o -name '*.conf' \) -print0)
@@ -682,6 +691,25 @@ echo "=================================================="
 lb build
 
 #
+# Validate that the finished image contains the installer payload before it is
+# published. The graphical installer is preferred, while the text installer
+# remains an explicit fallback for older or unusual graphics hardware.
+#
+echo
+echo "=== Validating LightNAS installer payload ==="
+INSTALLER_KERNEL_COUNT="$(find binary -type f \( -name 'linux' -o -name 'vmlinuz' \) -path '*install*' | wc -l)"
+INSTALLER_INITRD_COUNT="$(find binary -type f -name 'initrd*' -path '*install*' | wc -l)"
+if [[ "${INSTALLER_KERNEL_COUNT}" -lt 1 || "${INSTALLER_INITRD_COUNT}" -lt 1 ]]; then
+  echo "ERROR: Debian Installer kernel/initrd payload is missing from the LightNAS ISO tree." >&2
+  exit 1
+fi
+if [[ ! -f binary/install/preseed.cfg && ! -f binary/preseed.cfg && ! -f config/binary_debian-installer/preseed.cfg ]]; then
+  echo "ERROR: LightNAS installer preseed was not staged." >&2
+  exit 1
+fi
+echo "Installer kernel/initrd and LightNAS preseed confirmed."
+
+#
 # Verify the final SquashFS actually contains ZFS.
 #
 echo
@@ -731,6 +759,19 @@ if ! grep -Eqi 'UEFI|EFI' <<<"${ELTORITO_REPORT}"; then
   exit 1
 fi
 echo 'BIOS and UEFI boot entries confirmed.'
+
+echo
+echo "=== Verifying installer files inside final ISO ==="
+ISO_FILE_LIST="$(xorriso -indev "${ISO}" -find / -type f -exec lsdl -- 2>/dev/null || true)"
+if ! grep -Eqi '/install[^ ]*/.*(vmlinuz|linux)' <<<"${ISO_FILE_LIST}"; then
+  echo 'ERROR: final ISO does not contain an installer kernel.' >&2
+  exit 1
+fi
+if ! grep -Eqi '/install[^ ]*/.*initrd' <<<"${ISO_FILE_LIST}"; then
+  echo 'ERROR: final ISO does not contain an installer initrd.' >&2
+  exit 1
+fi
+echo 'Installer payload confirmed inside final ISO.'
 
 #
 # Copy final artifact.
