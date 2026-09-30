@@ -376,7 +376,7 @@ async function localAttachVmGuestDrivers(id) {
   const name = String(id || '');
   if (!/^[A-Za-z][A-Za-z0-9-]{1,39}$/.test(name)) throw Object.assign(new Error('Invalid VM name.'), { status: 400 });
   const drivers = await ensureWindowsVirtioDrivers('');
-  await localPrepareVmStorageAccess({ isoPath: drivers.path, diskDirectory: dirname(drivers.path), diskPath: drivers.path });
+  await localPrepareVmStorageAccess({ isoPath: drivers.path });
 
   const block = await command('virsh', ['-c', 'qemu:///system', 'domblklist', name, '--details'], 15000);
   if (!block.ok) throw Object.assign(new Error(`Unable to inspect VM optical drives: ${block.error}`), { status: 409 });
