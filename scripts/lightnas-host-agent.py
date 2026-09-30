@@ -1432,7 +1432,8 @@ def container_action(data: dict) -> dict:
     action = str(data.get("action") or "")
     if not NAME_RE.fullmatch(name):
         raise ValueError("invalid container name")
-    if not (Path("/var/lib/lxc") / name / "config").exists():
+    config = Path("/var/lib/lxc") / name / "config"
+    if not config.exists():
         raise ValueError("unknown local LXC container")
     if action == "start":
         sanitize_nested_lxc_network(config)
