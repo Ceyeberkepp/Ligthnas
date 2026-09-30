@@ -110,14 +110,14 @@ function dialogEsc(value) {
 const lightnasTasks = (() => {
   let items = [];
   const cancelHandlers = new Map();
-  try { items = JSON.parse(sessionStorage.getItem('lightnas-tasks') || '[]'); } catch {}
+  try { items = JSON.parse(localStorage.getItem('lightnas-tasks') || '[]'); } catch {}
   if (!Array.isArray(items)) items = [];
-  items = items.slice(-40).map(item => item?.status === 'running'
+  items = items.slice(-80).map(item => item?.status === 'running'
     ? { ...item, status:'canceled', detail:item.detail ? `${item.detail} · interrupted by page reload` : 'Interrupted by page reload' }
     : item);
 
   const save = () => {
-    try { sessionStorage.setItem('lightnas-tasks', JSON.stringify(items.slice(-40))); } catch {}
+    try { localStorage.setItem('lightnas-tasks', JSON.stringify(items.slice(-80))); } catch {}
   };
   const statusLabel = item => item.status === 'success' ? 'OK'
     : item.status === 'error' ? 'Error'
@@ -207,6 +207,32 @@ const lightnasTasks = (() => {
   });
   return { create, render, cancel, clear, cancelAll, clearAll };
 })();
+
+window.LightNASTasks = lightnasTasks;
+
+// Capture user-triggered API mutations even when a feature did not explicitly
+// create a progress task. This keeps the bottom Tasks dock consistent across
+// storage, networking, VM/container, backup and administration operations.
+const lightnasOriginalFetch = window.fetch.bind(window);
+window.fetch = async (input, init = {}) => {
+  const url = typeof input === 'string' ? input : String(input?.url || '');
+  const method = String(init.method || (typeof input !== 'string' ? input?.method : '') || 'GET').toUpperCase();
+  const sameApi = url.startsWith('/api/') || url.startsWith(location.origin + '/api/');
+  let action = '';
+  try { if (typeof init.body === 'string' && init.body.startsWith('{')) action = String(JSON.parse(init.body)?.action || ''); } catch {}
+  const background = action === 'auto-publish' || /\/api\/(?:overview|storage\/scan|login\/options|console)\b/.test(url);
+  const mutation = sameApi && ['POST','PATCH','PUT','DELETE'].includes(method) && !background;
+  const labelPath = url.replace(location.origin,'').split('?')[0];
+  const task = mutation ? lightnasTasks.create(action ? `${action} · ${labelPath}` : `${method} ${labelPath}`, 'Request submitted') : null;
+  try {
+    const response = await lightnasOriginalFetch(input, init);
+    if (task) response.ok ? task.success(`Completed · HTTP ${response.status}`) : task.error(`Failed · HTTP ${response.status}`);
+    return response;
+  } catch (error) {
+    task?.error(error?.message || 'Request failed');
+    throw error;
+  }
+};
 
 function openProgressDialog(title, detail, options = {}) {
   const task = lightnasTasks.create(title, detail || 'Starting…', { cancel: options.cancel });
