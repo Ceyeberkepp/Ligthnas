@@ -702,17 +702,17 @@ async function showContainerManager(id) {
           <section data-container-panel="network" hidden>
             <h3>Network</h3>
             <div class="form-grid">
-              <label>Bridge / network<select name="network">\${networks.map(value => \`<option value="\${dialogEsc(value)}" \${value === currentNetwork ? 'selected' : ''}>\${dialogEsc(value)}</option>\`).join('')}</select></label>
-              <label>IPv4 configuration<select name="ipv4Mode"><option value="dhcp" \${item.ipv4Mode !== 'manual' ? 'selected' : ''}>DHCP</option><option value="manual" \${item.ipv4Mode === 'manual' ? 'selected' : ''}>Static</option></select></label>
-              <label>Configured IPv4 address / prefix<input name="ipv4Address" value="\${dialogEsc(item.ipv4Address || '')}" placeholder="192.168.1.50/24"></label>
-              <label>Configured gateway<input name="gateway" value="\${dialogEsc(item.gateway || '')}" placeholder="192.168.1.1"></label>
-              <label>MAC address<input value="\${dialogEsc(item.macAddress || 'Automatically assigned')}" readonly></label>
+              <label>Bridge / network<select name="network">${networks.map(value => `<option value="${dialogEsc(value)}" ${value === currentNetwork ? 'selected' : ''}>${dialogEsc(value)}</option>`).join('')}</select></label>
+              <label>IPv4 configuration<select name="ipv4Mode"><option value="dhcp" ${item.ipv4Mode !== 'manual' ? 'selected' : ''}>DHCP</option><option value="manual" ${item.ipv4Mode === 'manual' ? 'selected' : ''}>Static</option></select></label>
+              <label>Configured IPv4 address / prefix<input name="ipv4Address" value="${dialogEsc(item.ipv4Address || '')}" placeholder="192.168.1.50/24"></label>
+              <label>Configured gateway<input name="gateway" value="${dialogEsc(item.gateway || '')}" placeholder="192.168.1.1"></label>
+              <label>MAC address<input value="${dialogEsc(item.macAddress || 'Automatically assigned')}" readonly></label>
             </div>
             <div class="manager-summary live-network-summary">
-              <div><span>Current live IPv4</span><b>\${dialogEsc(item.liveIpv4Address || item.ipv4 || (String(item.status || '').toLowerCase() === 'running' ? 'Not detected' : 'Container stopped'))}</b></div>
-              <div><span>Current live gateway</span><b>\${dialogEsc(item.liveGateway || (String(item.status || '').toLowerCase() === 'running' ? 'Not detected' : 'Container stopped'))}</b></div>
-              <div><span>Current live DNS</span><b>\${dialogEsc(item.liveDns || (String(item.status || '').toLowerCase() === 'running' ? 'Not detected' : 'Container stopped'))}</b></div>
-              <div><span>Configuration source</span><b>\${dialogEsc(item.networkSettingsSource || 'Detected configuration')}</b></div>
+              <div><span>Current live IPv4</span><b>${dialogEsc(item.liveIpv4Address || item.ipv4 || (String(item.status || '').toLowerCase() === 'running' ? 'Not detected' : 'Container stopped'))}</b></div>
+              <div><span>Current live gateway</span><b>${dialogEsc(item.liveGateway || (String(item.status || '').toLowerCase() === 'running' ? 'Not detected' : 'Container stopped'))}</b></div>
+              <div><span>Current live DNS</span><b>${dialogEsc(item.liveDns || (String(item.status || '').toLowerCase() === 'running' ? 'Not detected' : 'Container stopped'))}</b></div>
+              <div><span>Configuration source</span><b>${dialogEsc(item.networkSettingsSource || 'Detected configuration')}</b></div>
             </div>
 
             <div class="manager-subsection">
