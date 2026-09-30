@@ -1755,11 +1755,10 @@ def require_nmcli() -> None:
 
 
 def network_action(data: dict) -> dict:
-    require_nmcli()
     action = str(data.get("action") or "")
     if action == "firewall-add":
         if not available("ufw"):
-            raise RuntimeError("UFW is not installed on this LightNAS host")
+            return {"action": action, "status": "unmanaged", "backend": "none", "message": "UFW is not installed; existing host firewall policy is unchanged."}
         decision = str(data.get("decision") or "").lower()
         protocol = str(data.get("protocol") or "").lower()
         try:
@@ -1796,7 +1795,7 @@ def network_action(data: dict) -> dict:
         return {"action": action, "number": number}
     if action == "firewall-remove-port":
         if not available("ufw"):
-            raise RuntimeError("UFW is not installed on this LightNAS host")
+            return {"action": action, "status": "unmanaged", "backend": "none", "message": "UFW is not installed; existing host firewall policy is unchanged."}
         try:
             port = int(data.get("port"))
         except (TypeError, ValueError) as exc:
@@ -1817,6 +1816,7 @@ def network_action(data: dict) -> dict:
         run(["ufw", "disable"], timeout=30)
         return {"action": action, "status": "disabled"}
     if action == "wifi-connect":
+        require_nmcli()
         device = str(data.get("device") or "")
         ssid = str(data.get("ssid") or "")
         password = str(data.get("password") or "")
