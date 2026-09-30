@@ -64,7 +64,7 @@ export class JsonStore {
       timestamp: new Date().toISOString()
     };
     this.state.activity.unshift(event);
-    this.state.activity = this.state.activity.slice(0, 100);
+    this.state.activity = this.state.activity.slice(0, 500);
     if (this.activityListener) queueMicrotask(() => Promise.resolve(this.activityListener(event)).catch(() => {}));
     return event;
   }
