@@ -1017,7 +1017,8 @@ document.addEventListener('click', async event => {
     const vmPoolOptions = [{ value:'', label:'Do not add a disk' }, ...(virtualization.storageDetails || []).map(pool => ({ value:pool.id, label:pool.name || pool.id }))];
     const existingDisks = (item.disks || []).map(disk => `${disk.target || '?'} · ${disk.bus || '?'} · ${disk.source || 'unknown source'}`).join(' | ') || 'No disks reported';
     const existingNics = (item.interfaces || []).map(nic => `${nic.macAddress || 'auto'} · ${nic.model || 'virtio'} · ${nic.network || 'default'}`).join(' | ') || 'No NICs reported';
-    const existingHostDevices = (item.hostDevices || []).join(', ') || 'None';    const recommendedDisplay = item.installationMediaId && item.displayModel === 'virtio' ? 'vga' : (item.displayModel || 'vga');
+    const existingHostDevices = (item.hostDevices || []).join(', ') || 'None';
+    const recommendedDisplay = item.installationMediaId && item.displayModel === 'virtio' ? 'vga' : (item.displayModel || 'vga');
     const windowsMedia = looksLikeWindowsMedia(item.installationMediaName || '');
     const recommendedDiskBus = windowsMedia && ['scsi', 'virtio'].includes(item.diskBus) ? 'sata' : (item.diskBus || 'scsi');
     const recommendedNetworkModel = windowsMedia && item.networkModel === 'virtio' ? 'e1000' : (item.networkModel || 'virtio');
@@ -1056,7 +1057,7 @@ document.addEventListener('click', async event => {
         if (values.bootOrder === 'iso' && !values.iso) throw new Error('Select an installer ISO before choosing the CD/DVD drive as the first boot drive.');
         await dialogApi('/api/vms', { method: 'POST', body: JSON.stringify({
           id, vmid:id, action:'update', name:values.name, memoryMiB, cpus,
-          displayModel:values.displayModel, scsiController:values.scsiController, diskBus:values.diskBus, networkModel:values.networkModel,
+          displayModel:values.displayModel, scsiController:values.scsiController, diskBus: values.diskBus, networkModel: values.networkModel,
           iso:values.iso || '', bootOrder:values.bootOrder, startOnBoot:values.startOnBoot === 'true',
           diskSizeGiB:Number(values.diskSizeGiB) || 0, addDiskPool:values.addDiskPool || '', addDiskGiB:Number(values.addDiskGiB) || 0,
           addNicNetwork:values.addNicNetwork || '', addNicModel:values.addNicModel || 'virtio', addPciDevice:values.addPciDevice || ''
