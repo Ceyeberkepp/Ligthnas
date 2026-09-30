@@ -2304,7 +2304,7 @@ def open_vm_console(data: dict):
             last_error = exc
         time.sleep(0.75)
 
-    raise RuntimeError(f"VM console did not become ready within 75 seconds: {last_error}")
+    raise RuntimeError(f"VM display is not ready after 75 seconds: {last_error}")
 
 def stream_vm_console(connection, backend) -> None:
 
