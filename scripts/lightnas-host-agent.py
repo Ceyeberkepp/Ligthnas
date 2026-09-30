@@ -258,11 +258,21 @@ def container_settings(name: str) -> dict:
         match = re.search(rf"^{re.escape(key)}\\s*=\\s*(.+?)\\s*$", text, re.MULTILINE)
         return match.group(1).strip() if match else ""
 
+    metadata = {}
+    try:
+        metadata = json.loads((config.parent / "lightnas.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        pass
+
     rootfs = rootfs_from_config(config)
-    mode = "dhcp"
+    mode = ""
     address = ""
     gateway = ""
     dns: list[str] = []
+    settings_source = ""
+
+    # First read the actual guest configuration written on disk. This is the
+    # authoritative configured state, including when the container is stopped.
     if rootfs:
         candidates = [
             rootfs / "etc" / "systemd" / "network" / "10-lightnas-eth0.network",
@@ -272,38 +282,93 @@ def container_settings(name: str) -> dict:
         if network_file:
             try:
                 network_text = network_file.read_text(encoding="utf-8")
-                if not re.search(r"^DHCP\\s*=\\s*(?:yes|ipv4|true)\\s*$", network_text, re.MULTILINE | re.IGNORECASE):
-                    mode = "manual"
+                dhcp = bool(re.search(r"^DHCP\\s*=\\s*(?:yes|ipv4|true)\\s*$", network_text, re.MULTILINE | re.IGNORECASE))
+                mode = "dhcp" if dhcp else "manual"
                 match = re.search(r"^Address\\s*=\\s*(.+?)\\s*$", network_text, re.MULTILINE)
                 address = match.group(1).strip() if match else ""
                 match = re.search(r"^Gateway\\s*=\\s*(.+?)\\s*$", network_text, re.MULTILINE)
                 gateway = match.group(1).strip() if match else ""
                 dns = [item.strip() for item in re.findall(r"^DNS\\s*=\\s*(.+?)\\s*$", network_text, re.MULTILINE)]
+                settings_source = "guest-config"
             except OSError:
                 pass
 
-    metadata = {}
-    try:
-        metadata = json.loads((config.parent / "lightnas.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError, TypeError):
-        pass
-    # Saved LightNAS metadata is the authoritative fallback for settings that
-    # may not be readable from a stopped guest rootfs yet.
-    mode = str(metadata.get("ipv4Mode") or mode or "dhcp")
-    address = address or str(metadata.get("ipv4Address") or "")
-    gateway = gateway or str(metadata.get("gateway") or "")
+    # Some LXC configurations carry static addressing directly on net.0.
+    if not address:
+        lxc_address = config_value("lxc.net.0.ipv4.address")
+        if lxc_address:
+            address = lxc_address
+            mode = "manual"
+            settings_source = settings_source or "lxc-config"
+    if not gateway:
+        lxc_gateway = config_value("lxc.net.0.ipv4.gateway")
+        if lxc_gateway:
+            gateway = lxc_gateway
+            settings_source = settings_source or "lxc-config"
+
+    # Metadata is a fallback only. It must never overwrite a real guest/LXC
+    # setting because it can become stale after manual changes.
+    if not mode:
+        mode = str(metadata.get("ipv4Mode") or "dhcp")
+        settings_source = "saved-metadata"
+    if not address:
+        address = str(metadata.get("ipv4Address") or "")
+    if not gateway:
+        gateway = str(metadata.get("gateway") or "")
     if not dns:
         dns = [item.strip() for item in str(metadata.get("dns") or "").split(",") if item.strip()]
+
+    configured_address = address
+    configured_gateway = gateway
+    configured_dns = list(dns)
+
+    # For a running guest, also retrieve the effective network state. These
+    # values are shown separately in the UI so administrators can immediately
+    # see whether a saved static configuration has actually taken effect.
+    live_address = ""
+    live_gateway = ""
+    live_dns: list[str] = []
+    if lxc_state(name) == "running":
+        try:
+            live_ip = run(
+                ["lxc-attach", "-n", name, "--", "ip", "-4", "-o", "addr", "show", "dev", "eth0", "scope", "global"],
+                timeout=5, check=False,
+            )
+            match = re.search(r"\\binet\\s+([^\\s]+)", live_ip)
+            live_address = match.group(1).strip() if match else ""
+        except Exception:
+            pass
+        try:
+            live_route = run(
+                ["lxc-attach", "-n", name, "--", "ip", "-4", "route", "show", "default", "dev", "eth0"],
+                timeout=5, check=False,
+            )
+            match = re.search(r"\\bvia\\s+([0-9.]+)", live_route)
+            live_gateway = match.group(1).strip() if match else ""
+        except Exception:
+            pass
+        try:
+            resolv = run(["lxc-attach", "-n", name, "--", "cat", "/etc/resolv.conf"], timeout=5, check=False)
+            for item in re.findall(r"^nameserver\\s+([^\\s#]+)", resolv, re.MULTILINE):
+                value = item.strip()
+                try:
+                    parsed = ipaddress.ip_address(value)
+                    if not parsed.is_loopback:
+                        live_dns.append(value)
+                except ValueError:
+                    continue
+        except Exception:
+            pass
 
     extra_nics = []
     nic_indexes = sorted({
         int(match.group(1))
-        for match in re.finditer(r"^lxc\.net\.(\d+)\.", text, re.MULTILINE)
+        for match in re.finditer(r"^lxc\\.net\\.(\\d+)\\.", text, re.MULTILINE)
         if int(match.group(1)) > 0
     })
     for index in nic_indexes:
         def nic_value(field: str) -> str:
-            match = re.search(rf"^lxc\.net\.{index}\.{re.escape(field)}\s*=\s*(.+?)\s*$", text, re.MULTILINE)
+            match = re.search(rf"^lxc\\.net\\.{index}\\.{re.escape(field)}\\s*=\\s*(.+?)\\s*$", text, re.MULTILINE)
             return match.group(1).strip() if match else ""
         extra_nics.append({
             "index": index,
@@ -316,7 +381,7 @@ def container_settings(name: str) -> dict:
 
     mount_points = []
     device_paths = []
-    for match in re.finditer(r"^lxc\.mount\.entry\s*=\s*(.+?)\s*$", text, re.MULTILINE):
+    for match in re.finditer(r"^lxc\\.mount\\.entry\\s*=\\s*(.+?)\\s*$", text, re.MULTILINE):
         raw = match.group(1).strip()
         parts = raw.split()
         if len(parts) < 2:
@@ -339,9 +404,13 @@ def container_settings(name: str) -> dict:
         "macAddress": config_value("lxc.net.0.hwaddr"),
         "startOnBoot": config_value("lxc.start.auto") != "0",
         "ipv4Mode": mode,
-        "ipv4Address": address,
-        "gateway": gateway,
-        "dns": ", ".join(dns),
+        "ipv4Address": configured_address,
+        "gateway": configured_gateway,
+        "dns": ", ".join(configured_dns),
+        "networkSettingsSource": settings_source,
+        "liveIpv4Address": live_address,
+        "liveGateway": live_gateway,
+        "liveDns": ", ".join(live_dns),
         "storageId": str(metadata.get("storageId") or ""),
         "diskGiB": int(metadata.get("diskGiB") or 0),
         "imageId": str(metadata.get("imageId") or ""),
