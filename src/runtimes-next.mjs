@@ -481,16 +481,54 @@ async function localManageVm(id, action) {
   if (!/^[A-Za-z][A-Za-z0-9-]{1,39}$/.test(name)) throw Object.assign(new Error('Invalid VM name.'), { status: 400 });
   const allowed = new Set(['start', 'stop', 'shutdown', 'reboot', 'reset', 'delete']);
   if (!allowed.has(action)) throw Object.assign(new Error('Invalid VM action.'), { status: 400 });
+
   if (action === 'delete') {
-    await command('virsh', ['-c', 'qemu:///system', 'destroy', name], 30000);
+    const state = await command('virsh', ['-c', 'qemu:///system', 'domstate', name], 10000);
+    if (state.ok && /running|paused|idle/i.test(state.output || '')) {
+      await command('virsh', ['-c', 'qemu:///system', 'destroy', name], 30000);
+    }
     const result = await command('virsh', ['-c', 'qemu:///system', 'undefine', name, '--remove-all-storage', '--nvram'], 120000);
     if (!result.ok) throw Object.assign(new Error(`VM delete failed: ${result.error}`), { status: 409 });
     return { id: name, action, status: 'deleted' };
   }
+
+  const state = await command('virsh', ['-c', 'qemu:///system', 'domstate', name], 10000);
+  if (!state.ok) throw Object.assign(new Error(`Unable to read VM state: ${state.error}`), { status: 409 });
+  const stateText = String(state.output || '').trim().toLowerCase();
+  const running = /running|paused|idle|in shutdown/i.test(stateText);
+  const stopped = /shut off|shutoff|inactive|crashed|pmsuspended/i.test(stateText);
+
+  // Make power controls idempotent so a stale browser row cannot turn a
+  // harmless repeated Start/Shutdown/Stop into an error.
+  if (action === 'start' && running) {
+    return { id:name, action, status:'running', already:true };
+  }
+  if ((action === 'shutdown' || action === 'stop') && stopped) {
+    return { id:name, action, status:'shut off', already:true };
+  }
+  if ((action === 'reboot' || action === 'reset') && stopped) {
+    throw Object.assign(new Error('The VM is already stopped. Start it instead.'), { status: 409 });
+  }
+
   const verb = action === 'stop' ? 'destroy' : action;
   const result = await command('virsh', ['-c', 'qemu:///system', verb, name], 60000);
-  if (!result.ok) throw Object.assign(new Error(`VM ${action} failed: ${result.error}`), { status: 409 });
-  return { id: name, action, status: 'submitted' };
+  if (!result.ok) {
+    // libvirt may race with a guest that has just completed shutdown. Treat
+    // "not running" as success for stop/shutdown so the UI can refresh.
+    if ((action === 'shutdown' || action === 'stop') && /not running|domain is not running/i.test(result.error || '')) {
+      return { id:name, action, status:'shut off', already:true };
+    }
+    if (action === 'start' && /already active|already running/i.test(result.error || '')) {
+      return { id:name, action, status:'running', already:true };
+    }
+    throw Object.assign(new Error(`VM ${action} failed: ${result.error}`), { status: 409 });
+  }
+
+  return {
+    id:name,
+    action,
+    status: action === 'start' ? 'running' : (action === 'shutdown' || action === 'stop' ? 'transitioning' : 'submitted')
+  };
 }
 
 async function localUpdateVm(input) {
