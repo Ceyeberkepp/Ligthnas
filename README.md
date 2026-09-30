@@ -1,6 +1,6 @@
-# Lightweight AI NAS OS
+# LightNAS
 
-This repository contains the first runnable vertical slice of Lightweight AI NAS OS: a low-dependency Node control plane and responsive browser interface designed to remain practical on constrained hardware.
+LightNAS is an independent lightweight NAS and infrastructure operating environment with storage, files/media, networking, native system containers, virtual machines, applications, and administration in one interface. It is designed to run on bare metal or a standard Linux virtual machine without requiring any particular external hypervisor platform.
 
 ## Platform design targets
 
@@ -51,7 +51,7 @@ assumptions cannot silently regress.
 - API validation, request-size limits, security headers, and protected endpoints
 - Automated tests for setup, authentication, inventory, and share creation
 
-The storage screen displays the real available capacity of the appliance file directory, even if no physical disks are visible. If the data directory resides on the OS filesystem, the UI says so explicitly. For separate local storage, attach a Proxmox mount point or existing filesystem at `/var/lib/lightnas` before installation and verify its capacity in Storage. The installer does not partition or format a disk. The storage screen also reads host mount information, block-device metadata, and, if installed and accessible, `zpool list` and `zfs list`. Inside LXC it may show no physical disks or pools. Storage spaces are directories under `/var/lib/lightnas/files/Spaces` on the LXC's existing filesystem, not independently redundant pools. LightNAS does **not** create physical ZFS pools, modify Samba/NFS exports, or partition disks. On a host with existing ZFS pools and delegated permissions, enable `LIGHTNAS_ZFS_ENABLED=1` in `/etc/lightnas/runtime.env` to allow dataset creation and property changes. Saved share plans do not create real shares. Uploads are limited to 1 GB per file and available disk space. ISO uploads under Files/ISO are not automatically made available to libvirt hosts. Media conversion uses the installed FFmpeg codecs and is limited to five minutes per job; video encoding can consume significant CPU and may fail for unsupported inputs. Document indexing is not implemented. SMTP credentials are stored in the owner-only appliance state file and must be protected with host backups and a TLS reverse proxy. Local users can manage files but cannot access admin APIs; these are LightNAS accounts, not Linux, LDAP, or SMB accounts. The interface is plain HTTP on the LAN: use a TLS reverse proxy and trusted network before handling sensitive files or passwords.
+The storage screen displays the real available capacity of the appliance file directory, even if no physical disks are visible. If the data directory resides on the OS filesystem, the UI says so explicitly. For separate local storage, attach or mount an existing filesystem at `/var/lib/lightnas` before installation and verify its capacity in Storage. The storage source may be local hardware, a virtual disk, or storage presented by the operator's chosen virtualization platform. The installer does not partition or format a disk. The storage screen also reads host mount information, block-device metadata, and, if installed and accessible, `zpool list` and `zfs list`. Inside LXC it may show no physical disks or pools. Storage spaces are directories under `/var/lib/lightnas/files/Spaces` on the LXC's existing filesystem, not independently redundant pools. LightNAS does **not** create physical ZFS pools, modify Samba/NFS exports, or partition disks. On a host with existing ZFS pools and delegated permissions, enable `LIGHTNAS_ZFS_ENABLED=1` in `/etc/lightnas/runtime.env` to allow dataset creation and property changes. Saved share plans do not create real shares. Uploads are limited to 1 GB per file and available disk space. ISO uploads under Files/ISO are not automatically made available to libvirt hosts. Media conversion uses the installed FFmpeg codecs and is limited to five minutes per job; video encoding can consume significant CPU and may fail for unsupported inputs. Document indexing is not implemented. SMTP credentials are stored in the owner-only appliance state file and must be protected with host backups and a TLS reverse proxy. Local users can manage files but cannot access admin APIs; these are LightNAS accounts, not Linux, LDAP, or SMB accounts. The interface is plain HTTP on the LAN: use a TLS reverse proxy and trusted network before handling sensitive files or passwords.
 
 ## Container and VM runtimes
 
@@ -65,7 +65,7 @@ LightNAS now treats virtualization as a **built-in OS function**, not as a depen
 
 On bare metal or a normal VM, `install.sh` installs the native LXC and KVM/libvirt stack automatically. Hardware virtualization requires `/dev/kvm`; if it is missing, LightNAS reports VMs as unavailable instead of silently delegating creation to another host.
 
-When LightNAS itself is installed inside an LXC, nested LXC/KVM depends on capabilities granted by the outer hypervisor. The Proxmox helper is only a **deployment/capability helper**: it enables nesting/mknod/keyctl and, when possible, passes `/dev/kvm` into the LightNAS appliance. After that, LightNAS creates and manages its own LXC containers and KVM virtual machines locally. Normal compute operations do not call `pct`, `qm`, or the Proxmox API.
+When LightNAS itself is installed inside a container or nested virtualized environment, nested LXC/KVM depends on capabilities granted by the outer platform. LightNAS remains the local runtime manager after installation. Platform-specific helpers, including the optional Proxmox deployment helper, exist only to prepare the outer environment and are not part of normal LightNAS compute operations.
 
 This mirrors the underlying open-source architecture used by virtualization appliances: LXC-style kernel isolation for system containers and QEMU/KVM for full virtual machines. Incus is another open-source implementation of the same distinction, using LXC for system containers and QEMU for VMs.
 
@@ -105,9 +105,10 @@ Do not expose this development milestone directly to the public internet.
 
 ## One-command Debian/Ubuntu installation
 
-For the complete installation procedure, Proxmox LXC requirements, direct-LAN
-container networking, imported-template behavior, validation commands, upgrades,
-and troubleshooting, see **[docs/INSTALLATION.md](docs/INSTALLATION.md)**.
+For the complete installation procedure, bare-metal and VM deployment,
+container networking, imported-template behavior, optional platform-specific
+integration helpers, validation commands, upgrades, and troubleshooting, see
+**[docs/INSTALLATION.md](docs/INSTALLATION.md)**.
 
 Run as `root` on the NAS host or test LXC:
 
@@ -122,38 +123,26 @@ when installation finishes.
 
 The installer prepares native LXC/liblxc plus QEMU/libvirt. It uses KVM acceleration when available and automatically falls back to QEMU TCG software virtualization when hardware virtualization is unavailable. Docker is never the System Containers backend; it is used only by the App Store and can be disabled with `LIGHTNAS_ENABLE_DOCKER_APPS=0`.
 
-On the **node shell** (prompt such as `root@pve:~#`), use the
-host preparation/install helper with the LightNAS CTID. Do not run this helper
-from inside the LightNAS appliance.
+### Optional platform-specific deployment helpers
 
-Extra setting:
+LightNAS does not require Proxmox, VMware, Hyper-V, or another named hypervisor
+for normal operation. Install LightNAS directly on supported Linux hardware or
+inside a standard Linux VM using the normal installer above.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/Ceyeberkepp/Ligthnas/main/scripts/proxmox-lxc-install.sh \
-  -o /root/lightnas-proxmox-install.sh
-chmod +x /root/lightnas-proxmox-install.sh
-bash /root/lightnas-proxmox-install.sh
-```
-
-Replace `117` with the actual LightNAS CTID.
-
-The helper preserves the existing LightNAS management `eth0` configuration,
-enables the nested runtime capabilities, passes supported devices such as
-`/dev/kvm`, and installs the same local LightNAS engines used on bare metal.
-On supported nested Proxmox installs, new LightNAS system containers use the
-existing LAN uplink through macvlan, receive normal upstream DHCP addresses,
-and are reachable directly at those LAN IPs. The private `10.77.0.0/24`
-network is a compatibility fallback, not the normal direct-LAN path.
+If an operator intentionally deploys LightNAS inside a platform that requires
+extra nesting or device-passthrough preparation, a platform-specific helper may
+be used. For example, the repository includes
+`scripts/proxmox-lxc-install.sh` for users who specifically choose a Proxmox
+LXC deployment. That helper prepares the outer Proxmox container; it does not
+turn LightNAS into a Proxmox product or dependency.
 
 Imported LXC templates are unpacked with nested-LXC-safe handling: archived
 `/dev/*` device nodes are skipped because LXC supplies the runtime `/dev`.
 The main installer also installs the required `tar`, `gzip`, `xz-utils`,
 and `zstd` tools automatically.
 
-To update the web service from inside the appliance, rerun the normal
-`install.sh` command above. No Proxmox API token is required for normal
-LightNAS VM/container operations. Check
-`/var/lib/lightnas/runtime-status.txt` for capability results.
+To update the web service, rerun the normal `install.sh` command. Check
+`/var/lib/lightnas/runtime-status.txt` for local runtime capability results.
 
 To update an existing Git-based installation, run `install.sh` again. It performs a fast-forward-only source update and preserves state under `/var/lib/lightnas`.
 
@@ -206,8 +195,9 @@ Optional application engine
     └── Docker / OCI (App Store only; never the System Containers backend)
 
 Optional external integrations
-    └── Proxmox / other hypervisors for migration or interoperability only
-        (not required for normal LightNAS compute)
+    └── Third-party hypervisors or platforms for deployment, migration,
+        interoperability, or import/export only
+        (not required for normal LightNAS operation)
 ```
 
 
@@ -223,3 +213,20 @@ The next milestone is the storage agent and operation framework:
 6. Configure Samba/NFS shares with idempotent adapters and validation.
 
 See `Lightweight_AI_NAS_OS_Design_Brief.md` for the complete product vision and phased roadmap.
+
+
+## License and responsibility
+
+LightNAS is licensed under the **Apache License 2.0**. See [LICENSE](LICENSE).
+
+LightNAS is an independent product. Third-party names are used only where
+needed to describe optional compatibility, deployment, migration, or
+integration behavior and do not imply affiliation or endorsement.
+
+Operators remain responsible for the virtual machines, containers,
+applications, services, storage, networks, credentials, data, backups,
+third-party licenses, costs, security, and compliance of resources they create,
+import, connect, or manage with LightNAS on their own infrastructure.
+
+See [DISCLAIMER.md](DISCLAIMER.md) for the complete platform and workload
+responsibility notice.
