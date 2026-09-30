@@ -9,6 +9,7 @@ import { proxmoxInventory, proxmoxCreateVm, proxmoxManageVm, proxmoxUpdateVm } f
 import { localContainerInventory, localCreateContainer, localManageContainer, localUpdateContainer, localPrepareVmStorageAccess } from './local-host.mjs';
 import { listContainerTemplates, resolveContainerTemplate } from './templates.mjs';
 import { listStoragePools, listContentAcrossPools, resolveStoragePool } from './storage-pools.mjs';
+import { ensureWindowsVirtioDrivers, vmGuestToolsInventory } from './guest-tools.mjs';
 
 const execute = promisify(execFile);
 const dataRoot = dirname(process.env.NAS_DATA_FILE || 'data/state.json');
@@ -483,7 +484,7 @@ export async function runtimeInventory() {
   const runtime = {
     docker: { available: dockerInfo.ok, enabled: process.env.LIGHTNAS_DOCKER_ENABLED === '1', reason: dockerInfo.ok ? null : 'Optional app runtime is not installed or not accessible.', containers: [], presets: containerImages },
     containers: { available: false, enabled: false, provider: 'local-lxc', reason: 'Native LXC is not available on this LightNAS host.', containers: [], images: [], networks: [], pools: containerStoragePools.map(pool => pool.id), storageDetails: containerStoragePools, storageRoot: null },
-    virtualization: { available: vmInfo.ok && installer.ok, enabled: process.env.LIGHTNAS_VM_ENABLED === '1', provider: 'libvirt', acceleration: process.env.LIGHTNAS_VM_ACCELERATION || 'auto', reason: vmInfo.ok && installer.ok ? null : 'QEMU/libvirt is unavailable on this LightNAS host.', warning: null, machines: [], machineDetails: [], pools: vmStoragePools.map(pool => pool.id), storageDetails: vmStoragePools, networks: [], networkDetails: [], images, isoDetails: storageIsos.map(item => ({ id: item.id, name: item.name, storageId: item.storageId, storageName: item.storageName, sizeBytes: item.sizeBytes })) }
+    virtualization: { available: vmInfo.ok && installer.ok, enabled: process.env.LIGHTNAS_VM_ENABLED === '1', provider: 'libvirt', acceleration: process.env.LIGHTNAS_VM_ACCELERATION || 'auto', reason: vmInfo.ok && installer.ok ? null : 'QEMU/libvirt is unavailable on this LightNAS host.', warning: null, machines: [], machineDetails: [], pools: vmStoragePools.map(pool => pool.id), storageDetails: vmStoragePools, networks: [], networkDetails: [], images, isoDetails: storageIsos.map(item => ({ id: item.id, name: item.name, storageId: item.storageId, storageName: item.storageName, sizeBytes: item.sizeBytes })), guestTools: await vmGuestToolsInventory().catch(() => ({ windows:{ available:false, canDownload:false }, linux:{ available:true, builtIn:true } })) }
   };
   try {
     runtime.containers = await localContainerInventory();
@@ -893,14 +894,27 @@ export async function createVm(input) {
       : `network=${input.network},model=${networkModel}`;
   const virtType = virtualization.acceleration === 'kvm' ? 'kvm' : 'qemu';
   const diskController = diskBus === 'scsi' ? ['--controller', 'scsi,model=virtio-scsi'] : [];
+  let guestDrivers = null;
+  let guestDriversWarning = '';
+  if (windowsInstaller && input.attachGuestDrivers !== false && input.attachGuestDrivers !== 'false') {
+    try {
+      guestDrivers = await ensureWindowsVirtioDrivers(isoEntry?.storageId || '');
+    } catch (error) {
+      guestDriversWarning = error.message || 'Windows VirtIO driver media could not be prepared.';
+    }
+  }
   await localPrepareVmStorageAccess({
     isoPath: isoEntry?.path || '',
     diskDirectory,
     diskPath
   });
+  if (guestDrivers?.path) {
+    await localPrepareVmStorageAccess({ isoPath: guestDrivers.path, diskDirectory, diskPath });
+  }
   const args = ['--connect', 'qemu:///system', '--virt-type', virtType, '--name', input.name, '--memory', String(memory), '--vcpus', String(cpus), '--disk', `path=${diskPath},size=${disk},format=qcow2,bus=${diskBus}`, ...diskController, '--network', networkArg, '--graphics', 'vnc,listen=127.0.0.1', '--video', 'vga', '--noautoconsole', '--wait', '0'];
   if (isoEntry) args.push('--cdrom', isoEntry.path, '--osinfo', 'detect=on,require=off');
   else args.push('--import', '--osinfo', 'generic');
+  if (guestDrivers?.path) args.push('--disk', `path=${guestDrivers.path},device=cdrom,readonly=on,bus=sata`);
   args.push('--boot', firmware === 'uefi' ? (isoEntry ? 'uefi,cdrom,hd,menu=on' : 'uefi,hd,menu=on') : (isoEntry ? 'cdrom,hd,menu=on' : 'hd,menu=on'));
   const response = await exclusive(() => command('virt-install', args, 180000));
   if (!response.ok) {
@@ -931,8 +945,9 @@ export async function createVm(input) {
     networkModel,
     network: networkDetail?.name || input.network,
     guestProfile: windowsInstaller ? 'windows' : 'generic',
+    guestDrivers: guestDrivers ? { attached:true, name:guestDrivers.name, storageName:guestDrivers.storageName || '' } : { attached:false, warning:guestDriversWarning || '' },
     details: firmwareFallback
       ? 'VM created with legacy BIOS because UEFI/OVMF firmware is not installed on this host. Install the ovmf package for UEFI guests.'
-      : (response.output || 'VM created and started.')
+      : (guestDriversWarning ? `${response.output || 'VM created and started.'} Windows guest driver media was not attached: ${guestDriversWarning}` : (response.output || 'VM created and started.'))
   };
 }
