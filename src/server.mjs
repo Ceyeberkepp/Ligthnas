@@ -27,6 +27,7 @@ import {
   listStorageContent, uploadStorageContent, importStorageContent, deleteStorageContent
 } from './storage-pools.mjs';
 import { generateTotpSecret, totpUri, verifyTotp } from './totp.mjs';
+import { featureGateState } from './feature-gates.mjs';
 import {
   qrCodeDataUrl, challenge as mfaChallenge, relyingParty,
   verifyRegistration, verifyAssertion, sendTwilioSms,
@@ -1607,6 +1608,11 @@ async function api(req, res, url) {
     store.addActivity('storage', `Disk ${result.path} partition/filesystem signatures were cleaned.`, 'warning');
     await store.save();
     return send(res, 200, result);
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/features') {
+    if (!requireAnyPermission(res, permissions, ['overview.view', 'system.view', 'admin.view'])) return;
+    return send(res, 200, await featureGateState());
   }
 
   if (req.method === 'GET' && url.pathname === '/api/logs') {
