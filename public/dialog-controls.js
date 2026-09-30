@@ -1065,7 +1065,7 @@ document.addEventListener('click', async event => {
         await dialogApi('/api/vms', { method: 'POST', body: JSON.stringify({
           id, vmid:id, action:'update', name:values.name, memoryMiB, cpus,
           displayModel:values.displayModel, scsiController:values.scsiController, diskBus: values.diskBus, networkModel: values.networkModel,
-          iso:values.iso || '', bootOrder:values.bootOrder, startOnBoot:values.startOnBoot === 'true',
+          iso:values.iso || '', bootOrder: values.bootOrder, startOnBoot:values.startOnBoot === 'true',
           diskSizeGiB:Number(values.diskSizeGiB) || 0, addDiskPool:values.addDiskPool || '', addDiskGiB:Number(values.addDiskGiB) || 0,
           addNicNetwork:values.addNicNetwork || '', addNicModel:values.addNicModel || 'virtio', addPciDevice:values.addPciDevice || ''
         }) });
