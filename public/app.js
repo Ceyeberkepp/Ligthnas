@@ -2267,32 +2267,208 @@ $('#sidebar-backdrop')?.addEventListener('click', () => setMobileSidebar(false))
 addEventListener('keydown', event => { if (event.key === 'Escape' && innerWidth <= 760) setMobileSidebar(false); });
 addEventListener('resize', applySidebarPreference);
 $('#theme-toggle').addEventListener('click', () => { theme = themeChoices[(themeChoices.indexOf(theme) + 1) % themeChoices.length]; localStorage.setItem('lightnas-theme', theme); applyTheme(); toast(`Appearance: ${theme}`); });
-$('#avatar').addEventListener('click', () => {
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = 'image/jpeg,image/png,image/webp';
-  input.addEventListener('change', async () => {
-    const file = input.files?.[0];
+function ensureProfileDialog() {
+  let dialog = document.querySelector('#profile-dialog');
+  if (dialog) return dialog;
+  dialog = document.createElement('dialog');
+  dialog.id = 'profile-dialog';
+  dialog.className = 'lightnas-dialog runtime-dialog profile-dialog';
+  dialog.innerHTML = `
+    <form class="profile-form" method="dialog">
+      <div class="dialog-head">
+        <div><span class="eyebrow">ACCOUNT</span><h2>Edit profile</h2><p class="muted">Update your account details and profile picture.</p></div>
+        <button class="icon-button" type="button" data-profile-close aria-label="Close">×</button>
+      </div>
+      <div class="profile-layout">
+        <section class="profile-picture-editor">
+          <div class="profile-crop-stage" data-profile-crop-stage>
+            <img data-profile-preview alt="Profile picture preview">
+            <div class="profile-crop-ring" aria-hidden="true"></div>
+            <div class="profile-placeholder" data-profile-placeholder>Choose a picture</div>
+          </div>
+          <input data-profile-file type="file" accept="image/jpeg,image/png,image/webp" hidden>
+          <div class="profile-picture-actions">
+            <button class="secondary" type="button" data-profile-choose>Choose picture</button>
+            <button class="secondary" type="button" data-profile-reset-photo>Reset position</button>
+            <button class="secondary danger-button" type="button" data-profile-remove-photo>Remove picture</button>
+          </div>
+          <label>Zoom<input data-profile-zoom type="range" min="1" max="3" step="0.01" value="1"></label>
+          <div class="form-grid profile-position-controls">
+            <label>Horizontal<input data-profile-x type="range" min="-100" max="100" step="1" value="0"></label>
+            <label>Vertical<input data-profile-y type="range" min="-100" max="100" step="1" value="0"></label>
+          </div>
+          <p class="muted">Drag the image inside the circle or use the sliders to position it.</p>
+        </section>
+        <section class="profile-account-fields">
+          <label>Username<input name="username" readonly></label>
+          <label>Display name<input name="displayName" maxlength="80" placeholder="Your name"></label>
+          <label>Email address<input name="email" type="email" maxlength="160" placeholder="you@example.com"></label>
+          <div class="manager-summary">
+            <div><span>Account type</span><b data-profile-role>Local user</b></div>
+            <div><span>Created</span><b data-profile-created>Unknown</b></div>
+          </div>
+          <p class="module-note">Changing your profile does not change your login username or permissions.</p>
+        </section>
+      </div>
+      <div class="form-error" data-profile-error role="alert"></div>
+      <div class="dialog-actions">
+        <button class="secondary" type="button" data-profile-close>Cancel</button>
+        <button class="primary" type="submit">Save profile</button>
+      </div>
+    </form>`;
+  document.body.append(dialog);
+  return dialog;
+}
+
+async function refreshHeaderAvatar() {
+  state.overview = await request('/api/overview');
+  const appliance = state.overview.appliance;
+  const avatar = $('#avatar');
+  avatar.textContent = appliance.avatar ? '' : appliance.username[0].toUpperCase();
+  avatar.style.backgroundImage = appliance.avatar ? `url("/api/profile/avatar?v=${Date.now()}")` : '';
+  avatar.classList.toggle('has-photo', Boolean(appliance.avatar));
+}
+
+async function openProfileDialog() {
+  const dialog = ensureProfileDialog();
+  const form = dialog.querySelector('.profile-form');
+  const error = dialog.querySelector('[data-profile-error]');
+  const preview = dialog.querySelector('[data-profile-preview]');
+  const placeholder = dialog.querySelector('[data-profile-placeholder]');
+  const fileInput = dialog.querySelector('[data-profile-file]');
+  const zoom = dialog.querySelector('[data-profile-zoom]');
+  const x = dialog.querySelector('[data-profile-x]');
+  const y = dialog.querySelector('[data-profile-y]');
+  error.textContent = '';
+
+  const profile = await request('/api/profile');
+  form.elements.username.value = profile.username || '';
+  form.elements.displayName.value = profile.displayName || '';
+  form.elements.email.value = profile.email || '';
+  dialog.querySelector('[data-profile-role]').textContent = profile.isAdmin ? 'Appliance owner' : 'Local user';
+  dialog.querySelector('[data-profile-created]').textContent = profile.createdAt ? new Date(profile.createdAt).toLocaleDateString() : 'Unknown';
+
+  let image = null;
+  let selectedFile = null;
+  let removePhoto = false;
+  let drag = null;
+
+  function renderCrop() {
+    const scale = Number(zoom.value || 1);
+    const px = Number(x.value || 0);
+    const py = Number(y.value || 0);
+    preview.style.transform = `translate(${px}px,${py}px) scale(${scale})`;
+  }
+  function setImageSource(src) {
+    return new Promise((resolve, reject) => {
+      image = new Image();
+      image.onload = () => {
+        preview.src = src;
+        preview.hidden = false;
+        placeholder.hidden = true;
+        zoom.value = '1';
+        x.value = '0';
+        y.value = '0';
+        renderCrop();
+        resolve();
+      };
+      image.onerror = reject;
+      image.src = src;
+    });
+  }
+
+  preview.hidden = true;
+  placeholder.hidden = false;
+  zoom.value = '1'; x.value = '0'; y.value = '0';
+  if (profile.avatar) {
+    try { await setImageSource(`/api/profile/avatar?v=${Date.now()}`); } catch {}
+  }
+
+  dialog.querySelector('[data-profile-choose]').onclick = () => fileInput.click();
+  fileInput.onchange = async () => {
+    const file = fileInput.files?.[0];
     if (!file) return;
-    if (file.size > 8 * 1024 * 1024) return toast('Profile picture must be 8 MiB or smaller.');
+    if (file.size > 8 * 1024 * 1024) { toast('Profile picture must be 8 MiB or smaller.'); return; }
+    selectedFile = file;
+    removePhoto = false;
+    await setImageSource(URL.createObjectURL(file));
+  };
+  dialog.querySelector('[data-profile-reset-photo]').onclick = () => {
+    zoom.value = '1'; x.value = '0'; y.value = '0'; renderCrop();
+  };
+  dialog.querySelector('[data-profile-remove-photo]').onclick = () => {
+    selectedFile = null;
+    image = null;
+    removePhoto = true;
+    preview.removeAttribute('src');
+    preview.hidden = true;
+    placeholder.hidden = false;
+  };
+  zoom.oninput = renderCrop;
+  x.oninput = renderCrop;
+  y.oninput = renderCrop;
+
+  const stage = dialog.querySelector('[data-profile-crop-stage]');
+  stage.onpointerdown = event => {
+    if (!image) return;
+    drag = { x:event.clientX, y:event.clientY, ox:Number(x.value), oy:Number(y.value) };
+    stage.setPointerCapture(event.pointerId);
+  };
+  stage.onpointermove = event => {
+    if (!drag) return;
+    x.value = String(Math.max(-100, Math.min(100, drag.ox + event.clientX - drag.x)));
+    y.value = String(Math.max(-100, Math.min(100, drag.oy + event.clientY - drag.y)));
+    renderCrop();
+  };
+  stage.onpointerup = stage.onpointercancel = () => { drag = null; };
+
+  dialog.querySelectorAll('[data-profile-close]').forEach(button => button.onclick = () => dialog.close());
+  form.onsubmit = async event => {
+    event.preventDefault();
+    error.textContent = '';
     try {
-      const response = await fetch('/api/profile/avatar', {
-        method: 'PUT',
-        headers: { 'Content-Type': file.type, 'X-LightNAS-Request': '1' },
-        body: file
+      await request('/api/profile', {
+        method:'PUT',
+        body:JSON.stringify({
+          displayName:form.elements.displayName.value,
+          email:form.elements.email.value
+        })
       });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.error || 'Unable to upload profile picture.');
-      state.overview = await request('/api/overview');
-      const appliance = state.overview.appliance;
-      const avatar = $('#avatar');
-      avatar.textContent = '';
-      avatar.style.backgroundImage = `url("/api/profile/avatar?v=${Date.now()}")`;
-      avatar.classList.add('has-photo');
-      toast('Profile picture updated.');
-    } catch (error) { toast(error.message); }
-  }, { once: true });
-  input.click();
+
+      if (removePhoto) {
+        const response = await fetch('/api/profile/avatar', { method:'DELETE', headers:{ 'X-LightNAS-Request':'1' } });
+        if (!response.ok) throw new Error((await response.json().catch(()=>({}))).error || 'Unable to remove profile picture.');
+      } else if (selectedFile && image) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 512; canvas.height = 512;
+        const ctx = canvas.getContext('2d');
+        const scale = Number(zoom.value || 1);
+        const fit = Math.max(512 / image.naturalWidth, 512 / image.naturalHeight) * scale;
+        const drawW = image.naturalWidth * fit;
+        const drawH = image.naturalHeight * fit;
+        const offsetX = Number(x.value || 0) * 2.56;
+        const offsetY = Number(y.value || 0) * 2.56;
+        ctx.drawImage(image, (512 - drawW) / 2 + offsetX, (512 - drawH) / 2 + offsetY, drawW, drawH);
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/webp', 0.9));
+        if (!blob) throw new Error('Unable to prepare the cropped profile picture.');
+        const response = await fetch('/api/profile/avatar', {
+          method:'PUT',
+          headers:{ 'Content-Type':'image/webp', 'X-LightNAS-Request':'1' },
+          body:blob
+        });
+        if (!response.ok) throw new Error((await response.json().catch(()=>({}))).error || 'Unable to upload profile picture.');
+      }
+      await refreshHeaderAvatar();
+      dialog.close();
+      toast('Profile updated.');
+    } catch (problem) { error.textContent = problem.message; }
+  };
+
+  if (!dialog.open) dialog.showModal();
+}
+
+$('#avatar').addEventListener('click', () => {
+  openProfileDialog().catch(error => toast(error.message));
 });
 $('#mobile-more').addEventListener('click', () => setMobileSidebar(true));
 $$('[data-view]').forEach(link => link.addEventListener('click', () => setMobileSidebar(false)));
