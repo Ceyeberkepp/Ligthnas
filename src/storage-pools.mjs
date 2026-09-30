@@ -142,7 +142,8 @@ function publicPool(pool, source) {
     createdAt: pool.createdAt || null,
     provider: STORAGE_PROVIDER_SET.has(String(pool.provider || '').toLowerCase())
       ? String(pool.provider).toLowerCase()
-      : (source?.type === 'zfs' ? 'zfs' : 'directory')
+      : (source?.type === 'zfs' ? 'zfs' : 'directory'),
+    providerConfig: pool.providerConfig && typeof pool.providerConfig === 'object' ? { ...pool.providerConfig } : {}
   };
 }
 
@@ -209,6 +210,12 @@ export async function createStoragePool(input) {
   if (!poolName.test(name)) throw Object.assign(new Error('Storage name must contain 2–32 letters, numbers, underscores, or hyphens and start with a letter.'), { status: 400 });
   if (name.toLowerCase() === 'local') throw Object.assign(new Error('local is reserved for the default LightNAS storage.'), { status: 409 });
   const content = normalizeContent(input?.content, ['iso', 'vztmpl', 'images', 'rootdir', 'backup']);
+  const providerConfig = input?.providerConfig && typeof input.providerConfig === 'object' && !Array.isArray(input.providerConfig)
+    ? Object.fromEntries(Object.entries(input.providerConfig)
+        .filter(([key, value]) => /^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(key) && typeof value === 'string' && value.length <= 512)
+        .map(([key, value]) => [key, value.trim()])
+        .filter(([, value]) => value))
+    : {};
   if (!content.length) throw Object.assign(new Error('Select at least one allowed content type.'), { status: 400 });
 
   const inventory = await getStorageInventory();
@@ -237,6 +244,7 @@ export async function createStoragePool(input) {
     root,
     content,
     provider,
+    providerConfig,
     preparedByHostAgent,
     createdAt: new Date().toISOString()
   };
