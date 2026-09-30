@@ -2791,6 +2791,37 @@ def _managed_storage_path(value: object) -> Path:
     return path
 
 
+def vm_iso_access(data: dict) -> dict:
+    iso_path = _managed_storage_path(data.get("isoPath"))
+    if not iso_path.is_file():
+        raise RuntimeError("selected VM ISO no longer exists")
+    qemu_user = _vm_qemu_user()
+
+    # Grant QEMU traversal only along the managed path and read-only access to
+    # the ISO itself. This operation intentionally does not require a VM disk.
+    current = iso_path.parent
+    parents: set[Path] = set()
+    while True:
+        parents.add(current)
+        if str(current) in {"/storage", "/mnt", "/media", "/srv", "/data", "/var/lib/lightnas"}:
+            break
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+
+    for directory in sorted(parents, key=lambda item: len(str(item))):
+        if directory.exists():
+            _run_checked(["setfacl", "-m", f"u:{qemu_user}:x", str(directory)])
+    _run_checked(["setfacl", "-m", f"u:{qemu_user}:r", str(iso_path)])
+
+    return {
+        "qemuUser": qemu_user,
+        "iso": str(iso_path),
+        "prepared": True,
+    }
+
+
 def vm_storage_access(data: dict) -> dict:
     iso_raw = str(data.get("isoPath") or "").strip()
     disk_directory_raw = str(data.get("diskDirectory") or "").strip()
@@ -2881,6 +2912,8 @@ def dispatch(request: dict) -> dict:
         return storage_prepare(data)
     if action == "vm-storage-access":
         return vm_storage_access(data)
+    if action == "vm-iso-access":
+        return vm_iso_access(data)
     if action == "appliance-health":
         return appliance_health()
     if action == "appliance-repair":
