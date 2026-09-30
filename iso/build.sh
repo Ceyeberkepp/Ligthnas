@@ -106,6 +106,34 @@ SVG
       "$menu"
   done < <(find config/bootloaders -type f \( -name '*.cfg' -o -name '*.conf' \) -print0)
 
+  # Brand Syslinux installer choices by their stable label IDs instead of
+  # depending on Debian's human-readable menu wording. Trixie live-build uses
+  # labels such as installgui/install while the displayed text can vary
+  # between "Install", "Graphical install", or distribution-specific strings.
+  while IFS= read -r -d '' cfg; do
+    awk '
+      /^[[:space:]]*label[[:space:]]+installgui([[:space:]]|$)/ {
+        installer="gui"; print; next
+      }
+      /^[[:space:]]*label[[:space:]]+install([[:space:]]|$)/ {
+        installer="text"; print; next
+      }
+      /^[[:space:]]*label[[:space:]]+/ {
+        installer=""
+      }
+      installer=="gui" && /^[[:space:]]*menu[[:space:]]+label[[:space:]]+/ {
+        print "  menu label ^Install LightNAS (Graphical)"
+        next
+      }
+      installer=="text" && /^[[:space:]]*menu[[:space:]]+label[[:space:]]+/ {
+        print "  menu label Install LightNAS (Text fallback)"
+        next
+      }
+      { print }
+    ' "$cfg" >"${cfg}.tmp"
+    mv "${cfg}.tmp" "$cfg"
+  done < <(find config/bootloaders -type f -name '*.cfg' -print0)
+
   # Make the graphical installer the default BIOS/Syslinux choice instead of
   # silently entering the Debian live session. Live/Recovery remains in the
   # menu for troubleshooting.
