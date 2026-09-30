@@ -657,6 +657,33 @@ async function localUpdateVm(input) {
     }
   }
 
+  // Add a new managed qcow2 data disk when requested.
+  const addDiskGiB = Number(input.addDiskGiB || 0);
+  if (addDiskGiB > 0) {
+    if (!Number.isInteger(addDiskGiB) || addDiskGiB < 1 || addDiskGiB > 16384) {
+      throw Object.assign(new Error('Additional disk size must be 1–16384 GiB.'), { status:400 });
+    }
+    const storage = await resolveStoragePool(String(input.addDiskPool || ''), 'images', true);
+    const diskDirectory = join(storage.root, 'images');
+    await mkdir(diskDirectory, { recursive:true });
+    const safeTarget = target.replace(/[^A-Za-z0-9-]/g,'-');
+    const diskPath = join(diskDirectory, `${safeTarget}-data-${Date.now()}.qcow2`);
+    const create = await command('qemu-img', ['create','-f','qcow2',diskPath,`${addDiskGiB}G`], 60000);
+    if (!create.ok) throw Object.assign(new Error(`Unable to create additional VM disk: ${create.error}`), { status:409 });
+    await localPrepareVmStorageAccess({ isoPath:'', diskDirectory, diskPath });
+    const currentHardware = vmHardwareDetails((await command('virsh',['-c','qemu:///system','dumpxml',target,'--inactive'],10000)).output);
+    const usedTargets = new Set((currentHardware.disks || []).map(item => item.target).filter(Boolean));
+    const diskTarget = Array.from({length:25},(_,i)=>`sd${String.fromCharCode(98+i)}`).find(value=>!usedTargets.has(value)) || 'sdz';
+    const stateNow = await command('virsh',['-c','qemu:///system','domstate',target],10000);
+    const attachArgs = ['-c','qemu:///system','attach-disk',target,diskPath,diskTarget,'--driver','qemu','--subdriver','qcow2','--targetbus','scsi','--config'];
+    if (/running/i.test(stateNow.output || '')) attachArgs.push('--live');
+    const attached = await command('virsh', attachArgs, 60000);
+    if (!attached.ok) {
+      await rm(diskPath,{force:true}).catch(()=>{});
+      throw Object.assign(new Error(`Unable to attach additional VM disk: ${attached.error}`), { status:409 });
+    }
+  }
+
   // Add one additional virtual NIC when requested.
   const addNicNetwork = String(input.addNicNetwork || '').trim();
   if (addNicNetwork) {
