@@ -7,7 +7,7 @@ test('ISO builder uses supported compression and validates installer payload', a
   assert.match(build, /--compression xz/);
   assert.doesNotMatch(build, /--compression zstd/);
   assert.match(build, /--debian-installer-preseedfile preseed\.cfg/);
-  assert.ok(build.indexOf('config/binary_debian-installer/preseed.cfg') < build.indexOf('lb config'), 'preseed must be staged before lb config');
+  assert.ok(build.indexOf('config/binary_debian-installer/preseed.cfg') < build.indexOf('\nlb config \\'), 'preseed must be staged before the lb config command');
   assert.match(build, /Validating LightNAS installer payload/);
   assert.match(build, /BIOS and UEFI boot entries confirmed/);
   assert.match(build, /Graphical LightNAS installer and text fallback menu entries confirmed/);
