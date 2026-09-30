@@ -323,6 +323,35 @@ async function automaticContainerApplication(id, { preferredPort = 0, requestedH
   return { ...ready, publication };
 }
 
+let publicationReconcileRunning = false;
+async function reconcilePrivateNatPublications() {
+  if (publicationReconcileRunning) return;
+  publicationReconcileRunning = true;
+  try {
+    const inventory = await localContainerSummary();
+    const candidates = (inventory.containers || []).filter(item => {
+      const id = String(item.id || item.name || '');
+      const running = /running|active/i.test(String(item.status || ''));
+      return id && running && containerUsesPrivateNat(item) && !containerPublisher.forContainer(id);
+    });
+    for (const item of candidates) {
+      const id = String(item.id || item.name || '');
+      await automaticContainerApplication(id, { attempts: 1 }).catch(() => null);
+    }
+  } finally {
+    publicationReconcileRunning = false;
+  }
+}
+
+// Native containers can finish booting their web application long after LXC
+// itself reports RUNNING. Re-scan private-NAT guests so applications become
+// reachable through the LightNAS LAN address without manual port forwarding.
+const publicationReconcileTimer = setInterval(() => {
+  reconcilePrivateNatPublications().catch(() => null);
+}, 15000);
+publicationReconcileTimer.unref?.();
+queueMicrotask(() => reconcilePrivateNatPublications().catch(() => null));
+
 export const PERMISSIONS = Object.freeze([
   'overview.view',
   'files.read', 'files.write', 'files.download', 'files.delete', 'media.convert',
