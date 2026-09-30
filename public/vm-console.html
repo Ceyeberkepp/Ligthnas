@@ -17,6 +17,9 @@
     #screen { position:relative; flex:1 1 auto; width:100vw; min-height:0; overflow:hidden; background:#000; }
     #screen > div { position:absolute !important; inset:0 !important; width:100% !important; height:100% !important; }
     #screen canvas { display:block; width:100% !important; height:100% !important; max-width:none !important; max-height:none !important; object-fit:fill; }
+    :fullscreen header { display:none !important; }
+    :fullscreen body { width:100vw; height:100vh; }
+    :fullscreen #screen { width:100vw; height:100vh; flex:1 1 100vh; }
     .error { color:#ff9a9a !important; }
   </style>
 </head>
