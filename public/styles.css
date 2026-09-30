@@ -664,3 +664,56 @@ dialog::backdrop { background: rgba(1,7,13,.76); backdrop-filter: blur(5px); }
   .hardware-readout { align-items:flex-start; flex-direction:column; }
   .hardware-readout span { text-align:left; }
 }
+
+/* Compact Proxmox-style storage add menu */
+.storage-add-menu { position:relative; display:inline-block; }
+.storage-add-toggle {
+  min-height:34px;
+  padding:7px 10px;
+  gap:5px;
+  border:1px solid var(--line-strong);
+  border-radius:8px;
+  background:var(--panel);
+}
+.storage-add-toggle span { font-size:12px; line-height:1; }
+.storage-add-dropdown {
+  position:absolute;
+  top:calc(100% + 5px);
+  right:0;
+  z-index:50;
+  width:230px;
+  max-height:min(520px,70vh);
+  overflow:auto;
+  padding:5px;
+  border:1px solid var(--line-strong);
+  border-radius:9px;
+  background:var(--panel);
+  box-shadow:0 14px 34px rgba(0,0,0,.22);
+}
+.storage-add-dropdown[hidden] { display:none; }
+.storage-add-dropdown button {
+  width:100%;
+  display:flex;
+  align-items:center;
+  gap:9px;
+  min-height:34px;
+  padding:7px 9px;
+  border:0;
+  border-radius:6px;
+  background:transparent;
+  color:var(--text);
+  text-align:left;
+  font-weight:600;
+}
+.storage-add-dropdown button:hover,
+.storage-add-dropdown button:focus-visible {
+  background:var(--soft);
+  outline:none;
+}
+.storage-type-icon {
+  width:18px;
+  flex:0 0 18px;
+  color:var(--muted);
+  font-size:13px;
+  text-align:center;
+}
