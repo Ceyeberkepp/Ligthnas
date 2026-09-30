@@ -933,7 +933,10 @@ export async function createContainer(input) {
       ipv4Address: input.ipv4Address,
       gateway: input.gateway,
       dns: input.dns,
-      startOnBoot: input.startOnBoot !== false
+      startOnBoot: input.startOnBoot !== false,
+      extraNics: Array.isArray(input.extraNics) ? input.extraNics : undefined,
+      addMountPoints: Array.isArray(input.addMountPoints) ? input.addMountPoints : undefined,
+      addDevicePaths: Array.isArray(input.addDevicePaths) ? input.addDevicePaths : undefined
     });
     if (input.action === 'delete') requireDeletionConfirmation(input, id, 'container');
     return await localManageContainer(id, input.action, { deleteFiles: input.deleteFiles === true, confirmation: input.confirmation });
