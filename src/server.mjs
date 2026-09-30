@@ -1609,6 +1609,12 @@ async function api(req, res, url) {
     return send(res, 200, result);
   }
 
+  if (req.method === 'GET' && url.pathname === '/api/logs') {
+    if (!requirePermission(res, permissions, 'audit.view')) return;
+    const limit = Math.max(20, Math.min(500, Number(url.searchParams.get('limit') || 250)));
+    return send(res, 200, { logs: store.state.activity.slice(0, limit) });
+  }
+
   if (req.method === 'GET' && url.pathname === '/api/overview') {
     // Login/home must stay fast on old CPUs and 2 GiB systems. Filesystem
     // metadata is cheap, while ZFS/pool probing can take seconds on cold or
