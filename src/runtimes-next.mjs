@@ -375,6 +375,7 @@ async function localVmDetails(names) {
 async function localAttachVmGuestDrivers(id) {
   const name = String(id || '');
   if (!/^[A-Za-z][A-Za-z0-9-]{1,39}$/.test(name)) throw Object.assign(new Error('Invalid VM name.'), { status: 400 });
+
   const drivers = await ensureWindowsVirtioDrivers('');
   await localPrepareVmIsoAccess({ isoPath: drivers.path });
 
@@ -382,13 +383,21 @@ async function localAttachVmGuestDrivers(id) {
   const liveBlock = await command('virsh', ['-c', 'qemu:///system', 'domblklist', name, '--details'], 15000);
   if (!liveBlock.ok) throw Object.assign(new Error(`Unable to inspect VM optical drives: ${liveBlock.error}`), { status: 409 });
 
-  const combined = `${persistentBlock.output || ''}\n${liveBlock.output || ''}`.toLowerCase();
-  if (combined.includes(String(drivers.path || '').toLowerCase()) || combined.includes('virtio-win')) {
-    const liveAttached = String(liveBlock.output || '').toLowerCase().includes(String(drivers.path || '').toLowerCase()) ||
-      String(liveBlock.output || '').toLowerCase().includes('virtio-win');
+  const persistentText = String(persistentBlock.output || '').toLowerCase();
+  const liveText = String(liveBlock.output || '').toLowerCase();
+  const driverPathLower = String(drivers.path || '').toLowerCase();
+  const persistentHasDrivers = persistentText.includes(driverPathLower) || persistentText.includes('virtio-win');
+  const liveHasDrivers = liveText.includes(driverPathLower) || liveText.includes('virtio-win');
+
+  if (persistentHasDrivers || liveHasDrivers) {
     return {
-      id:name, action:'guest-drivers', attached:true, alreadyAttached:true,
-      liveAttached, requiresRestart:!liveAttached, name:drivers.name
+      id:name,
+      action:'guest-drivers',
+      attached:true,
+      alreadyAttached:true,
+      liveAttached:liveHasDrivers,
+      requiresRestart:!liveHasDrivers,
+      name:drivers.name
     };
   }
 
@@ -396,48 +405,75 @@ async function localAttachVmGuestDrivers(id) {
   const used = new Set([...allBlockOutput.matchAll(/\b(sd[a-z]|vd[a-z]|hd[a-z])\b/g)].map(match => match[1]));
   const persistentTarget = Array.from({ length:25 }, (_, index) => `sd${String.fromCharCode(98 + index)}`).find(candidate => !used.has(candidate)) || 'sdz';
 
-  // SATA optical media is reliable at boot, but libvirt/QEMU generally cannot
-  // hotplug a SATA disk into an already-running guest. Always save the SATA CD
-  // in the persistent definition first.
-  const configured = await command('virsh', [
-    '-c', 'qemu:///system', 'attach-disk', name, drivers.path, persistentTarget,
-    '--type', 'cdrom', '--mode', 'readonly', '--targetbus', 'sata', '--config'
-  ], 30000);
-  if (!configured.ok) throw Object.assign(new Error(`Could not add the VirtIO driver CD to the VM configuration: ${configured.error}`), { status: 409 });
+  // Define the permanent optical drive with explicit XML. attach-device
+  // --config edits only the persistent domain and does not attempt a live SATA
+  // hotplug on a running VM.
+  const xmlEscape = value => String(value || '')
+    .replaceAll('&', '&amp;')
+    .replaceAll("'", '&apos;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
+  const tempDir = await mkdtemp(join(tmpdir(), 'lightnas-virtio-cd-'));
+  const persistentXmlPath = join(tempDir, 'virtio-drivers.xml');
+  const persistentXml = `<disk type='file' device='cdrom'>
+  <driver name='qemu' type='raw'/>
+  <source file='${xmlEscape(drivers.path)}'/>
+  <target dev='${persistentTarget}' bus='sata'/>
+  <readonly/>
+</disk>
+`;
 
-  const state = await command('virsh', ['-c', 'qemu:///system', 'domstate', name], 10000);
-  const running = state.ok && /running|paused|idle/i.test(state.output || '');
-  if (!running) {
+  try {
+    await writeFile(persistentXmlPath, persistentXml, { mode:0o600 });
+    const configured = await command('virsh', [
+      '-c', 'qemu:///system', 'attach-device', name, persistentXmlPath, '--config'
+    ], 30000);
+    if (!configured.ok) {
+      throw Object.assign(new Error(`Could not add the VirtIO driver CD to the VM configuration: ${configured.error}`), { status: 409 });
+    }
+
+    const state = await command('virsh', ['-c', 'qemu:///system', 'domstate', name], 10000);
+    const running = state.ok && /running|paused|idle/i.test(state.output || '');
+    if (!running) {
+      return {
+        id:name, action:'guest-drivers', attached:true, alreadyAttached:false,
+        liveAttached:false, requiresRestart:false, target:persistentTarget,
+        name:drivers.name, storageName:drivers.storageName || ''
+      };
+    }
+
+    // Try a separate live-only SCSI CD. Failure is not fatal because the SATA
+    // CD is already saved in the persistent configuration for the next boot.
+    const liveUsed = new Set([...String(liveBlock.output || '').matchAll(/\b(sd[a-z]|vd[a-z]|hd[a-z])\b/g)].map(match => match[1]));
+    const liveTarget = Array.from({ length:25 }, (_, index) => `sd${String.fromCharCode(98 + index)}`).find(candidate => !liveUsed.has(candidate)) || 'sdz';
+    const liveXmlPath = join(tempDir, 'virtio-drivers-live.xml');
+    const liveXml = `<disk type='file' device='cdrom'>
+  <driver name='qemu' type='raw'/>
+  <source file='${xmlEscape(drivers.path)}'/>
+  <target dev='${liveTarget}' bus='scsi'/>
+  <readonly/>
+</disk>
+`;
+    await writeFile(liveXmlPath, liveXml, { mode:0o600 });
+    const live = await command('virsh', [
+      '-c', 'qemu:///system', 'attach-device', name, liveXmlPath, '--live'
+    ], 30000);
+
     return {
-      id:name, action:'guest-drivers', attached:true, alreadyAttached:false,
-      liveAttached:false, requiresRestart:false, target:persistentTarget,
-      name:drivers.name, storageName:drivers.storageName || ''
+      id:name,
+      action:'guest-drivers',
+      attached:true,
+      alreadyAttached:false,
+      liveAttached:Boolean(live.ok),
+      requiresRestart:!live.ok,
+      target:live.ok ? liveTarget : persistentTarget,
+      name:drivers.name,
+      storageName:drivers.storageName || '',
+      liveWarning:live.ok ? '' : (live.error || 'The running VM does not support optical-media hotplug; the driver CD will appear after reboot.')
     };
+  } finally {
+    await rm(tempDir, { recursive:true, force:true }).catch(() => {});
   }
-
-  // For a running VM, try a SCSI optical device for the live domain because
-  // SCSI is hot-pluggable on common virtio-scsi configurations. If this host
-  // or guest lacks a hot-pluggable SCSI controller, keep the persistent SATA
-  // attachment and tell the UI that one reboot is required.
-  const liveUsed = new Set([...String(liveBlock.output || '').matchAll(/\b(sd[a-z]|vd[a-z]|hd[a-z])\b/g)].map(match => match[1]));
-  const liveTarget = Array.from({ length:25 }, (_, index) => `sd${String.fromCharCode(98 + index)}`).find(candidate => !liveUsed.has(candidate)) || 'sdz';
-  const live = await command('virsh', [
-    '-c', 'qemu:///system', 'attach-disk', name, drivers.path, liveTarget,
-    '--type', 'cdrom', '--mode', 'readonly', '--targetbus', 'scsi', '--live'
-  ], 30000);
-
-  return {
-    id:name,
-    action:'guest-drivers',
-    attached:true,
-    alreadyAttached:false,
-    liveAttached:Boolean(live.ok),
-    requiresRestart:!live.ok,
-    target:live.ok ? liveTarget : persistentTarget,
-    name:drivers.name,
-    storageName:drivers.storageName || '',
-    liveWarning:live.ok ? '' : (live.error || 'The running VM does not support optical-media hotplug; the driver CD will appear after reboot.')
-  };
 }
 
 async function localManageVm(id, action) {
