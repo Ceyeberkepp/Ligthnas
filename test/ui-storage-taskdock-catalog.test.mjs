@@ -128,7 +128,7 @@ test('network shares provision SMB and SFTP instead of saving plans only', async
   assert.match(index, /Network username/);
   assert.match(index, /Network password/);
   assert.match(app, /Network shares/);
-  assert.match(app, /sftp user@LIGHTNAS-IP/);
+  assert.match(app, /built-in <code>Files<\/code> share/);
   assert.match(app, /share\.smb/);
   assert.match(server, /provisionNetworkShare/);
   assert.match(server, /removeNetworkShare/);
