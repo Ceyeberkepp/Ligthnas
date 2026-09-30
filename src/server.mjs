@@ -332,10 +332,21 @@ async function reconcilePrivateNatPublications() {
     const candidates = (inventory.containers || []).filter(item => {
       const id = String(item.id || item.name || '');
       const running = /running|active/i.test(String(item.status || ''));
-      return id && running && containerUsesPrivateNat(item) && !containerPublisher.forContainer(id);
+      return id && running && containerUsesPrivateNat(item);
     });
     for (const item of candidates) {
       const id = String(item.id || item.name || '');
+      const existing = containerPublisher.forContainer(id);
+      // A stored publication can outlive its listener or come from an older
+      // direct-access configuration. Private-NAT guests must always be
+      // reachable through a live host-side proxy, so stale/direct records are
+      // removed and re-detected rather than causing reconciliation to skip.
+      if (existing?.mode === 'proxy' && containerPublisher.isListening?.(existing.hostPort, id)) continue;
+      if (existing) {
+        await containerPublisher.remove(id).catch(error => {
+          console.warn(`Unable to clear stale application publication for ${id}: ${error.message}`);
+        });
+      }
       await automaticContainerApplication(id, { attempts: 1 }).catch(error => {
         console.warn(`Automatic application publishing failed for ${id}: ${error.message}`);
       });
