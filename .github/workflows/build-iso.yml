@@ -85,6 +85,10 @@ jobs:
           # cause QEMU to exit even though the ISO itself is valid.
           OVMF_CODE=""
           OVMF_VARS=""
+          # Keep a generic firmware discovery path for runner/package layouts
+          # that place OVMF outside the two preferred Ubuntu paths below.
+          DISCOVERED_OVMF="$(find /usr/share/OVMF /usr/share/qemu -maxdepth 2 -type f -name 'OVMF_CODE*.fd' 2>/dev/null | sort | head -n 1 || true)"
+
           for pair in \
             "/usr/share/OVMF/OVMF_CODE_4M.fd|/usr/share/OVMF/OVMF_VARS_4M.fd" \
             "/usr/share/OVMF/OVMF_CODE.fd|/usr/share/OVMF/OVMF_VARS.fd"; do
@@ -96,6 +100,14 @@ jobs:
               break
             fi
           done
+
+          if [ -z "$OVMF_CODE" ] && [ -n "$DISCOVERED_OVMF" ]; then
+            candidate_vars="${DISCOVERED_OVMF/CODE/VARS}"
+            if [ -f "$candidate_vars" ]; then
+              OVMF_CODE="$DISCOVERED_OVMF"
+              OVMF_VARS="$candidate_vars"
+            fi
+          fi
 
           if [ -z "$OVMF_CODE" ] || [ -z "$OVMF_VARS" ]; then
             echo "No matching OVMF CODE/VARS firmware pair was found." >&2
