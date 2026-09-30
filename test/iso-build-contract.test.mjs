@@ -35,8 +35,9 @@ test('ISO workflow avoids doc-only rebuild noise and performs a QEMU smoke boot'
   assert.match(workflow, /cancel-in-progress: true/);
   assert.match(workflow, /BIOS boot smoke test/);
   assert.match(workflow, /UEFI boot smoke test/);
-  assert.match(workflow, /OVMF_CODE\.fd/);
+  assert.match(workflow, /OVMF_CODE_4M\\.fd/);
   assert.match(workflow, /qemu-system-x86_64/);
+  assert.match(workflow, /OVMF_CODE_4M\.fd/);
   assert.match(workflow, /sha256sum -c/);
   assert.doesNotMatch(workflow, /README\.md/);
   assert.doesNotMatch(workflow, /docs\/\*\*/);
