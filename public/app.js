@@ -642,6 +642,7 @@ function vmsView() {
   <button class="secondary ${/running|active/i.test(String(item.status || '')) ? '' : 'hidden'}" type="button" data-vm-action="reboot" data-vm-id="${escapeHtml(item.id || item.name)}">Reboot</button>
   <button class="secondary ${/running|active/i.test(String(item.status || '')) ? '' : 'hidden'}" type="button" data-vm-action="stop" data-vm-id="${escapeHtml(item.id || item.name)}">Stop</button>
   <button class="secondary" type="button" data-vm-edit="${escapeHtml(item.id || item.name)}" data-vm-name="${escapeHtml(item.name)}" data-vm-memory="${Math.max(512, Math.round((Number(item.memory) || 0) / 1048576) || 2048)}" data-vm-cpus="${item.cpus || 2}">Edit</button>
+  <button class="secondary" type="button" data-vm-guest-drivers="${escapeHtml(item.id || item.name)}">Attach VirtIO Drivers</button>
   <button class="secondary" type="button" data-vm-action="reset" data-vm-id="${escapeHtml(item.id || item.name)}">Reset</button>
   <button class="secondary danger-button" type="button" data-vm-action="delete" data-vm-id="${escapeHtml(item.id || item.name)}">Delete</button>
 </div></article>`).join('')}</div>`
@@ -1480,6 +1481,23 @@ function bindViewActions() {
       toast(error.message);
     }
   });
+  $$('[data-vm-guest-drivers]', $('#content')).forEach(button => button.addEventListener('click', async event => {
+    const target = event.currentTarget;
+    const id = target.dataset.vmGuestDrivers;
+    target.disabled = true;
+    target.textContent = 'Attaching…';
+    try {
+      const result = await request('/api/vms', { method:'POST', body:JSON.stringify({ id, vmid:id, action:'guest-drivers' }) });
+      state.runtimes = await request('/api/runtimes');
+      render('vms');
+      toast(result.alreadyAttached ? 'VirtIO driver CD is already attached.' : 'VirtIO driver CD attached to the VM.');
+    } catch (error) {
+      target.disabled = false;
+      target.textContent = 'Attach VirtIO Drivers';
+      toast(error.message);
+    }
+  }));
+
     $('[data-appliance-health]', $('#content'))?.addEventListener('click', async event => {
     const button = event.currentTarget; button.disabled = true; button.textContent = 'Checking…';
     try { const result = await request('/api/appliance/health'); renderHealth(result); toast(result.healthy ? 'LightNAS appliance is healthy.' : 'Some appliance services need attention.'); }
