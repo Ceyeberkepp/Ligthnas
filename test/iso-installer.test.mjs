@@ -11,9 +11,11 @@ test('LightNAS ISO exposes and defaults to graphical installation', () => {
   assert.match(iso, /set default="Install LightNAS \(Graphical\)"/);
 });
 
-test('LightNAS ISO has a graphical fallback when LightDM does not create X display', () => {
-  assert.match(iso, /lightnas-display-fallback\.service/);
+test('LightNAS ISO boots its own kiosk instead of the Debian LightDM greeter', () => {
+  assert.match(iso, /lightnas-display-console\.service/);
   assert.match(iso, /\/usr\/bin\/xinit \/usr\/local\/bin\/lightnas-xsession/);
+  assert.match(iso, /systemctl mask lightdm\.service/);
+  assert.match(iso, /Conflicts=display-manager\.service lightdm\.service getty@tty7\.service/);
   assert.match(iso, /WantedBy=graphical\.target/);
 });
 
