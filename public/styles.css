@@ -963,3 +963,38 @@ dialog::backdrop { background: rgba(1,7,13,.76); backdrop-filter: blur(5px); }
   .workspace-mode-switch { position:static; transform:none; margin-left:auto; }
   .workspace-mode-switch button { min-width:74px; padding-inline:8px; }
 }
+
+
+/* NAS backup jobs: compact Proxmox-style management table without changing LightVisor. */
+body:not(.product-hypervisor) .backup-console { padding: 0; overflow: hidden; }
+body:not(.product-hypervisor) .backup-toolbar {
+  min-height: 42px; display:flex; align-items:center; gap:6px; padding:7px 9px;
+  border-bottom:1px solid var(--line); background:var(--panel);
+}
+body:not(.product-hypervisor) .backup-toolbar .secondary { min-height:28px; padding:4px 10px; border-radius:3px; }
+body:not(.product-hypervisor) .backup-toolbar-spacer { flex:1; }
+body:not(.product-hypervisor) .backup-filter { display:flex; align-items:center; gap:6px; margin:0; font-size:12px; white-space:nowrap; }
+body:not(.product-hypervisor) .backup-filter input { width:auto; min-height:0; }
+body:not(.product-hypervisor) .backup-table-wrap { overflow:auto; min-height:360px; }
+body:not(.product-hypervisor) .backup-table { min-width:1050px; font-size:12px; }
+body:not(.product-hypervisor) .backup-row {
+  width:100%; display:grid; grid-template-columns:72px 120px 130px 150px 120px 1fr 150px 2fr;
+  align-items:center; min-height:34px; border:0; border-bottom:1px solid var(--line);
+  background:transparent; color:var(--text); text-align:left; padding:0; font:inherit;
+}
+body:not(.product-hypervisor) button.backup-row { cursor:pointer; }
+body:not(.product-hypervisor) .backup-row > span { min-width:0; padding:7px 10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; border-right:1px solid var(--line); }
+body:not(.product-hypervisor) .backup-head { position:sticky; top:0; z-index:2; min-height:32px; background:var(--panel-2); font-weight:600; }
+body:not(.product-hypervisor) .backup-job-row:hover { background:color-mix(in srgb, var(--accent) 7%, var(--panel)); }
+body:not(.product-hypervisor) .backup-job-row.selected { background:color-mix(in srgb, var(--accent) 14%, var(--panel)); box-shadow:inset 3px 0 0 var(--accent); }
+body:not(.product-hypervisor) .backup-enabled { text-align:center; font-weight:700; }
+body:not(.product-hypervisor) .backup-selection { font-variant-numeric:tabular-nums; }
+body:not(.product-hypervisor) .backup-empty { padding:28px 16px; color:var(--muted); }
+body:not(.product-hypervisor) .backup-status-line {
+  display:flex; gap:18px; justify-content:flex-end; padding:7px 10px; border-top:1px solid var(--line);
+  color:var(--muted); font-size:11px; background:var(--panel);
+}
+@media (max-width: 900px) {
+  body:not(.product-hypervisor) .backup-toolbar { flex-wrap:wrap; }
+  body:not(.product-hypervisor) .backup-toolbar-spacer { display:none; }
+}
