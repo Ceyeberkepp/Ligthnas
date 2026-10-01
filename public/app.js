@@ -2093,7 +2093,7 @@ function bindViewActions() {
       if (live) { live.disabled = false; live.textContent = original || 'Refresh'; }
     }
   }));
-  $('[data-community-install]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+  $$('[data-community-install]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     const docker = state.runtimes?.docker;
     if (!docker?.available || !docker?.enabled) return toast(docker?.reason || 'Docker needs to be installed and enabled on this host before app installation.');
     const app = state.communityCatalog?.apps?.find(item => item.id === button.dataset.communityInstall);
@@ -2111,7 +2111,7 @@ function bindViewActions() {
       progress?.fail(error.message); toast(error.message); button.disabled = false; button.textContent = 'Install app';
     }
   }));
-  $('[data-install]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+  $$('[data-install]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     const docker = state.runtimes?.docker;
     if (!docker?.available || !docker?.enabled) return toast(docker?.reason || 'Docker needs to be installed and enabled on this host before app installation.');
     const app = state.runtimes?.catalog?.find(item => item.id === button.dataset.install);
