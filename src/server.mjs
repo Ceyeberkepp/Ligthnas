@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { readFile, mkdir, rmdir, writeFile, rm } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
@@ -28,6 +29,7 @@ import {
 } from './storage-pools.mjs';
 import { generateTotpSecret, totpUri, verifyTotp } from './totp.mjs';
 import { featureGateState } from './feature-gates.mjs';
+import { licenseStatus, verifyLicense } from './license.mjs';
 import {
   qrCodeDataUrl, challenge as mfaChallenge, relyingParty,
   verifyRegistration, verifyAssertion, sendTwilioSms,
@@ -47,12 +49,18 @@ import { provisionNetworkShare, removeNetworkShare, publicShare, publicLibrarySh
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const publicRoot = join(root, 'public');
+const packageInfo = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
+const SOFTWARE_VERSION = String(packageInfo.version || '0.0.0');
 const novncRoot = process.env.LIGHTNAS_NOVNC_ROOT || '/usr/share/novnc';
 const xtermRoot = join(root, 'node_modules', '@xterm', 'xterm');
 const xtermFitRoot = join(root, 'node_modules', '@xterm', 'addon-fit');
 const store = new JsonStore();
 const sessions = new Sessions();
 await store.load();
+if (store.state.config && !store.state.config.instanceId) {
+  store.state.config.instanceId = randomUUID();
+  await store.save();
+}
 const containerPublisher = new ContainerPublisher(store);
 await containerPublisher.restore();
 queueMicrotask(warmOverviewStorage);
@@ -571,7 +579,7 @@ function applyUserGroups(username, groupIds) {
 }
 
 async function api(req, res, url) {
-  if (req.method === 'GET' && url.pathname === '/api/status') return send(res, 200, { version: '0.12.0', setupRequired: !store.state.config });
+  if (req.method === 'GET' && url.pathname === '/api/status') return send(res, 200, { version: SOFTWARE_VERSION, setupRequired: !store.state.config });
   if (req.method === 'GET' && url.pathname === '/api/branding') {
     const config = store.state.config || {};
     return send(res, 200, {
@@ -602,6 +610,7 @@ async function api(req, res, url) {
       passwordHash: await hashPassword(input.password),
       timezone: input.timezone || 'UTC',
       createdAt: new Date().toISOString(),
+      instanceId: randomUUID(),
       totpEnabled: false
     };
     store.addActivity('setup', `Appliance ${input.deviceName} was configured.`, 'success');
@@ -1661,6 +1670,19 @@ async function api(req, res, url) {
   if (req.method === 'GET' && url.pathname === '/api/features') {
     if (!requireAnyPermission(res, permissions, ['overview.view', 'system.view', 'admin.view'])) return;
     return send(res, 200, await featureGateState());
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/license') {
+    if (!isAdmin && !permissions.includes('system.view')) return send(res, 403, { error: 'System information access is required.' });
+    return send(res, 200, await licenseStatus({ instanceId: store.state.config.instanceId, version: SOFTWARE_VERSION }));
+  }
+  if (req.method === 'POST' && url.pathname === '/api/license/verify') {
+    if (!requireOwner(res, context)) return;
+    const input = await bodyJson(req);
+    const result = await verifyLicense({ licenseKey: input.licenseKey, instanceId: store.state.config.instanceId, version: SOFTWARE_VERSION });
+    store.addActivity('license', `LightNAS ${result.edition} license was verified.`, 'success');
+    await store.save();
+    return send(res, 200, result);
   }
 
   if (req.method === 'GET' && url.pathname === '/api/software') {
