@@ -294,3 +294,267 @@ details[open] > summary .hv-tree-chevron:before{transform:rotate(45deg)}
 .hv-tree-status.online{background:#20b66a}.hv-tree-status.offline{background:#a7b0b8}
 .hv-tree-empty{padding:5px 5px 6px 19px;font-size:8px;color:#6f899d}
 .hv-operations-label{margin-top:8px;border-top:1px solid #18384f;padding-top:14px}
+
+
+/* vSphere-inspired VM/container configuration workflow.
+   Hypervisor edition only; NAS edition dialogs remain unchanged. */
+.product-hypervisor .runtime-create-dialog {
+  width:min(1040px,94vw);
+  max-width:1040px;
+}
+.product-hypervisor .runtime-create-dialog .dialog-body {
+  padding:0;
+  overflow:hidden;
+}
+.product-hypervisor .runtime-create-dialog .dialog-head {
+  padding:18px 22px;
+  border-bottom:1px solid #d9e2e9;
+}
+.product-hypervisor .runtime-create-dialog .runtime-wizard-form {
+  display:grid;
+  grid-template-columns:240px minmax(0,1fr);
+  grid-template-rows:auto minmax(460px,1fr) auto;
+}
+.product-hypervisor .runtime-create-dialog .dialog-head {
+  grid-column:1/-1;
+}
+.product-hypervisor .runtime-create-dialog .vsphere-wizard-steps {
+  grid-column:1;
+  grid-row:2;
+  display:flex;
+  flex-direction:column;
+  gap:0;
+  padding:14px 10px;
+  border-right:1px solid #d9e2e9;
+  background:#f5f8fa;
+}
+.product-hypervisor .runtime-create-dialog .vsphere-wizard-steps span {
+  position:relative;
+  min-height:58px;
+  display:grid;
+  grid-template-columns:30px minmax(0,1fr);
+  grid-template-rows:auto auto;
+  column-gap:9px;
+  align-items:center;
+  padding:8px 10px;
+  border:0;
+  border-radius:4px;
+  color:#526273;
+  text-align:left;
+}
+.product-hypervisor .runtime-create-dialog .vsphere-wizard-steps span.active {
+  background:#e7f2fb;
+  color:#145f96;
+}
+.product-hypervisor .runtime-create-dialog .vsphere-wizard-steps span.complete {
+  color:#2f6c4e;
+}
+.product-hypervisor .runtime-create-dialog .vsphere-wizard-steps b {
+  grid-row:1/3;
+  width:26px;height:26px;border-radius:50%;
+  display:grid;place-items:center;
+  border:1px solid #b9c7d2;background:white;font-size:10px;
+}
+.product-hypervisor .runtime-create-dialog .vsphere-wizard-steps i {
+  font-style:normal;font-size:11px;font-weight:800;
+}
+.product-hypervisor .runtime-create-dialog .vsphere-wizard-steps small {
+  font-size:9px;color:#81909e;
+}
+.product-hypervisor .runtime-create-dialog .wizard-page {
+  grid-column:2;
+  grid-row:2;
+  padding:22px 26px;
+  overflow:auto;
+}
+.product-hypervisor .runtime-create-dialog .wizard-page h3 {
+  margin:0 0 4px;
+  font-size:16px;
+}
+.product-hypervisor .runtime-create-dialog .wizard-grid {
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:14px 18px;
+  margin-top:18px;
+}
+.product-hypervisor .runtime-create-dialog .wizard-grid label {
+  display:grid;gap:6px;font-size:10px;font-weight:700;color:#45576a;
+}
+.product-hypervisor .runtime-create-dialog .wizard-grid input,
+.product-hypervisor .runtime-create-dialog .wizard-grid select {
+  min-height:36px;
+}
+.product-hypervisor .runtime-create-dialog .form-error {
+  grid-column:2;
+  padding:0 26px;
+}
+.product-hypervisor .runtime-create-dialog .dialog-actions {
+  grid-column:1/-1;
+  margin:0;
+  padding:12px 18px;
+  border-top:1px solid #d9e2e9;
+  background:#f8fafc;
+}
+
+.product-hypervisor .vsphere-hardware-dialog {
+  width:min(1120px,95vw);
+  max-width:1120px;
+}
+.product-hypervisor .vsphere-hardware-dialog .dialog-body {
+  padding:0;
+  overflow:hidden;
+}
+.product-hypervisor .vsphere-dialog-head {
+  padding:16px 20px;
+  border-bottom:1px solid #d8e1e8;
+}
+.product-hypervisor .vsphere-dialog-head p {
+  margin:4px 0 0;
+  max-width:760px;
+}
+.product-hypervisor .vsphere-settings-layout {
+  display:grid;
+  grid-template-columns:220px minmax(0,1fr);
+  min-height:510px;
+  max-height:66vh;
+}
+.product-hypervisor .vsphere-settings-nav {
+  padding:10px 8px;
+  background:#f4f7f9;
+  border-right:1px solid #d8e1e8;
+  overflow:auto;
+}
+.product-hypervisor .vsphere-settings-nav button {
+  width:100%;
+  min-height:38px;
+  display:flex;
+  align-items:center;
+  gap:9px;
+  padding:7px 10px;
+  border:0;
+  border-radius:3px;
+  background:transparent;
+  color:#314458;
+  font:inherit;
+  font-size:11px;
+  text-align:left;
+  cursor:pointer;
+}
+.product-hypervisor .vsphere-settings-nav button:hover {
+  background:#e9eff4;
+}
+.product-hypervisor .vsphere-settings-nav button.active {
+  background:#dcecf8;
+  color:#0f5f98;
+  box-shadow:inset 3px 0 0 #2389d2;
+  font-weight:800;
+}
+.product-hypervisor .vsphere-nav-icon {
+  width:18px;
+  color:#607b91;
+  text-align:center;
+}
+.product-hypervisor .vsphere-settings-content {
+  overflow:auto;
+  background:white;
+}
+.product-hypervisor .vsphere-settings-panel {
+  padding:20px 24px 30px;
+}
+.product-hypervisor .vsphere-panel-title {
+  padding-bottom:13px;
+  border-bottom:1px solid #e4e9ed;
+  margin-bottom:16px;
+}
+.product-hypervisor .vsphere-panel-title h3 {
+  margin:0 0 3px;
+  font-size:15px;
+}
+.product-hypervisor .vsphere-field-grid {
+  display:grid;
+  grid-template-columns:minmax(180px,.6fr) minmax(280px,1.4fr);
+  gap:0;
+  border:1px solid #e0e6eb;
+  border-bottom:0;
+}
+.product-hypervisor .vsphere-field {
+  grid-column:1/-1;
+  display:grid !important;
+  grid-template-columns:minmax(180px,.6fr) minmax(280px,1.4fr);
+  align-items:center;
+  gap:14px;
+  min-height:52px;
+  margin:0 !important;
+  padding:8px 12px;
+  border-bottom:1px solid #e0e6eb;
+}
+.product-hypervisor .vsphere-field:nth-child(even) {
+  background:#fafbfd;
+}
+.product-hypervisor .vsphere-field-label {
+  font-size:10px;
+  font-weight:700;
+  color:#526374;
+}
+.product-hypervisor .vsphere-field input,
+.product-hypervisor .vsphere-field select {
+  width:100%;
+  min-height:34px;
+  margin:0 !important;
+}
+.product-hypervisor .vsphere-field input[readonly] {
+  border-color:transparent;
+  background:transparent;
+  color:#667889;
+}
+.product-hypervisor .vsphere-dialog-actions {
+  display:flex;
+  align-items:center;
+  margin:0;
+  padding:12px 18px;
+  border-top:1px solid #d8e1e8;
+  background:#f8fafc;
+}
+.product-hypervisor .vsphere-action-spacer {
+  flex:1;
+}
+
+/* Container manager uses the same enterprise settings layout in Hypervisor mode. */
+.product-hypervisor .container-manager-dialog {
+  width:min(1160px,95vw);
+  max-width:1160px;
+}
+.product-hypervisor .container-manager-layout {
+  grid-template-columns:220px minmax(0,1fr);
+}
+.product-hypervisor .container-manager-tabs {
+  background:#f4f7f9;
+  border-right:1px solid #d8e1e8;
+  padding:10px 8px;
+}
+.product-hypervisor .container-manager-tabs button {
+  min-height:36px;
+  border-radius:3px;
+  font-size:10px;
+}
+.product-hypervisor .container-manager-tabs button.active {
+  background:#dcecf8;
+  color:#0f5f98;
+  box-shadow:inset 3px 0 0 #2389d2;
+}
+
+@media (max-width:760px) {
+  .product-hypervisor .runtime-create-dialog .runtime-wizard-form { display:block; }
+  .product-hypervisor .runtime-create-dialog .vsphere-wizard-steps {
+    flex-direction:row; overflow:auto; border-right:0; border-bottom:1px solid #d9e2e9;
+  }
+  .product-hypervisor .runtime-create-dialog .vsphere-wizard-steps span {
+    min-width:180px;
+  }
+  .product-hypervisor .runtime-create-dialog .wizard-grid { grid-template-columns:1fr; }
+  .product-hypervisor .vsphere-settings-layout { grid-template-columns:1fr; max-height:none; }
+  .product-hypervisor .vsphere-settings-nav { display:flex; overflow:auto; border-right:0; border-bottom:1px solid #d8e1e8; }
+  .product-hypervisor .vsphere-settings-nav button { min-width:max-content; }
+  .product-hypervisor .vsphere-field-grid { grid-template-columns:1fr; }
+  .product-hypervisor .vsphere-field { grid-template-columns:1fr; }
+}
