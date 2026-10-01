@@ -85,7 +85,8 @@ if [[ -d /usr/share/live/build/bootloaders ]]; then
   <rect x="330" y="132" width="34" height="90" rx="11" fill="#7ab8ff"/>
   <text x="320" y="292" text-anchor="middle" font-family="DejaVu Sans, sans-serif" font-size="54" font-weight="700" fill="#f4fbff">LightNAS</text>
   <text x="320" y="333" text-anchor="middle" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#9db2c3">Storage · Apps · Containers · Virtual Machines</text>
-  <text x="320" y="393" text-anchor="middle" font-family="DejaVu Sans, sans-serif" font-size="15" fill="#5ce1c3">Graphical installer · BIOS + UEFI</text>
+  <text x="320" y="380" text-anchor="middle" font-family="DejaVu Sans, sans-serif" font-size="15" fill="#5ce1c3">LightNAS Installer</text>
+  <text x="320" y="408" text-anchor="middle" font-family="DejaVu Sans, sans-serif" font-size="13" fill="#9db2c3">Graphical · VGA safe · Terminal · Serial · BIOS + UEFI</text>
 </svg>
 SVG
   rsvg-convert -w 640 -h 480 "${BUILD_DIR}/lightnas-splash.svg" >"${BUILD_DIR}/lightnas-splash.png"
@@ -100,7 +101,7 @@ SVG
       -e 's/Debian GNU\/Linux/LightNAS/g' \
       -e 's/Debian Live/LightNAS Live\/Recovery/g' \
       -e 's/Graphical Debian Installer/Install LightNAS (Graphical)/g' \
-      -e 's/Debian Installer/Install LightNAS (Text fallback)/g' \
+      -e 's/Debian Installer/Install LightNAS (Terminal UI)/g' \
       -e 's/Graphical installer/Install LightNAS (Graphical)/g' \
       -e 's/splash\.svg/splash.png/g' \
       "$menu"
@@ -126,13 +127,71 @@ SVG
         next
       }
       installer=="text" && /^[[:space:]]*menu[[:space:]]+label[[:space:]]+/ {
-        print "  menu label Install LightNAS (Text fallback)"
+        print "  menu label Install LightNAS (Terminal UI)"
         next
       }
       { print }
     ' "$cfg" >"${cfg}.tmp"
     mv "${cfg}.tmp" "$cfg"
   done < <(find config/bootloaders -type f -name '*.cfg' -print0)
+
+  # Add Proxmox-style compatibility choices. The normal graphical installer is
+  # first, but every machine has an explicit path that does not depend on a
+  # modern GPU: VGA-safe framebuffer, ncurses terminal, and serial console.
+  while IFS= read -r -d '' cfg; do
+    if grep -Eq '^[[:space:]]*label[[:space:]]+installgui([[:space:]]|$)' "$cfg"; then
+      awk '
+        function emit_safe(block, mode,   out,n,i,line) {
+          n=split(block,out,"\n")
+          for (i=1;i<=n;i++) {
+            line=out[i]
+            if (mode=="vga" && line ~ /^[[:space:]]*label[[:space:]]+installgui([[:space:]]|$)/) {
+              sub(/installgui/,"lightnas-vga",line)
+            } else if (mode=="serial" && line ~ /^[[:space:]]*label[[:space:]]+installgui([[:space:]]|$)/) {
+              sub(/installgui/,"lightnas-serial",line)
+            } else if (mode=="vga" && line ~ /^[[:space:]]*menu[[:space:]]+label[[:space:]]+/) {
+              line="  menu label Install LightNAS (VGA Safe Mode)"
+            } else if (mode=="serial" && line ~ /^[[:space:]]*menu[[:space:]]+label[[:space:]]+/) {
+              line="  menu label Install LightNAS (Serial Console)"
+            } else if (mode=="vga" && line ~ /^[[:space:]]*append[[:space:]]+/) {
+              line=line " nomodeset vga=normal video=vesa:off"
+            } else if (mode=="serial" && line ~ /^[[:space:]]*append[[:space:]]+/) {
+              line=line " DEBIAN_FRONTEND=text console=tty0 console=ttyS0,115200n8"
+            }
+            if (line !~ /^[[:space:]]*menu[[:space:]]+default[[:space:]]*$/) print line
+          }
+        }
+        BEGIN { capture=0; block="" }
+        /^[[:space:]]*label[[:space:]]+installgui([[:space:]]|$)/ { capture=1; block=$0 "\n"; print; next }
+        capture && /^[[:space:]]*label[[:space:]]+/ {
+          emit_safe(block,"vga")
+          emit_safe(block,"serial")
+          capture=0; block=""
+          print
+          next
+        }
+        capture { block=block $0 "\n"; print; next }
+        { print }
+        END {
+          if (capture) {
+            emit_safe(block,"vga")
+            emit_safe(block,"serial")
+          }
+        }
+      ' "$cfg" >"${cfg}.tmp"
+      mv "${cfg}.tmp" "$cfg"
+    fi
+  done < <(find config/bootloaders -type f -name '*.cfg' -print0)
+
+  # Add conservative graphics options to the dedicated VGA-safe entry and keep
+  # terminal/serial modes independent of X, Wayland, VESA, VirtIO, VMware,
+  # VirtualBox VMSVGA/VBoxVGA, or physical GPU drivers.
+  while IFS= read -r -d '' grubcfg; do
+    if grep -q 'Install LightNAS (Graphical)' "$grubcfg"; then
+      # Rename Debian text installer consistently in GRUB menus.
+      sed -i 's/Install LightNAS (Text fallback)/Install LightNAS (Terminal UI)/g' "$grubcfg"
+    fi
+  done < <(find config/bootloaders -type f \( -name 'grub.cfg' -o -name 'grub*.cfg' \) -print0)
 
   # Make the graphical installer the default BIOS/Syslinux choice instead of
   # silently entering the Debian live session. Live/Recovery remains in the
@@ -202,7 +261,10 @@ ufw
 smartmontools
 xserver-xorg
 xserver-xorg-video-all
+xserver-xorg-video-vesa
+xserver-xorg-video-fbdev
 xserver-xorg-input-all
+fbset
 xinit
 xauth
 lightdm
@@ -741,8 +803,8 @@ if ! grep -Rqs -- 'Install LightNAS (Graphical)' binary 2>/dev/null; then
   echo "ERROR: final ISO tree does not contain the branded graphical LightNAS installer entry." >&2
   exit 1
 fi
-if ! grep -Rqs -- 'Install LightNAS (Text fallback)' binary 2>/dev/null; then
-  echo "ERROR: final ISO tree does not contain the text installer fallback entry." >&2
+if ! grep -Rqs -- 'Install LightNAS (Terminal UI)' binary 2>/dev/null; then
+  echo "ERROR: final ISO tree does not contain the terminal installer fallback entry." >&2
   exit 1
 fi
 echo "Graphical LightNAS installer and text fallback menu entries confirmed."
