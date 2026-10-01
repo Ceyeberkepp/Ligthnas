@@ -11,7 +11,7 @@ import { getFilesystems, getStorageInventory, getSystemSnapshot } from './system
 import { hashPassword, Sessions, verifyPassword } from './auth.mjs';
 import { listFiles, listAllFiles, createFolder, uploadFile, downloadFile, downloadEntry, deleteEntry } from './files.mjs';
 import { thumbnailFor } from './thumbnails.mjs';
-import { catalog, runtimeInventory, installCatalogApp, manageCatalogApp, updateCatalogApp, openContainerShell, createContainer, createVm } from './runtimes-next.mjs';
+import { catalog, runtimeInventory, vmEditorInventory, installCatalogApp, manageCatalogApp, updateCatalogApp, openContainerShell, createContainer, createVm } from './runtimes-next.mjs';
 import { communityCatalog } from './community-catalog.mjs';
 import { proxmoxConsoleSocket, proxmoxUpdateStorage, proxmoxCleanDisk } from './proxmox.mjs';
 import { localContainerSummary, localContainerInventory, localManageContainer, localContainerConsoleSocket, localContainerCommand, localVmConsoleSocket, localNodeConsoleSocket, localNetworkInventory, localNetworkAction, localApplianceHealth, localApplianceRepair, localSoftwareStatus, localSoftwareUpdate, localRepairNetworkShares, localSyncShareAdministrator } from './local-host.mjs';
@@ -1627,6 +1627,10 @@ async function api(req, res, url) {
     const refresh = url.searchParams.get('refresh') === '1';
     const community = await communityCatalog({ refresh });
     return send(res, 200, community);
+  }
+  if (req.method === 'GET' && url.pathname === '/api/vms/editor') {
+    if (!requirePermission(res, permissions, 'vms.manage')) return;
+    return send(res, 200, await vmEditorInventory(url.searchParams.get('id') || ''));
   }
   if (req.method === 'GET' && url.pathname === '/api/runtimes') {
     if (!requireAnyPermission(res, permissions, ['apps.manage', 'containers.manage', 'vms.manage', 'storage.view', 'system.view'])) return;
