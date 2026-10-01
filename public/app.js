@@ -15,11 +15,14 @@ systemTheme.addEventListener('change', applyTheme);
 applyTheme();
 
 async function request(path, options = {}) {
+  const started = performance.now();
   const response = await fetch(path, {
     ...options,
     headers: { 'Content-Type': 'application/json', 'X-LightNAS-Request': '1', ...(options.headers || {}) }
   });
   const body = await response.json().catch(() => ({}));
+  const elapsed = performance.now() - started;
+  if (elapsed > 1200) console.warn(`[LightNAS slow API] ${Math.round(elapsed)}ms ${options.method || 'GET'} ${path}`);
   if (!response.ok) throw Object.assign(new Error(body.error || 'Request failed.'), { status: response.status, payload: body });
   return body;
 }
@@ -919,6 +922,7 @@ async function loadRuntimes(forceRefresh = false) {
   const work = (async () => {
     try {
       state.runtimes = await request(`/api/runtimes${forceRefresh ? '?refresh=1' : ''}`);
+      window.LightNASRuntimeInventory = state.runtimes;
       state.runtimeError = null;
     } catch (error) {
       state.runtimeError = error.message;
@@ -947,6 +951,8 @@ async function loadContainers() {
   try {
     const containers = await request('/api/containers/inventory?summary=1');
     state.runtimes = { ...(state.runtimes || {}), containers };
+    window.LightNASContainerInventory = containers;
+    window.LightNASRuntimeInventory = state.runtimes;
     state.containerError = null;
   } catch (error) {
     state.containerError = error.message;
