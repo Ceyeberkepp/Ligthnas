@@ -539,3 +539,19 @@
     min-width: max-content;
   }
 }
+
+
+/* Hypervisor is a dedicated console. The NAS product sidebar must not remain
+   beside the hypervisor inventory tree. */
+.console[data-workspace-mode="hypervisor"] {
+  grid-template-columns: 1fr !important;
+}
+.console[data-workspace-mode="hypervisor"] > .sidebar {
+  display: none !important;
+}
+.console[data-workspace-mode="hypervisor"] > .main,
+.console[data-workspace-mode="hypervisor"] > main {
+  grid-column: 1 / -1 !important;
+  width: 100%;
+  min-width: 0;
+}
