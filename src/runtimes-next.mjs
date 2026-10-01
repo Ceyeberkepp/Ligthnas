@@ -372,40 +372,46 @@ function parseDomInfo(text) {
 }
 
 async function localVmDetails(names) {
-  const details = [];
-  for (const name of names.slice(0, 100)) {
-    const [info, blockDevices, domainXml] = await Promise.all([
-      command('virsh', ['-c', 'qemu:///system', 'dominfo', name], 10000),
-      command('virsh', ['-c', 'qemu:///system', 'domblklist', name, '--details'], 10000),
-      command('virsh', ['-c', 'qemu:///system', 'dumpxml', name, '--inactive'], 10000)
-    ]);
-    if (!info.ok) continue;
-    const parsed = parseDomInfo(info.output);
-    const hardware = domainXml.ok ? vmHardwareDetails(domainXml.output) : { disks:[], interfaces:[], hostDevices:[] };
-    let primaryDiskSizeGiB = 0;
-    const primaryTarget = hardware.disks?.[0]?.target || '';
-    if (primaryTarget) {
-      const blockInfo = await command('virsh', ['-c', 'qemu:///system', 'domblkinfo', name, primaryTarget], 10000);
-      const capacity = blockInfo.ok ? Number(blockInfo.output.match(/Capacity:\s*(\d+)/i)?.[1] || 0) : 0;
-      primaryDiskSizeGiB = capacity ? Math.round((capacity / (1024 ** 3)) * 100) / 100 : 0;
+  const selected = names.slice(0, 100);
+  const details = new Array(selected.length);
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < selected.length) {
+      const index = cursor++;
+      const name = selected[index];
+      const [info, blockDevices, domainXml] = await Promise.all([
+        command('virsh', ['-c', 'qemu:///system', 'dominfo', name], 4000),
+        command('virsh', ['-c', 'qemu:///system', 'domblklist', name, '--details'], 4000),
+        command('virsh', ['-c', 'qemu:///system', 'dumpxml', name, '--inactive'], 4000)
+      ]);
+      if (!info.ok) continue;
+      const parsed = parseDomInfo(info.output);
+      const hardware = domainXml.ok ? vmHardwareDetails(domainXml.output) : { disks:[], interfaces:[], hostDevices:[] };
+      let primaryDiskSizeGiB = 0;
+      const primaryTarget = hardware.disks?.[0]?.target || '';
+      if (primaryTarget) {
+        const blockInfo = await command('virsh', ['-c', 'qemu:///system', 'domblkinfo', name, primaryTarget], 4000);
+        const capacity = blockInfo.ok ? Number(blockInfo.output.match(/Capacity:\s*(\d+)/i)?.[1] || 0) : 0;
+        primaryDiskSizeGiB = capacity ? Math.round((capacity / (1024 ** 3)) * 100) / 100 : 0;
+      }
+      details[index] = {
+        id: name, name,
+        uuid: parsed.uuid || null,
+        status: parsed.state || 'unknown',
+        cpus: Number(parsed['cpu(s)']) || 0,
+        memory: (Number(String(parsed['max memory'] || '').split(/\s+/)[0]) || 0) * 1024,
+        persistent: parsed.persistent === 'yes',
+        installationMedia: blockDevices.ok && hasInstallerMedia(blockDevices.output),
+        installationMediaPath: blockDevices.ok ? installerMediaPath(blockDevices.output) : '',
+        bootOrder: domainXml.ok ? vmBootOrder(domainXml.output) : 'disk',
+        ...hardware,
+        primaryDiskSizeGiB,
+        startOnBoot: parsed.autostart === 'enable'
+      };
     }
-    details.push({
-      id: name,
-      name,
-      uuid: parsed.uuid || null,
-      status: parsed.state || 'unknown',
-      cpus: Number(parsed['cpu(s)']) || 0,
-      memory: (Number(String(parsed['max memory'] || '').split(/\s+/)[0]) || 0) * 1024,
-      persistent: parsed.persistent === 'yes',
-      installationMedia: blockDevices.ok && hasInstallerMedia(blockDevices.output),
-      installationMediaPath: blockDevices.ok ? installerMediaPath(blockDevices.output) : '',
-      bootOrder: domainXml.ok ? vmBootOrder(domainXml.output) : 'disk',
-      ...hardware,
-      primaryDiskSizeGiB,
-      startOnBoot: parsed.autostart === 'enable'
-    });
-  }
-  return details;
+  };
+  await Promise.all(Array.from({ length: Math.min(6, selected.length || 1) }, worker));
+  return details.filter(Boolean);
 }
 
 async function localAttachVmGuestDrivers(id) {
