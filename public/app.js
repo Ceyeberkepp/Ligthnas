@@ -1,4 +1,4 @@
-const state = { overview: null, view: 'home', folder: '', files: null, fileError: null, filesSettingsOpen: false, aiMessages: [], logs: null, fileView: ['list','grid','gallery'].includes(localStorage.getItem('lightnas-file-view')) ? localStorage.getItem('lightnas-file-view') : 'grid', fileTruncated: false, overviewMetric: localStorage.getItem('lightnas-overview-metric') || 'cpu', lastNetworkSample: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, smtp: undefined, media: null, network: null, software: null, license: null, metricHistory: { cpu: [], load: [], memory: [], storage: [], networkIn: [], networkOut: [] } };
+const state = { overview: null, view: 'home', folder: '', files: null, fileError: null, filesSettingsOpen: false, aiMessages: [], logs: null, fileView: ['list','grid','gallery'].includes(localStorage.getItem('lightnas-file-view')) ? localStorage.getItem('lightnas-file-view') : 'grid', fileTruncated: false, overviewMetric: localStorage.getItem('lightnas-overview-metric') || 'cpu', lastNetworkSample: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, smtp: undefined, media: null, network: null, software: null, license: null, overviewMetricCollapsed: JSON.parse(localStorage.getItem('lightnas-overview-metric-collapsed') || '{}'), metricHistory: { cpu: [], load: [], memory: [], storage: [], networkIn: [], networkOut: [] } };
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
 const themeChoices = ['system', 'light', 'dark'];
@@ -198,6 +198,9 @@ function applyApplianceBranding(appliance = state.overview?.appliance) {
   const topbarColor = /^#[0-9a-f]{6}$/i.test(String(appliance.topbarColor || '')) ? appliance.topbarColor : contentColor;
   const panelColor = /^#[0-9a-f]{6}$/i.test(String(appliance.panelColor || '')) ? appliance.panelColor : contentColor;
   const inputColor = /^#[0-9a-f]{6}$/i.test(String(appliance.inputColor || '')) ? appliance.inputColor : `color-mix(in srgb, ${contentColor} 94%, ${contentTextColor})`;
+  const performanceTabsColor = /^#[0-9a-f]{6}$/i.test(String(appliance.performanceTabsColor || '')) ? appliance.performanceTabsColor : panelColor;
+  const performanceTabsActiveColor = /^#[0-9a-f]{6}$/i.test(String(appliance.performanceTabsActiveColor || '')) ? appliance.performanceTabsActiveColor : accent;
+  const performanceTabsTextColor = /^#[0-9a-f]{6}$/i.test(String(appliance.performanceTabsTextColor || '')) ? appliance.performanceTabsTextColor : contentTextColor;
   const rgb = [1,3,5].map(index => Number.parseInt(accent.slice(index,index+2),16));
   const luminance = (0.2126*rgb[0] + 0.7152*rgb[1] + 0.0722*rgb[2]) / 255;
   document.documentElement.style.setProperty('--accent', accent);
@@ -220,6 +223,10 @@ function applyApplianceBranding(appliance = state.overview?.appliance) {
   document.documentElement.style.setProperty('--primary-button-contrast', readableBrandText('#ffffff', primaryButtonColor));
   document.documentElement.style.setProperty('--login-button', loginButtonColor);
   document.documentElement.style.setProperty('--login-button-contrast', readableBrandText('#ffffff', loginButtonColor));
+  document.documentElement.style.setProperty('--performance-tabs', performanceTabsColor);
+  document.documentElement.style.setProperty('--performance-tabs-active', performanceTabsActiveColor);
+  document.documentElement.style.setProperty('--performance-tabs-text', performanceTabsTextColor);
+  document.documentElement.style.setProperty('--performance-tabs-active-text', readableBrandText('#ffffff', performanceTabsActiveColor));
   document.documentElement.style.setProperty('--button', `color-mix(in srgb, ${contentColor} 88%, ${contentTextColor})`);
   document.documentElement.style.setProperty('--line', `color-mix(in srgb, ${contentTextColor} 14%, transparent)`);
   document.documentElement.style.setProperty('--line-strong', `color-mix(in srgb, ${contentTextColor} 24%, transparent)`);
@@ -337,11 +344,16 @@ function captureOverviewMetrics() {
   }
 }
 
-function overviewChart(label, value, suffix, history, maximum = 100, detail = '') {
+function overviewMetricIsCollapsed(metric) {
+  return Boolean(state.overviewMetricCollapsed?.[metric]);
+}
+
+function overviewChart(label, value, suffix, history, maximum = 100, detail = '', metric = state.overviewMetric) {
   const points = history.length > 1 ? history : [history[0] || 0, history[0] || 0];
   const ceiling = Math.max(maximum, ...points, 1);
   const coordinates = points.map((item, index) => `${(index / Math.max(points.length - 1, 1)) * 100},${38 - (Math.min(ceiling, item) / ceiling) * 34}`).join(' ');
-  return `<article class="overview-chart panel"><div class="overview-chart-head"><div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}${escapeHtml(suffix)}</strong></div><div class="overview-chart-context">${detail ? `<b>${escapeHtml(detail)}</b>` : ''}<small>Live · last ${points.length} sample${points.length === 1 ? '' : 's'}</small></div></div>${detail ? `<div class="overview-chart-detail-strip">${escapeHtml(detail)}</div>` : ''}<svg viewBox="0 0 100 40" preserveAspectRatio="none" role="img" aria-label="${escapeHtml(label)} history"><defs><linearGradient id="chart-${escapeHtml(label.replace(/\W/g, ''))}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--accent)" stop-opacity=".52"/><stop offset="1" stop-color="var(--accent)" stop-opacity=".04"/></linearGradient></defs><polygon points="0,40 ${coordinates} 100,40" fill="url(#chart-${escapeHtml(label.replace(/\W/g, ''))})"/><polyline points="${coordinates}" fill="none" stroke="var(--accent)" stroke-width="1.2" vector-effect="non-scaling-stroke"/></svg></article>`;
+  const collapsed = overviewMetricIsCollapsed(metric);
+  return `<article class="overview-chart panel ${collapsed ? 'collapsed' : ''}" data-overview-chart="${escapeHtml(metric)}"><div class="overview-chart-head"><div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}${escapeHtml(suffix)}</strong></div><div class="overview-chart-head-actions"><div class="overview-chart-context">${detail ? `<b>${escapeHtml(detail)}</b>` : ''}<small>Live · last ${points.length} sample${points.length === 1 ? '' : 's'}</small></div><button type="button" class="chart-collapse-button" data-overview-collapse="${escapeHtml(metric)}" aria-expanded="${collapsed ? 'false' : 'true'}" aria-label="${collapsed ? 'Expand' : 'Collapse'} ${escapeHtml(label)}">${collapsed ? '⌄' : '⌃'}</button></div></div><div class="overview-chart-body" ${collapsed ? 'hidden' : ''}>${detail ? `<div class="overview-chart-detail-strip">${escapeHtml(detail)}</div>` : ''}<svg viewBox="0 0 100 40" preserveAspectRatio="none" role="img" aria-label="${escapeHtml(label)} history"><defs><linearGradient id="chart-${escapeHtml(label.replace(/\W/g, ''))}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--accent)" stop-opacity=".52"/><stop offset="1" stop-color="var(--accent)" stop-opacity=".04"/></linearGradient></defs><polygon points="0,40 ${coordinates} 100,40" fill="url(#chart-${escapeHtml(label.replace(/\W/g, ''))})"/><polyline points="${coordinates}" fill="none" stroke="var(--accent)" stroke-width="1.2" vector-effect="non-scaling-stroke"/></svg></div></article>`;
 }
 
 function overviewNetworkChart(system) {
@@ -349,7 +361,8 @@ function overviewNetworkChart(system) {
   const transmitted = state.metricHistory.networkOut.length > 1 ? state.metricHistory.networkOut : [0, 0];
   const ceiling = Math.max(...received, ...transmitted, 1024);
   const points = values => values.map((item, index) => `${(index / Math.max(values.length - 1, 1)) * 100},${38 - (Math.min(ceiling, item) / ceiling) * 34}`).join(' ');
-  return `<article class="overview-chart panel"><div class="overview-chart-head"><div><span>Network throughput</span><strong>↓ ${bytes(received.at(-1) || 0)}/s · ↑ ${bytes(transmitted.at(-1) || 0)}/s</strong></div><div class="overview-chart-context"><b>${system.network?.interfaces || 0} active interface${system.network?.interfaces === 1 ? '' : 's'}</b><small>RX ${bytes(system.network?.receivedBytes || 0)} · TX ${bytes(system.network?.transmittedBytes || 0)}</small></div></div><svg viewBox="0 0 100 40" preserveAspectRatio="none" role="img" aria-label="Network receive and transmit history"><polyline points="${points(received)}" fill="none" stroke="var(--accent)" stroke-width="1.4" vector-effect="non-scaling-stroke"/><polyline points="${points(transmitted)}" fill="none" stroke="#6f7cff" stroke-width="1.4" vector-effect="non-scaling-stroke"/></svg><div class="chart-legend"><span><i></i>Received</span><span><i class="sent"></i>Sent</span></div></article>`;
+  const collapsed = overviewMetricIsCollapsed('network');
+  return `<article class="overview-chart panel ${collapsed ? 'collapsed' : ''}" data-overview-chart="network"><div class="overview-chart-head"><div><span>Network throughput</span><strong>↓ ${bytes(received.at(-1) || 0)}/s · ↑ ${bytes(transmitted.at(-1) || 0)}/s</strong></div><div class="overview-chart-head-actions"><div class="overview-chart-context"><b>${system.network?.interfaces || 0} active interface${system.network?.interfaces === 1 ? '' : 's'}</b><small>RX ${bytes(system.network?.receivedBytes || 0)} · TX ${bytes(system.network?.transmittedBytes || 0)}</small></div><button type="button" class="chart-collapse-button" data-overview-collapse="network" aria-expanded="${collapsed ? 'false' : 'true'}" aria-label="${collapsed ? 'Expand' : 'Collapse'} Network throughput">${collapsed ? '⌄' : '⌃'}</button></div></div><div class="overview-chart-body" ${collapsed ? 'hidden' : ''}><svg viewBox="0 0 100 40" preserveAspectRatio="none" role="img" aria-label="Network receive and transmit history"><polyline points="${points(received)}" fill="none" stroke="var(--accent)" stroke-width="1.4" vector-effect="non-scaling-stroke"/><polyline points="${points(transmitted)}" fill="none" stroke="#6f7cff" stroke-width="1.4" vector-effect="non-scaling-stroke"/></svg><div class="chart-legend"><span><i></i>Received</span><span><i class="sent"></i>Sent</span></div></div></article>`;
 }
 
 function overviewComputeInventory() {
@@ -1133,6 +1146,9 @@ function settingsView() {
           <label>Top bar color<div class="accent-color-control"><input name="topbarColor" type="color" value="${escapeHtml(appliance.topbarColor || appliance.contentColor || '#f2f6fa')}"><input name="topbarHex" value="${escapeHtml(appliance.topbarColor || appliance.contentColor || '#f2f6fa')}" maxlength="7" pattern="#[0-9A-Fa-f]{6}"></div><small>Header behind Shell, theme and profile controls.</small></label>
           <label>Cards / boxes color<div class="accent-color-control"><input name="panelColor" type="color" value="${escapeHtml(appliance.panelColor || appliance.contentColor || '#ffffff')}"><input name="panelHex" value="${escapeHtml(appliance.panelColor || appliance.contentColor || '#ffffff')}" maxlength="7" pattern="#[0-9A-Fa-f]{6}"></div><small>Panels, cards, dialogs, and content boxes.</small></label>
           <label>Input field color<div class="accent-color-control"><input name="inputColor" type="color" value="${escapeHtml(appliance.inputColor || '#f9fbfd')}"><input name="inputHex" value="${escapeHtml(appliance.inputColor || '#f9fbfd')}" maxlength="7" pattern="#[0-9A-Fa-f]{6}"></div><small>Text fields, selects, and editable controls.</small></label>
+          <label>Performance tabs color<div class="accent-color-control"><input name="performanceTabsColor" type="color" value="${escapeHtml(appliance.performanceTabsColor || appliance.panelColor || '#ffffff')}"><input name="performanceTabsHex" value="${escapeHtml(appliance.performanceTabsColor || appliance.panelColor || '#ffffff')}" maxlength="7" pattern="#[0-9A-Fa-f]{6}"></div><small>Background behind CPU, Load, Memory, Storage, and Network tabs.</small></label>
+          <label>Active performance tab<div class="accent-color-control"><input name="performanceTabsActiveColor" type="color" value="${escapeHtml(appliance.performanceTabsActiveColor || appliance.accentColor || '#087b70')}"><input name="performanceTabsActiveHex" value="${escapeHtml(appliance.performanceTabsActiveColor || appliance.accentColor || '#087b70')}" maxlength="7" pattern="#[0-9A-Fa-f]{6}"></div><small>Selected performance tab background.</small></label>
+          <label>Performance tab text<div class="accent-color-control"><input name="performanceTabsTextColor" type="color" value="${escapeHtml(appliance.performanceTabsTextColor || appliance.contentTextColor || '#12283b')}"><input name="performanceTabsTextHex" value="${escapeHtml(appliance.performanceTabsTextColor || appliance.contentTextColor || '#12283b')}" maxlength="7" pattern="#[0-9A-Fa-f]{6}"></div><small>Text on unselected performance tabs.</small></label>
           <label>Display time zone<select name="timezone">${zones.map(([value, label]) => `<option value="${value}" ${appliance.timezone === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
         </div>
         <div class="general-branding-row branding-card">
@@ -1646,6 +1662,13 @@ function bindViewActions() {
     localStorage.setItem('lightnas-overview-metric', state.overviewMetric);
     render('home');
   }));
+  document.querySelectorAll('#content [data-overview-collapse]').forEach(button => button.addEventListener('click', () => {
+    const metric = button.dataset.overviewCollapse || state.overviewMetric;
+    state.overviewMetricCollapsed ||= {};
+    state.overviewMetricCollapsed[metric] = !state.overviewMetricCollapsed[metric];
+    localStorage.setItem('lightnas-overview-metric-collapsed', JSON.stringify(state.overviewMetricCollapsed));
+    render('home');
+  }));
   $('[data-open-node-shell]', $('#content'))?.addEventListener('click', () => {
     window.open(`/node-shell.html?v=${Date.now()}`, '_blank', 'noopener,width=1200,height=800');
   });
@@ -1907,6 +1930,12 @@ function bindViewActions() {
     const panelHex = settingsForm.elements.panelHex;
     const inputColor = settingsForm.elements.inputColor;
     const inputHex = settingsForm.elements.inputHex;
+    const performanceTabsColor = settingsForm.elements.performanceTabsColor;
+    const performanceTabsHex = settingsForm.elements.performanceTabsHex;
+    const performanceTabsActiveColor = settingsForm.elements.performanceTabsActiveColor;
+    const performanceTabsActiveHex = settingsForm.elements.performanceTabsActiveHex;
+    const performanceTabsTextColor = settingsForm.elements.performanceTabsTextColor;
+    const performanceTabsTextHex = settingsForm.elements.performanceTabsTextHex;
     const previewBrandingFromForm = () => applyApplianceBranding({
       ...state.overview.appliance,
       brandName: settingsForm.elements.brandName?.value || state.overview.appliance.brandName,
@@ -1920,7 +1949,10 @@ function bindViewActions() {
       loginButtonColor: loginButtonColor?.value || state.overview.appliance.loginButtonColor,
       topbarColor: topbarColor?.value || state.overview.appliance.topbarColor,
       panelColor: panelColor?.value || state.overview.appliance.panelColor,
-      inputColor: inputColor?.value || state.overview.appliance.inputColor
+      inputColor: inputColor?.value || state.overview.appliance.inputColor,
+      performanceTabsColor: performanceTabsColor?.value || state.overview.appliance.performanceTabsColor,
+      performanceTabsActiveColor: performanceTabsActiveColor?.value || state.overview.appliance.performanceTabsActiveColor,
+      performanceTabsTextColor: performanceTabsTextColor?.value || state.overview.appliance.performanceTabsTextColor
     });
     const bindBrandColor = (picker, textInput) => {
       picker?.addEventListener('input', () => {
@@ -1943,6 +1975,9 @@ function bindViewActions() {
     bindBrandColor(topbarColor, topbarHex);
     bindBrandColor(panelColor, panelHex);
     bindBrandColor(inputColor, inputHex);
+    bindBrandColor(performanceTabsColor, performanceTabsHex);
+    bindBrandColor(performanceTabsActiveColor, performanceTabsActiveHex);
+    bindBrandColor(performanceTabsTextColor, performanceTabsTextHex);
     settingsForm.elements.logoMode?.addEventListener('change', previewBrandingFromForm);
     settingsForm.elements.brandName?.addEventListener('input', previewBrandingFromForm);
     syncBrandingControls();
@@ -1990,6 +2025,9 @@ function bindViewActions() {
         topbarColor: state.overview.appliance.topbarColor,
         panelColor: state.overview.appliance.panelColor,
         inputColor: state.overview.appliance.inputColor,
+        performanceTabsColor: state.overview.appliance.performanceTabsColor,
+        performanceTabsActiveColor: state.overview.appliance.performanceTabsActiveColor,
+        performanceTabsTextColor: state.overview.appliance.performanceTabsTextColor,
         currentPassword: input.currentPassword,
         newPassword: input.newPassword
       }) });
