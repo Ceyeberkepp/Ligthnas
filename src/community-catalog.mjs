@@ -8,9 +8,9 @@ const CACHE_FILE = join(CACHE_DIR, 'community-index.json');
 const CACHE_MS = 6 * 60 * 60 * 1000;
 
 const DEFAULT_SOURCES = Object.freeze([
-  { id:'zimaos-official', name:'ZimaOS / CasaOS Official', index:'https://raw.githubusercontent.com/IceWhaleTech/CasaOS-AppStore/main/dist/index.json' },
-  { id:'big-bear', name:'Big Bear Community', index:'https://raw.githubusercontent.com/bigbeartechworld/big-bear-casaos/master/index.json' },
-  { id:'linuxserver', name:'LinuxServer Community', index:'https://raw.githubusercontent.com/WisdomSky/LinuxServer-AppStore/main/index.json' },
+  { id:'zimaos-official', name:'ZimaOS / CasaOS Official', github:'IceWhaleTech/CasaOS-AppStore', branch:'main', type:'casaos-repo' },
+  { id:'big-bear', name:'Big Bear Community', github:'bigbeartechworld/big-bear-casaos', branch:'master', type:'casaos-repo' },
+  { id:'linuxserver', name:'LinuxServer Community', github:'WisdomSky/LinuxServer-AppStore', branch:'main', type:'casaos-repo' },
   { id:'truenas', name:'TrueNAS Apps', index:'https://raw.githubusercontent.com/truenas/apps/master/catalog.json', type:'truenas' }
 ]);
 
@@ -45,9 +45,44 @@ function normalize(item, source) {
 }
 
 async function fetchJson(url) {
-  const response = await fetch(url, { signal: AbortSignal.timeout(15000), headers:{ 'User-Agent':'LightNAS-AppStore/1.0' } });
+  const response = await fetch(url, { signal: AbortSignal.timeout(20000), headers:{ 'User-Agent':'LightNAS-AppStore/1.0', 'Accept':'application/vnd.github+json' } });
   if (!response.ok) throw new Error('HTTP ' + response.status);
   return response.json();
+}
+
+async function githubDirectory(repo, path, branch) {
+  const data = await fetchJson(`https://api.github.com/repos/${repo}/contents/${path}?ref=${encodeURIComponent(branch)}`);
+  return Array.isArray(data) ? data : [];
+}
+
+async function githubText(url) {
+  const response = await fetch(url, { signal: AbortSignal.timeout(20000), headers:{ 'User-Agent':'LightNAS-AppStore/1.0' } });
+  if (!response.ok) throw new Error('HTTP ' + response.status);
+  return response.text();
+}
+
+function casaosMeta(compose, fallbackId) {
+  const id = (compose.match(/^\s*id:\s*["']?([^"'\n#]+)["']?/m)?.[1] || fallbackId).trim();
+  const title = (compose.match(/^\s*title:\s*["']?([^"'\n#]+)["']?/m)?.[1] || fallbackId).trim();
+  const tagline = (compose.match(/^\s*tagline:\s*["']?([^"'\n#]+)["']?/m)?.[1] || '').trim();
+  const category = (compose.match(/^\s*category:\s*["']?([^"'\n#]+)["']?/m)?.[1] || 'Community').trim();
+  const icon = (compose.match(/^\s*icon:\s*["']?([^"'\n#]+)["']?/m)?.[1] || '').trim();
+  return { id, title, tagline, description:tagline, category, icon };
+}
+
+async function casaosRepoItems(source) {
+  const dirs = await githubDirectory(source.github, 'Apps', source.branch);
+  const apps = [];
+  for (const dir of dirs.filter(item => item.type === 'dir')) {
+    try {
+      const files = await githubDirectory(source.github, `Apps/${dir.name}`, source.branch);
+      const compose = files.find(item => /^(docker-compose|compose)\.ya?ml$/i.test(item.name));
+      if (!compose?.download_url) continue;
+      const raw = await githubText(compose.download_url);
+      apps.push(casaosMeta(raw, dir.name));
+    } catch {}
+  }
+  return apps;
 }
 
 function itemsFromIndex(data, source = {}) {
