@@ -50,9 +50,9 @@ async function fetchJson(url) {
   return response.json();
 }
 
-async function githubDirectory(repo, path, branch) {
-  const data = await fetchJson(`https://api.github.com/repos/${repo}/contents/${path}?ref=${encodeURIComponent(branch)}`);
-  return Array.isArray(data) ? data : [];
+async function githubTree(repo, branch) {
+  const data = await fetchJson(`https://api.github.com/repos/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`);
+  return Array.isArray(data?.tree) ? data.tree : [];
 }
 
 async function githubText(url) {
@@ -71,15 +71,14 @@ function casaosMeta(compose, fallbackId) {
 }
 
 async function casaosRepoItems(source) {
-  const dirs = await githubDirectory(source.github, 'Apps', source.branch);
+  const tree = await githubTree(source.github, source.branch);
+  const manifests = tree.filter(item => /^Apps\/[^/]+\/(?:docker-compose|compose)\.ya?ml$/i.test(item.path || ''));
   const apps = [];
-  for (const dir of dirs.filter(item => item.type === 'dir')) {
+  for (const manifest of manifests) {
     try {
-      const files = await githubDirectory(source.github, `Apps/${dir.name}`, source.branch);
-      const compose = files.find(item => /^(docker-compose|compose)\.ya?ml$/i.test(item.name));
-      if (!compose?.download_url) continue;
-      const raw = await githubText(compose.download_url);
-      apps.push(casaosMeta(raw, dir.name));
+      const name = manifest.path.split('/')[1];
+      const raw = await githubText('https://raw.githubusercontent.com/' + source.github + '/' + source.branch + '/' + manifest.path);
+      apps.push(casaosMeta(raw, name));
     } catch {}
   }
   return apps;
