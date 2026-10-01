@@ -2773,64 +2773,25 @@ small {
 }
 
 /* Datacenter / hypervisor workspace */
-.hv-workspace {
+.hv-main {
+  min-width:0;
   display:grid;
-  grid-template-columns:250px minmax(0,1fr);
   gap:14px;
-  align-items:start;
 }
-.hv-tree {
-  position:sticky;
-  top:76px;
-  padding:0;
-  overflow:hidden;
-}
-.hv-tree-head {
-  padding:16px 16px 14px;
-  border-bottom:1px solid var(--line);
-}
-.hv-tree-head b {
-  display:block;
-  margin-top:4px;
-  font-size:17px;
-}
-.hv-tree-list {
-  display:grid;
-  padding:7px;
-}
-.hv-tree-list button {
+.hv-main-flat {
   width:100%;
-  display:grid;
-  grid-template-columns:24px minmax(0,1fr) auto;
-  align-items:center;
-  gap:8px;
-  min-height:38px;
-  padding:7px 9px;
-  border:0;
-  border-radius:7px;
-  background:transparent;
-  color:var(--text);
-  text-align:left;
-  cursor:pointer;
+  max-width:none;
 }
-.hv-tree-list button:hover { background:var(--soft); }
-.hv-tree-list button.active {
-  background:color-mix(in srgb,var(--accent) 11%,transparent);
-  color:var(--accent);
-}
-.hv-tree-list button small { color:var(--muted); }
-.hv-main { min-width:0; display:grid; gap:14px; }
 .hv-summary-strip {
   display:grid;
   grid-template-columns:repeat(6,minmax(110px,1fr));
-  border:1px solid var(--line);
-  border-radius:10px;
-  background:var(--panel);
-  overflow:hidden;
+  border-top:1px solid var(--line);
+  border-bottom:1px solid var(--line);
+  background:transparent;
 }
 .hv-summary-strip article {
   min-width:0;
-  padding:13px 14px;
+  padding:12px 14px;
   border-right:1px solid var(--line);
 }
 .hv-summary-strip article:last-child { border-right:0; }
@@ -2916,9 +2877,6 @@ small {
 .hv-resource-list i.online { background:#38c985; }
 
 @media (max-width:1100px) {
-  .hv-workspace { grid-template-columns:1fr; }
-  .hv-tree { position:static; }
-  .hv-tree-list { grid-template-columns:repeat(4,minmax(0,1fr)); }
   .hv-summary-strip { grid-template-columns:repeat(3,minmax(0,1fr)); }
   .hv-summary-strip article:nth-child(3) { border-right:0; }
 }
@@ -2926,6 +2884,10 @@ small {
   .console[data-workspace-mode="nas"] .node-overview-grid,
   .console[data-workspace-mode="nas"] .overview-bottom-grid,
   .hv-bottom-grid { grid-template-columns:1fr; }
+  .hv-summary-strip { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .hv-node-facts { grid-template-columns:1fr; }
+  .hv-node-facts > div { border-right:0; }
+}
   .hv-tree-list { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .hv-summary-strip { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .hv-node-facts { grid-template-columns:1fr; }
