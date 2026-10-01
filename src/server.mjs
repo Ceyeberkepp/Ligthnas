@@ -582,7 +582,12 @@ async function api(req, res, url) {
       sidebarColor: /^#[0-9a-f]{6}$/i.test(String(config.sidebarColor || '')) ? config.sidebarColor : '#ffffff',
       contentColor: /^#[0-9a-f]{6}$/i.test(String(config.contentColor || '')) ? config.contentColor : '#f2f6fa',
       sidebarTextColor: /^#[0-9a-f]{6}$/i.test(String(config.sidebarTextColor || '')) ? config.sidebarTextColor : '#12283b',
-      contentTextColor: /^#[0-9a-f]{6}$/i.test(String(config.contentTextColor || '')) ? config.contentTextColor : '#12283b'
+      contentTextColor: /^#[0-9a-f]{6}$/i.test(String(config.contentTextColor || '')) ? config.contentTextColor : '#12283b',
+      primaryButtonColor: /^#[0-9a-f]{6}$/i.test(String(config.primaryButtonColor || '')) ? config.primaryButtonColor : (config.accentColor || '#087b70'),
+      loginButtonColor: /^#[0-9a-f]{6}$/i.test(String(config.loginButtonColor || '')) ? config.loginButtonColor : (config.primaryButtonColor || config.accentColor || '#087b70'),
+      topbarColor: /^#[0-9a-f]{6}$/i.test(String(config.topbarColor || '')) ? config.topbarColor : (config.contentColor || '#f2f6fa'),
+      panelColor: /^#[0-9a-f]{6}$/i.test(String(config.panelColor || '')) ? config.panelColor : (config.contentColor || '#ffffff'),
+      inputColor: /^#[0-9a-f]{6}$/i.test(String(config.inputColor || '')) ? config.inputColor : '#f9fbfd'
     });
   }
 
@@ -1383,7 +1388,7 @@ async function api(req, res, url) {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/settings') {
-    const { username: owner, deviceName, timezone, logoExt, brandName, logoMode, accentColor, sidebarColor, contentColor, sidebarTextColor, contentTextColor } = store.state.config;
+    const { username: owner, deviceName, timezone, logoExt, brandName, logoMode, accentColor, sidebarColor, contentColor, sidebarTextColor, contentTextColor, primaryButtonColor, loginButtonColor, topbarColor, panelColor, inputColor } = store.state.config;
     return send(res, 200, {
       username: owner,
       deviceName,
@@ -1394,6 +1399,11 @@ async function api(req, res, url) {
       contentColor: /^#[0-9a-f]{6}$/i.test(String(contentColor || '')) ? contentColor : '#f2f6fa',
       sidebarTextColor: /^#[0-9a-f]{6}$/i.test(String(sidebarTextColor || '')) ? sidebarTextColor : '#12283b',
       contentTextColor: /^#[0-9a-f]{6}$/i.test(String(contentTextColor || '')) ? contentTextColor : '#12283b',
+      primaryButtonColor: /^#[0-9a-f]{6}$/i.test(String(primaryButtonColor || '')) ? primaryButtonColor : (accentColor || '#087b70'),
+      loginButtonColor: /^#[0-9a-f]{6}$/i.test(String(loginButtonColor || '')) ? loginButtonColor : (primaryButtonColor || accentColor || '#087b70'),
+      topbarColor: /^#[0-9a-f]{6}$/i.test(String(topbarColor || '')) ? topbarColor : (contentColor || '#f2f6fa'),
+      panelColor: /^#[0-9a-f]{6}$/i.test(String(panelColor || '')) ? panelColor : (contentColor || '#ffffff'),
+      inputColor: /^#[0-9a-f]{6}$/i.test(String(inputColor || '')) ? inputColor : '#f9fbfd',
       timezone,
       logo: Boolean(logoExt)
     });
@@ -1413,11 +1423,19 @@ async function api(req, res, url) {
     const contentColor = String(input.contentColor || store.state.config.contentColor || '#f2f6fa').trim();
     const sidebarTextColor = String(input.sidebarTextColor || store.state.config.sidebarTextColor || '#12283b').trim();
     const contentTextColor = String(input.contentTextColor || store.state.config.contentTextColor || '#12283b').trim();
+    const primaryButtonColor = String(input.primaryButtonColor || store.state.config.primaryButtonColor || accentColor).trim();
+    const loginButtonColor = String(input.loginButtonColor || store.state.config.loginButtonColor || primaryButtonColor).trim();
+    const topbarColor = String(input.topbarColor || store.state.config.topbarColor || contentColor).trim();
+    const panelColor = String(input.panelColor || store.state.config.panelColor || contentColor).trim();
+    const inputColor = String(input.inputColor || store.state.config.inputColor || '#f9fbfd').trim();
     if (!/^#[0-9a-f]{6}$/i.test(accentColor)) return send(res, 400, { error: 'Site accent color must be a six-digit hex color such as #087b70.' });
     if (!/^#[0-9a-f]{6}$/i.test(sidebarColor)) return send(res, 400, { error: 'Sidebar color must be a six-digit hex color.' });
     if (!/^#[0-9a-f]{6}$/i.test(contentColor)) return send(res, 400, { error: 'Main content color must be a six-digit hex color.' });
     if (!/^#[0-9a-f]{6}$/i.test(sidebarTextColor)) return send(res, 400, { error: 'Sidebar font color must be a six-digit hex color.' });
     if (!/^#[0-9a-f]{6}$/i.test(contentTextColor)) return send(res, 400, { error: 'Main font color must be a six-digit hex color.' });
+    for (const [label, value] of [['Primary button', primaryButtonColor], ['Login button', loginButtonColor], ['Top bar', topbarColor], ['Panel', panelColor], ['Input', inputColor]]) {
+      if (!/^#[0-9a-f]{6}$/i.test(value)) return send(res, 400, { error: `${label} color must be a six-digit hex color.` });
+    }
     const changedPassword = Boolean(input.newPassword);
     if (changedPassword) {
       if (typeof input.currentPassword !== 'string' || !(await verifyPassword(input.currentPassword, store.state.config.passwordHash))) return send(res, 403, { error: 'Current administrator password is required to change the password.' });
@@ -1431,6 +1449,11 @@ async function api(req, res, url) {
     store.state.config.contentColor = contentColor;
     store.state.config.sidebarTextColor = sidebarTextColor;
     store.state.config.contentTextColor = contentTextColor;
+    store.state.config.primaryButtonColor = primaryButtonColor;
+    store.state.config.loginButtonColor = loginButtonColor;
+    store.state.config.topbarColor = topbarColor;
+    store.state.config.panelColor = panelColor;
+    store.state.config.inputColor = inputColor;
     store.state.config.timezone = input.timezone;
     if (changedPassword) store.state.config.passwordHash = await hashPassword(input.newPassword);
     store.addActivity('settings', changedPassword ? 'Administrator password was changed.' : 'Appliance settings were updated.');
@@ -1664,6 +1687,11 @@ async function api(req, res, url) {
         contentColor: /^#[0-9a-f]{6}$/i.test(String(store.state.config.contentColor || '')) ? store.state.config.contentColor : '#f2f6fa',
         sidebarTextColor: /^#[0-9a-f]{6}$/i.test(String(store.state.config.sidebarTextColor || '')) ? store.state.config.sidebarTextColor : '#12283b',
         contentTextColor: /^#[0-9a-f]{6}$/i.test(String(store.state.config.contentTextColor || '')) ? store.state.config.contentTextColor : '#12283b',
+        primaryButtonColor: /^#[0-9a-f]{6}$/i.test(String(store.state.config.primaryButtonColor || '')) ? store.state.config.primaryButtonColor : (store.state.config.accentColor || '#087b70'),
+        loginButtonColor: /^#[0-9a-f]{6}$/i.test(String(store.state.config.loginButtonColor || '')) ? store.state.config.loginButtonColor : (store.state.config.primaryButtonColor || store.state.config.accentColor || '#087b70'),
+        topbarColor: /^#[0-9a-f]{6}$/i.test(String(store.state.config.topbarColor || '')) ? store.state.config.topbarColor : (store.state.config.contentColor || '#f2f6fa'),
+        panelColor: /^#[0-9a-f]{6}$/i.test(String(store.state.config.panelColor || '')) ? store.state.config.panelColor : (store.state.config.contentColor || '#ffffff'),
+        inputColor: /^#[0-9a-f]{6}$/i.test(String(store.state.config.inputColor || '')) ? store.state.config.inputColor : '#f9fbfd',
         username,
         role: isAdmin ? 'administrator' : context.apiToken ? 'api' : 'user',
         permissions,
