@@ -1,4 +1,4 @@
-const state = { overview: null, view: 'home', folder: '', files: null, fileError: null, filesSettingsOpen: false, aiMessages: [], logs: null, fileView: ['list','grid','gallery'].includes(localStorage.getItem('lightnas-file-view')) ? localStorage.getItem('lightnas-file-view') : 'grid', fileTruncated: false, overviewMetric: localStorage.getItem('lightnas-overview-metric') || 'cpu', lastNetworkSample: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, smtp: undefined, media: null, network: null, software: null, license: null, metricHistory: { cpu: [], load: [], memory: [], storage: [], networkIn: [], networkOut: [] } };
+const state = { overview: null, view: 'home', uiMode: localStorage.getItem('lightnas-workspace-mode') === 'hypervisor' ? 'hypervisor' : 'nas', folder: '', files: null, fileError: null, filesSettingsOpen: false, aiMessages: [], logs: null, fileView: ['list','grid','gallery'].includes(localStorage.getItem('lightnas-file-view')) ? localStorage.getItem('lightnas-file-view') : 'grid', fileTruncated: false, overviewMetric: localStorage.getItem('lightnas-overview-metric') || 'cpu', lastNetworkSample: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, smtp: undefined, media: null, network: null, software: null, license: null, metricHistory: { cpu: [], load: [], memory: [], storage: [], networkIn: [], networkOut: [] } };
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
 const themeChoices = ['system', 'light', 'dark'];
@@ -146,7 +146,7 @@ function canView(view, appliance = state.overview?.appliance) {
   if (appliance.role === 'administrator') return true;
   const allowed = new Set(appliance.permissions || []);
   const required = {
-    home: ['overview.view'], files: ['files.read'], media: ['files.read'], storage: ['storage.view'], pools: ['pools.view', 'storage.manage'], shares: ['shares.view', 'shares.manage'], backups: ['backup.manage', 'storage.view'],
+    home: ['overview.view'], hypervisor: ['overview.view', 'vms.view', 'containers.view'], files: ['files.read'], media: ['files.read'], storage: ['storage.view'], pools: ['pools.view', 'storage.manage'], shares: ['shares.view', 'shares.manage'], backups: ['backup.manage', 'storage.view'],
     apps: ['apps.view', 'apps.manage'], ai: ['apps.view', 'apps.manage', 'system.view'], containers: ['containers.view', 'containers.manage', 'containers.console'], vms: ['vms.view', 'vms.manage', 'vms.console'],
     network: ['network.view'], firewall: ['firewall.view', 'firewall.manage', 'network.manage'], monitoring: ['monitoring.view', 'system.view'], analytics: ['monitoring.view', 'system.view'], logs: ['audit.view'], capabilities: ['capabilities.view', 'system.view'],
     integrations: ['integrations.view', 'integrations.manage'], assistant: ['admin.view', 'system.view'], users: ['users.manage'], permissions: ['users.manage'], shell: ['system.shell'], smtp: ['smtp.manage'], settings: ['settings.manage'], admin: ['admin.view']
@@ -417,6 +417,102 @@ function homeView() {
     <section class="dashboard-grid overview-bottom-grid">
       <article class="panel overview-compute-panel"><div class="panel-head"><div><h2>Installed compute</h2><p class="muted">Virtual machines, native containers, and App Store applications.</p></div><button class="panel-link" data-view-link="containers">Open compute</button></div>${overviewComputeInventory()}</article>
       <article class="panel"><div class="panel-head"><h2>Recent activity</h2></div><div class="activity-list">${activity.length ? activity.slice(0, 5).map(item => `<div class="activity"><span class="activity-icon">${item.type === 'setup' ? '✓' : '↗'}</span><div><b>${escapeHtml(item.message)}</b><time>${relativeTime(item.timestamp)}</time></div></div>`).join('') : '<p class="muted">No recent activity.</p>'}</div></article>
+    </section>`;
+}
+
+
+function applyWorkspaceMode() {
+  const consoleRoot = $('#console');
+  if (!consoleRoot) return;
+  consoleRoot.dataset.workspaceMode = state.uiMode;
+  document.querySelectorAll('[data-workspace-mode]').forEach(button => {
+    const active = button.dataset.workspaceMode === state.uiMode;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+  document.querySelectorAll('[data-hypervisor-nav]').forEach(link => link.classList.toggle('hidden', state.uiMode !== 'hypervisor'));
+}
+
+function hypervisorInventoryRows() {
+  const vms = state.runtimes?.virtualization?.machineDetails || [];
+  const containers = state.runtimes?.containers?.containers || [];
+  const vmRows = vms.map(item => {
+    const running = /running|active/i.test(String(item.status || ''));
+    return `<div class="hv-inventory-row"><span class="hv-kind">VM</span><span class="compute-status"><i class="${running ? 'online' : 'offline'}"></i>${escapeHtml(item.status || 'unknown')}</span><b>${escapeHtml(item.name || item.id)}</b><span>${item.cpus || '—'} vCPU</span><span>${bytes(item.memory || 0)}</span><span>${escapeHtml(state.runtimes?.virtualization?.provider || 'libvirt')}</span><div class="runtime-actions"><button class="secondary" data-view-link="vms">Manage</button></div></div>`;
+  });
+  const ctRows = containers.map(item => {
+    const running = /running|active/i.test(String(item.status || ''));
+    return `<div class="hv-inventory-row"><span class="hv-kind">CT</span><span class="compute-status"><i class="${running ? 'online' : 'offline'}"></i>${escapeHtml(item.status || 'unknown')}</span><b>${escapeHtml(item.name || item.id)}</b><span>${item.cpus || '—'} vCPU</span><span>${bytes(item.memory || 0)}</span><span>${escapeHtml(item.ipv4 || 'No IP')}</span><div class="runtime-actions"><button class="secondary" data-view-link="containers">Manage</button></div></div>`;
+  });
+  return [...vmRows, ...ctRows].join('') || '<div class="empty compact-empty"><p>No virtual machines or system containers are visible.</p></div>';
+}
+
+function hypervisorView() {
+  const system = state.overview?.system || {};
+  const storage = state.overview?.storage || {};
+  const pools = storage.configuredPools || [];
+  const vms = state.runtimes?.virtualization?.machineDetails || [];
+  const containers = state.runtimes?.containers?.containers || [];
+  const runningVms = vms.filter(item => /running|active/i.test(String(item.status || ''))).length;
+  const runningContainers = containers.filter(item => /running|active/i.test(String(item.status || ''))).length;
+  const networks = state.runtimes?.virtualization?.networkDetails || [];
+  const nodeName = state.overview?.appliance?.deviceName || 'LightNAS';
+  const visibleStorage = storage.usableStorage || storage.virtualStorage || storage.local || {};
+  return `${pageHead('Datacenter', 'Virtualization, compute, storage and networking in one workspace.', '<div class="head-actions"><button class="secondary" data-action="refresh-runtime">Refresh</button><button class="secondary" data-view-link="network">Networking</button><button class="primary" data-action="create-vm">+ Create VM</button></div>')}
+    <section class="hv-workspace">
+      <aside class="panel hv-tree">
+        <div class="hv-tree-head"><span class="eyebrow">LIGHTNAS DATACENTER</span><b>${escapeHtml(nodeName)}</b></div>
+        <div class="hv-tree-list">
+          <button class="active" type="button"><span>▣</span><b>Datacenter</b></button>
+          <button type="button" data-view-link="home"><span>◫</span><b>${escapeHtml(nodeName)}</b><small>local node</small></button>
+          <button type="button" data-view-link="vms"><span>▣</span><b>Virtual machines</b><small>${vms.length}</small></button>
+          <button type="button" data-view-link="containers"><span>▦</span><b>Containers</b><small>${containers.length}</small></button>
+          <button type="button" data-view-link="storage"><span>▱</span><b>Storage</b><small>${pools.length}</small></button>
+          <button type="button" data-view-link="network"><span>⌁</span><b>Networks</b><small>${networks.length}</small></button>
+          <button type="button" data-view-link="backups"><span>↶</span><b>Backups</b></button>
+          <button type="button" data-view-link="firewall"><span>◇</span><b>Firewall</b></button>
+        </div>
+      </aside>
+
+      <div class="hv-main">
+        <section class="hv-summary-strip">
+          <article><span>Node</span><strong>${escapeHtml(nodeName)}</strong><small>${escapeHtml(system.kernel || '')}</small></article>
+          <article><span>Virtual machines</span><strong>${runningVms}/${vms.length}</strong><small>running</small></article>
+          <article><span>Containers</span><strong>${runningContainers}/${containers.length}</strong><small>running</small></article>
+          <article><span>CPU</span><strong>${system.cpu?.loadPercent || 0}%</strong><small>${system.cpu?.cores || 0} logical CPUs</small></article>
+          <article><span>Memory</span><strong>${system.memory?.usedPercent || 0}%</strong><small>${bytes(system.memory?.usedBytes || 0)} used</small></article>
+          <article><span>Storage</span><strong>${visibleStorage.usedPercent || 0}%</strong><small>${bytes(visibleStorage.availableBytes || 0)} free</small></article>
+        </section>
+
+        <section class="panel hv-node-panel">
+          <div class="panel-head"><div><span class="eyebrow">NODE</span><h2>${escapeHtml(nodeName)}</h2><p class="muted">Local virtualization host and attached infrastructure.</p></div><span class="volume-state writable">ONLINE</span></div>
+          <div class="hv-node-facts">
+            <div><span>CPU model</span><b>${escapeHtml(system.cpu?.model || 'Unknown')}</b></div>
+            <div><span>Architecture</span><b>${escapeHtml(system.architecture || 'Unknown')}</b></div>
+            <div><span>VM provider</span><b>${escapeHtml(state.runtimes?.virtualization?.provider || 'libvirt / KVM')}</b></div>
+            <div><span>Container runtime</span><b>LXC + OCI</b></div>
+            <div><span>Networks</span><b>${networks.length}</b></div>
+            <div><span>Storage pools</span><b>${pools.length}</b></div>
+          </div>
+        </section>
+
+        <section class="panel hv-inventory-panel">
+          <div class="panel-head"><div><span class="eyebrow">GUEST INVENTORY</span><h2>Virtual machines & containers</h2></div><div class="head-actions"><button class="secondary" data-view-link="containers">Containers</button><button class="secondary" data-view-link="vms">VMs</button></div></div>
+          <div class="hv-inventory-table">
+            <div class="hv-inventory-head"><span>Type</span><span>Status</span><span>Name</span><span>CPU</span><span>Memory</span><span>Network / provider</span><span></span></div>
+            ${hypervisorInventoryRows()}
+          </div>
+        </section>
+
+        <div class="hv-bottom-grid">
+          <section class="panel"><div class="panel-head"><div><span class="eyebrow">STORAGE</span><h2>Datastores</h2></div><button class="panel-link" data-view-link="storage">Open storage</button></div>
+            <div class="hv-resource-list">${pools.slice(0,6).map(pool => `<div><span><i class="online"></i><b>${escapeHtml(pool.name)}</b></span><small>${escapeHtml(pool.provider || pool.type || 'storage')} · ${escapeHtml(pool.mountPoint || 'managed')}</small></div>`).join('') || '<p class="muted">No configured storage pools.</p>'}</div>
+          </section>
+          <section class="panel"><div class="panel-head"><div><span class="eyebrow">NETWORKING</span><h2>Virtual networks</h2></div><button class="panel-link" data-view-link="network">Open networking</button></div>
+            <div class="hv-resource-list">${networks.slice(0,6).map(net => `<div><span><i class="online"></i><b>${escapeHtml(net.name || net.bridge || 'network')}</b></span><small>${escapeHtml(net.bridge || net.type || 'bridge')}</small></div>`).join('') || '<p class="muted">No virtualization networks detected.</p>'}</div>
+          </section>
+        </div>
+      </div>
     </section>`;
 }
 
@@ -1014,13 +1110,19 @@ function capabilitiesView() {
   const hardware = system.capabilities || [];
   const features = appliance.features || {};
   const optional = [
-    ['appStore', 'App Store', 'One-click application catalog and managed app hosting.', 'apps'],
-    ['containers', 'System containers', 'Native Linux system containers and terminal access.', 'containers'],
-    ['virtualMachines', 'Virtual machines', 'KVM/libvirt or supported hypervisor virtual machines.', 'vms'],
-    ['ai', 'AI workspace', 'Local and remote AI tools, model runtimes, and AI applications.', 'ai'],
-    ['phoneSync', 'Phone library sync', 'Automatic phone photo/video uploads into Files & media.', 'files'],
-    ['monitoringAnalytics', 'Monitoring analytics', 'Live charts and session performance analytics.', 'monitoring'],
-    ['integrations', 'Integrations', 'Host runtimes, external services, and provider connections.', 'integrations']
+    ['storage', 'NAS storage', 'Pools, datasets, ZFS/BTRFS/LVM, NFS, SMB/CIFS, iSCSI and managed file storage.', 'storage'],
+    ['shares', 'File services', 'SMB/SFTP shares, media libraries, file browser and permissions.', 'shares'],
+    ['backups', 'Backup & restore', 'Backup-capable storage, snapshots, restore activity and replication foundations.', 'backups'],
+    ['virtualMachines', 'Virtual machines', 'KVM/libvirt virtual machines, noVNC, VirtIO drivers, disks, NICs and PCI/GPU passthrough.', 'vms'],
+    ['containers', 'System containers', 'Native LXC containers plus OCI application containers and terminal access.', 'containers'],
+    ['networking', 'Datacenter networking', 'Physical NICs, Wi-Fi, bridges, VLANs, bonds, routes, DNS and virtual networks.', 'network'],
+    ['firewall', 'Firewall & segmentation', 'Host firewall controls for appliance, guest and service isolation.', 'firewall'],
+    ['appStore', 'Application platform', 'One-click application catalog and managed app hosting.', 'apps'],
+    ['ai', 'AI workspace', 'Local/remote AI runtimes, model tools and system-aware assistance.', 'ai'],
+    ['monitoringAnalytics', 'Analytics & audit', 'Operational analytics, audit logs, activity history and task tracking.', 'analytics'],
+    ['integrations', 'Infrastructure integrations', 'External runtimes, storage providers, identity and service connections.', 'integrations'],
+    ['identity', 'Identity & security', 'Local users, groups, permissions, MFA, passkeys, SSO foundations and audit controls.', 'permissions'],
+    ['hypervisorWorkspace', 'Hypervisor workspace', 'Datacenter-style inventory for nodes, VMs, containers, storage and networks.', 'hypervisor']
   ];
   return `${pageHead('Capabilities', 'Review hardware support and control optional LightNAS features.')}
     <section class="capability-overview-grid">
@@ -1554,13 +1656,14 @@ async function loadLogs() {
 function render(view) {
   if (view === 'media') view = 'files';
   if (view === 'monitoring') view = 'home';
-  state.view = ['home', 'storage', 'pools', 'files', 'users', 'permissions', 'shell', 'smtp', 'admin', 'shares', 'backups', 'analytics', 'logs', 'capabilities', 'apps', 'ai', 'containers', 'vms', 'settings', 'network', 'firewall', 'integrations'].includes(view) ? view : 'home';
+  state.view = ['home', 'hypervisor', 'storage', 'pools', 'files', 'users', 'permissions', 'shell', 'smtp', 'admin', 'shares', 'backups', 'analytics', 'logs', 'capabilities', 'apps', 'ai', 'containers', 'vms', 'settings', 'network', 'firewall', 'integrations'].includes(view) ? view : 'home';
   if (!canView(state.view)) state.view = canView('home') ? 'home' : 'files';
   const content = $('#content');
-  content.innerHTML = state.view === 'home' ? homeView() : state.view === 'storage' ? storageView() : state.view === 'pools' ? poolsView() : state.view === 'files' ? filesView() : state.view === 'media' ? mediaView() : state.view === 'users' ? usersView() : state.view === 'permissions' ? permissionsView() : state.view === 'shell' ? shellView() : state.view === 'smtp' ? smtpView() : state.view === 'admin' ? adminView() : state.view === 'shares' ? sharesView() : state.view === 'backups' ? backupsView() : state.view === 'analytics' ? analyticsView() : state.view === 'logs' ? logsView() : state.view === 'containers' ? containersView() : state.view === 'vms' ? vmsView() : state.view === 'settings' ? settingsView() : state.view === 'capabilities' ? capabilitiesView() : state.view === 'monitoring' ? monitoringView() : state.view === 'ai' ? aiView() : state.view === 'network' ? networkView() : state.view === 'firewall' ? firewallView() : state.view === 'integrations' ? integrationsView() : moduleView(state.view);
+  content.innerHTML = state.view === 'home' ? (state.uiMode === 'hypervisor' ? hypervisorView() : homeView()) : state.view === 'hypervisor' ? hypervisorView() : state.view === 'storage' ? storageView() : state.view === 'pools' ? poolsView() : state.view === 'files' ? filesView() : state.view === 'media' ? mediaView() : state.view === 'users' ? usersView() : state.view === 'permissions' ? permissionsView() : state.view === 'shell' ? shellView() : state.view === 'smtp' ? smtpView() : state.view === 'admin' ? adminView() : state.view === 'shares' ? sharesView() : state.view === 'backups' ? backupsView() : state.view === 'analytics' ? analyticsView() : state.view === 'logs' ? logsView() : state.view === 'containers' ? containersView() : state.view === 'vms' ? vmsView() : state.view === 'settings' ? settingsView() : state.view === 'capabilities' ? capabilitiesView() : state.view === 'monitoring' ? monitoringView() : state.view === 'ai' ? aiView() : state.view === 'network' ? networkView() : state.view === 'firewall' ? firewallView() : state.view === 'integrations' ? integrationsView() : moduleView(state.view);
   $$('[data-view]').forEach(link => link.classList.toggle('active', link.dataset.view === state.view));
   $(`[data-view="${state.view}"]`, $('#nav'))?.closest('details')?.setAttribute('open', '');
   content.focus({ preventScroll: true });
+  applyWorkspaceMode();
   bindViewActions();
   if (state.view === 'files' && state.files === null) loadFiles();
   if (['pools', 'storage'].includes(state.view) && state.spaces === null) loadSpaces();
@@ -1575,10 +1678,17 @@ function render(view) {
     if (!state.runtimes?.containers && !state.containerError) loadContainers();
     if ((!state.runtimes?.docker || !state.runtimes?.catalog) && !state.runtimeError) loadRuntimes();
   }
-  if (['home', 'apps', 'ai', 'vms', 'integrations'].includes(state.view) && (!state.runtimes?.docker || !state.runtimes?.virtualization || !state.runtimes?.catalog) && !state.runtimeError) loadRuntimes();
+  if (['home', 'hypervisor', 'apps', 'ai', 'vms', 'integrations'].includes(state.view) && (!state.runtimes?.docker || !state.runtimes?.virtualization || !state.runtimes?.catalog) && !state.runtimeError) loadRuntimes();
 }
 
 function bindViewActions() {
+  document.querySelectorAll('[data-workspace-mode]').forEach(button => button.addEventListener('click', () => {
+    const mode = button.dataset.workspaceMode === 'hypervisor' ? 'hypervisor' : 'nas';
+    state.uiMode = mode;
+    localStorage.setItem('lightnas-workspace-mode', mode);
+    applyWorkspaceMode();
+    location.hash = mode === 'hypervisor' ? 'hypervisor' : 'home';
+  }));
   document.querySelectorAll('#content [data-settings-collapse]').forEach(button => button.addEventListener('click', () => {
     const id = button.dataset.settingsCollapse;
     let saved = {};
