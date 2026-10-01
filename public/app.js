@@ -473,8 +473,8 @@ function hypervisorInventoryRows() {
 function hypervisorResourceTree(nodeName, pools, networks, vms, containers) {
   const vmItems = vms.slice(0, 12).map(item => `<button class="hv-tree-item child" data-view-link="vms"><span class="hv-tree-glyph vm">▣</span><span>${escapeHtml(item.name || item.id || 'VM')}</span></button>`).join('');
   const ctItems = containers.slice(0, 12).map(item => `<button class="hv-tree-item child" data-view-link="containers"><span class="hv-tree-glyph ct">▦</span><span>${escapeHtml(item.name || item.id || 'Container')}</span></button>`).join('');
-  const storageItems = pools.slice(0, 10).map(pool => `<button class="hv-tree-item child" data-view-link="storage"><span class="hv-tree-glyph">◫</span><span>${escapeHtml(pool.name || 'Storage')}</span></button>`).join('');
-  const networkItems = networks.slice(0, 10).map(net => `<button class="hv-tree-item child" data-view-link="network"><span class="hv-tree-glyph">⌁</span><span>${escapeHtml(net.name || net.bridge || 'Network')}</span></button>`).join('');
+  const storageItems = pools.slice(0, 10).map(pool => `<button class="hv-tree-item child" data-view-link="storage" data-resource-name="${escapeHtml(pool.name || 'Storage')}"><span class="hv-tree-glyph">◫</span><span>${escapeHtml(pool.name || 'Storage')}</span></button>`).join('');
+  const networkItems = networks.slice(0, 10).map(net => `<button class="hv-tree-item child" data-view-link="network" data-resource-name="${escapeHtml(net.name || net.bridge || 'Network')}"><span class="hv-tree-glyph">⌁</span><span>${escapeHtml(net.name || net.bridge || 'Network')}</span></button>`).join('');
 
   return `<aside class="hv-resource-tree" aria-label="Datacenter inventory">
     <div class="hv-pane-title"><b>Inventory</b><button class="icon-button" data-action="refresh-runtime" title="Refresh inventory">↻</button></div>
@@ -2055,11 +2055,28 @@ function bindViewActions() {
     state.folder = folder; state.files = null; location.hash = 'files';
   }));
   $$('[data-action="refresh-network"]', $('#content')).forEach(button => button.addEventListener('click', loadNetwork));
-  $$('[data-action="refresh-runtime"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+  $('[data-action="refresh-runtime"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+    const original = button.textContent;
     button.disabled = true;
     button.textContent = 'Refreshing…';
-    if (state.view === 'containers') await Promise.all([loadContainers(), loadRuntimes()]);
-    else await loadRuntimes();
+    try {
+      if (state.uiMode === 'hypervisor') {
+        const jobs = [loadRuntimes(), request('/api/overview').then(data => { state.overview = data; captureOverviewMetrics(); })];
+        if (state.view === 'containers') jobs.push(loadContainers());
+        await Promise.all(jobs);
+        render(state.view);
+        toast('Hypervisor inventory refreshed.');
+      } else if (state.view === 'containers') {
+        await Promise.all([loadContainers(), loadRuntimes()]);
+      } else {
+        await loadRuntimes();
+      }
+    } catch (error) {
+      toast(error.message || 'Unable to refresh hypervisor inventory.');
+    } finally {
+      const live = $('#content [data-action="refresh-runtime"]');
+      if (live) { live.disabled = false; live.textContent = original || 'Refresh'; }
+    }
   }));
   $$('[data-install]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     const docker = state.runtimes?.docker;
