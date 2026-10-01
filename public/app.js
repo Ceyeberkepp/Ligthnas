@@ -1,5 +1,5 @@
 if (window.LIGHTNAS_PRODUCT_MODE === 'hypervisor') document.body.classList.add('product-hypervisor');
-const state = { overview: null, view: 'home', uiMode: window.LIGHTNAS_PRODUCT_MODE === 'hypervisor' ? 'hypervisor' : 'nas', folder: '', files: null, fileError: null, filesSettingsOpen: false, aiMessages: [], logs: null, fileView: ['list','grid','gallery'].includes(localStorage.getItem('lightnas-file-view')) ? localStorage.getItem('lightnas-file-view') : 'grid', fileTruncated: false, overviewMetric: localStorage.getItem('lightnas-overview-metric') || 'cpu', lastNetworkSample: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, smtp: undefined, media: null, network: null, software: null, license: null, metricHistory: { cpu: [], load: [], memory: [], storage: [], networkIn: [], networkOut: [] } };
+const state = { overview: null, view: 'home', uiMode: window.LIGHTNAS_PRODUCT_MODE === 'hypervisor' ? 'hypervisor' : 'nas', folder: '', files: null, fileError: null, filesSettingsOpen: false, aiMessages: [], logs: null, fileView: ['list','grid','gallery'].includes(localStorage.getItem('lightnas-file-view')) ? localStorage.getItem('lightnas-file-view') : 'grid', fileTruncated: false, overviewMetric: localStorage.getItem('lightnas-overview-metric') || 'cpu', lastNetworkSample: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, smtp: undefined, media: null, network: null, software: null, license: null, communityCatalog: null, communityCatalogLoading: false, communityCatalogError: null, backupJobs: null, selectedBackupJobId: null, metricHistory: { cpu: [], load: [], memory: [], storage: [], networkIn: [], networkOut: [] } };
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
 const themeChoices = ['system', 'light', 'dark'];
@@ -873,16 +873,50 @@ async function loadMedia() {
   try { state.media = await request('/api/media'); if (['media', 'files'].includes(state.view)) render(state.view); } catch (error) { toast(error.message); }
 }
 
-async function loadRuntimes() {
+let runtimeLoadPromise = null;
+
+async function loadCommunityCatalog(forceRefresh = false) {
+  if (state.communityCatalogLoading && !forceRefresh) return;
+  state.communityCatalogLoading = true;
+  state.communityCatalogError = null;
+  if (state.view === 'apps') render('apps');
   try {
-    state.runtimes = await request('/api/runtimes');
-    state.runtimeError = null;
-    if (state.view === 'apps') {
-      try { state.communityCatalog = await request('/api/catalog/community?refresh=1'); }
-      catch (error) { state.communityCatalog = { apps: [], sources: [], error: error.message }; }
+    state.communityCatalog = await request(`/api/catalog/community${forceRefresh ? '?refresh=1' : ''}`);
+  } catch (error) {
+    state.communityCatalogError = error.message;
+    if (!state.communityCatalog) state.communityCatalog = { apps: [], sources: [], count: 0 };
+  } finally {
+    state.communityCatalogLoading = false;
+    if (state.view === 'apps') render('apps');
+  }
+}
+
+async function loadRuntimes(forceRefresh = false) {
+  if (runtimeLoadPromise && !forceRefresh) return runtimeLoadPromise;
+  const work = (async () => {
+    try {
+      state.runtimes = await request(`/api/runtimes${forceRefresh ? '?refresh=1' : ''}`);
+      state.runtimeError = null;
+    } catch (error) {
+      state.runtimeError = error.message;
     }
-  } catch (error) { state.runtimeError = error.message; }
-  if (['apps', 'containers', 'vms', 'integrations'].includes(state.view)) render(state.view);
+    if (['apps', 'containers', 'vms', 'integrations'].includes(state.view)) render(state.view);
+  })();
+  if (!forceRefresh) runtimeLoadPromise = work.finally(() => { runtimeLoadPromise = null; });
+  await work;
+  if (state.view === 'apps' && !state.communityCatalog && !state.communityCatalogLoading) loadCommunityCatalog(false);
+}
+
+async function loadBackupJobs() {
+  try {
+    state.backupJobs = (await request('/api/backups/jobs')).jobs || [];
+    if (state.selectedBackupJobId && !state.backupJobs.some(job => job.id === state.selectedBackupJobId)) state.selectedBackupJobId = null;
+    if (state.view === 'backups') render('backups');
+  } catch (error) {
+    state.backupJobs = [];
+    if (state.view === 'backups') render('backups');
+    toast(error.message);
+  }
 }
 
 async function loadContainers() {
@@ -1616,7 +1650,7 @@ function moduleView(view) {
     return `${pageHead('App Store', 'Install curated open-source applications directly from LightNAS.', '<button class="secondary" data-action="refresh-runtime">Refresh apps</button>')}
       ${runtimeBanner('docker')}
       <section class="app-catalog-toolbar panel">
-        <div><span class="eyebrow">LIGHTNAS APPLICATION CATALOG</span><h2>${apps.length} one-click apps</h2><p class="muted">A combined LightNAS and community application catalog. Built-in LightNAS recipes are directly installable; imported community entries are clearly marked while their Compose package is validated for the LightNAS application engine.</p></div>
+        <div><span class="eyebrow">LIGHTNAS APPLICATION CATALOG</span><h2>${apps.length} one-click apps</h2><p class="muted">Built-in apps load immediately. Community sources are cached locally and refresh in the background.</p>${state.communityCatalogLoading ? '<p class="muted app-catalog-status">Updating community catalog in background…</p>' : state.communityCatalogError ? `<p class="muted app-catalog-status">Community catalog: ${escapeHtml(state.communityCatalogError)}</p>` : ''}</div>
         <div class="app-filter-controls">
           <label>Search<input id="app-search" type="search" placeholder="Search apps, categories, or images…"></label>
           <label>Category<select id="app-category"><option value="">All categories</option>${categories.map(category => `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`).join('')}</select></label>
@@ -1804,18 +1838,58 @@ function backupsView() {
   const pools = state.overview?.storage?.configuredPools || [];
   const eligible = pools.filter(pool => Array.isArray(pool.content) ? pool.content.includes('backups') : /backup/i.test((pool.contentLabels || []).join(' ')));
   const activity = (state.logs || state.overview?.activity || []).filter(item => /backup|restore|snapshot/i.test(`${item.type || ''} ${item.message || ''}`));
-  return `${pageHead('Backups', 'Backup storage, restore activity and protection status.', '<div class="head-actions"><button class="secondary" data-action="refresh-storage">Refresh storage</button><button class="secondary" data-action="refresh-logs">Refresh activity</button></div>')}
-    <section class="metric-grid">
-      ${metric('Backup-capable pools', String(eligible.length), eligible.length ? 100 : 0, eligible.length ? 'Ready for backup content' : 'No pool currently advertises backup content')}
-      ${metric('Recent backup events', String(activity.length), Math.min(100, activity.length * 10), 'Recorded in the LightNAS activity log')}
-      ${metric('Configured storage pools', String(pools.length), pools.length ? 100 : 0, 'Available storage targets')}
-      ${metric('Protection status', eligible.length ? 'Ready' : 'Needs target', eligible.length ? 100 : 0, eligible.length ? 'At least one backup target is available' : 'Add or edit storage to allow Backups')}
-    </section>
-    <section class="panel"><div class="panel-head"><div><span class="eyebrow">BACKUP TARGETS</span><h2>Storage available for backups</h2></div><button class="secondary" data-view-link="storage">Manage storage</button></div>
-      <div class="storage-list">${eligible.length ? eligible.map(pool => `<article class="storage-row"><div><h3>${escapeHtml(pool.name)}</h3><p>${escapeHtml(pool.provider || pool.type || 'storage')} · ${escapeHtml(pool.mountPoint || 'managed storage')}</p></div><span class="volume-state writable">READY</span></article>`).join('') : '<div class="empty compact-empty"><h3>No backup target configured</h3><p>Open Storage and add or edit a pool with Backups enabled in its content policy.</p></div>'}</div>
-    </section>
-    <section class="panel"><div class="panel-head"><div><span class="eyebrow">HISTORY</span><h2>Backup & restore activity</h2></div></div>
-      <div class="activity-list">${activity.length ? activity.slice(0,50).map(item => `<div class="activity"><span class="activity-icon">↶</span><div><b>${escapeHtml(item.message || item.type)}</b><time>${relativeTime(item.timestamp)}</time></div></div>`).join('') : '<p class="muted">No backup or restore activity has been recorded yet.</p>'}</div>
+
+  // Keep the LightVisor/hypervisor workspace unchanged. This redesign is NAS-only.
+  if (window.LIGHTNAS_PRODUCT_MODE === 'hypervisor') {
+    return `${pageHead('Backups', 'Backup storage, restore activity and protection status.', '<div class="head-actions"><button class="secondary" data-action="refresh-storage">Refresh storage</button><button class="secondary" data-action="refresh-logs">Refresh activity</button></div>')}
+      <section class="metric-grid">
+        ${metric('Backup-capable pools', String(eligible.length), eligible.length ? 100 : 0, eligible.length ? 'Ready for backup content' : 'No pool currently advertises backup content')}
+        ${metric('Recent backup events', String(activity.length), Math.min(100, activity.length * 10), 'Recorded in the LightNAS activity log')}
+        ${metric('Configured storage pools', String(pools.length), pools.length ? 100 : 0, 'Available storage targets')}
+        ${metric('Protection status', eligible.length ? 'Ready' : 'Needs target', eligible.length ? 100 : 0, eligible.length ? 'At least one backup target is available' : 'Add or edit storage to allow Backups')}
+      </section>
+      <section class="panel"><div class="panel-head"><div><span class="eyebrow">BACKUP TARGETS</span><h2>Storage available for backups</h2></div><button class="secondary" data-view-link="storage">Manage storage</button></div>
+        <div class="storage-list">${eligible.length ? eligible.map(pool => `<article class="storage-row"><div><h3>${escapeHtml(pool.name)}</h3><p>${escapeHtml(pool.provider || pool.type || 'storage')} · ${escapeHtml(pool.mountPoint || 'managed storage')}</p></div><span class="volume-state writable">READY</span></article>`).join('') : '<div class="empty compact-empty"><h3>No backup target configured</h3><p>Open Storage and add or edit a pool with Backups enabled in its content policy.</p></div>'}</div>
+      </section>
+      <section class="panel"><div class="panel-head"><div><span class="eyebrow">HISTORY</span><h2>Backup & restore activity</h2></div></div>
+        <div class="activity-list">${activity.length ? activity.slice(0,50).map(item => `<div class="activity"><span class="activity-icon">↶</span><div><b>${escapeHtml(item.message || item.type)}</b><time>${relativeTime(item.timestamp)}</time></div></div>`).join('') : '<p class="muted">No backup or restore activity has been recorded yet.</p>'}</div>
+      </section>`;
+  }
+
+  const jobs = Array.isArray(state.backupJobs) ? state.backupJobs : [];
+  const selected = jobs.find(job => job.id === state.selectedBackupJobId);
+  return `${pageHead('Backup', 'Create and manage NAS backup jobs.', '')}
+    <section class="panel backup-console">
+      <div class="backup-toolbar" role="toolbar" aria-label="Backup jobs">
+        <button type="button" class="secondary" data-backup-add>Add</button>
+        <button type="button" class="secondary" data-backup-remove ${selected ? '' : 'disabled'}>Remove</button>
+        <button type="button" class="secondary" data-backup-edit ${selected ? '' : 'disabled'}>Edit</button>
+        <button type="button" class="secondary" data-backup-detail ${selected ? '' : 'disabled'}>Job Detail</button>
+        <button type="button" class="secondary" data-backup-run ${selected ? '' : 'disabled'}>Run now</button>
+        <span class="backup-toolbar-spacer"></span>
+        <label class="backup-filter"><input type="checkbox" data-backup-unprotected> Show: Data Without Backup Job</label>
+        <button type="button" class="secondary" data-backup-simulator>Schedule Simulator</button>
+      </div>
+      <div class="backup-table-wrap">
+        <div class="backup-table" role="table">
+          <div class="backup-row backup-head" role="row"><span>Enabled</span><span>Node</span><span>Schedule</span><span>Next Run</span><span>Storage</span><span>Comment</span><span>Retention</span><span>Selection</span></div>
+          ${state.backupJobs === null
+            ? '<div class="backup-empty">Loading backup jobs…</div>'
+            : jobs.length
+              ? jobs.map(job => `<button type="button" class="backup-row backup-job-row${job.id === state.selectedBackupJobId ? ' selected' : ''}" data-backup-job="${escapeHtml(job.id)}" role="row">
+                  <span class="backup-enabled">${job.enabled ? '✓' : '—'}</span>
+                  <span>${escapeHtml(job.node || state.overview?.appliance?.deviceName || 'LightNAS')}</span>
+                  <span>${escapeHtml(job.schedule || 'On demand')}</span>
+                  <span>${escapeHtml(job.nextRun || 'Pending scheduler')}</span>
+                  <span>${escapeHtml(job.storage || '—')}</span>
+                  <span>${escapeHtml(job.comment || '')}</span>
+                  <span>${escapeHtml(job.retention || 'Keep last 7')}</span>
+                  <span class="backup-selection">${escapeHtml(job.selection || 'All NAS data')}</span>
+                </button>`).join('')
+              : '<div class="backup-empty">No backup jobs configured. Select Add to create the first NAS backup job.</div>'}
+        </div>
+      </div>
+      <div class="backup-status-line"><span>${eligible.length} backup-capable storage target${eligible.length === 1 ? '' : 's'} detected</span><span>${activity.length} recent backup/restore event${activity.length === 1 ? '' : 's'}</span></div>
     </section>`;
 }
 
@@ -1912,6 +1986,8 @@ function render(view) {
   if (['files', 'media'].includes(state.view) && state.media === null) loadMedia();
   if (['network', 'firewall'].includes(state.view) && !state.network) loadNetwork();
   if (['logs','backups','analytics'].includes(state.view) && state.logs === null) loadLogs();
+  if (state.view === 'backups' && state.backupJobs === null && window.LIGHTNAS_PRODUCT_MODE !== 'hypervisor') loadBackupJobs();
+  if (state.view === 'apps' && !state.communityCatalog && !state.communityCatalogLoading) loadCommunityCatalog(false);
   if (state.view === 'settings' && (!state.software || !state.license)) loadSoftwareAndLicense();
 
   if (state.view === 'containers') {
@@ -2209,19 +2285,23 @@ function bindViewActions() {
       if (live) { live.disabled = false; live.textContent = original || 'Refresh'; }
     }
   }));
-  $$('[data-action="refresh-runtime"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+  $('[data-action="refresh-runtime"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     const original = button.textContent;
     button.disabled = true;
     button.textContent = 'Refreshing…';
     try {
-      state.runtimes = await request('/api/runtimes');
-      if (state.view === 'apps') state.communityCatalog = await request('/api/catalog/community?refresh=1');
+      if (state.view === 'apps') {
+        await Promise.all([loadRuntimes(true), loadCommunityCatalog(true)]);
+      } else {
+        await loadRuntimes(true);
+      }
       render(state.view);
       toast(state.view === 'apps' ? 'App catalog refreshed.' : 'Runtime inventory refreshed.');
     } catch (error) {
       toast(error.message);
-      button.disabled = false;
-      button.textContent = original || 'Refresh';
+    } finally {
+      const live = $('#content [data-action="refresh-runtime"]');
+      if (live) { live.disabled = false; live.textContent = original || 'Refresh'; }
     }
   }));
   $$('[data-community-install]', $('#content')).forEach(button => button.addEventListener('click', async () => {
@@ -2235,7 +2315,7 @@ function bindViewActions() {
     const progress = window.LightNASProgress?.open(`Installing ${app.name}`, 'Downloading the Compose package and starting application services…', { modal:false });
     try {
       await request(`/api/catalog/community/${app.id}/install`, { method:'POST', body:'{}' });
-      await loadRuntimes();
+      await loadRuntimes(true);
       progress?.succeed(`${app.name} installed and started successfully.`);
       toast(`${app.name} installed.`);
     } catch (error) {
@@ -2259,7 +2339,7 @@ function bindViewActions() {
     const progress = window.LightNASProgress?.open(`Installing ${app.name}`, 'Creating the app container and starting the service…', { modal:false });
     try {
       await request(`/api/catalog/${app.id}/install`, { method: 'POST', body: JSON.stringify(setup) });
-      await loadRuntimes();
+      await loadRuntimes(true);
       progress?.succeed(`${app.name} installed and started successfully.`);
       toast(`${app.name} installed. Use Open application to access it.`);
     }
@@ -2278,7 +2358,7 @@ function bindViewActions() {
     const { appId, appAction } = button.dataset;
     if (appAction === 'remove' && !confirm(`Remove ${appId}? Its saved app data will remain on this NAS.`)) return;
     button.disabled = true;
-    try { await request(`/api/catalog/${appId}/${appAction}`, { method: 'POST' }); await loadRuntimes(); toast(`App ${appAction} complete.`); }
+    try { await request(`/api/catalog/${appId}/${appAction}`, { method: 'POST' }); await loadRuntimes(true); toast(`App ${appAction} complete.`); }
     catch (error) { toast(error.message); button.disabled = false; }
   }));
   for (const [selector, path, message] of [['#container-form', '/api/containers', 'Container created.'], ['#vm-form', '/api/vms', 'VM creation submitted. Check the host task status.']]) {
@@ -2291,7 +2371,7 @@ function bindViewActions() {
       button.disabled = true;
       try {
         await request(path, { method: 'POST', body: JSON.stringify(Object.fromEntries(new FormData(form))) });
-        if (path === '/api/containers') await loadContainers(); else await loadRuntimes();
+        if (path === '/api/containers') await loadContainers(); else await loadRuntimes(true);
         toast(message);
       }
       catch (problem) { error.textContent = problem.message; }
@@ -2382,6 +2462,73 @@ function bindViewActions() {
     settingsForm.elements.brandName?.addEventListener('input', previewBrandingFromForm);
     syncBrandingControls();
   }
+
+  $('[data-backup-job]', $('#content')).forEach(row => row.addEventListener('click', () => {
+    state.selectedBackupJobId = row.dataset.backupJob;
+    render('backups');
+  }));
+  $('[data-backup-add]', $('#content'))?.addEventListener('click', async () => {
+    const targets = (state.overview?.storage?.configuredPools || []).filter(pool => Array.isArray(pool.content) ? pool.content.includes('backups') : /backup/i.test((pool.contentLabels || []).join(' ')));
+    const fallbackTarget = targets[0]?.name || '';
+    const storage = prompt('Backup storage target', fallbackTarget);
+    if (storage === null) return;
+    if (!storage.trim()) return toast('Choose a backup storage target.');
+    const schedule = prompt('Schedule (example: daily 04:00, weekly Sun 02:00, or on-demand)', 'daily 04:00');
+    if (schedule === null) return;
+    const selection = prompt('Data selection', 'All NAS data');
+    if (selection === null) return;
+    const retention = prompt('Retention', 'Keep last 7');
+    if (retention === null) return;
+    try {
+      const job = await request('/api/backups/jobs', { method:'POST', body:JSON.stringify({ storage, schedule, selection, retention }) });
+      state.selectedBackupJobId = job.id;
+      await loadBackupJobs();
+      toast('Backup job added.');
+    } catch (error) { toast(error.message); }
+  });
+  $('[data-backup-edit]', $('#content'))?.addEventListener('click', async () => {
+    const job = (state.backupJobs || []).find(item => item.id === state.selectedBackupJobId);
+    if (!job) return;
+    const schedule = prompt('Schedule', job.schedule || 'daily 04:00'); if (schedule === null) return;
+    const storage = prompt('Backup storage target', job.storage || ''); if (storage === null) return;
+    const selection = prompt('Data selection', job.selection || 'All NAS data'); if (selection === null) return;
+    const retention = prompt('Retention', job.retention || 'Keep last 7'); if (retention === null) return;
+    const comment = prompt('Comment', job.comment || ''); if (comment === null) return;
+    try {
+      await request(`/api/backups/jobs/${encodeURIComponent(job.id)}`, { method:'PATCH', body:JSON.stringify({ schedule, storage, selection, retention, comment }) });
+      await loadBackupJobs();
+      toast('Backup job updated.');
+    } catch (error) { toast(error.message); }
+  });
+  $('[data-backup-remove]', $('#content'))?.addEventListener('click', async () => {
+    const job = (state.backupJobs || []).find(item => item.id === state.selectedBackupJobId);
+    if (!job || !confirm('Remove the selected backup job?')) return;
+    try {
+      await request(`/api/backups/jobs/${encodeURIComponent(job.id)}`, { method:'DELETE' });
+      state.selectedBackupJobId = null;
+      await loadBackupJobs();
+      toast('Backup job removed.');
+    } catch (error) { toast(error.message); }
+  });
+  $('[data-backup-detail]', $('#content'))?.addEventListener('click', () => {
+    const job = (state.backupJobs || []).find(item => item.id === state.selectedBackupJobId);
+    if (!job) return;
+    alert([`Node: ${job.node || 'LightNAS'}`, `Schedule: ${job.schedule || 'On demand'}`, `Storage: ${job.storage || '—'}`, `Retention: ${job.retention || '—'}`, `Selection: ${job.selection || '—'}`, `Comment: ${job.comment || '—'}`].join('\n'));
+  });
+  $('[data-backup-run]', $('#content'))?.addEventListener('click', async () => {
+    const job = (state.backupJobs || []).find(item => item.id === state.selectedBackupJobId);
+    if (!job) return;
+    try {
+      const result = await request(`/api/backups/jobs/${encodeURIComponent(job.id)}/run`, { method:'POST', body:'{}' });
+      toast(result.message || 'Backup run requested.');
+      state.logs = null;
+      loadLogs();
+    } catch (error) { toast(error.message); }
+  });
+  $('[data-backup-simulator]', $('#content'))?.addEventListener('click', () => {
+    const lines = (state.backupJobs || []).map(job => `${job.enabled ? '✓' : '—'} ${job.schedule || 'On demand'} — ${job.selection || 'All NAS data'} → ${job.storage || 'No target'}`);
+    alert(lines.length ? lines.join('\n') : 'No backup jobs are configured.');
+  });
 
   $('#settings-form', $('#content'))?.addEventListener('submit', async event => {
     event.preventDefault();
