@@ -13,10 +13,28 @@ set -Eeuo pipefail
 BRIDGE="${LIGHTNAS_LAN_BRIDGE:-virbr0}"
 STATE_DIR=/etc/lightnas
 STATE_FILE="${STATE_DIR}/network.env"
+CHOICE_FILE="${STATE_DIR}/network-choice.env"
 mkdir -p "${STATE_DIR}"
+
+preferred_uplink="${LIGHTNAS_UPLINK_PREFERENCE:-}"
+if [[ -z "${preferred_uplink}" && -r "${CHOICE_FILE}" ]]; then
+  preferred_uplink="$(sed -n 's/^LIGHTNAS_UPLINK_PREFERENCE=//p' "${CHOICE_FILE}" | tail -1)"
+fi
+if [[ -n "${preferred_uplink}" && ! "${preferred_uplink}" =~ ^[A-Za-z0-9_.:-]{1,32}$ ]]; then
+  echo "LightNAS network: ignoring invalid saved uplink preference." >&2
+  preferred_uplink=""
+fi
+if [[ -n "${preferred_uplink}" && ! -e "/sys/class/net/${preferred_uplink}" ]]; then
+  echo "LightNAS network: saved interface ${preferred_uplink} is not currently present; using automatic discovery." >&2
+  preferred_uplink=""
+fi
 
 bridge_uplink() {
   local port path
+  if [[ -n "${preferred_uplink}" && -e "/sys/class/net/${preferred_uplink}" ]]; then
+    printf '%s\n' "${preferred_uplink}"
+    return 0
+  fi
   if [[ -r "${STATE_FILE}" ]]; then
     port="$(sed -n 's/^LIGHTNAS_UPLINK=//p' "${STATE_FILE}" | tail -1)"
     [[ -n "${port}" && -e "/sys/class/net/${port}" ]] && { printf '%s\n' "${port}"; return 0; }
@@ -146,6 +164,10 @@ is_virtual_name() {
 
 discover_wired_uplink() {
   local path name first="" carrier=""
+  if [[ -n "${preferred_uplink}" && -e "/sys/class/net/${preferred_uplink}" && ! -d "/sys/class/net/${preferred_uplink}/wireless" ]]; then
+    printf '%s\n' "${preferred_uplink}"
+    return 0
+  fi
   for path in /sys/class/net/*; do
     [[ -e "${path}" ]] || continue
     name="$(basename "${path}")"
@@ -164,7 +186,8 @@ discover_wired_uplink() {
 
 bootstrap_wired_dhcp() {
   local uplink profile
-  uplink="$(discover_wired_uplink || true)"
+  uplink="${1:-}"
+  [[ -n "${uplink}" ]] || uplink="$(discover_wired_uplink || true)"
   [[ -n "${uplink}" ]] || return 1
 
   echo "LightNAS network: no IPv4 route yet; bringing up ${uplink} with DHCP."
@@ -209,8 +232,35 @@ bootstrap_wired_dhcp() {
 default_dev="$(ip -4 route show default 2>/dev/null | awk 'NR==1 {for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')"
 default_gw="$(ip -4 route show default 2>/dev/null | awk 'NR==1 {for(i=1;i<=NF;i++) if($i=="via"){print $(i+1); exit}}')"
 
+# A user-selected physical interface wins over automatic route discovery. If
+# NetworkManager already knows a Wi-Fi profile, bring it up; for Ethernet,
+# acquire DHCP. Do not silently switch to another adapter after selection.
+if [[ -n "${preferred_uplink}" && "${default_dev}" != "${preferred_uplink}" ]]; then
+  echo "LightNAS network: applying selected management uplink ${preferred_uplink}."
+  ip link set "${preferred_uplink}" up >/dev/null 2>&1 || true
+  if [[ -d "/sys/class/net/${preferred_uplink}/wireless" ]]; then
+    if command -v nmcli >/dev/null 2>&1; then
+      systemctl enable NetworkManager.service >/dev/null 2>&1 || true
+      systemctl start NetworkManager.service >/dev/null 2>&1 || true
+      nmcli device set "${preferred_uplink}" managed yes >/dev/null 2>&1 || true
+      nmcli device connect "${preferred_uplink}" >/dev/null 2>&1 || true
+    fi
+  else
+    bootstrap_wired_dhcp "${preferred_uplink}" || true
+  fi
+  preferred_route="$(ip -4 route show default dev "${preferred_uplink}" 2>/dev/null | head -1 || true)"
+  if [[ -n "${preferred_route}" ]]; then
+    default_dev="${preferred_uplink}"
+    default_gw="$(awk '{for(i=1;i<=NF;i++) if($i=="via"){print $(i+1); exit}}' <<<"${preferred_route}")"
+  elif [[ -d "/sys/class/net/${preferred_uplink}/wireless" ]]; then
+    printf 'LIGHTNAS_NETWORK_MODE=pending-wifi\nLIGHTNAS_UPLINK=%s\n' "${preferred_uplink}" >"${STATE_FILE}"
+    echo "LightNAS network: selected Wi-Fi adapter ${preferred_uplink} is not connected yet. Configure its Wi-Fi connection from Networking." >&2
+    exit 0
+  fi
+fi
+
 if [[ -z "${default_dev}" ]]; then
-  bootstrap_wired_dhcp || true
+  bootstrap_wired_dhcp "${preferred_uplink}" || true
   default_dev="$(ip -4 route show default 2>/dev/null | awk 'NR==1 {for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')"
   default_gw="$(ip -4 route show default 2>/dev/null | awk 'NR==1 {for(i=1;i<=NF;i++) if($i=="via"){print $(i+1); exit}}')"
 fi
