@@ -478,24 +478,98 @@ function hypervisorResourceTree(nodeName, pools, networks, vms, containers, acti
     const normalized = ['home','hypervisor'].includes(activeView) ? 'hypervisor' : activeView;
     return normalized === view ? ' active' : '';
   };
+  const guestLabel = item => escapeHtml(item.name || item.hostname || item.id || 'Guest');
+  const guestId = item => escapeHtml(String(item.vmid || item.ctid || item.id || ''));
+  const vmItems = vms.map(item => {
+    const running = /running|active/i.test(String(item.status || ''));
+    const id = guestId(item);
+    return `<button class="hv-tree-resource vm-resource${active('vms')}" data-view-link="vms" title="${guestLabel(item)}">
+      <span class="hv-tree-status ${running ? 'online' : 'offline'}"></span>
+      <span class="hv-tree-resource-icon vm">▣</span>
+      <span class="hv-tree-resource-copy"><b>${id ? id + ' ' : ''}${guestLabel(item)}</b><small>${escapeHtml(item.status || 'unknown')}</small></span>
+    </button>`;
+  }).join('');
+  const ctItems = containers.map(item => {
+    const running = /running|active/i.test(String(item.status || ''));
+    const id = guestId(item);
+    return `<button class="hv-tree-resource ct-resource${active('containers')}" data-view-link="containers" title="${guestLabel(item)}">
+      <span class="hv-tree-status ${running ? 'online' : 'offline'}"></span>
+      <span class="hv-tree-resource-icon ct">⬡</span>
+      <span class="hv-tree-resource-copy"><b>${id ? id + ' ' : ''}${guestLabel(item)}</b><small>${escapeHtml(item.status || 'unknown')}</small></span>
+    </button>`;
+  }).join('');
+  const networkItems = networks.map(net => {
+    const name = escapeHtml(net.name || net.bridge || 'Network');
+    return `<button class="hv-tree-resource network-resource${active('network')}" data-view-link="network" title="${name}">
+      <span class="hv-tree-resource-icon network">⌁</span>
+      <span class="hv-tree-resource-copy"><b>${name}</b><small>${escapeHtml(net.type || net.bridge || 'virtual network')}</small></span>
+    </button>`;
+  }).join('');
+  const storageItems = pools.map(pool => {
+    const name = escapeHtml(pool.name || 'Storage');
+    return `<button class="hv-tree-resource storage-resource${active('storage')}" data-view-link="storage" title="${name}">
+      <span class="hv-tree-resource-icon storage">◫</span>
+      <span class="hv-tree-resource-copy"><b>${name}</b><small>${escapeHtml(pool.provider || pool.type || 'datastore')}</small></span>
+    </button>`;
+  }).join('');
+
   return `<aside class="hv-resource-tree" aria-label="Hypervisor navigation">
     <div class="hv-brand"><span class="hv-brand-mark">◢</span><span>LIGHT<span>VISOR</span></span></div>
     <nav class="hv-primary-nav">
-      <button class="hv-nav-item${active('hypervisor')}" data-view-link="hypervisor"><span>⌂</span>Dashboard</button>
+      <button class="hv-nav-item hv-dashboard-link${active('hypervisor')}" data-view-link="hypervisor"><span>⌂</span>Dashboard</button>
 
-      <div class="hv-nav-label">DATACENTER</div>
-      <div class="hv-datacenter-card">
-        <button class="hv-nav-item hv-datacenter-link${active('hypervisor')}" data-view-link="hypervisor">
-          <span>▦</span><span><b>Local Datacenter</b><small>1 host</small></span>
-        </button>
-        <div class="hv-host-summary"><span class="hv-state-dot ok"></span><span><b>${escapeHtml(nodeName)}</b><small>Online</small></span></div>
-      </div>
+      <div class="hv-nav-label">RESOURCE TREE</div>
+      <details class="hv-inventory-root" open>
+        <summary class="hv-inventory-root-summary">
+          <span class="hv-tree-chevron"></span>
+          <span class="hv-tree-glyph">▦</span>
+          <span class="hv-root-copy"><b>Local Datacenter</b><small>1 host · ${vms.length} VMs · ${containers.length} containers</small></span>
+        </summary>
 
-      <div class="hv-nav-label">INFRASTRUCTURE</div>
-      <button class="hv-nav-item${active('vms')}" data-view-link="vms"><span>▣</span>Virtual Machines <small>${vms.length}</small></button>
-      <button class="hv-nav-item${active('containers')}" data-view-link="containers"><span>⬡</span>Containers <small>${containers.length}</small></button>
-      <button class="hv-nav-item${active('storage')}" data-view-link="storage"><span>◫</span>Storage <small>${pools.length}</small></button>
-      <button class="hv-nav-item${active('network')}" data-view-link="network"><span>⌁</span>Networking <small>${networks.length}</small></button>
+        <div class="hv-tree-branch">
+          <details class="hv-inventory-group" open>
+            <summary>
+              <span class="hv-tree-chevron"></span><span class="hv-tree-resource-icon ct">⬡</span><b>LXC Containers</b><small>${containers.length}</small>
+            </summary>
+            <div class="hv-tree-children">${ctItems || '<span class="hv-tree-empty">No containers</span>'}</div>
+          </details>
+
+          <details class="hv-inventory-group" open>
+            <summary>
+              <span class="hv-tree-chevron"></span><span class="hv-tree-resource-icon node">▤</span><b>Nodes</b><small>1</small>
+            </summary>
+            <div class="hv-tree-children">
+              <button class="hv-tree-resource node-resource${active('hypervisor')}" data-view-link="hypervisor">
+                <span class="hv-tree-status online"></span><span class="hv-tree-resource-icon node">▤</span>
+                <span class="hv-tree-resource-copy"><b>${escapeHtml(nodeName)}</b><small>Online</small></span>
+              </button>
+            </div>
+          </details>
+
+          <details class="hv-inventory-group" open>
+            <summary>
+              <span class="hv-tree-chevron"></span><span class="hv-tree-resource-icon vm">▣</span><b>Virtual Machines</b><small>${vms.length}</small>
+            </summary>
+            <div class="hv-tree-children">${vmItems || '<span class="hv-tree-empty">No virtual machines</span>'}</div>
+          </details>
+
+          <details class="hv-inventory-group">
+            <summary>
+              <span class="hv-tree-chevron"></span><span class="hv-tree-resource-icon network">⌁</span><b>SDN / Networks</b><small>${networks.length}</small>
+            </summary>
+            <div class="hv-tree-children">${networkItems || '<span class="hv-tree-empty">No virtual networks</span>'}</div>
+          </details>
+
+          <details class="hv-inventory-group">
+            <summary>
+              <span class="hv-tree-chevron"></span><span class="hv-tree-resource-icon storage">◫</span><b>Storage</b><small>${pools.length}</small>
+            </summary>
+            <div class="hv-tree-children">${storageItems || '<span class="hv-tree-empty">No storage pools</span>'}</div>
+          </details>
+        </div>
+      </details>
+
+      <div class="hv-nav-label hv-operations-label">OPERATIONS</div>
       <button class="hv-nav-item${active('backups')}" data-view-link="backups"><span>↶</span>Backups</button>
       <button class="hv-nav-item${active('analytics')}" data-view-link="analytics"><span>⌁</span>Monitoring</button>
       <button class="hv-nav-item${active('users')}" data-view-link="users"><span>◎</span>Users & RBAC</button>
