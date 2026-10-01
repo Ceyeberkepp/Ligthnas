@@ -51,11 +51,12 @@ test('sidebar scrollbar is completely hidden', async () => {
   assert.match(css, /sidebar nav::-webkit-scrollbar \{ display: none; width: 0; height: 0; \}/);
 });
 
-test('ISO uses supported compressed filesystem and remains branded graphical LightNAS', async () => {
+test('ISO uses supported compressed filesystem and boots the branded LightNAS kiosk directly', async () => {
   const iso = await read('iso/build.sh');
   assert.match(iso, /--compression xz/);
   assert.match(iso, /Install LightNAS \(Graphical\)/);
-  assert.match(iso, /lightnas-display-fallback\.service/);
+  assert.match(iso, /lightnas-display-console\.service/);
+  assert.match(iso, /systemctl mask lightdm\.service/);
   assert.match(iso, /LightNAS 1\.0/);
 });
 
