@@ -744,8 +744,14 @@ async function loadMedia() {
 }
 
 async function loadRuntimes() {
-  try { state.runtimes = await request('/api/runtimes'); state.runtimeError = null; }
-  catch (error) { state.runtimeError = error.message; }
+  try {
+    state.runtimes = await request('/api/runtimes');
+    state.runtimeError = null;
+    if (state.view === 'apps') {
+      try { state.communityCatalog = await request('/api/catalog/community'); }
+      catch (error) { state.communityCatalog = { apps: [], sources: [], error: error.message }; }
+    }
+  } catch (error) { state.runtimeError = error.message; }
   if (['apps', 'containers', 'vms', 'integrations'].includes(state.view)) render(state.view);
 }
 
@@ -1247,7 +1253,9 @@ function lightnasAgentReply(input) {
   const storage = state.overview?.storage?.usableStorage || state.overview?.storage?.virtualStorage || state.overview?.storage?.local || {};
   const containers = state.runtimes?.containers?.containers || [];
   const noIp = containers.filter(item => /running|active/i.test(String(item.status || '')) && !/^\d+\.\d+\.\d+\.\d+$/.test(String(item.ipv4 || '')));
-  const apps = state.runtimes?.catalog || [];
+  const builtInApps = state.runtimes?.catalog || [];
+    const communityApps = state.communityCatalog?.apps || [];
+    const apps = [...builtInApps, ...communityApps];
   const defaultRoute = (state.network?.routes || []).find(item => item.destination === 'default');
 
   if (/container|ip|dhcp|network/.test(lower)) {
@@ -1476,7 +1484,7 @@ function moduleView(view) {
     return `${pageHead('App Store', 'Install curated open-source applications directly from LightNAS.', '<button class="secondary" data-action="refresh-runtime">Refresh apps</button>')}
       ${runtimeBanner('docker')}
       <section class="app-catalog-toolbar panel">
-        <div><span class="eyebrow">LIGHTNAS APPLICATION CATALOG</span><h2>${apps.length} one-click apps</h2><p class="muted">A broad NAS app catalog sourced from official upstream and community container images, including many apps commonly found in TrueNAS-style catalogs. LightNAS only lists entries its current one-click engine can actually launch; complex multi-service stacks will join as Compose support expands. No external hypervisor configuration or manual port forwarding is required for managed catalog apps.</p></div>
+        <div><span class="eyebrow">LIGHTNAS APPLICATION CATALOG</span><h2>${apps.length} one-click apps</h2><p class="muted">A combined LightNAS and community application catalog. Built-in LightNAS recipes are directly installable; imported community entries are clearly marked while their Compose package is validated for the LightNAS application engine.</p></div>
         <div class="app-filter-controls">
           <label>Search<input id="app-search" type="search" placeholder="Search apps, categories, or images…"></label>
           <label>Category<select id="app-category"><option value="">All categories</option>${categories.map(category => `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`).join('')}</select></label>
@@ -1487,7 +1495,7 @@ function moduleView(view) {
         const appUrl = `http://${location.hostname}:${app.port}/`;
         const running = instance?.state === 'running';
         const searchText = `${app.name} ${app.category} ${app.description} ${app.image} ${app.source || ''}`.toLowerCase();
-        return `<article class="panel app-card" data-app-card data-category="${escapeHtml(app.category)}" data-search="${escapeHtml(searchText)}"><span class="eyebrow">${escapeHtml(app.category)}</span><h2>${escapeHtml(app.name)}</h2><p class="muted">${escapeHtml(app.description)}</p><p class="muted app-source">${escapeHtml(app.source || 'Open source')} · ${escapeHtml(app.image)} · Port ${app.port}</p>${instance ? `<p class="muted">${escapeHtml(instance.status || instance.state)} · Container IP ${escapeHtml(instance.ip || 'not assigned')}</p><div class="head-actions">${running ? `<a class="primary" href="${escapeHtml(appUrl)}" target="_blank" rel="noopener">Open application</a><button class="secondary" type="button" data-app-terminal="${escapeHtml(instance.name)}" data-app-name="${escapeHtml(app.name)}">Terminal</button>` : ''}<button class="secondary" data-app-action="${running ? 'stop' : 'start'}" data-app-id="${app.id}">${running ? 'Stop' : 'Start'}</button><button class="secondary" type="button" data-app-edit="${app.id}" data-app-container="${escapeHtml(instance.name)}">Edit resources</button><button class="secondary" data-app-action="restart" data-app-id="${app.id}">Restart</button><button class="secondary" data-app-action="remove" data-app-id="${app.id}">Remove</button></div>` : `<button class="primary" data-install="${app.id}">Install app</button>`}</article>`;
+        return `<article class="panel app-card" data-app-card data-category="${escapeHtml(app.category)}" data-search="${escapeHtml(searchText)}"><span class="eyebrow">${escapeHtml(app.category)}</span><h2>${escapeHtml(app.name)}</h2><p class="muted">${escapeHtml(app.description)}</p><p class="muted app-source">${escapeHtml(app.source || 'Open source')}${app.image ? ` · ${escapeHtml(app.image)}` : ''}${app.port ? ` · Port ${app.port}` : ''}</p>${instance ? `<p class="muted">${escapeHtml(instance.status || instance.state)} · Container IP ${escapeHtml(instance.ip || 'not assigned')}</p><div class="head-actions">${running ? `<a class="primary" href="${escapeHtml(appUrl)}" target="_blank" rel="noopener">Open application</a><button class="secondary" type="button" data-app-terminal="${escapeHtml(instance.name)}" data-app-name="${escapeHtml(app.name)}">Terminal</button>` : ''}<button class="secondary" data-app-action="${running ? 'stop' : 'start'}" data-app-id="${app.id}">${running ? 'Stop' : 'Start'}</button><button class="secondary" type="button" data-app-edit="${app.id}" data-app-container="${escapeHtml(instance.name)}">Edit resources</button><button class="secondary" data-app-action="restart" data-app-id="${app.id}">Restart</button><button class="secondary" data-app-action="remove" data-app-id="${app.id}">Remove</button></div>` : app.community ? `<button class="secondary" type="button" disabled title="Compose installer integration is required before this community app can be deployed safely.">Community package</button>` : `<button class="primary" data-install="${app.id}">Install app</button>`}</article>`;
       }).join('') || '<div class="empty"><p>Loading catalog…</p></div>'}</div>
       <section class="module-hero"><h2>Managed app hosting</h2><p>LightNAS downloads each app, creates its persistent storage, publishes its web service on the LightNAS LAN address, starts it after reboot, and verifies that the service is reachable. ${docker?.available && docker?.enabled ? 'The integrated App Store engine is ready.' : 'Rerun the one-click LightNAS installer to provision the integrated App Store engine.'}</p></section>`;
   }
@@ -2085,7 +2093,25 @@ function bindViewActions() {
       if (live) { live.disabled = false; live.textContent = original || 'Refresh'; }
     }
   }));
-  $$('[data-install]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+  $('[data-community-install]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+    const docker = state.runtimes?.docker;
+    if (!docker?.available || !docker?.enabled) return toast(docker?.reason || 'Docker needs to be installed and enabled on this host before app installation.');
+    const app = state.communityCatalog?.apps?.find(item => item.id === button.dataset.communityInstall);
+    if (!app) return toast('The selected community application is no longer in the catalog.');
+    if (!confirm(`Install ${app.name} from ${app.source}? LightNAS will download its Compose package, pull the required images, create its services and persistent storage, and start it.`)) return;
+    button.disabled = true;
+    button.textContent = 'Installing…';
+    const progress = window.LightNASProgress?.open(`Installing ${app.name}`, 'Downloading the Compose package and starting application services…', { modal:false });
+    try {
+      await request(`/api/catalog/community/${app.id}/install`, { method:'POST', body:'{}' });
+      await loadRuntimes();
+      progress?.succeed(`${app.name} installed and started successfully.`);
+      toast(`${app.name} installed.`);
+    } catch (error) {
+      progress?.fail(error.message); toast(error.message); button.disabled = false; button.textContent = 'Install app';
+    }
+  }));
+  $('[data-install]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     const docker = state.runtimes?.docker;
     if (!docker?.available || !docker?.enabled) return toast(docker?.reason || 'Docker needs to be installed and enabled on this host before app installation.');
     const app = state.runtimes?.catalog?.find(item => item.id === button.dataset.install);
