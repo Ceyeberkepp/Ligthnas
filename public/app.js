@@ -1778,14 +1778,6 @@ function render(view) {
 }
 
 function bindViewActions() {
-  document.querySelectorAll('[data-workspace-mode]').forEach(button => {
-    button.onclick = () => {
-      if (window.LIGHTNAS_PRODUCT_MODE === 'hypervisor') return;
-      state.uiMode = 'nas';
-      applyWorkspaceMode();
-      location.hash = 'home';
-    };
-  });
   document.querySelectorAll('#content [data-settings-collapse]').forEach(button => button.addEventListener('click', () => {
     const id = button.dataset.settingsCollapse;
     let saved = {};
