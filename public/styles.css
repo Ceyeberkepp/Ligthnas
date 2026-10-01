@@ -22,6 +22,10 @@
   --primary-button-contrast: #05221e;
   --login-button: var(--accent);
   --login-button-contrast: #05221e;
+  --performance-tabs: var(--panel);
+  --performance-tabs-active: var(--accent);
+  --performance-tabs-text: var(--muted);
+  --performance-tabs-active-text: #ffffff;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
@@ -44,6 +48,10 @@
   --primary-button-contrast: #ffffff;
   --login-button: var(--accent);
   --login-button-contrast: #ffffff;
+  --performance-tabs: var(--panel);
+  --performance-tabs-active: var(--accent);
+  --performance-tabs-text: var(--muted);
+  --performance-tabs-active-text: #ffffff;
   --shadow: 0 16px 42px rgba(21,53,79,.12);
 }
 
