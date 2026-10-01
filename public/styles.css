@@ -18,6 +18,10 @@
   --topbar: rgba(7,16,29,.96);
   --input: #091421;
   --button: #172638;
+  --primary-button: var(--accent);
+  --primary-button-contrast: #05221e;
+  --login-button: var(--accent);
+  --login-button-contrast: #05221e;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
@@ -36,6 +40,10 @@
   --topbar: rgba(255,255,255,.96);
   --input: #f9fbfd;
   --button: #e6eef4;
+  --primary-button: var(--accent);
+  --primary-button-contrast: #ffffff;
+  --login-button: var(--accent);
+  --login-button-contrast: #ffffff;
   --shadow: 0 16px 42px rgba(21,53,79,.12);
 }
 
@@ -78,8 +86,8 @@ textarea { min-height: 92px; resize: vertical; }
 .check { display: flex; grid-template-columns: auto 1fr; align-items: center; gap: 10px; font-weight: 500; }
 .check input { width: 17px; height: 17px; accent-color: var(--accent); }
 .primary, .secondary { border: 0; border-radius: 11px; padding: 12px 17px; font-weight: 750; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
-.primary { background: var(--accent); color: #05221e; box-shadow: 0 9px 24px rgba(92,225,195,.14); }
-.primary:hover { background: #77ead0; }
+.primary { background: var(--primary-button); color: var(--primary-button-contrast); box-shadow: 0 9px 24px color-mix(in srgb, var(--primary-button) 20%, transparent); }
+.primary:hover { background: color-mix(in srgb, var(--primary-button) 84%, white); }
 .secondary { background: var(--button); color: var(--text); border: 1px solid var(--line); }
 .wide { width: 100%; padding: 14px; margin-top: 7px; }
 .form-error { min-height: 22px; color: var(--danger); font-size: 13px; margin-top: 12px; }
@@ -907,3 +915,6 @@ dialog::backdrop { background: rgba(1,7,13,.76); backdrop-filter: blur(5px); }
   .profile-layout { grid-template-columns:1fr; }
   .profile-crop-stage { width:min(280px,80vw); height:min(280px,80vw); }
 }
+
+.auth-panel .primary { background:var(--login-button); color:var(--login-button-contrast); }
+.auth-panel .primary:hover { background:color-mix(in srgb,var(--login-button) 84%,white); }
