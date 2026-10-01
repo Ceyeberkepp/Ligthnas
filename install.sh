@@ -161,6 +161,83 @@ install -d -o lightnas -g lightnas -m 0700 "${DATA_DIRECTORY}"
 install -d -o lightnas -g lightnas -m 0700 "${DATA_DIRECTORY}/files"
 install -d -o lightnas -g lightnas -m 0770 "${DATA_DIRECTORY}/storage" "${DATA_DIRECTORY}/storage/local"
 install -d -o root -g lightnas -m 0750 /etc/lightnas
+
+# On a fresh interactive install, enumerate real physical Ethernet and Wi-Fi
+# adapters and let the administrator choose the management uplink. Existing
+# installs keep their saved choice unless LIGHTNAS_RESELECT_UPLINK=1 is set.
+select_lightnas_uplink() {
+  local choice_file=/etc/lightnas/network-choice.env
+  [[ "${EXISTING_INSTALL}" == "0" || "${LIGHTNAS_RESELECT_UPLINK:-0}" == "1" ]] || return 0
+  [[ -t 0 && -t 1 ]] || return 0
+
+  local -a devices=()
+  local path name type carrier ipv4 state
+  echo
+  echo "=== LightNAS management network ==="
+  while IFS= read -r path; do
+    [[ -e "${path}" ]] || continue
+    name="$(basename "${path}")"
+    [[ "${name}" == "lo" || "${name}" =~ ^(docker|virbr|br-|veth|tap|tun|lightnas|lxcbr) ]] && continue
+    [[ "$(cat "${path}/type" 2>/dev/null || true)" == "1" ]] || continue
+    if [[ -d "${path}/wireless" ]]; then type="Wi-Fi"; else type="Ethernet"; fi
+    carrier="$(cat "${path}/carrier" 2>/dev/null || true)"
+    ipv4="$(ip -4 -o addr show dev "${name}" scope global 2>/dev/null | awk 'NR==1{print $4}')"
+    state="$(cat "${path}/operstate" 2>/dev/null || true)"
+    devices+=("${name}")
+    printf '  %d) %-14s %-8s link=%-8s IPv4=%s\n' "${#devices[@]}" "${name}" "${type}" "${carrier:-${state:-unknown}}" "${ipv4:-none}"
+  done < <(find /sys/class/net -mindepth 1 -maxdepth 1 -type l -print | sort)
+
+  if [[ "${#devices[@]}" -eq 0 ]]; then
+    echo "No physical Ethernet or Wi-Fi interfaces were detected; LightNAS will use automatic network discovery."
+    return 0
+  fi
+
+  local default_dev selected answer
+  default_dev="$(ip -4 route show default 2>/dev/null | awk 'NR==1{for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')"
+  selected=""
+  if [[ "${#devices[@]}" -eq 1 ]]; then
+    selected="${devices[0]}"
+    echo "Using the only detected management interface: ${selected}"
+  else
+    local default_index=1 i
+    for i in "${!devices[@]}"; do
+      [[ "${devices[$i]}" == "${default_dev}" ]] && default_index=$((i+1))
+    done
+    read -r -p "Choose the LightNAS management interface [${default_index}]: " answer
+    answer="${answer:-${default_index}}"
+    if [[ "${answer}" =~ ^[0-9]+$ ]] && (( answer >= 1 && answer <= ${#devices[@]} )); then
+      selected="${devices[$((answer-1))]}"
+    else
+      echo "Invalid selection; keeping ${devices[$((default_index-1))]}."
+      selected="${devices[$((default_index-1))]}"
+    fi
+  fi
+
+  printf 'LIGHTNAS_UPLINK_PREFERENCE=%s\n' "${selected}" >"${choice_file}"
+  chown root:lightnas "${choice_file}"
+  chmod 0640 "${choice_file}"
+
+  # If Wi-Fi was selected and is not connected, allow an interactive fresh
+  # install to establish the connection without ever writing the password to
+  # the LightNAS configuration files.
+  if [[ -d "/sys/class/net/${selected}/wireless" ]] && command -v nmcli >/dev/null 2>&1; then
+    if ! nmcli -t -f DEVICE,STATE device status 2>/dev/null | grep -Eq "^${selected}:(connected|connecting)$"; then
+      echo
+      nmcli device wifi rescan ifname "${selected}" >/dev/null 2>&1 || true
+      nmcli -f IN-USE,SSID,SIGNAL,SECURITY device wifi list ifname "${selected}" 2>/dev/null | head -20 || true
+      local ssid wifi_password
+      read -r -p "Wi-Fi SSID for ${selected} (leave blank to configure later): " ssid
+      if [[ -n "${ssid}" ]]; then
+        read -r -s -p "Wi-Fi password: " wifi_password
+        echo
+        nmcli device wifi connect "${ssid}" ifname "${selected}" password "${wifi_password}" >/dev/null
+        unset wifi_password
+      fi
+    fi
+  fi
+}
+
+select_lightnas_uplink
 if [[ ! -e /etc/lightnas/feature-gates.json ]]; then
   cat >/etc/lightnas/feature-gates.json <<'EOF'
 {
