@@ -193,6 +193,11 @@ function applyApplianceBranding(appliance = state.overview?.appliance) {
   const requestedContentTextColor = /^#[0-9a-f]{6}$/i.test(String(appliance.contentTextColor || '')) ? appliance.contentTextColor : '#12283b';
   const sidebarTextColor = readableBrandText(requestedSidebarTextColor, sidebarColor);
   const contentTextColor = readableBrandText(requestedContentTextColor, contentColor);
+  const primaryButtonColor = /^#[0-9a-f]{6}$/i.test(String(appliance.primaryButtonColor || '')) ? appliance.primaryButtonColor : accent;
+  const loginButtonColor = /^#[0-9a-f]{6}$/i.test(String(appliance.loginButtonColor || '')) ? appliance.loginButtonColor : primaryButtonColor;
+  const topbarColor = /^#[0-9a-f]{6}$/i.test(String(appliance.topbarColor || '')) ? appliance.topbarColor : contentColor;
+  const panelColor = /^#[0-9a-f]{6}$/i.test(String(appliance.panelColor || '')) ? appliance.panelColor : contentColor;
+  const inputColor = /^#[0-9a-f]{6}$/i.test(String(appliance.inputColor || '')) ? appliance.inputColor : `color-mix(in srgb, ${contentColor} 94%, ${contentTextColor})`;
   const rgb = [1,3,5].map(index => Number.parseInt(accent.slice(index,index+2),16));
   const luminance = (0.2126*rgb[0] + 0.7152*rgb[1] + 0.0722*rgb[2]) / 255;
   document.documentElement.style.setProperty('--accent', accent);
@@ -207,10 +212,14 @@ function applyApplianceBranding(appliance = state.overview?.appliance) {
   document.documentElement.style.setProperty('--sidebar-muted', `color-mix(in srgb, ${sidebarTextColor} 68%, transparent)`);
   document.documentElement.style.setProperty('--text', contentTextColor);
   document.documentElement.style.setProperty('--muted', `color-mix(in srgb, ${contentTextColor} 68%, transparent)`);
-  document.documentElement.style.setProperty('--panel', contentColor);
-  document.documentElement.style.setProperty('--panel-2', `color-mix(in srgb, ${contentColor} 92%, ${contentTextColor})`);
-  document.documentElement.style.setProperty('--topbar', contentColor);
-  document.documentElement.style.setProperty('--input', `color-mix(in srgb, ${contentColor} 94%, ${contentTextColor})`);
+  document.documentElement.style.setProperty('--panel', panelColor);
+  document.documentElement.style.setProperty('--panel-2', `color-mix(in srgb, ${panelColor} 92%, ${contentTextColor})`);
+  document.documentElement.style.setProperty('--topbar', topbarColor);
+  document.documentElement.style.setProperty('--input', inputColor);
+  document.documentElement.style.setProperty('--primary-button', primaryButtonColor);
+  document.documentElement.style.setProperty('--primary-button-contrast', readableBrandText('#ffffff', primaryButtonColor));
+  document.documentElement.style.setProperty('--login-button', loginButtonColor);
+  document.documentElement.style.setProperty('--login-button-contrast', readableBrandText('#ffffff', loginButtonColor));
   document.documentElement.style.setProperty('--button', `color-mix(in srgb, ${contentColor} 88%, ${contentTextColor})`);
   document.documentElement.style.setProperty('--line', `color-mix(in srgb, ${contentTextColor} 14%, transparent)`);
   document.documentElement.style.setProperty('--line-strong', `color-mix(in srgb, ${contentTextColor} 24%, transparent)`);
@@ -1107,6 +1116,11 @@ function settingsView() {
           <label>Main content color<div class="accent-color-control"><input name="contentColor" type="color" value="${escapeHtml(appliance.contentColor || '#f2f6fa')}" aria-label="Main content color"><input name="contentHex" value="${escapeHtml(appliance.contentColor || '#f2f6fa')}" maxlength="7" pattern="#[0-9A-Fa-f]{6}" spellcheck="false"></div><small>Workspace, top bar, cards/boxes, and login form side.</small></label>
           <label>Sidebar font color<div class="accent-color-control"><input name="sidebarTextColor" type="color" value="${escapeHtml(appliance.sidebarTextColor || '#12283b')}" aria-label="Sidebar font color"><input name="sidebarTextHex" value="${escapeHtml(appliance.sidebarTextColor || '#12283b')}" maxlength="7" pattern="#[0-9A-Fa-f]{6}" spellcheck="false"></div><small>Navigation labels, device name, and login brand-side text.</small></label>
           <label>Main font color<div class="accent-color-control"><input name="contentTextColor" type="color" value="${escapeHtml(appliance.contentTextColor || '#12283b')}" aria-label="Main font color"><input name="contentTextHex" value="${escapeHtml(appliance.contentTextColor || '#12283b')}" maxlength="7" pattern="#[0-9A-Fa-f]{6}" spellcheck="false"></div><small>Headings, labels, card text, and login form text.</small></label>
+          <label>Primary button color<div class="accent-color-control"><input name="primaryButtonColor" type="color" value="${escapeHtml(appliance.primaryButtonColor || appliance.accentColor || '#087b70')}" aria-label="Primary button color"><input name="primaryButtonHex" value="${escapeHtml(appliance.primaryButtonColor || appliance.accentColor || '#087b70')}" maxlength="7" pattern="#[0-9A-Fa-f]{6}"></div><small>Main action buttons throughout the control center.</small></label>
+          <label>Login button color<div class="accent-color-control"><input name="loginButtonColor" type="color" value="${escapeHtml(appliance.loginButtonColor || appliance.primaryButtonColor || appliance.accentColor || '#087b70')}" aria-label="Login button color"><input name="loginButtonHex" value="${escapeHtml(appliance.loginButtonColor || appliance.primaryButtonColor || appliance.accentColor || '#087b70')}" maxlength="7" pattern="#[0-9A-Fa-f]{6}"></div><small>Sign-in and setup primary button.</small></label>
+          <label>Top bar color<div class="accent-color-control"><input name="topbarColor" type="color" value="${escapeHtml(appliance.topbarColor || appliance.contentColor || '#f2f6fa')}"><input name="topbarHex" value="${escapeHtml(appliance.topbarColor || appliance.contentColor || '#f2f6fa')}" maxlength="7" pattern="#[0-9A-Fa-f]{6}"></div><small>Header behind Shell, theme and profile controls.</small></label>
+          <label>Cards / boxes color<div class="accent-color-control"><input name="panelColor" type="color" value="${escapeHtml(appliance.panelColor || appliance.contentColor || '#ffffff')}"><input name="panelHex" value="${escapeHtml(appliance.panelColor || appliance.contentColor || '#ffffff')}" maxlength="7" pattern="#[0-9A-Fa-f]{6}"></div><small>Panels, cards, dialogs, and content boxes.</small></label>
+          <label>Input field color<div class="accent-color-control"><input name="inputColor" type="color" value="${escapeHtml(appliance.inputColor || '#f9fbfd')}"><input name="inputHex" value="${escapeHtml(appliance.inputColor || '#f9fbfd')}" maxlength="7" pattern="#[0-9A-Fa-f]{6}"></div><small>Text fields, selects, and editable controls.</small></label>
           <label>Display time zone<select name="timezone">${zones.map(([value, label]) => `<option value="${value}" ${appliance.timezone === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
         </div>
         <div class="general-branding-row branding-card">
@@ -1822,6 +1836,16 @@ function bindViewActions() {
     const sidebarTextHex = settingsForm.elements.sidebarTextHex;
     const contentTextColor = settingsForm.elements.contentTextColor;
     const contentTextHex = settingsForm.elements.contentTextHex;
+    const primaryButtonColor = settingsForm.elements.primaryButtonColor;
+    const primaryButtonHex = settingsForm.elements.primaryButtonHex;
+    const loginButtonColor = settingsForm.elements.loginButtonColor;
+    const loginButtonHex = settingsForm.elements.loginButtonHex;
+    const topbarColor = settingsForm.elements.topbarColor;
+    const topbarHex = settingsForm.elements.topbarHex;
+    const panelColor = settingsForm.elements.panelColor;
+    const panelHex = settingsForm.elements.panelHex;
+    const inputColor = settingsForm.elements.inputColor;
+    const inputHex = settingsForm.elements.inputHex;
     const previewBrandingFromForm = () => applyApplianceBranding({
       ...state.overview.appliance,
       brandName: settingsForm.elements.brandName?.value || state.overview.appliance.brandName,
@@ -1830,7 +1854,12 @@ function bindViewActions() {
       sidebarColor: sidebarColor?.value || state.overview.appliance.sidebarColor,
       contentColor: contentColor?.value || state.overview.appliance.contentColor,
       sidebarTextColor: sidebarTextColor?.value || state.overview.appliance.sidebarTextColor,
-      contentTextColor: contentTextColor?.value || state.overview.appliance.contentTextColor
+      contentTextColor: contentTextColor?.value || state.overview.appliance.contentTextColor,
+      primaryButtonColor: primaryButtonColor?.value || state.overview.appliance.primaryButtonColor,
+      loginButtonColor: loginButtonColor?.value || state.overview.appliance.loginButtonColor,
+      topbarColor: topbarColor?.value || state.overview.appliance.topbarColor,
+      panelColor: panelColor?.value || state.overview.appliance.panelColor,
+      inputColor: inputColor?.value || state.overview.appliance.inputColor
     });
     const bindBrandColor = (picker, textInput) => {
       picker?.addEventListener('input', () => {
@@ -1848,6 +1877,11 @@ function bindViewActions() {
     bindBrandColor(contentColor, contentHex);
     bindBrandColor(sidebarTextColor, sidebarTextHex);
     bindBrandColor(contentTextColor, contentTextHex);
+    bindBrandColor(primaryButtonColor, primaryButtonHex);
+    bindBrandColor(loginButtonColor, loginButtonHex);
+    bindBrandColor(topbarColor, topbarHex);
+    bindBrandColor(panelColor, panelHex);
+    bindBrandColor(inputColor, inputHex);
     settingsForm.elements.logoMode?.addEventListener('change', previewBrandingFromForm);
     settingsForm.elements.brandName?.addEventListener('input', previewBrandingFromForm);
     syncBrandingControls();
@@ -1890,6 +1924,11 @@ function bindViewActions() {
         contentColor: state.overview.appliance.contentColor,
         sidebarTextColor: state.overview.appliance.sidebarTextColor,
         contentTextColor: state.overview.appliance.contentTextColor,
+        primaryButtonColor: state.overview.appliance.primaryButtonColor,
+        loginButtonColor: state.overview.appliance.loginButtonColor,
+        topbarColor: state.overview.appliance.topbarColor,
+        panelColor: state.overview.appliance.panelColor,
+        inputColor: state.overview.appliance.inputColor,
         currentPassword: input.currentPassword,
         newPassword: input.newPassword
       }) });
