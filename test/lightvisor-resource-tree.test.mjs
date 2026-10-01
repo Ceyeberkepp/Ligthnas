@@ -57,10 +57,12 @@ test('LightVisor keeps inventory and operational navigation separate', async () 
   assert.ok(inventory >= 0 && operations > inventory);
 
   for (const label of ['LXC Containers','Nodes','Virtual Machines','SDN / Networks','Storage']) {
-    const pos = tree.indexOf(label);
+    const marker = '<b>' + label + '</b>';
+    const pos = tree.indexOf(marker, inventory);
     assert.ok(pos > inventory && pos < operations, label + ' must remain in resource inventory');
   }
   for (const label of ['Backups','Monitoring','Users & RBAC','Settings']) {
-    assert.ok(tree.indexOf(label) > operations, label + ' must remain in operations');
+    const pos = tree.indexOf('>' + label + '</button>', operations);
+    assert.ok(pos > operations, label + ' must remain in operations');
   }
 });
