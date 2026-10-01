@@ -20,6 +20,13 @@ curl -fsSL https://raw.githubusercontent.com/Ceyeberkepp/Ligthnas/main/install-h
 
 Use the NAS installer for the storage/files/media appliance. Use the Hypervisor installer for the dedicated virtualization host interface. Both remain in this repository.
 
+## LightNAS support and knowledge base
+
+For the NAS edition:
+
+- **[LightNAS Support Guide](docs/LIGHTNAS-SUPPORT-GUIDE.md)** — how the NAS edition works, services, storage, apps, LXC, VMs, noVNC, networking, updates, performance and support triage.
+- **[LightNAS Knowledge Base](docs/kb/lightnas/README.md)** — installation/update, slow UI, noVNC, Windows VM performance, storage visibility, App Store, container networking, service startup, backups, file performance and support-data collection.
+
 ## LightVisor support and knowledge base
 
 For the dedicated Hypervisor edition:
