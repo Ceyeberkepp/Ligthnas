@@ -102,6 +102,14 @@ export async function localApplianceRepair() {
   return await request('appliance-repair', undefined, 15 * 60 * 1000);
 }
 
+export async function localSoftwareStatus(fetch = false) {
+  return await request('software-status', { fetch: Boolean(fetch) }, fetch ? 60000 : 15000);
+}
+
+export async function localSoftwareUpdate() {
+  return await request('software-update', {}, 30000);
+}
+
 export async function localNodeConsoleSocket() {
   return await new Promise((resolve, reject) => {
     const socket = net.createConnection({ path: socketPath });
