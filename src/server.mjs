@@ -51,6 +51,9 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const publicRoot = join(root, 'public');
 const packageInfo = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
 const SOFTWARE_VERSION = String(packageInfo.version || '0.0.0');
+const PRODUCT_MODE = ['nas', 'hypervisor'].includes(String(process.env.LIGHTNAS_PRODUCT_MODE || '').toLowerCase())
+  ? String(process.env.LIGHTNAS_PRODUCT_MODE).toLowerCase()
+  : 'nas';
 const novncRoot = process.env.LIGHTNAS_NOVNC_ROOT || '/usr/share/novnc';
 const xtermRoot = join(root, 'node_modules', '@xterm', 'xterm');
 const xtermFitRoot = join(root, 'node_modules', '@xterm', 'addon-fit');
@@ -2118,6 +2121,18 @@ async function api(req, res, url) {
 }
 
 async function staticAsset(req, res, url) {
+  // Product mode is selected at installation/service level. The dedicated
+  // Hypervisor edition receives a tiny bootstrap before the normal app.
+  if (url.pathname === '/product-mode.js') {
+    const body = Buffer.from(`window.LIGHTNAS_PRODUCT_MODE=${JSON.stringify(PRODUCT_MODE)};`, 'utf8');
+    res.writeHead(200, {
+      'Content-Type': 'application/javascript; charset=utf-8',
+      'Cache-Control': 'no-cache, max-age=0',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': csp
+    });
+    return res.end(body);
+  }
   const isNovnc = url.pathname.startsWith('/novnc/');
   const isXterm = url.pathname.startsWith('/xterm/');
   const isXtermFit = url.pathname.startsWith('/xterm-addon-fit/');

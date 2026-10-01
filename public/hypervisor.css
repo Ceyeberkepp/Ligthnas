@@ -704,3 +704,6 @@
 .console[data-workspace-mode="hypervisor"] .hv-tree-item.child:active {
   background: color-mix(in srgb, var(--accent) 15%, transparent);
 }
+
+/* Dedicated Hypervisor edition has no NAS/Hypervisor runtime switch. */
+body.product-hypervisor .workspace-mode-switch { display:none !important; }
