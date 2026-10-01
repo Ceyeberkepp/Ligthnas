@@ -110,6 +110,39 @@ const pendingSmsEnrollments = new Map();
 const pendingPasskeyLogins = new Map();
 const pendingPasskeyRegistrations = new Map();
 const smsSendThrottle = new Map();
+const loginFailures = new Map();
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_BLOCK_MS = 5 * 60 * 1000;
+
+function loginAttemptKey(req, username) {
+  const forwarded = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  const address = forwarded || req.socket?.remoteAddress || 'unknown';
+  return `${address}|${String(username || '').toLowerCase()}`;
+}
+
+function loginBlocked(req, username) {
+  const key = loginAttemptKey(req, username);
+  const item = loginFailures.get(key);
+  if (!item) return false;
+  if (item.blockedUntil && item.blockedUntil > Date.now()) return true;
+  if (Date.now() - item.firstAt > LOGIN_WINDOW_MS) loginFailures.delete(key);
+  return false;
+}
+
+function recordLoginFailure(req, username) {
+  const key = loginAttemptKey(req, username);
+  const now = Date.now();
+  let item = loginFailures.get(key);
+  if (!item || now - item.firstAt > LOGIN_WINDOW_MS) item = { count:0, firstAt:now, blockedUntil:0 };
+  item.count += 1;
+  if (item.count >= 5) item.blockedUntil = now + LOGIN_BLOCK_MS;
+  loginFailures.set(key, item);
+}
+
+function clearLoginFailures(req, username) {
+  loginFailures.delete(loginAttemptKey(req, username));
+}
+
 const MFA_CODE_TTL_MS = 5 * 60 * 1000;
 const PASSKEY_CHALLENGE_TTL_MS = 2 * 60 * 1000;
 
@@ -151,11 +184,16 @@ function enabledMfaMethods(account) {
   return methods;
 }
 
-async function accountForPassword(username, password) {
+async function accountForPassword(username, password, req = null) {
+  if (req && loginBlocked(req, username)) throw Object.assign(new Error('Too many sign-in attempts. Try again in a few minutes.'), { status: 429 });
   const account = username === store.state.config?.username
     ? store.state.config
     : store.state.users.find(user => user.username === username);
-  if (!account || account.disabled || !(await verifyPassword(password, account.passwordHash))) return null;
+  if (!account || account.disabled || !(await verifyPassword(password, account.passwordHash))) {
+    if (req) recordLoginFailure(req, username);
+    return null;
+  }
+  if (req) clearLoginFailures(req, username);
   return account;
 }
 
@@ -422,14 +460,15 @@ const mimeTypes = {
   '.yml': 'text/yaml; charset=utf-8', '.ini': 'text/plain; charset=utf-8', '.conf': 'text/plain; charset=utf-8',
   '.sh': 'text/plain; charset=utf-8', '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf'
 };
-const csp = "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: blob:; media-src 'self' data: blob:; frame-src 'self' blob:; connect-src 'self' ws: wss:; worker-src 'self' blob:; font-src 'self' data:";
+const csp = "default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: blob:; media-src 'self' data: blob:; frame-src 'self' blob:; connect-src 'self' ws: wss:; worker-src 'self' blob:; font-src 'self' data:";
 
 function send(res, status, body, headers = {}) {
   const payload = typeof body === 'string' ? body : JSON.stringify(body);
   res.writeHead(status, {
     'Content-Type': typeof body === 'string' ? 'text/plain; charset=utf-8' : 'application/json; charset=utf-8',
     'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'same-origin',
-    'Content-Security-Policy': csp, ...headers
+    'X-Frame-Options': 'DENY', 'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=()',
+    'Cross-Origin-Resource-Policy': 'same-origin', 'Content-Security-Policy': csp, ...headers
   });
   res.end(payload);
 }
@@ -464,6 +503,24 @@ async function bodyBuffer(req, maxBytes) {
 
 function avatarPath(username, extension) {
   return join(profileRoot, `${username}.${extension}`);
+}
+
+function validProfileImage(data, extension) {
+  if (!Buffer.isBuffer(data) || data.length < 12) return false;
+  if (extension === 'jpg') return data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff;
+  if (extension === 'png') return data.subarray(0, 8).equals(Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]));
+  if (extension === 'webp') return data.subarray(0,4).toString('ascii') === 'RIFF' && data.subarray(8,12).toString('ascii') === 'WEBP';
+  return false;
+}
+
+function requestIsSecure(req) {
+  const forwarded = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
+  return Boolean(req.socket?.encrypted) || forwarded === 'https';
+}
+
+function sessionCookie(req, token, maxAge = 43200) {
+  const value = token ? encodeURIComponent(token) : '';
+  return `nas_session=${value}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAge}${requestIsSecure(req) ? '; Secure' : ''}`;
 }
 
 function cookies(req) {
@@ -632,7 +689,7 @@ async function api(req, res, url) {
       await store.save();
     }
     const token = sessions.create(input.username);
-    return send(res, 201, { ok: true, readiness }, { 'Set-Cookie': `nas_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200` });
+    return send(res, 201, { ok: true, readiness }, { 'Set-Cookie': sessionCookie(req, token) });
   }
 
   if (req.method === 'GET' && url.pathname === '/api/login/options') {
@@ -647,7 +704,7 @@ async function api(req, res, url) {
     if (!store.state.config) return send(res, 409, { error: 'Complete setup first.' });
     const input = await bodyJson(req);
     const username = String(input.username || '');
-    const account = await accountForPassword(username, input.password);
+    const account = await accountForPassword(username, input.password, req);
     if (!account) return send(res, 401, { error: 'Username or password is incorrect.' });
     if (!account.smsMfa?.enabled) return send(res, 409, { error: 'SMS verification is not enabled for this account.' });
     const lastSent = Number(smsSendThrottle.get(username) || 0);
@@ -667,7 +724,7 @@ async function api(req, res, url) {
     if (!store.state.config) return send(res, 409, { error: 'Complete setup first.' });
     const input = await bodyJson(req);
     const username = String(input.username || '');
-    const account = await accountForPassword(username, input.password);
+    const account = await accountForPassword(username, input.password, req);
     if (!account) return send(res, 401, { error: 'Username or password is incorrect.' });
     if (!Array.isArray(account.passkeys) || !account.passkeys.length) return send(res, 409, { error: 'No passkey is registered for this account.' });
     const rpId = relyingParty(req);
@@ -696,14 +753,14 @@ async function api(req, res, url) {
     const token = sessions.create(username);
     store.addActivity('login', `${username} signed in with a passkey.`, 'info');
     await store.save();
-    return send(res, 200, { ok: true }, { 'Set-Cookie': `nas_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200` });
+    return send(res, 200, { ok: true }, { 'Set-Cookie': sessionCookie(req, token) });
   }
 
   if (req.method === 'POST' && url.pathname === '/api/login') {
     if (!store.state.config) return send(res, 409, { error: 'Complete setup first.' });
     const input = await bodyJson(req);
     const username = String(input.username || '');
-    const account = await accountForPassword(username, input.password);
+    const account = await accountForPassword(username, input.password, req);
     if (!account) return send(res, 401, { error: 'Username or password is incorrect.' });
 
     const methods = enabledMfaMethods(account);
@@ -745,12 +802,12 @@ async function api(req, res, url) {
     const token = sessions.create(username);
     store.addActivity('login', `${username} signed in.`, 'info');
     await store.save();
-    return send(res, 200, { ok: true }, { 'Set-Cookie': `nas_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200` });
+    return send(res, 200, { ok: true }, { 'Set-Cookie': sessionCookie(req, token) });
   }
 
   if (req.method === 'POST' && url.pathname === '/api/logout') {
     sessions.delete(cookies(req).nas_session);
-    return send(res, 200, { ok: true }, { 'Set-Cookie': 'nas_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0' });
+    return send(res, 200, { ok: true }, { 'Set-Cookie': sessionCookie(req, '', 0) });
   }
 
   if (req.method === 'GET' && url.pathname === '/api/branding/logo') {
@@ -847,6 +904,7 @@ async function api(req, res, url) {
     if (!extension) return send(res, 415, { error: 'Use a JPEG, PNG, or WebP profile picture.' });
     const data = await bodyBuffer(req, 8 * 1024 * 1024);
     if (!data.length) return send(res, 400, { error: 'Choose a profile picture.' });
+    if (!validProfileImage(data, extension)) return send(res, 415, { error: 'The uploaded file does not match its JPEG, PNG, or WebP image type.' });
     await mkdir(profileRoot, { recursive: true, mode: 0o700 });
     for (const old of ['jpg', 'png', 'webp']) {
       if (old !== extension) await rm(avatarPath(username, old), { force: true }).catch(() => {});
@@ -1480,7 +1538,7 @@ async function api(req, res, url) {
       });
       sessions.clear();
     }
-    return send(res, 200, { ok: true, signInRequired: changedPassword }, changedPassword ? { 'Set-Cookie': 'nas_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0' } : {});
+    return send(res, 200, { ok: true, signInRequired: changedPassword }, changedPassword ? { 'Set-Cookie': sessionCookie(req, '', 0) } : {});
   }
 
   if (req.method === 'GET' && url.pathname === '/api/containers/inventory') {
@@ -2136,7 +2194,10 @@ export function createServer() {
     try {
       const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
       const bearer = /^Bearer\s+/i.test(req.headers.authorization || '');
-      if (url.pathname.startsWith('/api/') && !['GET', 'HEAD'].includes(req.method) && req.headers['x-lightnas-request'] !== '1' && !bearer) send(res, 403, { error: 'This request must originate from the LightNAS interface or use a scoped API token.' });
+      const fetchSite = String(req.headers['sec-fetch-site'] || '').toLowerCase();
+      const hostileOrigin = Boolean(req.headers.origin) && !sameOrigin(req);
+      if (url.pathname.startsWith('/api/') && !bearer && (hostileOrigin || fetchSite === 'cross-site')) send(res, 403, { error: 'Cross-site API requests are not allowed.' });
+      else if (url.pathname.startsWith('/api/') && !['GET', 'HEAD'].includes(req.method) && req.headers['x-lightnas-request'] !== '1' && !bearer) send(res, 403, { error: 'This request must originate from the LightNAS interface or use a scoped API token.' });
       else if (url.pathname.startsWith('/api/')) await api(req, res, url);
       else await staticAsset(req, res, url);
     } catch (error) {
