@@ -744,8 +744,14 @@ async function loadMedia() {
 }
 
 async function loadRuntimes() {
-  try { state.runtimes = await request('/api/runtimes'); state.runtimeError = null; }
-  catch (error) { state.runtimeError = error.message; }
+  try {
+    state.runtimes = await request('/api/runtimes');
+    state.runtimeError = null;
+    if (state.view === 'apps') {
+      try { state.communityCatalog = await request('/api/catalog/community'); }
+      catch (error) { state.communityCatalog = { apps: [], sources: [], error: error.message }; }
+    }
+  } catch (error) { state.runtimeError = error.message; }
   if (['apps', 'containers', 'vms', 'integrations'].includes(state.view)) render(state.view);
 }
 
