@@ -2285,7 +2285,7 @@ function bindViewActions() {
       if (live) { live.disabled = false; live.textContent = original || 'Refresh'; }
     }
   }));
-  $('[data-action="refresh-runtime"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+  document.querySelectorAll('#content [data-action="refresh-runtime"]').forEach(button => button.addEventListener('click', async () => {
     const original = button.textContent;
     button.disabled = true;
     button.textContent = 'Refreshing…';
