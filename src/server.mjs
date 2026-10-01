@@ -12,6 +12,7 @@ import { hashPassword, Sessions, verifyPassword } from './auth.mjs';
 import { listFiles, listAllFiles, createFolder, uploadFile, downloadFile, downloadEntry, deleteEntry } from './files.mjs';
 import { thumbnailFor } from './thumbnails.mjs';
 import { catalog, runtimeInventory, installCatalogApp, manageCatalogApp, updateCatalogApp, openContainerShell, createContainer, createVm } from './runtimes-next.mjs';
+import { communityCatalog } from './community-catalog.mjs';
 import { proxmoxConsoleSocket, proxmoxUpdateStorage, proxmoxCleanDisk } from './proxmox.mjs';
 import { localContainerSummary, localContainerInventory, localManageContainer, localContainerConsoleSocket, localContainerCommand, localVmConsoleSocket, localNodeConsoleSocket, localNetworkInventory, localNetworkAction, localApplianceHealth, localApplianceRepair, localSoftwareStatus, localSoftwareUpdate, localRepairNetworkShares, localSyncShareAdministrator } from './local-host.mjs';
 import { validateSmtp, sendSmtpTest } from './mailer.mjs';
@@ -1589,6 +1590,12 @@ async function api(req, res, url) {
     ];
     containers.templateCount = (templateLibrary.templates || []).length;
     return send(res, 200, containerPublisher.decorate(containers));
+  }
+  if (req.method === 'GET' && url.pathname === '/api/catalog/community') {
+    if (!requirePermission(res, permissions, 'apps.manage')) return;
+    const refresh = url.searchParams.get('refresh') === '1';
+    const community = await communityCatalog({ refresh });
+    return send(res, 200, community);
   }
   if (req.method === 'GET' && url.pathname === '/api/runtimes') {
     if (!requireAnyPermission(res, permissions, ['apps.manage', 'containers.manage', 'vms.manage', 'storage.view', 'system.view'])) return;
