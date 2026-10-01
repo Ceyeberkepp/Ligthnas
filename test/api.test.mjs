@@ -40,7 +40,7 @@ test('LightNAS 0.12 setup and owner APIs', async context => {
   assert.ok(overview.appliance.permissions.includes('network.manage'));
 
   response = await apiFetch(`${base}/api/profile/avatar`, {
-    method: 'PUT', headers: { Cookie: cookie, 'Content-Type': 'image/png' }, body: Buffer.from('profile-image')
+    method: 'PUT', headers: { Cookie: cookie, 'Content-Type': 'image/png' }, body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
   });
   assert.equal(response.status, 200);
   response = await apiFetch(`${base}/api/profile/avatar`, { headers: { Cookie: cookie } });
