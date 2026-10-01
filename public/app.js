@@ -2093,7 +2093,25 @@ function bindViewActions() {
       if (live) { live.disabled = false; live.textContent = original || 'Refresh'; }
     }
   }));
-  $$('[data-install]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+  $('[data-community-install]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+    const docker = state.runtimes?.docker;
+    if (!docker?.available || !docker?.enabled) return toast(docker?.reason || 'Docker needs to be installed and enabled on this host before app installation.');
+    const app = state.communityCatalog?.apps?.find(item => item.id === button.dataset.communityInstall);
+    if (!app) return toast('The selected community application is no longer in the catalog.');
+    if (!confirm(`Install ${app.name} from ${app.source}? LightNAS will download its Compose package, pull the required images, create its services and persistent storage, and start it.`)) return;
+    button.disabled = true;
+    button.textContent = 'Installing…';
+    const progress = window.LightNASProgress?.open(`Installing ${app.name}`, 'Downloading the Compose package and starting application services…', { modal:false });
+    try {
+      await request(`/api/catalog/community/${app.id}/install`, { method:'POST', body:'{}' });
+      await loadRuntimes();
+      progress?.succeed(`${app.name} installed and started successfully.`);
+      toast(`${app.name} installed.`);
+    } catch (error) {
+      progress?.fail(error.message); toast(error.message); button.disabled = false; button.textContent = 'Install app';
+    }
+  }));
+  $('[data-install]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     const docker = state.runtimes?.docker;
     if (!docker?.available || !docker?.enabled) return toast(docker?.reason || 'Docker needs to be installed and enabled on this host before app installation.');
     const app = state.runtimes?.catalog?.find(item => item.id === button.dataset.install);
