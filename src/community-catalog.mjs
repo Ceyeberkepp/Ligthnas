@@ -6,6 +6,9 @@ import { arch } from 'node:os';
 const CACHE_DIR = process.env.LIGHTNAS_CATALOG_CACHE_DIR || '/var/lib/lightnas/catalogs';
 const CACHE_FILE = join(CACHE_DIR, 'community-index.json');
 const CACHE_MS = 6 * 60 * 60 * 1000;
+const REMOTE_TIMEOUT_MS = 8000;
+const MANIFEST_CONCURRENCY = 10;
+let refreshInFlight = null;
 
 const DEFAULT_SOURCES = Object.freeze([
   { id:'zimaos-official', name:'ZimaOS / CasaOS Official', github:'IceWhaleTech/CasaOS-AppStore', branch:'main', type:'casaos-repo' },
@@ -45,7 +48,7 @@ function normalize(item, source) {
 }
 
 async function fetchJson(url) {
-  const response = await fetch(url, { signal: AbortSignal.timeout(20000), headers:{ 'User-Agent':'LightNAS-AppStore/1.0', 'Accept':'application/vnd.github+json' } });
+  const response = await fetch(url, { signal: AbortSignal.timeout(REMOTE_TIMEOUT_MS), headers:{ 'User-Agent':'LightNAS-AppStore/1.0', 'Accept':'application/vnd.github+json' } });
   if (!response.ok) throw new Error('HTTP ' + response.status);
   return response.json();
 }
@@ -56,7 +59,7 @@ async function githubTree(repo, branch) {
 }
 
 async function githubText(url) {
-  const response = await fetch(url, { signal: AbortSignal.timeout(20000), headers:{ 'User-Agent':'LightNAS-AppStore/1.0' } });
+  const response = await fetch(url, { signal: AbortSignal.timeout(REMOTE_TIMEOUT_MS), headers:{ 'User-Agent':'LightNAS-AppStore/1.0' } });
   if (!response.ok) throw new Error('HTTP ' + response.status);
   return response.text();
 }
@@ -70,18 +73,28 @@ function casaosMeta(compose, fallbackId) {
   return { id, title, tagline, description:tagline, category, icon };
 }
 
+async function mapWithConcurrency(items, limit, mapper) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor++;
+      try { results[index] = await mapper(items[index], index); }
+      catch { results[index] = null; }
+    }
+  });
+  await Promise.all(workers);
+  return results.filter(Boolean);
+}
+
 async function casaosRepoItems(source) {
   const tree = await githubTree(source.github, source.branch);
   const manifests = tree.filter(item => /^Apps\/[^/]+\/(?:docker-compose|compose)\.ya?ml$/i.test(item.path || ''));
-  const apps = [];
-  for (const manifest of manifests) {
-    try {
-      const name = manifest.path.split('/')[1];
-      const raw = await githubText('https://raw.githubusercontent.com/' + source.github + '/' + source.branch + '/' + manifest.path);
-      apps.push(casaosMeta(raw, name));
-    } catch {}
-  }
-  return apps;
+  return mapWithConcurrency(manifests, MANIFEST_CONCURRENCY, async manifest => {
+    const name = manifest.path.split('/')[1];
+    const raw = await githubText('https://raw.githubusercontent.com/' + source.github + '/' + source.branch + '/' + manifest.path);
+    return casaosMeta(raw, name);
+  });
 }
 
 function itemsFromIndex(data, source = {}) {
@@ -112,27 +125,23 @@ function itemsFromIndex(data, source = {}) {
 }
 
 async function readCache() {
-  try {
-    const cached = JSON.parse(await readFile(CACHE_FILE, 'utf8'));
-    return cached;
-  } catch { return null; }
+  try { return JSON.parse(await readFile(CACHE_FILE, 'utf8')); }
+  catch { return null; }
 }
 
-export async function communityCatalog({ refresh=false } = {}) {
-  const cached = await readCache();
-  if (!refresh && cached?.updatedAt && Date.now() - Date.parse(cached.updatedAt) < CACHE_MS && Array.isArray(cached.apps)) return cached;
-  const apps = [], sources = [];
-  for (const source of DEFAULT_SOURCES) {
+async function refreshCommunityCatalog(cached = null) {
+  const sourceResults = await Promise.all(DEFAULT_SOURCES.map(async source => {
     try {
       const data = source.type === 'casaos-repo' ? await casaosRepoItems(source) : await fetchJson(source.index);
       const items = source.type === 'casaos-repo' ? data : itemsFromIndex(data, source);
-      const normalized = items.map(item => normalize(item, source)).filter(Boolean);
-      apps.push(...normalized);
-      sources.push({ id:source.id, name:source.name, ok:true, count:normalized.length });
+      const apps = items.map(item => normalize(item, source)).filter(Boolean);
+      return { apps, status:{ id:source.id, name:source.name, ok:true, count:apps.length } };
     } catch (error) {
-      sources.push({ id:source.id, name:source.name, ok:false, count:0, error:error.message });
+      return { apps:[], status:{ id:source.id, name:source.name, ok:false, count:0, error:error.message } };
     }
-  }
+  }));
+  const apps = sourceResults.flatMap(item => item.apps);
+  const sources = sourceResults.map(item => item.status);
   const deduped = [...new Map(apps.map(app => [app.upstreamId + '|' + app.name.toLowerCase(), app])).values()]
     .sort((a,b) => a.name.localeCompare(b.name));
   const result = { updatedAt:new Date().toISOString(), apps:deduped, sources, count:deduped.length };
@@ -141,8 +150,25 @@ export async function communityCatalog({ refresh=false } = {}) {
   return result;
 }
 
+function beginRefresh(cached) {
+  if (!refreshInFlight) {
+    refreshInFlight = refreshCommunityCatalog(cached).finally(() => { refreshInFlight = null; });
+  }
+  return refreshInFlight;
+}
+
+export async function communityCatalog({ refresh=false } = {}) {
+  const cached = await readCache();
+  const fresh = cached?.updatedAt && Date.now() - Date.parse(cached.updatedAt) < CACHE_MS && Array.isArray(cached.apps);
+  if (!refresh && fresh) return cached;
+  if (!refresh && cached?.apps?.length) {
+    beginRefresh(cached).catch(() => null);
+    return { ...cached, stale:true, refreshing:true };
+  }
+  return beginRefresh(cached);
+}
+
 export async function communityApp(id, { refresh=false } = {}) {
   const catalog = await communityCatalog({refresh});
   return catalog.apps.find(app => app.id === id) || null;
 }
-

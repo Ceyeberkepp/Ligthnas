@@ -11,6 +11,7 @@ export class JsonStore {
       users: [],
       groups: [],
       spaces: [],
+      backupJobs: [],
       containerPublications: [],
       smtp: null,
       security: { apiTokens: [], webhooks: [], identityProviders: [] },
@@ -25,6 +26,7 @@ export class JsonStore {
       const parsed = JSON.parse(await readFile(this.path, 'utf8'));
       this.state = { ...this.state, ...parsed };
       this.state.groups ||= [];
+      this.state.backupJobs ||= [];
       this.state.containerPublications ||= [];
       this.state.security = {
         apiTokens: [],
