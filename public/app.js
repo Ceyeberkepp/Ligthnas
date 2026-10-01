@@ -459,22 +459,7 @@ function hypervisorView() {
   const nodeName = state.overview?.appliance?.deviceName || 'LightNAS';
   const visibleStorage = storage.usableStorage || storage.virtualStorage || storage.local || {};
   return `${pageHead('Datacenter', 'Virtualization, compute, storage and networking in one workspace.', '<div class="head-actions"><button class="secondary" data-action="refresh-runtime">Refresh</button><button class="secondary" data-view-link="network">Networking</button><button class="primary" data-action="create-vm">+ Create VM</button></div>')}
-    <section class="hv-workspace">
-      <aside class="panel hv-tree">
-        <div class="hv-tree-head"><span class="eyebrow">LIGHTNAS DATACENTER</span><b>${escapeHtml(nodeName)}</b></div>
-        <div class="hv-tree-list">
-          <button class="active" type="button"><span>▣</span><b>Datacenter</b></button>
-          <button type="button" data-view-link="home"><span>◫</span><b>${escapeHtml(nodeName)}</b><small>local node</small></button>
-          <button type="button" data-view-link="vms"><span>▣</span><b>Virtual machines</b><small>${vms.length}</small></button>
-          <button type="button" data-view-link="containers"><span>▦</span><b>Containers</b><small>${containers.length}</small></button>
-          <button type="button" data-view-link="storage"><span>▱</span><b>Storage</b><small>${pools.length}</small></button>
-          <button type="button" data-view-link="network"><span>⌁</span><b>Networks</b><small>${networks.length}</small></button>
-          <button type="button" data-view-link="backups"><span>↶</span><b>Backups</b></button>
-          <button type="button" data-view-link="firewall"><span>◇</span><b>Firewall</b></button>
-        </div>
-      </aside>
-
-      <div class="hv-main">
+    <section class="hv-main hv-main-flat">
         <section class="hv-summary-strip">
           <article><span>Node</span><strong>${escapeHtml(nodeName)}</strong><small>${escapeHtml(system.kernel || '')}</small></article>
           <article><span>Virtual machines</span><strong>${runningVms}/${vms.length}</strong><small>running</small></article>
@@ -512,7 +497,6 @@ function hypervisorView() {
             <div class="hv-resource-list">${networks.slice(0,6).map(net => `<div><span><i class="online"></i><b>${escapeHtml(net.name || net.bridge || 'network')}</b></span><small>${escapeHtml(net.bridge || net.type || 'bridge')}</small></div>`).join('') || '<p class="muted">No virtualization networks detected.</p>'}</div>
           </section>
         </div>
-      </div>
     </section>`;
 }
 
