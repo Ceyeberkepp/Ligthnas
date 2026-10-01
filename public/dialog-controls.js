@@ -1040,7 +1040,7 @@ document.addEventListener('click', async event => {
     event.preventDefault();
     event.stopImmediatePropagation();
     try {
-      const inventory = await dialogApi('/api/runtimes');
+      const inventory = window.LightNASRuntimeInventory || await dialogApi('/api/runtimes');
       window.LightNASRuntimeInventory = inventory;
       const id = appEdit.dataset.appEdit;
       const containerName = appEdit.dataset.appContainer || `lightnas-app-${id}`;
@@ -1107,8 +1107,19 @@ document.addEventListener('click', async event => {
     const id = vmEdit.dataset.vmEdit;
     let inventory;
     try {
-      inventory = await dialogApi('/api/runtimes');
-      window.LightNASRuntimeInventory = inventory;
+      const cached = window.LightNASRuntimeInventory;
+      const cachedItem = (cached?.virtualization?.machineDetails || []).find(candidate => String(candidate.id || candidate.vmid || candidate.name) === String(id));
+      inventory = cachedItem ? cached : await dialogApi(`/api/vms/editor?id=${encodeURIComponent(id)}`);
+      if (!cachedItem) {
+        window.LightNASRuntimeInventory = {
+          ...(cached || {}),
+          virtualization: {
+            ...(cached?.virtualization || {}),
+            ...(inventory.virtualization || {})
+          }
+        };
+        inventory = window.LightNASRuntimeInventory;
+      }
     } catch (problem) {
       alert(problem.message);
       return;

@@ -372,40 +372,46 @@ function parseDomInfo(text) {
 }
 
 async function localVmDetails(names) {
-  const details = [];
-  for (const name of names.slice(0, 100)) {
-    const [info, blockDevices, domainXml] = await Promise.all([
-      command('virsh', ['-c', 'qemu:///system', 'dominfo', name], 10000),
-      command('virsh', ['-c', 'qemu:///system', 'domblklist', name, '--details'], 10000),
-      command('virsh', ['-c', 'qemu:///system', 'dumpxml', name, '--inactive'], 10000)
-    ]);
-    if (!info.ok) continue;
-    const parsed = parseDomInfo(info.output);
-    const hardware = domainXml.ok ? vmHardwareDetails(domainXml.output) : { disks:[], interfaces:[], hostDevices:[] };
-    let primaryDiskSizeGiB = 0;
-    const primaryTarget = hardware.disks?.[0]?.target || '';
-    if (primaryTarget) {
-      const blockInfo = await command('virsh', ['-c', 'qemu:///system', 'domblkinfo', name, primaryTarget], 10000);
-      const capacity = blockInfo.ok ? Number(blockInfo.output.match(/Capacity:\s*(\d+)/i)?.[1] || 0) : 0;
-      primaryDiskSizeGiB = capacity ? Math.round((capacity / (1024 ** 3)) * 100) / 100 : 0;
+  const selected = names.slice(0, 100);
+  const details = new Array(selected.length);
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < selected.length) {
+      const index = cursor++;
+      const name = selected[index];
+      const [info, blockDevices, domainXml] = await Promise.all([
+        command('virsh', ['-c', 'qemu:///system', 'dominfo', name], 4000),
+        command('virsh', ['-c', 'qemu:///system', 'domblklist', name, '--details'], 4000),
+        command('virsh', ['-c', 'qemu:///system', 'dumpxml', name, '--inactive'], 4000)
+      ]);
+      if (!info.ok) continue;
+      const parsed = parseDomInfo(info.output);
+      const hardware = domainXml.ok ? vmHardwareDetails(domainXml.output) : { disks:[], interfaces:[], hostDevices:[] };
+      let primaryDiskSizeGiB = 0;
+      const primaryTarget = hardware.disks?.[0]?.target || '';
+      if (primaryTarget) {
+        const blockInfo = await command('virsh', ['-c', 'qemu:///system', 'domblkinfo', name, primaryTarget], 4000);
+        const capacity = blockInfo.ok ? Number(blockInfo.output.match(/Capacity:\s*(\d+)/i)?.[1] || 0) : 0;
+        primaryDiskSizeGiB = capacity ? Math.round((capacity / (1024 ** 3)) * 100) / 100 : 0;
+      }
+      details[index] = {
+        id: name, name,
+        uuid: parsed.uuid || null,
+        status: parsed.state || 'unknown',
+        cpus: Number(parsed['cpu(s)']) || 0,
+        memory: (Number(String(parsed['max memory'] || '').split(/\s+/)[0]) || 0) * 1024,
+        persistent: parsed.persistent === 'yes',
+        installationMedia: blockDevices.ok && hasInstallerMedia(blockDevices.output),
+        installationMediaPath: blockDevices.ok ? installerMediaPath(blockDevices.output) : '',
+        bootOrder: domainXml.ok ? vmBootOrder(domainXml.output) : 'disk',
+        ...hardware,
+        primaryDiskSizeGiB,
+        startOnBoot: parsed.autostart === 'enable'
+      };
     }
-    details.push({
-      id: name,
-      name,
-      uuid: parsed.uuid || null,
-      status: parsed.state || 'unknown',
-      cpus: Number(parsed['cpu(s)']) || 0,
-      memory: (Number(String(parsed['max memory'] || '').split(/\s+/)[0]) || 0) * 1024,
-      persistent: parsed.persistent === 'yes',
-      installationMedia: blockDevices.ok && hasInstallerMedia(blockDevices.output),
-      installationMediaPath: blockDevices.ok ? installerMediaPath(blockDevices.output) : '',
-      bootOrder: domainXml.ok ? vmBootOrder(domainXml.output) : 'disk',
-      ...hardware,
-      primaryDiskSizeGiB,
-      startOnBoot: parsed.autostart === 'enable'
-    });
-  }
-  return details;
+  };
+  await Promise.all(Array.from({ length: Math.min(6, selected.length || 1) }, worker));
+  return details.filter(Boolean);
 }
 
 async function localAttachVmGuestDrivers(id) {
@@ -732,6 +738,62 @@ function requireDeletionConfirmation(input, id, label) {
   if (input?.deleteFiles !== true || String(input?.confirmation || '') !== id) {
     throw Object.assign(new Error(`Deleting this ${label} requires “delete all files” and its exact ID.`), { status: 400 });
   }
+}
+
+export async function vmEditorInventory(id) {
+  const name = String(id || '');
+  if (!/^[A-Za-z][A-Za-z0-9-]{1,39}$/.test(name)) throw Object.assign(new Error('Invalid VM name.'), { status:400 });
+
+  const [machineDetails, vmNetworks, hostBridges, defaultRoute, lightnasStorage, storageIsos] = await Promise.all([
+    localVmDetails([name]),
+    command('virsh', ['-c', 'qemu:///system', 'net-list', '--name'], 3000),
+    command('ip', ['-j', 'link', 'show', 'type', 'bridge'], 3000),
+    command('ip', ['-j', '-4', 'route', 'show', 'default'], 3000),
+    listStoragePools().catch(() => ({ pools: [] })),
+    listContentAcrossPools('iso').catch(() => [])
+  ]);
+
+  const storageDetails = (lightnasStorage.pools || []).filter(pool => pool.online && pool.writable && pool.content.includes('images'));
+  const libvirtNetworks = vmNetworks.ok && vmNetworks.output ? vmNetworks.output.split('\n').filter(Boolean) : [];
+  let bridges = [];
+  if (hostBridges.ok && hostBridges.output) {
+    try {
+      bridges = JSON.parse(hostBridges.output)
+        .filter(item => item.ifname !== 'docker0' && (item.flags || []).includes('UP'))
+        .map(item => item.ifname)
+        .filter(value => /^[A-Za-z0-9_.:-]{1,32}$/.test(value || ''));
+      let defaultBridge = '';
+      if (defaultRoute.ok && defaultRoute.output) {
+        try { defaultBridge = String((JSON.parse(defaultRoute.output)[0] || {}).dev || ''); } catch {}
+      }
+      if (defaultBridge && bridges.includes(defaultBridge)) bridges = [defaultBridge, ...bridges.filter(value => value !== defaultBridge)];
+      else if (bridges.includes('virbr0')) bridges = ['virbr0', ...bridges.filter(value => value !== 'virbr0')];
+    } catch {}
+  }
+
+  const networkDetails = [
+    ...bridges.filter(value => !libvirtNetworks.includes(value)).map((value, index) => ({ name:value, type:'host-bridge', label:index === 0 ? `${value} · appliance LAN bridge` : `${value} · host bridge` })),
+    ...libvirtNetworks.map(value => ({ name:value, type:'libvirt-network', label:`${value} · LightNAS managed NAT` })),
+    { name:'qemu-user', type:'qemu-user', label:'QEMU user NAT fallback' }
+  ].filter((item, index, all) => all.findIndex(other => other.name === item.name) === index);
+
+  const details = machineDetails.map(item => {
+    const media = storageIsos.find(iso => iso.path === item.installationMediaPath);
+    const { installationMediaPath: _privatePath, ...visible } = item;
+    return { ...visible, installationMediaId: media?.id || '', installationMediaName: media?.name || '' };
+  });
+
+  return {
+    virtualization: {
+      machineDetails: details,
+      storageDetails,
+      pools: storageDetails.map(pool => pool.id),
+      networkDetails,
+      networks: networkDetails.map(item => item.name),
+      isoDetails: storageIsos.map(item => ({ id:item.id, name:item.name, storageId:item.storageId, storageName:item.storageName, sizeBytes:item.sizeBytes })),
+      images: storageIsos.map(item => item.id)
+    }
+  };
 }
 
 export async function runtimeInventory() {

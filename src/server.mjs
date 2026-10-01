@@ -11,7 +11,7 @@ import { getFilesystems, getStorageInventory, getSystemSnapshot } from './system
 import { hashPassword, Sessions, verifyPassword } from './auth.mjs';
 import { listFiles, listAllFiles, createFolder, uploadFile, downloadFile, downloadEntry, deleteEntry } from './files.mjs';
 import { thumbnailFor } from './thumbnails.mjs';
-import { catalog, runtimeInventory, installCatalogApp, manageCatalogApp, updateCatalogApp, openContainerShell, createContainer, createVm } from './runtimes-next.mjs';
+import { catalog, runtimeInventory, vmEditorInventory, installCatalogApp, manageCatalogApp, updateCatalogApp, openContainerShell, createContainer, createVm } from './runtimes-next.mjs';
 import { communityCatalog } from './community-catalog.mjs';
 import { proxmoxConsoleSocket, proxmoxUpdateStorage, proxmoxCleanDisk } from './proxmox.mjs';
 import { localContainerSummary, localContainerInventory, localManageContainer, localContainerConsoleSocket, localContainerCommand, localVmConsoleSocket, localNodeConsoleSocket, localNetworkInventory, localNetworkAction, localApplianceHealth, localApplianceRepair, localSoftwareStatus, localSoftwareUpdate, localRepairNetworkShares, localSyncShareAdministrator } from './local-host.mjs';
@@ -304,19 +304,32 @@ function invalidateRuntimeInventory() {
 
 async function getRuntimeInventoryCached(force = false) {
   const now = Date.now();
-  if (!force && runtimeInventoryCache && now - runtimeInventoryCacheAt < RUNTIME_INVENTORY_TTL_MS) return runtimeInventoryCache;
-  if (runtimeInventoryRefresh) return runtimeInventoryRefresh;
-  runtimeInventoryRefresh = (async () => {
-    try {
-      const value = await runtimeInventory();
-      runtimeInventoryCache = value;
-      runtimeInventoryCacheAt = Date.now();
-      return value;
-    } finally {
-      runtimeInventoryRefresh = null;
+  const fresh = runtimeInventoryCache && now - runtimeInventoryCacheAt < RUNTIME_INVENTORY_TTL_MS;
+  if (!force && fresh) return runtimeInventoryCache;
+
+  const refresh = () => {
+    if (!runtimeInventoryRefresh) {
+      runtimeInventoryRefresh = (async () => {
+        try {
+          const value = await runtimeInventory();
+          runtimeInventoryCache = value;
+          runtimeInventoryCacheAt = Date.now();
+          return value;
+        } finally {
+          runtimeInventoryRefresh = null;
+        }
+      })();
     }
-  })();
-  return runtimeInventoryRefresh;
+    return runtimeInventoryRefresh;
+  };
+
+  // Stale-while-revalidate: once an inventory exists, never make ordinary
+  // navigation wait for libvirt/Docker/storage discovery again.
+  if (!force && runtimeInventoryCache) {
+    refresh().catch(() => null);
+    return runtimeInventoryCache;
+  }
+  return refresh();
 }
 
 
@@ -1628,6 +1641,10 @@ async function api(req, res, url) {
     const community = await communityCatalog({ refresh });
     return send(res, 200, community);
   }
+  if (req.method === 'GET' && url.pathname === '/api/vms/editor') {
+    if (!requirePermission(res, permissions, 'vms.manage')) return;
+    return send(res, 200, await vmEditorInventory(url.searchParams.get('id') || ''));
+  }
   if (req.method === 'GET' && url.pathname === '/api/runtimes') {
     if (!requireAnyPermission(res, permissions, ['apps.manage', 'containers.manage', 'vms.manage', 'storage.view', 'system.view'])) return;
     const runtimes = await getRuntimeInventoryCached(url.searchParams.get('refresh') === '1');
@@ -2408,5 +2425,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     };
     const timer = setTimeout(warmCatalog, 1500);
     timer.unref?.();
+    const runtimeTimer = setTimeout(() => getRuntimeInventoryCached(true).catch(() => null), 500);
+    runtimeTimer.unref?.();
   });
 }

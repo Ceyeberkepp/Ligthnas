@@ -28,11 +28,11 @@ test('noVNC console path is fail-fast and latency tuned', async () => {
     read('src/server.mjs'),
     read('public/vm-console.js')
   ]);
-  assert.match(agent, /vncdisplay", name\], timeout=3/);
+  assert.match(agent, /vncdisplay", name\], timeout=2/);
   assert.match(agent, /deadline = time\.monotonic\(\) \+ 5/);
   assert.match(agent, /TCP_NODELAY/);
   assert.doesNotMatch(agent, /VM display is not ready after 75 seconds/);
-  assert.match(localHost, /socket\.setTimeout\(6500/);
+  assert.match(localHost, /socket\.setTimeout\(3500/);
   assert.match(server, /backend\.setNoDelay\?\.\(true\)/);
   assert.match(consoleJs, /compressionLevel = 1/);
   assert.match(consoleJs, /qualityLevel = 7/);

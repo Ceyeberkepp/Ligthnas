@@ -227,7 +227,7 @@ export async function localVmConsoleSocket(id) {
       if (remaining.length) socket.unshift(remaining);
       resolve(socket);
     };
-    socket.setTimeout(6500, () => fail(operationError('Local VM console timed out.')));
+    socket.setTimeout(3500, () => fail(operationError('Local VM console timed out.')));
     socket.on('error', error => fail(operationError(`Local VM console is unavailable: ${error.message}`)));
     socket.on('connect', () => socket.write(`${JSON.stringify({ action: 'vm-console', data: { id: name } })}\n`));
     socket.on('data', onData);

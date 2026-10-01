@@ -20,7 +20,7 @@ const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
 const socketUrl = `${protocol}//${location.host}/api/console/vm/${encodeURIComponent(id)}`;
 let rfb = null;
 let reconnectTimer = null;
-let reconnectDelay = 1000;
+let reconnectDelay = 200;
 let closing = false;
 
 function fitConsole() {
@@ -44,7 +44,7 @@ function scheduleReconnect() {
     reconnectTimer = null;
     connectConsole();
   }, reconnectDelay);
-  reconnectDelay = Math.min(5000, Math.round(reconnectDelay * 1.5));
+  reconnectDelay = Math.min(1500, Math.round(reconnectDelay * 1.6));
 }
 
 function connectConsole() {
@@ -64,7 +64,7 @@ function connectConsole() {
   if ('showDotCursor' in rfb) rfb.showDotCursor = true;
 
   rfb.addEventListener('connect', () => {
-    reconnectDelay = 1000;
+    reconnectDelay = 200;
     status.textContent = 'Connected';
     status.classList.remove('error');
     fitConsole();

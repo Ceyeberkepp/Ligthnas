@@ -2315,22 +2315,17 @@ def network_action(data: dict) -> dict:
 
 
 
-def vm_console_target(name: str) -> tuple[str, int]:
-    if not NAME_RE.fullmatch(name):
-        raise ValueError("invalid VM name")
-    if not available("virsh"):
-        raise RuntimeError("libvirt client is not installed")
-    # One libvirt round-trip is enough. The old path queried domstate and then
-    # vncdisplay, doubling console-open latency and making transient libvirt
-    # stalls feel like an 8-15 second frozen window.
-    display = run(["virsh", "-c", "qemu:///system", "vncdisplay", name], timeout=3).strip()
-    # Common forms are :0, 127.0.0.1:0 and 127.0.0.1:5900.
+_VM_CONSOLE_CACHE = {}
+_VM_CONSOLE_CACHE_LOCK = threading.Lock()
+_VM_CONSOLE_CACHE_TTL = 30.0
+
+def _parse_vnc_display(display: str) -> tuple[str, int]:
     host = "127.0.0.1"
-    value = display
-    if ":" in display and not display.startswith(":"):
-        host, value = display.rsplit(":", 1)
+    value = str(display or "").strip()
+    if ":" in value and not value.startswith(":"):
+        host, value = value.rsplit(":", 1)
     else:
-        value = display.lstrip(":")
+        value = value.lstrip(":")
     try:
         number = int(value)
     except ValueError as exc:
@@ -2341,6 +2336,58 @@ def vm_console_target(name: str) -> tuple[str, int]:
     if host in {"0.0.0.0", "::", "localhost", ""}:
         host = "127.0.0.1"
     return host, port
+
+def _cache_vm_console(name: str, target: tuple[str, int]) -> None:
+    with _VM_CONSOLE_CACHE_LOCK:
+        _VM_CONSOLE_CACHE[name] = (time.monotonic(), target)
+
+def _cached_vm_console(name: str) -> tuple[str, int] | None:
+    with _VM_CONSOLE_CACHE_LOCK:
+        cached = _VM_CONSOLE_CACHE.get(name)
+    if not cached:
+        return None
+    stamp, target = cached
+    if time.monotonic() - stamp > _VM_CONSOLE_CACHE_TTL:
+        return None
+    return target
+
+def _invalidate_vm_console(name: str) -> None:
+    with _VM_CONSOLE_CACHE_LOCK:
+        _VM_CONSOLE_CACHE.pop(name, None)
+
+def vm_console_target(name: str) -> tuple[str, int]:
+    if not NAME_RE.fullmatch(name):
+        raise ValueError("invalid VM name")
+    cached = _cached_vm_console(name)
+    if cached:
+        return cached
+    if not available("virsh"):
+        raise RuntimeError("libvirt client is not installed")
+    display = run(["virsh", "-c", "qemu:///system", "vncdisplay", name], timeout=2).strip()
+    target = _parse_vnc_display(display)
+    _cache_vm_console(name, target)
+    return target
+
+def warm_vm_console_cache() -> None:
+    """Keep running VM VNC targets hot so opening noVNC does not wait on virsh."""
+    if not available("virsh"):
+        return
+    while True:
+        try:
+            result = subprocess.run(
+                ["virsh", "-c", "qemu:///system", "list", "--name"],
+                capture_output=True, text=True, timeout=3, check=False,
+            )
+            names = [line.strip() for line in result.stdout.splitlines() if NAME_RE.fullmatch(line.strip())]
+            for name in names:
+                try:
+                    display = run(["virsh", "-c", "qemu:///system", "vncdisplay", name], timeout=2).strip()
+                    _cache_vm_console(name, _parse_vnc_display(display))
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        time.sleep(8)
 
 
 def open_vm_console(data: dict):
@@ -2364,6 +2411,9 @@ def open_vm_console(data: dict):
             return backend
         except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
             last_error = exc
+            # QEMU may choose a new autoport after a VM restart. Drop a cached
+            # target immediately so the next retry refreshes it from libvirt.
+            _invalidate_vm_console(name)
         time.sleep(0.20)
 
     raise RuntimeError(f"VM display is not ready yet: {last_error}")
@@ -3316,6 +3366,7 @@ if __name__ == "__main__":
     except FileNotFoundError:
         pass
     server = Server(str(SOCKET_PATH), Handler)
+    threading.Thread(target=warm_vm_console_cache, name="lightnas-vnc-warm", daemon=True).start()
     try:
         gid = grp.getgrnam("lightnas").gr_gid
     except KeyError:
