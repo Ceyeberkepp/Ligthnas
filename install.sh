@@ -183,6 +183,16 @@ EOF
   chown root:lightnas /etc/lightnas/feature-gates.json
   chmod 0640 /etc/lightnas/feature-gates.json
 fi
+if [[ ! -e /etc/lightnas/license.env ]]; then
+  cat >/etc/lightnas/license.env <<'EOF'
+# Future LightNAS Pro/Enterprise verification.
+# Set the HTTPS verification endpoint when your licensing/auth server is ready.
+LIGHTNAS_LICENSE_SERVER_URL=
+LIGHTNAS_LICENSE_PUBLIC_KEY_FILE=/etc/lightnas/license-public.pem
+EOF
+  chown root:lightnas /etc/lightnas/license.env
+  chmod 0640 /etc/lightnas/license.env
+fi
 for vm_user in libvirt-qemu qemu; do
   if id "$vm_user" >/dev/null 2>&1; then
     # QEMU must be able to traverse the private LightNAS data root before it
@@ -239,6 +249,7 @@ Type=simple
 User=root
 Group=root
 EnvironmentFile=-/etc/lightnas/runtime.env
+EnvironmentFile=-/etc/lightnas/license.env
 Environment=LIGHTNAS_HOST_SOCKET=/run/lightnas/host-agent.sock
 ExecStart=/usr/bin/python3 ${INSTALL_DIRECTORY}/scripts/lightnas-host-agent.py
 Restart=on-failure
@@ -263,6 +274,7 @@ User=lightnas
 Group=lightnas
 WorkingDirectory=${INSTALL_DIRECTORY}
 EnvironmentFile=-/etc/lightnas/runtime.env
+EnvironmentFile=-/etc/lightnas/license.env
 Environment=LIGHTNAS_HOST_SOCKET=/run/lightnas/host-agent.sock
 Environment=NODE_ENV=production
 Environment=NAS_HOST=0.0.0.0
