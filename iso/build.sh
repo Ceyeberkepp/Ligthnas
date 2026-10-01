@@ -207,15 +207,42 @@ SVG
     fi
   done < <(find config/bootloaders -type f -name '*.cfg' -print0)
 
-  # GRUB normally uses the first menu entry. Prefer the renamed graphical
-  # installer by title when that entry is available; if the template differs,
-  # GRUB simply falls back to its normal first-entry behavior.
+  # GRUB/UEFI gets the same compatibility choices as BIOS/Syslinux. Derive
+  # kernel/initrd commands from the existing graphical installer entry so this
+  # remains compatible with future Debian live-build path changes.
   while IFS= read -r -d '' grubcfg; do
     if grep -q 'Install LightNAS (Graphical)' "$grubcfg"; then
+      linux_line="$(awk '
+        /menuentry .*Install LightNAS \(Graphical\)/ { inentry=1; next }
+        inentry && /^[[:space:]]*(linux|linuxefi)[[:space:]]+/ { print; exit }
+      ' "$grubcfg")"
+      initrd_line="$(awk '
+        /menuentry .*Install LightNAS \(Graphical\)/ { inentry=1; next }
+        inentry && /^[[:space:]]*(initrd|initrdefi)[[:space:]]+/ { print; exit }
+      ' "$grubcfg")"
+
+      if [[ -n "$linux_line" && -n "$initrd_line" ]] && ! grep -q 'Install LightNAS (VGA Safe Mode)' "$grubcfg"; then
+        {
+          printf '\nmenuentry "Install LightNAS (VGA Safe Mode)" {\n'
+          printf '%s nomodeset vga=normal video=vesa:off\n' "$linux_line"
+          printf '%s\n' "$initrd_line"
+          printf '}\n'
+          printf '\nmenuentry "Install LightNAS (Serial Console)" {\n'
+          printf '%s DEBIAN_FRONTEND=text console=tty0 console=ttyS0,115200n8\n' "$linux_line"
+          printf '%s\n' "$initrd_line"
+          printf '}\n'
+        } >>"$grubcfg"
+      fi
+
       if grep -q '^set default=' "$grubcfg"; then
         sed -i 's/^set default=.*/set default="Install LightNAS (Graphical)"/' "$grubcfg"
       else
         sed -i '1iset default="Install LightNAS (Graphical)"' "$grubcfg"
+      fi
+      if grep -q '^set timeout=' "$grubcfg"; then
+        sed -i 's/^set timeout=.*/set timeout=10/' "$grubcfg"
+      else
+        sed -i '2iset timeout=10' "$grubcfg"
       fi
     fi
   done < <(find config/bootloaders -type f \( -name 'grub.cfg' -o -name 'grub*.cfg' \) -print0)
