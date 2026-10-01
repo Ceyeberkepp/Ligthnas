@@ -1,4 +1,5 @@
-const state = { overview: null, view: 'home', uiMode: localStorage.getItem('lightnas-workspace-mode') === 'hypervisor' ? 'hypervisor' : 'nas', folder: '', files: null, fileError: null, filesSettingsOpen: false, aiMessages: [], logs: null, fileView: ['list','grid','gallery'].includes(localStorage.getItem('lightnas-file-view')) ? localStorage.getItem('lightnas-file-view') : 'grid', fileTruncated: false, overviewMetric: localStorage.getItem('lightnas-overview-metric') || 'cpu', lastNetworkSample: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, smtp: undefined, media: null, network: null, software: null, license: null, metricHistory: { cpu: [], load: [], memory: [], storage: [], networkIn: [], networkOut: [] } };
+if (window.LIGHTNAS_PRODUCT_MODE === 'hypervisor') document.body.classList.add('product-hypervisor');
+const state = { overview: null, view: 'home', uiMode: window.LIGHTNAS_PRODUCT_MODE === 'hypervisor' ? 'hypervisor' : 'nas', folder: '', files: null, fileError: null, filesSettingsOpen: false, aiMessages: [], logs: null, fileView: ['list','grid','gallery'].includes(localStorage.getItem('lightnas-file-view')) ? localStorage.getItem('lightnas-file-view') : 'grid', fileTruncated: false, overviewMetric: localStorage.getItem('lightnas-overview-metric') || 'cpu', lastNetworkSample: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, smtp: undefined, media: null, network: null, software: null, license: null, metricHistory: { cpu: [], load: [], memory: [], storage: [], networkIn: [], networkOut: [] } };
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
 const themeChoices = ['system', 'light', 'dark'];
@@ -422,6 +423,7 @@ function homeView() {
 
 
 function applyWorkspaceMode() {
+  if (window.LIGHTNAS_PRODUCT_MODE === 'hypervisor') state.uiMode = 'hypervisor';
   const consoleRoot = $('#console');
   if (!consoleRoot) return;
   consoleRoot.dataset.workspaceMode = state.uiMode;
@@ -1778,11 +1780,10 @@ function render(view) {
 function bindViewActions() {
   document.querySelectorAll('[data-workspace-mode]').forEach(button => {
     button.onclick = () => {
-      const mode = button.dataset.workspaceMode === 'hypervisor' ? 'hypervisor' : 'nas';
-      state.uiMode = mode;
-      localStorage.setItem('lightnas-workspace-mode', mode);
+      if (window.LIGHTNAS_PRODUCT_MODE === 'hypervisor') return;
+      state.uiMode = 'nas';
       applyWorkspaceMode();
-      location.hash = mode === 'hypervisor' ? 'hypervisor' : 'home';
+      location.hash = 'home';
     };
   });
   document.querySelectorAll('#content [data-settings-collapse]').forEach(button => button.addEventListener('click', () => {
