@@ -19,6 +19,19 @@ test('LightNAS ISO boots its own kiosk instead of the Debian LightDM greeter', (
   assert.match(iso, /WantedBy=graphical\.target/);
 });
 
+
+
+test('LightNAS installer provides graphics-independent compatibility modes', () => {
+  assert.match(iso, /Install LightNAS \(VGA Safe Mode\)/);
+  assert.match(iso, /Install LightNAS \(Terminal UI\)/);
+  assert.match(iso, /Install LightNAS \(Serial Console\)/);
+  assert.match(iso, /nomodeset vga=normal video=vesa:off/);
+  assert.match(iso, /console=ttyS0,115200n8/);
+  assert.match(iso, /xserver-xorg-video-vesa/);
+  assert.match(iso, /xserver-xorg-video-fbdev/);
+  assert.match(iso, /virtualbox-guest-x11/);
+});
+
 test('LightNAS ISO is branded as LightNAS', () => {
   assert.match(iso, /LightNAS 1\.0/);
   assert.match(iso, /PRETTY_NAME="LightNAS 1\.0 \(Debian 13\)"/);
