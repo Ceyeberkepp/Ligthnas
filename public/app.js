@@ -1,4 +1,4 @@
-const state = { overview: null, view: 'home', folder: '', files: null, fileError: null, filesSettingsOpen: false, aiMessages: [], logs: null, fileView: ['list','grid','gallery'].includes(localStorage.getItem('lightnas-file-view')) ? localStorage.getItem('lightnas-file-view') : 'grid', fileTruncated: false, overviewMetric: localStorage.getItem('lightnas-overview-metric') || 'cpu', lastNetworkSample: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, smtp: undefined, media: null, network: null, metricHistory: { cpu: [], load: [], memory: [], storage: [], networkIn: [], networkOut: [] } };
+const state = { overview: null, view: 'home', folder: '', files: null, fileError: null, filesSettingsOpen: false, aiMessages: [], logs: null, fileView: ['list','grid','gallery'].includes(localStorage.getItem('lightnas-file-view')) ? localStorage.getItem('lightnas-file-view') : 'grid', fileTruncated: false, overviewMetric: localStorage.getItem('lightnas-overview-metric') || 'cpu', lastNetworkSample: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, smtp: undefined, media: null, network: null, software: null, license: null, metricHistory: { cpu: [], load: [], memory: [], storage: [], networkIn: [], networkOut: [] } };
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
 const themeChoices = ['system', 'light', 'dark'];
@@ -1100,6 +1100,18 @@ function aiView() {
 }
 
 
+async function loadSoftwareAndLicense(check = false) {
+  try {
+    const [software, license] = await Promise.all([
+      request(`/api/software${check ? '?check=1' : ''}`),
+      request('/api/license')
+    ]);
+    state.software = software;
+    state.license = license;
+    if (state.view === 'settings') render('settings');
+  } catch (error) { toast(error.message); }
+}
+
 function settingsView() {
   const { appliance } = state.overview;
   const zones = [['America/New_York', 'Eastern Time'], ['America/Chicago', 'Central Time'], ['America/Denver', 'Mountain Time'], ['America/Los_Angeles', 'Pacific Time'], ['UTC', 'UTC']];
@@ -1144,6 +1156,28 @@ function settingsView() {
         <label>New password<input name="newPassword" type="password" minlength="10" autocomplete="new-password" required placeholder="At least 10 characters"></label>
         <button class="secondary" type="submit">Change password</button><div class="form-error" role="alert"></div>
       </form>
+
+      <section class="panel software-card">
+        <div class="settings-card-head"><div><span class="eyebrow">SOFTWARE & EDITION</span><h2>LightNAS version and updates</h2><p class="muted">Check the installed build, install signed source updates, and verify a future Pro or Enterprise entitlement.</p></div></div>
+        <div class="manager-summary software-summary">
+          <div><span>Version</span><b>${escapeHtml(state.software?.version || 'Loading…')}</b></div>
+          <div><span>Commit</span><b>${escapeHtml(state.software?.commit || '—')}</b></div>
+          <div><span>Update</span><b>${state.software?.updateAvailable ? 'Available' : state.software ? 'Current' : 'Checking…'}</b></div>
+          <div><span>Edition</span><b>${escapeHtml(state.license?.edition || 'community')}</b></div>
+          <div><span>License verification</span><b>${state.license?.verified ? 'Verified' : state.license?.serverConfigured ? 'Not verified' : 'Server not configured'}</b></div>
+          <div><span>Instance ID</span><b class="mono">${escapeHtml(state.license?.instanceId || '—')}</b></div>
+        </div>
+        <div class="head-actions software-actions">
+          <button class="secondary" type="button" data-software-check>Check for updates</button>
+          <button class="primary" type="button" data-software-update ${state.software?.updateAvailable ? '' : 'disabled'}>Install update</button>
+        </div>
+        <form data-license-form class="license-verify-form">
+          <label>Pro / Enterprise license key<input name="licenseKey" type="password" autocomplete="off" placeholder="Enter license key when your authentication server is ready"></label>
+          <button class="secondary" type="submit">Verify edition</button>
+          <div class="form-error" role="alert"></div>
+        </form>
+        <p class="module-note">Community remains fully unlocked while paid-feature enforcement is disabled. Future license responses are accepted only from the configured HTTPS license server and must carry a valid signed receipt for this appliance.</p>
+      </section>
     </section>`;
 }
 function adminView() {
@@ -1507,6 +1541,8 @@ function render(view) {
   if (['files', 'media'].includes(state.view) && state.media === null) loadMedia();
   if (['network', 'firewall'].includes(state.view) && !state.network) loadNetwork();
   if (['logs','backups','analytics'].includes(state.view) && state.logs === null) loadLogs();
+  if (state.view === 'settings' && (!state.software || !state.license)) loadSoftwareAndLicense();
+
   if (state.view === 'containers') {
     if (!state.runtimes?.containers && !state.containerError) loadContainers();
     if ((!state.runtimes?.docker || !state.runtimes?.catalog) && !state.runtimeError) loadRuntimes();
@@ -1515,6 +1551,31 @@ function render(view) {
 }
 
 function bindViewActions() {
+  $('[data-software-check]', $('#content'))?.addEventListener('click', async event => {
+    event.currentTarget.disabled = true;
+    try { await loadSoftwareAndLicense(true); toast(state.software?.updateAvailable ? 'A LightNAS update is available.' : 'LightNAS is up to date.'); }
+    finally { event.currentTarget.disabled = false; }
+  });
+  $('[data-software-update]', $('#content'))?.addEventListener('click', async event => {
+    if (!confirm('Install the newest LightNAS update now? The web interface will restart briefly.')) return;
+    event.currentTarget.disabled = true;
+    try {
+      await request('/api/software/update', { method:'POST', body:'{}' });
+      toast('Update started. LightNAS will restart when installation finishes.');
+    } catch (error) { toast(error.message); event.currentTarget.disabled = false; }
+  });
+  $('[data-license-form]', $('#content'))?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const error = $('.form-error', form);
+    error.textContent = '';
+    try {
+      state.license = await request('/api/license/verify', { method:'POST', body:JSON.stringify({ licenseKey:form.elements.licenseKey.value }) });
+      form.reset();
+      render('settings');
+      toast(`LightNAS ${state.license.edition} edition verified.`);
+    } catch (problem) { error.textContent = problem.message; }
+  });
   $('[data-action="open-logs-modal"]', $('#content'))?.addEventListener('click', async () => { if (state.logs === null) { try { state.logs = (await request('/api/logs?limit=500')).logs || []; } catch (error) { toast(error.message); return; } } openLogsModal(); });
   $('[data-action="refresh-logs"]', $('#content'))?.addEventListener('click', async event => { event.currentTarget.disabled = true; try { state.logs = (await request('/api/logs?limit=500')).logs || []; render(state.view); } catch (error) { toast(error.message); } });
   const renderHealth = result => {
