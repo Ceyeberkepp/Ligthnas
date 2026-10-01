@@ -304,19 +304,32 @@ function invalidateRuntimeInventory() {
 
 async function getRuntimeInventoryCached(force = false) {
   const now = Date.now();
-  if (!force && runtimeInventoryCache && now - runtimeInventoryCacheAt < RUNTIME_INVENTORY_TTL_MS) return runtimeInventoryCache;
-  if (runtimeInventoryRefresh) return runtimeInventoryRefresh;
-  runtimeInventoryRefresh = (async () => {
-    try {
-      const value = await runtimeInventory();
-      runtimeInventoryCache = value;
-      runtimeInventoryCacheAt = Date.now();
-      return value;
-    } finally {
-      runtimeInventoryRefresh = null;
+  const fresh = runtimeInventoryCache && now - runtimeInventoryCacheAt < RUNTIME_INVENTORY_TTL_MS;
+  if (!force && fresh) return runtimeInventoryCache;
+
+  const refresh = () => {
+    if (!runtimeInventoryRefresh) {
+      runtimeInventoryRefresh = (async () => {
+        try {
+          const value = await runtimeInventory();
+          runtimeInventoryCache = value;
+          runtimeInventoryCacheAt = Date.now();
+          return value;
+        } finally {
+          runtimeInventoryRefresh = null;
+        }
+      })();
     }
-  })();
-  return runtimeInventoryRefresh;
+    return runtimeInventoryRefresh;
+  };
+
+  // Stale-while-revalidate: once an inventory exists, never make ordinary
+  // navigation wait for libvirt/Docker/storage discovery again.
+  if (!force && runtimeInventoryCache) {
+    refresh().catch(() => null);
+    return runtimeInventoryCache;
+  }
+  return refresh();
 }
 
 
@@ -2412,5 +2425,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     };
     const timer = setTimeout(warmCatalog, 1500);
     timer.unref?.();
+    const runtimeTimer = setTimeout(() => getRuntimeInventoryCached(true).catch(() => null), 500);
+    runtimeTimer.unref?.();
   });
 }
