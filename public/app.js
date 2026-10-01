@@ -274,7 +274,7 @@ async function showConsole() {
     setTimeout(() => { if (!state.network) loadNetwork(); }, 700);
     setTimeout(() => { if (state.spaces === null) loadSpaces(); }, 900);
   });
-  $('#nav a[data-view], .foot-admin[data-view]').forEach(link => {
+  document.querySelectorAll('#nav a[data-view], .foot-admin[data-view]').forEach(link => {
     const label = link.textContent.replace(/\s+/g, ' ').trim();
     if (label) link.title = label;
   });
