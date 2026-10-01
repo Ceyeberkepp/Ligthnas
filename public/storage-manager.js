@@ -193,7 +193,7 @@ function openCreateStorage(sourceId='', provider='directory') {
       </div>
       <div class="storage-content-heading"><div><h3>What can this storage hold?</h3><p class="muted">Choose the content types you want available on this pool.</p></div><button class="secondary storage-select-all" type="button" data-storage-toggle-content>Select all</button></div>
       <div class="content-policy-grid storage-content-policy">${contentCheckboxes(data.contentTypes||[],['iso','vztmpl','images','rootdir','backup','snippets','files'])}</div>
-      ${writableSources.length?'': '<div class="module-note storage-volume-warning"><b>No usable mounted source detected.</b> Mount or expose the selected provider to LightNAS read/write, then rescan.</div>'}
+      ${writableSources.length?'': '<div class="module-note storage-volume-warning"><b>No usable volume detected.</b> Mount or expose the selected provider to LightNAS read/write, then rescan.</div>'}
       <div class="dialog-actions storage-create-actions"><button class="secondary" type="button" data-storage-dialog-close>Cancel</button><button class="primary" type="submit" ${writableSources.length?'':'disabled'}>Create storage</button></div>
     </form>`;
 
