@@ -65,9 +65,10 @@ test('All Files scan is bounded, cached and manually refreshable', async () => {
   const [files, app, server] = await Promise.all([read('src/files.mjs'), read('public/app.js'), read('src/server.mjs')]);
   assert.match(files, /offset \+= 48/);
   assert.match(files, /Promise\.all\(batch\.map/);
-  assert.match(files, /allFilesCache = \{ expiresAt: now \+ 5000, value \}/);
-  assert.match(files, /listAllFiles\(forceRefresh = false\)/);
-  assert.match(server, /listAllFiles\(url\.searchParams\.get\('refresh'\) === '1'\)/);
+  assert.match(files, /const allFilesCache = new Map\(\)/);
+  assert.match(files, /allFilesCache\.set\(cacheKey, \{ expiresAt: now \+ 5000, value \}\)/);
+  assert.match(files, /listAllFiles\(forceRefresh = false, scopePrefix = ''\)/);
+  assert.match(server, /listAllFiles\(url\.searchParams\.get\('refresh'\) === '1', scope\)/);
   assert.match(app, /loadFiles\(true\)/);
 });
 
