@@ -20,6 +20,14 @@ curl -fsSL https://raw.githubusercontent.com/Ceyeberkepp/Ligthnas/main/install-h
 
 Use the NAS installer for the storage/files/media appliance. Use the Hypervisor installer for the dedicated virtualization host interface. Both remain in this repository.
 
+## LightVisor support and knowledge base
+
+For the dedicated Hypervisor edition:
+
+- **[LightVisor Support Guide](docs/LIGHTVISOR-SUPPORT-GUIDE.md)** — architecture, resource tree, services, updating, diagnostics, and support boundaries.
+- **[LightVisor Knowledge Base](docs/kb/lightvisor/README.md)** — installation/update, resource-tree behavior, VM/LXC/storage/network troubleshooting, stale UI recovery, and support-data collection.
+- **[Hypervisor Architecture](docs/HYPERVISOR-ARCHITECTURE.md)** — current architectural direction and planned capabilities.
+
 ## Platform design targets
 
 LightNAS is being designed around a **2 GB RAM / 35 GB system-storage minimum**
