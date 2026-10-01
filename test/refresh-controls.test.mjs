@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 test('refresh controls bind every matching button and reload scoped data', async () => {
   const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
 
-  assert.ok(app.includes(`$('[data-action="refresh-runtime"]', $('#content')).forEach`));
+  assert.ok(app.includes("$$('[data-action=\"refresh-runtime\"]', $('#content')).forEach"));
   assert.equal(app.includes(`\n  $('[data-action="refresh-runtime"]', $('#content')).forEach`), false);
   assert.equal(/^\s*\$\([^\n]+\)\.forEach/m.test(app), false, 'single-element selectors cannot be iterated with forEach');
   assert.match(app, /button\.textContent = 'Refreshing…'/);
