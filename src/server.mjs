@@ -471,7 +471,7 @@ queueMicrotask(() => reconcilePrivateNatPublications().catch(() => null));
 
 export const PERMISSIONS = Object.freeze([
   'overview.view',
-  'files.read', 'files.write', 'files.download', 'files.delete', 'media.convert',
+  'files.own', 'files.read', 'files.write', 'files.download', 'files.delete', 'media.convert',
   'storage.view', 'storage.manage', 'pools.view', 'shares.view', 'shares.manage',
   'apps.view', 'apps.manage', 'containers.view', 'containers.manage', 'vms.view', 'vms.manage',
   'network.view', 'network.manage', 'firewall.view', 'firewall.manage', 'integrations.view', 'integrations.manage',
@@ -479,7 +479,7 @@ export const PERMISSIONS = Object.freeze([
   'monitoring.view', 'capabilities.view', 'system.view', 'system.shell',
   'users.manage', 'smtp.manage', 'settings.manage', 'admin.view'
 ]);
-const DEFAULT_USER_PERMISSIONS = Object.freeze(['files.read', 'files.write', 'files.download', 'files.delete']);
+const DEFAULT_USER_PERMISSIONS = Object.freeze(['files.own']);
 
 store.setActivityListener(async event => {
   await deliverEvent(store.state, event);
@@ -622,6 +622,19 @@ function requireAnyPermission(res, permissionSet, choices) {
   if (choices.some(permission => hasPermission(permissionSet, permission))) return true;
   send(res, 403, { error: `Permission required: ${choices.join(' or ')}.` });
   return false;
+}
+
+function privateFileScope(context, globalPermissions = []) {
+  if (context.isAdmin || globalPermissions.some(permission => context.permissions.includes(permission))) return '';
+  if (!context.apiToken && context.permissions.includes('files.own')) return `Users/${context.username}`;
+  return null;
+}
+
+function scopedFilePath(context, relative, globalPermissions = []) {
+  const scope = privateFileScope(context, globalPermissions);
+  if (scope === null) return null;
+  const clean = String(relative || '').replace(/^\/+|\/+$/g, '');
+  return scope ? [scope, clean].filter(Boolean).join('/') : clean;
 }
 
 function requireOwner(res, context) {
@@ -1424,16 +1437,21 @@ async function api(req, res, url) {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/media') {
-    if (!requirePermission(res, permissions, 'files.read')) return;
+    if (!requireAnyPermission(res, permissions, ['files.own', 'files.read'])) return;
     return send(res, 200, { converterAvailable: await mediaAvailable(), formats: ['mp4', 'webm', 'mp3', 'jpg', 'png', 'webp'] });
   }
   if (req.method === 'POST' && url.pathname === '/api/media/convert') {
     if (!requirePermission(res, permissions, 'media.convert')) return;
+    if (!requireAnyPermission(res, permissions, ['files.own', 'files.read'])) return;
     const input = await bodyJson(req);
-    const converted = await convertMedia(input.path, input.format);
+    const source = scopedFilePath(context, input.path, ['files.read']);
+    if (source === null) return send(res, 403, { error: 'File access is required.' });
+    const converted = await convertMedia(source, input.format);
     store.addActivity('media', `Converted a media file to ${input.format}.`);
     await store.save();
-    return send(res, 201, converted);
+    const scope = privateFileScope(context, ['files.read']);
+    const visiblePath = scope && String(converted.path || '').startsWith(scope + '/') ? String(converted.path).slice(scope.length + 1) : converted.path;
+    return send(res, 201, { ...converted, path: visiblePath });
   }
 
   if (req.method === 'GET' && url.pathname === '/api/spaces') {
@@ -2117,33 +2135,44 @@ async function api(req, res, url) {
   }
 
   if (url.pathname === '/api/files') {
-    const path = url.searchParams.get('path') || '';
+    const requestedPath = url.searchParams.get('path') || '';
     if (req.method === 'GET') {
-      if (!requirePermission(res, permissions, 'files.read')) return;
-      if (!path && url.searchParams.get('all') === '1') {
-        const all = await listAllFiles(url.searchParams.get('refresh') === '1');
+      if (!requireAnyPermission(res, permissions, ['files.own', 'files.read'])) return;
+      const scope = privateFileScope(context, ['files.read']);
+      if (scope === null) return send(res, 403, { error: 'File access is required.' });
+      if (!requestedPath && url.searchParams.get('all') === '1') {
+        const all = await listAllFiles(url.searchParams.get('refresh') === '1', scope);
         return send(res, 200, { path: '', ...all });
       }
-      return send(res, 200, { path, entries: await listFiles(path), truncated: false });
+      const path = scopedFilePath(context, requestedPath, ['files.read']);
+      return send(res, 200, { path: requestedPath, entries: await listFiles(path), truncated: false });
     }
     if (req.method === 'DELETE') {
-      if (!requireAnyPermission(res, permissions, ['files.delete', 'files.write'])) return;
-      await deleteEntry(path); store.addActivity('file', `File entry ${path} was deleted.`); await store.save(); return send(res, 200, { ok: true });
+      if (!requireAnyPermission(res, permissions, ['files.own', 'files.delete', 'files.write'])) return;
+      const path = scopedFilePath(context, requestedPath, ['files.delete', 'files.write']);
+      if (path === null) return send(res, 403, { error: 'File modification access is required.' });
+      await deleteEntry(path); store.addActivity('file', `File entry ${requestedPath} was deleted.`); await store.save(); return send(res, 200, { ok: true });
     }
-    if (!requirePermission(res, permissions, 'files.write')) return;
-    if (req.method === 'POST') { await createFolder(path); store.addActivity('file', `Folder ${path} was created.`); await store.save(); return send(res, 201, { ok: true }); }
-    if (req.method === 'PUT') { await uploadFile(path, req); store.addActivity('file', `File ${path} was uploaded.`); await store.save(); return send(res, 201, { ok: true }); }
+    if (!requireAnyPermission(res, permissions, ['files.own', 'files.write'])) return;
+    const path = scopedFilePath(context, requestedPath, ['files.write']);
+    if (path === null) return send(res, 403, { error: 'File modification access is required.' });
+    if (req.method === 'POST') { await createFolder(path); store.addActivity('file', `Folder ${requestedPath} was created.`); await store.save(); return send(res, 201, { ok: true }); }
+    if (req.method === 'PUT') { await uploadFile(path, req); store.addActivity('file', `File ${requestedPath} was uploaded.`); await store.save(); return send(res, 201, { ok: true }); }
   }
   if (req.method === 'GET' && url.pathname === '/api/files/thumbnail') {
-    if (!requirePermission(res, permissions, 'files.read')) return;
-    const thumbnail = await thumbnailFor(url.searchParams.get('path') || '', { preview: url.searchParams.get('preview') === '1' });
+    if (!requireAnyPermission(res, permissions, ['files.own', 'files.read'])) return;
+    const path = scopedFilePath(context, url.searchParams.get('path') || '', ['files.read']);
+    if (path === null) return send(res, 403, { error: 'File access is required.' });
+    const thumbnail = await thumbnailFor(path, { preview: url.searchParams.get('preview') === '1' });
     res.writeHead(200, { 'Content-Type': thumbnail.contentType, 'Content-Length': thumbnail.size, 'Cache-Control': 'private, max-age=86400', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': csp });
     return createReadStream(thumbnail.path).pipe(res);
   }
 
   if (req.method === 'GET' && url.pathname === '/api/files/archive') {
-    if (!requireAnyPermission(res, permissions, ['files.download', 'files.read'])) return;
-    const relative = url.searchParams.get('path') || '';
+    if (!requireAnyPermission(res, permissions, ['files.own', 'files.download', 'files.read'])) return;
+    const requested = url.searchParams.get('path') || '';
+    const relative = scopedFilePath(context, requested, ['files.download', 'files.read']);
+    if (relative === null) return send(res, 403, { error: 'File download access is required.' });
     const data = await downloadEntry(relative);
     if (!data.directory) return send(res, 400, { error: 'Select a folder to download.' });
     const folderName = basename(data.path) || 'folder';
@@ -2166,8 +2195,9 @@ async function api(req, res, url) {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/files/video-preview') {
-    if (!requirePermission(res, permissions, 'files.read')) return;
-    const relative = url.searchParams.get('path') || '';
+    if (!requireAnyPermission(res, permissions, ['files.own', 'files.read'])) return;
+    const relative = scopedFilePath(context, url.searchParams.get('path') || '', ['files.read']);
+    if (relative === null) return send(res, 403, { error: 'File access is required.' });
     const filename = relative.split('/').pop() || 'video';
     const extension = extname(filename).toLowerCase();
     const supportedVideo = new Set(['.mp4', '.webm', '.mov', '.m4v', '.ogv', '.mkv', '.avi', '.wmv', '.flv', '.mpeg', '.mpg', '.m2v', '.mts', '.m2ts', '.ts', '.3gp', '.3g2', '.vob']);
@@ -2194,9 +2224,11 @@ async function api(req, res, url) {
     return ffmpeg.stdout.pipe(res);
   }
   if (req.method === 'GET' && url.pathname === '/api/files/download') {
-    if (!requireAnyPermission(res, permissions, ['files.download', 'files.read'])) return;
-    const path = url.searchParams.get('path') || '';
-    const filename = path.split('/').pop() || 'file';
+    if (!requireAnyPermission(res, permissions, ['files.own', 'files.download', 'files.read'])) return;
+    const requested = url.searchParams.get('path') || '';
+    const path = scopedFilePath(context, requested, ['files.download', 'files.read']);
+    if (path === null) return send(res, 403, { error: 'File download access is required.' });
+    const filename = requested.split('/').pop() || 'file';
     const data = await downloadFile(path);
     const extension = extname(filename).toLowerCase();
     const mime = mimeTypes[extension] || 'application/octet-stream';

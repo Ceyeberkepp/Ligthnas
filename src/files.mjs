@@ -12,7 +12,7 @@ const infrastructureImageSuffixes = [
   '.iso', '.img', '.qcow', '.qcow2', '.vmdk', '.vhd', '.vhdx', '.ova', '.ovf',
   '.vma', '.vma.zst', '.vma.gz', '.tar.zst', '.tar.xz', '.tgz'
 ];
-let allFilesCache = { expiresAt: 0, value: null };
+const allFilesCache = new Map();
 
 function infrastructureFile(name) {
   const value = String(name || '').toLowerCase();
@@ -20,7 +20,7 @@ function infrastructureFile(name) {
 }
 
 function invalidateAllFilesCache() {
-  allFilesCache = { expiresAt: 0, value: null };
+  allFilesCache.clear();
 }
 
 function parts(relative) {
@@ -156,21 +156,25 @@ async function recursiveFileEntries(path, prefix = '', output = [], limits = { c
   return output;
 }
 
-export async function listAllFiles(forceRefresh = false) {
+export async function listAllFiles(forceRefresh = false, scopePrefix = '') {
+  const prefixSegments = parts(scopePrefix);
+  const cacheKey = prefixSegments.join('/');
   const now = Date.now();
-  if (!forceRefresh && allFilesCache.value && allFilesCache.expiresAt > now) return allFilesCache.value;
+  const cached = allFilesCache.get(cacheKey);
+  if (!forceRefresh && cached?.value && cached.expiresAt > now) return cached.value;
 
   await mkdir(root, { recursive: true, mode: 0o700 });
+  const base = prefixSegments.length ? await checked(cacheKey, false) : root;
+  await mkdir(base, { recursive: true, mode: 0o700 });
   const limits = { count: 0, max: 10000 };
   const entries = [];
 
-  // Files & media is intentionally a curated personal library. "All files"
-  // means the union of Documents, Photos, Videos, and Audio only. Attached
-  // storage, VM disks, ISOs, container templates, backups, and unrelated
-  // folders belong to Storage / VM / Container workflows and are excluded.
+  // Files & media is intentionally a curated personal library. For a scoped
+  // user, the same virtual Documents/Photos/Videos/Audio layout lives below
+  // Users/<username> but the physical prefix is never exposed to the browser.
   for (const folder of MEDIA_LIBRARY_ROOTS) {
     if (limits.count >= limits.max) break;
-    const absolute = join(root, folder);
+    const absolute = join(base, folder);
     try { await mkdir(absolute, { recursive: true, mode: 0o700 }); } catch {}
     await recursiveFileEntries(absolute, folder, entries, limits);
   }
@@ -180,7 +184,7 @@ export async function listAllFiles(forceRefresh = false) {
     truncated: limits.count >= limits.max,
     limit: limits.max
   };
-  allFilesCache = { expiresAt: now + 5000, value };
+  allFilesCache.set(cacheKey, { expiresAt: now + 5000, value });
   return value;
 }
 

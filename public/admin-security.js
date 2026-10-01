@@ -35,10 +35,11 @@ function serializePasskeyRegistration(credential) {
 
 const permissionNames = {
   'overview.view':'View overview',
-  'files.read':'Read / preview files',
-  'files.write':'Upload / create files',
-  'files.download':'Download files & folders',
-  'files.delete':'Delete files & folders',
+  'files.own':'Manage only my own files',
+  'files.read':'Read / preview all files',
+  'files.write':'Upload / create files anywhere',
+  'files.download':'Download all files & folders',
+  'files.delete':'Delete files & folders anywhere',
   'media.convert':'Convert media',
   'storage.view':'View storage',
   'storage.manage':'Manage storage',
