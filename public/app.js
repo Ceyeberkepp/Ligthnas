@@ -1,4 +1,4 @@
-const state = { overview: null, view: 'home', folder: '', files: null, fileError: null, filesSettingsOpen: false, aiMessages: [], logs: null, fileView: ['list','grid','gallery'].includes(localStorage.getItem('lightnas-file-view')) ? localStorage.getItem('lightnas-file-view') : 'grid', fileTruncated: false, overviewMetric: localStorage.getItem('lightnas-overview-metric') || 'cpu', lastNetworkSample: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, smtp: undefined, media: null, network: null, software: null, license: null, overviewMetricCollapsed: JSON.parse(localStorage.getItem('lightnas-overview-metric-collapsed') || '{}'), metricHistory: { cpu: [], load: [], memory: [], storage: [], networkIn: [], networkOut: [] } };
+const state = { overview: null, view: 'home', folder: '', files: null, fileError: null, filesSettingsOpen: false, aiMessages: [], logs: null, fileView: ['list','grid','gallery'].includes(localStorage.getItem('lightnas-file-view')) ? localStorage.getItem('lightnas-file-view') : 'grid', fileTruncated: false, overviewMetric: localStorage.getItem('lightnas-overview-metric') || 'cpu', lastNetworkSample: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, smtp: undefined, media: null, network: null, software: null, license: null, metricHistory: { cpu: [], load: [], memory: [], storage: [], networkIn: [], networkOut: [] } };
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
 const themeChoices = ['system', 'light', 'dark'];
@@ -344,16 +344,11 @@ function captureOverviewMetrics() {
   }
 }
 
-function overviewMetricIsCollapsed(metric) {
-  return Boolean(state.overviewMetricCollapsed?.[metric]);
-}
-
-function overviewChart(label, value, suffix, history, maximum = 100, detail = '', metric = state.overviewMetric) {
+function overviewChart(label, value, suffix, history, maximum = 100, detail = '') {
   const points = history.length > 1 ? history : [history[0] || 0, history[0] || 0];
   const ceiling = Math.max(maximum, ...points, 1);
   const coordinates = points.map((item, index) => `${(index / Math.max(points.length - 1, 1)) * 100},${38 - (Math.min(ceiling, item) / ceiling) * 34}`).join(' ');
-  const collapsed = overviewMetricIsCollapsed(metric);
-  return `<article class="overview-chart panel ${collapsed ? 'collapsed' : ''}" data-overview-chart="${escapeHtml(metric)}"><div class="overview-chart-head"><div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}${escapeHtml(suffix)}</strong></div><div class="overview-chart-head-actions"><div class="overview-chart-context">${detail ? `<b>${escapeHtml(detail)}</b>` : ''}<small>Live · last ${points.length} sample${points.length === 1 ? '' : 's'}</small></div><button type="button" class="chart-collapse-button" data-overview-collapse="${escapeHtml(metric)}" aria-expanded="${collapsed ? 'false' : 'true'}" aria-label="${collapsed ? 'Expand' : 'Collapse'} ${escapeHtml(label)}">${collapsed ? '⌄' : '⌃'}</button></div></div><div class="overview-chart-body" ${collapsed ? 'hidden' : ''}>${detail ? `<div class="overview-chart-detail-strip">${escapeHtml(detail)}</div>` : ''}<svg viewBox="0 0 100 40" preserveAspectRatio="none" role="img" aria-label="${escapeHtml(label)} history"><defs><linearGradient id="chart-${escapeHtml(label.replace(/\W/g, ''))}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--accent)" stop-opacity=".52"/><stop offset="1" stop-color="var(--accent)" stop-opacity=".04"/></linearGradient></defs><polygon points="0,40 ${coordinates} 100,40" fill="url(#chart-${escapeHtml(label.replace(/\W/g, ''))})"/><polyline points="${coordinates}" fill="none" stroke="var(--accent)" stroke-width="1.2" vector-effect="non-scaling-stroke"/></svg></div></article>`;
+  return `<article class="overview-chart panel"><div class="overview-chart-head"><div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}${escapeHtml(suffix)}</strong></div><div class="overview-chart-context">${detail ? `<b>${escapeHtml(detail)}</b>` : ''}<small>Live · last ${points.length} sample${points.length === 1 ? '' : 's'}</small></div></div>${detail ? `<div class="overview-chart-detail-strip">${escapeHtml(detail)}</div>` : ''}<svg viewBox="0 0 100 40" preserveAspectRatio="none" role="img" aria-label="${escapeHtml(label)} history"><defs><linearGradient id="chart-${escapeHtml(label.replace(/\W/g, ''))}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--accent)" stop-opacity=".52"/><stop offset="1" stop-color="var(--accent)" stop-opacity=".04"/></linearGradient></defs><polygon points="0,40 ${coordinates} 100,40" fill="url(#chart-${escapeHtml(label.replace(/\W/g, ''))})"/><polyline points="${coordinates}" fill="none" stroke="var(--accent)" stroke-width="1.2" vector-effect="non-scaling-stroke"/></svg></article>`;
 }
 
 function overviewNetworkChart(system) {
@@ -361,8 +356,7 @@ function overviewNetworkChart(system) {
   const transmitted = state.metricHistory.networkOut.length > 1 ? state.metricHistory.networkOut : [0, 0];
   const ceiling = Math.max(...received, ...transmitted, 1024);
   const points = values => values.map((item, index) => `${(index / Math.max(values.length - 1, 1)) * 100},${38 - (Math.min(ceiling, item) / ceiling) * 34}`).join(' ');
-  const collapsed = overviewMetricIsCollapsed('network');
-  return `<article class="overview-chart panel ${collapsed ? 'collapsed' : ''}" data-overview-chart="network"><div class="overview-chart-head"><div><span>Network throughput</span><strong>↓ ${bytes(received.at(-1) || 0)}/s · ↑ ${bytes(transmitted.at(-1) || 0)}/s</strong></div><div class="overview-chart-head-actions"><div class="overview-chart-context"><b>${system.network?.interfaces || 0} active interface${system.network?.interfaces === 1 ? '' : 's'}</b><small>RX ${bytes(system.network?.receivedBytes || 0)} · TX ${bytes(system.network?.transmittedBytes || 0)}</small></div><button type="button" class="chart-collapse-button" data-overview-collapse="network" aria-expanded="${collapsed ? 'false' : 'true'}" aria-label="${collapsed ? 'Expand' : 'Collapse'} Network throughput">${collapsed ? '⌄' : '⌃'}</button></div></div><div class="overview-chart-body" ${collapsed ? 'hidden' : ''}><svg viewBox="0 0 100 40" preserveAspectRatio="none" role="img" aria-label="Network receive and transmit history"><polyline points="${points(received)}" fill="none" stroke="var(--accent)" stroke-width="1.4" vector-effect="non-scaling-stroke"/><polyline points="${points(transmitted)}" fill="none" stroke="#6f7cff" stroke-width="1.4" vector-effect="non-scaling-stroke"/></svg><div class="chart-legend"><span><i></i>Received</span><span><i class="sent"></i>Sent</span></div></div></article>`;
+  return `<article class="overview-chart panel"><div class="overview-chart-head"><div><span>Network throughput</span><strong>↓ ${bytes(received.at(-1) || 0)}/s · ↑ ${bytes(transmitted.at(-1) || 0)}/s</strong></div><div class="overview-chart-context"><b>${system.network?.interfaces || 0} active interface${system.network?.interfaces === 1 ? '' : 's'}</b><small>RX ${bytes(system.network?.receivedBytes || 0)} · TX ${bytes(system.network?.transmittedBytes || 0)}</small></div></div><svg viewBox="0 0 100 40" preserveAspectRatio="none" role="img" aria-label="Network receive and transmit history"><polyline points="${points(received)}" fill="none" stroke="var(--accent)" stroke-width="1.4" vector-effect="non-scaling-stroke"/><polyline points="${points(transmitted)}" fill="none" stroke="#6f7cff" stroke-width="1.4" vector-effect="non-scaling-stroke"/></svg><div class="chart-legend"><span><i></i>Received</span><span><i class="sent"></i>Sent</span></div></article>`;
 }
 
 function overviewComputeInventory() {
@@ -1125,13 +1119,26 @@ async function loadSoftwareAndLicense(check = false) {
   } catch (error) { toast(error.message); }
 }
 
+function settingsSectionCollapsed(id) {
+  try {
+    const saved = JSON.parse(localStorage.getItem('lightnas-settings-collapsed') || '{}');
+    return Boolean(saved[id]);
+  } catch { return false; }
+}
+
+function settingsCollapseButton(id, label) {
+  const collapsed = settingsSectionCollapsed(id);
+  return `<button class="settings-collapse-button" type="button" data-settings-collapse="${escapeHtml(id)}" aria-expanded="${collapsed ? 'false' : 'true'}" aria-label="${collapsed ? 'Expand' : 'Collapse'} ${escapeHtml(label)}">${collapsed ? '⌄' : '⌃'}</button>`;
+}
+
 function settingsView() {
   const { appliance } = state.overview;
   const zones = [['America/New_York', 'Eastern Time'], ['America/Chicago', 'Central Time'], ['America/Denver', 'Mountain Time'], ['America/Los_Angeles', 'Pacific Time'], ['UTC', 'UTC']];
   return `${pageHead('Settings & security', 'Brand the appliance, manage general settings, and control account security.')}
     <section class="settings-dashboard">
-      <form id="settings-form" class="panel settings-general-card">
-        <div class="settings-card-head"><div><span class="eyebrow">GENERAL</span><h2>Appliance identity & branding</h2><p class="muted">Use either a text logo or a picture logo, then match the interface color to your brand.</p></div></div>
+      <form id="settings-form" class="panel settings-general-card settings-collapsible ${settingsSectionCollapsed('general') ? 'collapsed' : ''}" data-settings-section="general">
+        <div class="settings-card-head"><div><span class="eyebrow">GENERAL</span><h2>Appliance identity & branding</h2><p class="muted">Use either a text logo or a picture logo, then match the interface color to your brand.</p></div>${settingsCollapseButton('general','Appliance identity & branding')}</div>
+        <div class="settings-section-body" ${settingsSectionCollapsed('general') ? 'hidden' : ''}>
         <div class="settings-general-grid branding-settings-grid">
           <label>Device name<input name="deviceName" value="${escapeHtml(appliance.deviceName)}" required minlength="2" maxlength="32" autocomplete="off"><small>System name shown in administration views.</small></label>
           <label>Logo type<select name="logoMode"><option value="text" ${appliance.logoMode !== 'picture' ? 'selected' : ''}>Text logo</option><option value="picture" ${appliance.logoMode === 'picture' ? 'selected' : ''}>Picture logo</option></select><small>Only one logo type is displayed at a time.</small></label>
@@ -1164,17 +1171,21 @@ function settingsView() {
         <div class="form-error" data-logo-error role="alert"></div>
         <div class="settings-save-row"><button class="primary" type="submit">Save general settings</button></div>
         <div class="form-error" role="alert"></div>
+        </div>
       </form>
 
-      <form id="password-form" class="panel password-card">
-        <div class="settings-card-head"><div><span class="eyebrow">PASSWORD</span><h2>Change administrator password</h2><p class="muted">Password verification is required only when changing the password.</p></div></div>
+      <form id="password-form" class="panel password-card settings-collapsible ${settingsSectionCollapsed('password') ? 'collapsed' : ''}" data-settings-section="password">
+        <div class="settings-card-head"><div><span class="eyebrow">PASSWORD</span><h2>Change administrator password</h2><p class="muted">Password verification is required only when changing the password.</p></div>${settingsCollapseButton('password','Change administrator password')}</div>
+        <div class="settings-section-body" ${settingsSectionCollapsed('password') ? 'hidden' : ''}>
         <label>Current password<input name="currentPassword" type="password" autocomplete="current-password" required></label>
         <label>New password<input name="newPassword" type="password" minlength="10" autocomplete="new-password" required placeholder="At least 10 characters"></label>
         <button class="secondary" type="submit">Change password</button><div class="form-error" role="alert"></div>
+        </div>
       </form>
 
-      <section class="panel software-card">
-        <div class="settings-card-head"><div><span class="eyebrow">SOFTWARE & EDITION</span><h2>LightNAS version and updates</h2><p class="muted">Check the installed build, install signed source updates, and verify a future Pro or Enterprise entitlement.</p></div></div>
+      <section class="panel software-card settings-collapsible ${settingsSectionCollapsed('software') ? 'collapsed' : ''}" data-settings-section="software">
+        <div class="settings-card-head"><div><span class="eyebrow">SOFTWARE & EDITION</span><h2>LightNAS version and updates</h2><p class="muted">Check the installed build, install signed source updates, and verify a future Pro or Enterprise entitlement.</p></div>${settingsCollapseButton('software','LightNAS version and updates')}</div>
+        <div class="settings-section-body" ${settingsSectionCollapsed('software') ? 'hidden' : ''}>
         <div class="manager-summary software-summary">
           <div><span>Version</span><b>${escapeHtml(state.software?.version || 'Loading…')}</b></div>
           <div><span>Commit</span><b>${escapeHtml(state.software?.commit || '—')}</b></div>
@@ -1193,6 +1204,7 @@ function settingsView() {
           <div class="form-error" role="alert"></div>
         </form>
         <p class="module-note">Community remains fully unlocked while paid-feature enforcement is disabled. Future license responses are accepted only from the configured HTTPS license server and must carry a valid signed receipt for this appliance.</p>
+        </div>
       </section>
     </section>`;
 }
@@ -1567,6 +1579,14 @@ function render(view) {
 }
 
 function bindViewActions() {
+  document.querySelectorAll('#content [data-settings-collapse]').forEach(button => button.addEventListener('click', () => {
+    const id = button.dataset.settingsCollapse;
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem('lightnas-settings-collapsed') || '{}'); } catch {}
+    saved[id] = !saved[id];
+    localStorage.setItem('lightnas-settings-collapsed', JSON.stringify(saved));
+    render('settings');
+  }));
   $('[data-software-check]', $('#content'))?.addEventListener('click', async event => {
     event.currentTarget.disabled = true;
     try { await loadSoftwareAndLicense(true); toast(state.software?.updateAvailable ? 'A LightNAS update is available.' : 'LightNAS is up to date.'); }
@@ -1660,13 +1680,6 @@ function bindViewActions() {
   document.querySelectorAll('#content [data-overview-metric]').forEach(button => button.addEventListener('click', () => {
     state.overviewMetric = button.dataset.overviewMetric;
     localStorage.setItem('lightnas-overview-metric', state.overviewMetric);
-    render('home');
-  }));
-  document.querySelectorAll('#content [data-overview-collapse]').forEach(button => button.addEventListener('click', () => {
-    const metric = button.dataset.overviewCollapse || state.overviewMetric;
-    state.overviewMetricCollapsed ||= {};
-    state.overviewMetricCollapsed[metric] = !state.overviewMetricCollapsed[metric];
-    localStorage.setItem('lightnas-overview-metric-collapsed', JSON.stringify(state.overviewMetricCollapsed));
     render('home');
   }));
   $('[data-open-node-shell]', $('#content'))?.addEventListener('click', () => {
