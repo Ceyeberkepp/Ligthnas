@@ -616,3 +616,37 @@
     grid-template-columns: 1fr;
   }
 }
+
+
+/* Compact workspace selector: a utility switch, not a page hero control. */
+.console[data-workspace-mode] .workspace-mode-switch {
+  min-height: 30px;
+  padding: 2px;
+  gap: 2px;
+  border-radius: 5px;
+  box-shadow: none;
+}
+.console[data-workspace-mode] .workspace-mode-switch button {
+  min-height: 26px !important;
+  padding: 3px 10px !important;
+  border-radius: 3px !important;
+  font-size: 11px !important;
+  font-weight: 650;
+  line-height: 1;
+  box-shadow: none !important;
+}
+.console[data-workspace-mode] .workspace-mode-switch button.active {
+  box-shadow: none !important;
+}
+
+/* Make the Hypervisor inventory feel like navigation, not static text. */
+.console[data-workspace-mode="hypervisor"] .hv-resource-tree button:not(:disabled),
+.console[data-workspace-mode="hypervisor"] .hv-resource-tree summary,
+.console[data-workspace-mode="hypervisor"] [data-view-link],
+.console[data-workspace-mode="hypervisor"] [data-action] {
+  pointer-events: auto;
+}
+.console[data-workspace-mode="hypervisor"] .hv-tree-item {
+  position: relative;
+  z-index: 1;
+}
