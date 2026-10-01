@@ -2717,3 +2717,37 @@ small {
     grid-template-columns:1fr;
   }
 }
+
+/* Collapsible Settings & security cards */
+.settings-collapsible .settings-card-head {
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:16px;
+}
+.settings-collapse-button {
+  flex:0 0 auto;
+  width:34px;
+  height:34px;
+  display:grid;
+  place-items:center;
+  border:1px solid var(--line);
+  border-radius:8px;
+  background:var(--button);
+  color:var(--text);
+  font-size:16px;
+  line-height:1;
+  cursor:pointer;
+}
+.settings-collapse-button:hover {
+  border-color:var(--accent);
+}
+.settings-collapsible.collapsed {
+  padding-bottom:18px;
+}
+.settings-collapsible.collapsed .settings-card-head {
+  margin-bottom:0;
+}
+.settings-section-body[hidden] {
+  display:none !important;
+}
