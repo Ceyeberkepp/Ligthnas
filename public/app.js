@@ -474,23 +474,23 @@ function hypervisorInventoryRows() {
 
 
 function hypervisorResourceTree(nodeName, pools, networks, vms, containers) {
-  const vmItems = vms.slice(0, 14).map(item => \`<button class="hv-tree-item child" data-view-link="vms"><span class="hv-tree-glyph vm">▣</span><span>\${escapeHtml(item.name || item.id || 'VM')}</span><small>\${escapeHtml(item.status || '')}</small></button>\`).join('');
-  const ctItems = containers.slice(0, 14).map(item => \`<button class="hv-tree-item child" data-view-link="containers"><span class="hv-tree-glyph ct">⬡</span><span>\${escapeHtml(item.name || item.id || 'Container')}</span><small>\${escapeHtml(item.status || '')}</small></button>\`).join('');
-  const storageItems = pools.slice(0, 10).map(pool => \`<button class="hv-tree-item child" data-view-link="storage"><span class="hv-tree-glyph">◫</span><span>\${escapeHtml(pool.name || 'Storage')}</span></button>\`).join('');
-  const networkItems = networks.slice(0, 10).map(net => \`<button class="hv-tree-item child" data-view-link="network"><span class="hv-tree-glyph">⌁</span><span>\${escapeHtml(net.name || net.bridge || 'Network')}</span></button>\`).join('');
+  const vmItems = vms.slice(0, 14).map(item => `<button class="hv-tree-item child" data-view-link="vms"><span class="hv-tree-glyph vm">▣</span><span>${escapeHtml(item.name || item.id || 'VM')}</span><small>${escapeHtml(item.status || '')}</small></button>`).join('');
+  const ctItems = containers.slice(0, 14).map(item => `<button class="hv-tree-item child" data-view-link="containers"><span class="hv-tree-glyph ct">⬡</span><span>${escapeHtml(item.name || item.id || 'Container')}</span><small>${escapeHtml(item.status || '')}</small></button>`).join('');
+  const storageItems = pools.slice(0, 10).map(pool => `<button class="hv-tree-item child" data-view-link="storage"><span class="hv-tree-glyph">◫</span><span>${escapeHtml(pool.name || 'Storage')}</span></button>`).join('');
+  const networkItems = networks.slice(0, 10).map(net => `<button class="hv-tree-item child" data-view-link="network"><span class="hv-tree-glyph">⌁</span><span>${escapeHtml(net.name || net.bridge || 'Network')}</span></button>`).join('');
 
-  return \`<aside class="hv-resource-tree" aria-label="Datacenter navigation">
+  return `<aside class="hv-resource-tree" aria-label="Datacenter navigation">
     <div class="hv-brand"><span class="hv-brand-mark">◢</span><span>LIGHT<span>VISOR</span></span></div>
     <nav class="hv-primary-nav">
       <button class="hv-nav-item active" data-view-link="hypervisor"><span>⌂</span>Dashboard</button>
       <div class="hv-nav-label">DATACENTER</div>
       <details open class="hv-tree-group hv-datacenter">
         <summary><span>▦</span><b>Local Datacenter</b><small>⌄</small></summary>
-        <button class="hv-tree-item host" data-view-link="hypervisor"><span class="hv-state-dot ok"></span><span>\${escapeHtml(nodeName)}</span></button>
-        <details open class="hv-tree-group nested"><summary><span>▣</span><b>Virtual Machines</b><small>\${vms.length}</small></summary>\${vmItems || '<span class="hv-tree-empty">No virtual machines</span>'}</details>
-        <details class="hv-tree-group nested"><summary><span>⬡</span><b>Containers</b><small>\${containers.length}</small></summary>\${ctItems || '<span class="hv-tree-empty">No containers</span>'}</details>
-        <details class="hv-tree-group nested"><summary><span>◫</span><b>Storage</b><small>\${pools.length}</small></summary>\${storageItems || '<span class="hv-tree-empty">No pools</span>'}</details>
-        <details class="hv-tree-group nested"><summary><span>⌁</span><b>Networking</b><small>\${networks.length}</small></summary>\${networkItems || '<span class="hv-tree-empty">No networks</span>'}</details>
+        <button class="hv-tree-item host" data-view-link="hypervisor"><span class="hv-state-dot ok"></span><span>${escapeHtml(nodeName)}</span></button>
+        <details open class="hv-tree-group nested"><summary><span>▣</span><b>Virtual Machines</b><small>${vms.length}</small></summary>${vmItems || '<span class="hv-tree-empty">No virtual machines</span>'}</details>
+        <details class="hv-tree-group nested"><summary><span>⬡</span><b>Containers</b><small>${containers.length}</small></summary>${ctItems || '<span class="hv-tree-empty">No containers</span>'}</details>
+        <details class="hv-tree-group nested"><summary><span>◫</span><b>Storage</b><small>${pools.length}</small></summary>${storageItems || '<span class="hv-tree-empty">No pools</span>'}</details>
+        <details class="hv-tree-group nested"><summary><span>⌁</span><b>Networking</b><small>${networks.length}</small></summary>${networkItems || '<span class="hv-tree-empty">No networks</span>'}</details>
       </details>
       <div class="hv-nav-label">INFRASTRUCTURE</div>
       <button class="hv-nav-item" data-view-link="vms"><span>▣</span>Virtual Machines</button>
@@ -502,16 +502,16 @@ function hypervisorResourceTree(nodeName, pools, networks, vms, containers) {
       <button class="hv-nav-item" data-view-link="users"><span>◎</span>Users & RBAC</button>
       <button class="hv-nav-item" data-view-link="settings"><span>⚙</span>Settings</button>
     </nav>
-  </aside>\`;
+  </aside>`;
 }
 
 function hypervisorRing(label, value, detail) {
   const safe = Math.max(0, Math.min(100, Number(value) || 0));
-  return \`<div class="hv-ring-stat"><div class="hv-ring" style="--pct:\${safe}"><span>\${Math.round(safe)}%</span></div><div><b>\${escapeHtml(label)}</b><small>\${escapeHtml(detail || '')}</small></div></div>\`;
+  return `<div class="hv-ring-stat"><div class="hv-ring" style="--pct:${safe}"><span>${Math.round(safe)}%</span></div><div><b>${escapeHtml(label)}</b><small>${escapeHtml(detail || '')}</small></div></div>`;
 }
 
 function hypervisorStatusCard(icon, label, value, detail, tone = '') {
-  return \`<article class="hv-status-card \${tone}"><span class="hv-card-icon">\${icon}</span><div><small>\${escapeHtml(label)}</small><strong>\${escapeHtml(String(value))}</strong><p>\${escapeHtml(detail || '')}</p></div></article>\`;
+  return `<article class="hv-status-card ${tone}"><span class="hv-card-icon">${icon}</span><div><small>${escapeHtml(label)}</small><strong>${escapeHtml(String(value))}</strong><p>${escapeHtml(detail || '')}</p></div></article>`;
 }
 
 function hypervisorView() {
@@ -534,13 +534,13 @@ function hypervisorView() {
   const runningGuests = runningVms + runningContainers;
   const alerts = [state.runtimeError, state.containerError, state.fileError].filter(Boolean);
   const recent = Array.isArray(state.logs) ? state.logs.slice(0, 7) : [];
-  const hostDetail = \`\${system.cpu?.cores || 0} CPUs · \${bytes(system.memory?.totalBytes || 0)} RAM\`;
+  const hostDetail = `${system.cpu?.cores || 0} CPUs · ${bytes(system.memory?.totalBytes || 0)} RAM`;
   const usedBytes = Number(visibleStorage.usedBytes || 0);
   const totalBytes = Number(visibleStorage.totalBytes || 0);
 
-  return \`<section class="hv-console-shell">
+  return `<section class="hv-console-shell">
     <div class="hv-three-pane">
-      \${hypervisorResourceTree(nodeName, pools, networks, vms, containers)}
+      ${hypervisorResourceTree(nodeName, pools, networks, vms, containers)}
 
       <main class="hv-workspace">
         <header class="hv-topbar">
@@ -555,16 +555,16 @@ function hypervisorView() {
         <div class="hv-dashboard">
           <header class="hv-page-title">
             <div><h1>Dashboard</h1><p>Overview of your virtualization infrastructure</p></div>
-            <div class="hv-page-actions"><span class="hv-updated">Host: \${escapeHtml(nodeName)} · \${escapeHtml(managementIp)}</span><button class="secondary compact" data-action="refresh-runtime">Refresh</button></div>
+            <div class="hv-page-actions"><span class="hv-updated">Host: ${escapeHtml(nodeName)} · ${escapeHtml(managementIp)}</span><button class="secondary compact" data-action="refresh-runtime">Refresh</button></div>
           </header>
 
           <section class="hv-status-grid">
-            \${hypervisorStatusCard('✓','Host Health','Healthy', \`\${provider} · online\`, 'healthy')}
-            \${hypervisorStatusCard('▦','Total Hosts','1', hostDetail)}
-            \${hypervisorStatusCard('▣','Virtual Machines',vms.length, \`\${runningVms} running · \${Math.max(0,vms.length-runningVms)} stopped\`)}
-            \${hypervisorStatusCard('⬡','Containers',containers.length, \`\${runningContainers} running · \${Math.max(0,containers.length-runningContainers)} stopped\`)}
-            \${hypervisorStatusCard('◫','Storage Usage', totalBytes ? bytes(usedBytes) : \`\${Math.round(storageUsed)}%\`, totalBytes ? \`\${bytes(usedBytes)} / \${bytes(totalBytes)}\` : \`\${pools.length} storage pool\${pools.length===1?'':'s'}\`)}
-            \${hypervisorStatusCard('!','Alerts',alerts.length, alerts.length ? 'Runtime issues need attention' : 'No active runtime errors', alerts.length ? 'alert' : '')}
+            ${hypervisorStatusCard('✓','Host Health','Healthy', `${provider} · online`, 'healthy')}
+            ${hypervisorStatusCard('▦','Total Hosts','1', hostDetail)}
+            ${hypervisorStatusCard('▣','Virtual Machines',vms.length, `${runningVms} running · ${Math.max(0,vms.length-runningVms)} stopped`)}
+            ${hypervisorStatusCard('⬡','Containers',containers.length, `${runningContainers} running · ${Math.max(0,containers.length-runningContainers)} stopped`)}
+            ${hypervisorStatusCard('◫','Storage Usage', totalBytes ? bytes(usedBytes) : `${Math.round(storageUsed)}%`, totalBytes ? `${bytes(usedBytes)} / ${bytes(totalBytes)}` : `${pools.length} storage pool${pools.length===1?'':'s'}`)}
+            ${hypervisorStatusCard('!','Alerts',alerts.length, alerts.length ? 'Runtime issues need attention' : 'No active runtime errors', alerts.length ? 'alert' : '')}
           </section>
 
           <section class="hv-overview-grid">
@@ -572,14 +572,14 @@ function hypervisorView() {
               <div class="hv-panel-head"><div><h2>Infrastructure Overview</h2><p>Live local host resources and workload inventory</p></div><nav><button class="active">Datacenter</button><button data-view-link="monitoring">Resource Usage</button></nav></div>
               <div class="hv-infra-body">
                 <div class="hv-infra-tree">
-                  <div class="hv-infra-row root"><span class="hv-state-dot ok"></span><span class="hv-infra-icon">▦</span><div><b>Local Datacenter</b><small>1 host · \${vms.length} VMs · \${containers.length} containers</small></div></div>
-                  <div class="hv-infra-row child"><span class="hv-state-dot ok"></span><span class="hv-infra-icon">▤</span><div><b>\${escapeHtml(nodeName)}</b><small>\${escapeHtml(provider)} · \${escapeHtml(managementIp)}</small></div></div>
+                  <div class="hv-infra-row root"><span class="hv-state-dot ok"></span><span class="hv-infra-icon">▦</span><div><b>Local Datacenter</b><small>1 host · ${vms.length} VMs · ${containers.length} containers</small></div></div>
+                  <div class="hv-infra-row child"><span class="hv-state-dot ok"></span><span class="hv-infra-icon">▤</span><div><b>${escapeHtml(nodeName)}</b><small>${escapeHtml(provider)} · ${escapeHtml(managementIp)}</small></div></div>
                 </div>
                 <div class="hv-ring-grid">
-                  \${hypervisorRing('CPU', cpuUsed, \`\${system.cpu?.cores || 0} logical CPUs\`)}
-                  \${hypervisorRing('Memory', memoryUsed, \`\${bytes(system.memory?.usedBytes || 0)} / \${bytes(system.memory?.totalBytes || 0)}\`)}
-                  \${hypervisorRing('Storage', storageUsed, totalBytes ? \`\${bytes(usedBytes)} / \${bytes(totalBytes)}\` : \`\${pools.length} pools\`)}
-                  \${hypervisorRing('Guests', totalGuests ? (runningGuests/totalGuests)*100 : 0, \`\${runningGuests} / \${totalGuests} running\`)}
+                  ${hypervisorRing('CPU', cpuUsed, `${system.cpu?.cores || 0} logical CPUs`)}
+                  ${hypervisorRing('Memory', memoryUsed, `${bytes(system.memory?.usedBytes || 0)} / ${bytes(system.memory?.totalBytes || 0)}`)}
+                  ${hypervisorRing('Storage', storageUsed, totalBytes ? `${bytes(usedBytes)} / ${bytes(totalBytes)}` : `${pools.length} pools`)}
+                  ${hypervisorRing('Guests', totalGuests ? (runningGuests/totalGuests)*100 : 0, `${runningGuests} / ${totalGuests} running`)}
                 </div>
               </div>
             </article>
@@ -602,25 +602,25 @@ function hypervisorView() {
               <div class="hv-panel-head"><div><h2>Hosts (1)</h2><p>Hypervisor nodes in this datacenter</p></div><button class="hv-link" data-view-link="monitoring">View metrics</button></div>
               <div class="hv-host-table">
                 <div class="hv-table-row head"><span>Name</span><span>State</span><span>CPU</span><span>Memory</span><span>Storage</span><span>IP Address</span><span>Guests</span></div>
-                <div class="hv-table-row"><button class="hv-link" data-view-link="hypervisor">\${escapeHtml(nodeName)}</button><span><i class="hv-state-dot ok"></i>Online</span><span>\${Math.round(cpuUsed)}%</span><span>\${Math.round(memoryUsed)}%</span><span>\${Math.round(storageUsed)}%</span><span>\${escapeHtml(managementIp)}</span><span>\${totalGuests}</span></div>
+                <div class="hv-table-row"><button class="hv-link" data-view-link="hypervisor">${escapeHtml(nodeName)}</button><span><i class="hv-state-dot ok"></i>Online</span><span>${Math.round(cpuUsed)}%</span><span>${Math.round(memoryUsed)}%</span><span>${Math.round(storageUsed)}%</span><span>${escapeHtml(managementIp)}</span><span>${totalGuests}</span></div>
               </div>
             </article>
 
             <article class="hv-panel hv-events-panel">
               <div class="hv-panel-head"><div><h2>Recent Tasks & Events</h2><p>Latest host activity</p></div><button class="hv-link" data-view-link="logs">View all</button></div>
               <div class="hv-event-list">
-                \${recent.length ? recent.map(item => \`<div class="hv-event"><span class="hv-event-icon">✓</span><div><b>\${escapeHtml(item.message || item.action || item.type || 'System event')}</b><small>\${escapeHtml(item.detail || item.category || '')}</small></div><time>\${item.timestamp ? relativeTime(item.timestamp) : ''}</time></div>\`).join('') : '<div class="hv-empty">No recent events loaded.</div>'}
+                ${recent.length ? recent.map(item => `<div class="hv-event"><span class="hv-event-icon">✓</span><div><b>${escapeHtml(item.message || item.action || item.type || 'System event')}</b><small>${escapeHtml(item.detail || item.category || '')}</small></div><time>${item.timestamp ? relativeTime(item.timestamp) : ''}</time></div>`).join('') : '<div class="hv-empty">No recent events loaded.</div>'}
               </div>
             </article>
           </section>
 
           <section class="hv-bottom-grid">
             <article class="hv-panel">
-              <div class="hv-panel-head"><div><h2>Virtual Machines <span>(\${vms.length})</span></h2><p>Guest systems on this host</p></div><button class="hv-link" data-view-link="vms">View all</button></div>
+              <div class="hv-panel-head"><div><h2>Virtual Machines <span>(${vms.length})</span></h2><p>Guest systems on this host</p></div><button class="hv-link" data-view-link="vms">View all</button></div>
               <div class="hv-mini-table">
-                \${vms.slice(0,6).map(item => {
+                ${vms.slice(0,6).map(item => {
                   const running=/running|active/i.test(String(item.status||''));
-                  return \`<div><button class="hv-link" data-view-link="vms">\${escapeHtml(item.name || item.id || 'VM')}</button><span><i class="hv-state-dot \${running?'ok':'off'}"></i>\${escapeHtml(item.status || 'unknown')}</span><span>\${escapeHtml(String(item.cpus || item.vcpus || '—'))} CPU</span><span>\${item.memory || item.memoryBytes ? bytes(item.memory || item.memoryBytes) : '—'}</span></div>\`;
+                  return `<div><button class="hv-link" data-view-link="vms">${escapeHtml(item.name || item.id || 'VM')}</button><span><i class="hv-state-dot ${running?'ok':'off'}"></i>${escapeHtml(item.status || 'unknown')}</span><span>${escapeHtml(String(item.cpus || item.vcpus || '—'))} CPU</span><span>${item.memory || item.memoryBytes ? bytes(item.memory || item.memoryBytes) : '—'}</span></div>`;
                 }).join('') || '<div class="hv-empty">No virtual machines yet.</div>'}
               </div>
             </article>
@@ -628,18 +628,18 @@ function hypervisorView() {
             <article class="hv-panel">
               <div class="hv-panel-head"><div><h2>Storage Pools</h2><p>Datastores available to workloads</p></div><button class="hv-link" data-view-link="storage">View all</button></div>
               <div class="hv-mini-table storage">
-                \${pools.slice(0,6).map(pool => \`<div><button class="hv-link" data-view-link="storage">\${escapeHtml(pool.name || 'Storage')}</button><span>\${escapeHtml(pool.provider || pool.type || 'Storage')}</span><span>\${escapeHtml(pool.mountPoint || 'Managed')}</span></div>\`).join('') || '<div class="hv-empty">No configured storage pools.</div>'}
+                ${pools.slice(0,6).map(pool => `<div><button class="hv-link" data-view-link="storage">${escapeHtml(pool.name || 'Storage')}</button><span>${escapeHtml(pool.provider || pool.type || 'Storage')}</span><span>${escapeHtml(pool.mountPoint || 'Managed')}</span></div>`).join('') || '<div class="hv-empty">No configured storage pools.</div>'}
               </div>
               <div class="hv-panel-head hv-network-subhead"><div><h2>Virtual Networks</h2></div><button class="hv-link" data-view-link="network">View all</button></div>
               <div class="hv-mini-table storage">
-                \${networks.slice(0,5).map(net => \`<div><button class="hv-link" data-view-link="network">\${escapeHtml(net.name || net.bridge || 'Network')}</button><span>\${escapeHtml(net.type || 'bridge')}</span><span>\${escapeHtml(net.bridge || '')}</span></div>\`).join('') || '<div class="hv-empty">No virtualization networks detected.</div>'}
+                ${networks.slice(0,5).map(net => `<div><button class="hv-link" data-view-link="network">${escapeHtml(net.name || net.bridge || 'Network')}</button><span>${escapeHtml(net.type || 'bridge')}</span><span>${escapeHtml(net.bridge || '')}</span></div>`).join('') || '<div class="hv-empty">No virtualization networks detected.</div>'}
               </div>
             </article>
           </section>
         </div>
       </main>
     </div>
-  </section>\`;
+  </section>`;
 }
 
 function storageAddMenuHeader() {
