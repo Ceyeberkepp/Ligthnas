@@ -1682,13 +1682,15 @@ function render(view) {
 }
 
 function bindViewActions() {
-  document.querySelectorAll('[data-workspace-mode]').forEach(button => button.addEventListener('click', () => {
-    const mode = button.dataset.workspaceMode === 'hypervisor' ? 'hypervisor' : 'nas';
-    state.uiMode = mode;
-    localStorage.setItem('lightnas-workspace-mode', mode);
-    applyWorkspaceMode();
-    location.hash = mode === 'hypervisor' ? 'hypervisor' : 'home';
-  }));
+  document.querySelectorAll('[data-workspace-mode]').forEach(button => {
+    button.onclick = () => {
+      const mode = button.dataset.workspaceMode === 'hypervisor' ? 'hypervisor' : 'nas';
+      state.uiMode = mode;
+      localStorage.setItem('lightnas-workspace-mode', mode);
+      applyWorkspaceMode();
+      location.hash = mode === 'hypervisor' ? 'hypervisor' : 'home';
+    };
+  });
   document.querySelectorAll('#content [data-settings-collapse]').forEach(button => button.addEventListener('click', () => {
     const id = button.dataset.settingsCollapse;
     let saved = {};
