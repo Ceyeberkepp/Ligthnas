@@ -2451,6 +2451,7 @@ async function openProfileDialog() {
   let image = null;
   let selectedFile = null;
   let removePhoto = false;
+  let photoDirty = false;
   let drag = null;
 
   function renderCrop() {
@@ -2491,10 +2492,11 @@ async function openProfileDialog() {
     if (file.size > 8 * 1024 * 1024) { toast('Profile picture must be 8 MiB or smaller.'); return; }
     selectedFile = file;
     removePhoto = false;
+    photoDirty = true;
     await setImageSource(URL.createObjectURL(file));
   };
   dialog.querySelector('[data-profile-reset-photo]').onclick = () => {
-    zoom.value = '1'; x.value = '0'; y.value = '0'; renderCrop();
+    zoom.value = '1'; x.value = '0'; y.value = '0'; photoDirty = true; renderCrop();
   };
   dialog.querySelector('[data-profile-remove-photo]').onclick = () => {
     selectedFile = null;
@@ -2504,9 +2506,9 @@ async function openProfileDialog() {
     preview.hidden = true;
     placeholder.hidden = false;
   };
-  zoom.oninput = renderCrop;
-  x.oninput = renderCrop;
-  y.oninput = renderCrop;
+  zoom.oninput = () => { photoDirty = true; renderCrop(); };
+  x.oninput = () => { photoDirty = true; renderCrop(); };
+  y.oninput = () => { photoDirty = true; renderCrop(); };
 
   const stage = dialog.querySelector('[data-profile-crop-stage]');
   stage.onpointerdown = event => {
@@ -2518,6 +2520,7 @@ async function openProfileDialog() {
     if (!drag) return;
     x.value = String(Math.max(-100, Math.min(100, drag.ox + event.clientX - drag.x)));
     y.value = String(Math.max(-100, Math.min(100, drag.oy + event.clientY - drag.y)));
+    photoDirty = true;
     renderCrop();
   };
   stage.onpointerup = stage.onpointercancel = () => { drag = null; };
@@ -2538,7 +2541,7 @@ async function openProfileDialog() {
       if (removePhoto) {
         const response = await fetch('/api/profile/avatar', { method:'DELETE', headers:{ 'X-LightNAS-Request':'1' } });
         if (!response.ok) throw new Error((await response.json().catch(()=>({}))).error || 'Unable to remove profile picture.');
-      } else if (selectedFile && image) {
+      } else if (image && photoDirty) {
         const canvas = document.createElement('canvas');
         canvas.width = 512; canvas.height = 512;
         const ctx = canvas.getContext('2d');
