@@ -37,7 +37,7 @@ function showEditor({ eyebrow, title, description, fields, submitLabel = 'Save c
       </div>
       <div class="vsphere-settings-layout">
         <nav class="vsphere-settings-nav" aria-label="Virtual machine settings">
-          ${vmGroups.map(([key,label],index)=>`<button type="button" class="${index ? '' : 'active'}" data-vm-settings-tab="${key}"><span class="vsphere-nav-icon">${({summary:'▤',cpu:'▦',memory:'▥',disks:'◫',network:'⌁',media:'◉',video:'▣',pci:'⊞'})[key]}</span>${label}</button>`).join('')}
+          ${vmGroups.map(([key,label],index)=>`<button type="button" class="vm-settings-tab ${index ? '' : 'active'}" data-vm-settings-tab="${key}">${label}</button>`).join('')}
         </nav>
         <div class="vsphere-settings-content" data-dialog-fields></div>
       </div>
