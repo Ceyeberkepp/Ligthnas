@@ -2888,8 +2888,3 @@ small {
   .hv-node-facts { grid-template-columns:1fr; }
   .hv-node-facts > div { border-right:0; }
 }
-  .hv-tree-list { grid-template-columns:repeat(2,minmax(0,1fr)); }
-  .hv-summary-strip { grid-template-columns:repeat(2,minmax(0,1fr)); }
-  .hv-node-facts { grid-template-columns:1fr; }
-  .hv-node-facts > div { border-right:0; }
-}
