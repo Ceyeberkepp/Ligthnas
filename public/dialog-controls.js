@@ -13,9 +13,42 @@ function closeDialog(dialog) {
 }
 
 function showEditor({ eyebrow, title, description, fields, submitLabel = 'Save changes', danger = false, wide = false, onSubmit }) {
+  const vmHardwareEditor = wide && eyebrow === 'VIRTUAL MACHINE SETTINGS';
   const dialog = document.createElement('dialog');
-  dialog.className = `lightnas-dialog${wide ? ' runtime-dialog hardware-editor-dialog' : ''}`;
-  dialog.innerHTML = `
+  dialog.className = `lightnas-dialog${wide ? ' runtime-dialog hardware-editor-dialog' : ''}${vmHardwareEditor ? ' vsphere-hardware-dialog' : ''}`;
+
+  const vmGroups = [
+    ['summary','Summary',['name','firmwareInfo','machineInfo','startOnBoot']],
+    ['cpu','CPU',['cpus']],
+    ['memory','Memory',['memoryMiB']],
+    ['disks','Hard disks',['diskSizeGiB','existingDisks','addDiskPool','addDiskGiB','diskBus','scsiController']],
+    ['network','Network adapters',['networkModel','existingNics','addNicNetwork','addNicModel']],
+    ['media','CD/DVD drive',['iso','bootOrder']],
+    ['video','Video card',['displayModel']],
+    ['pci','PCI devices',['existingHostDevices','addPciDevice']]
+  ];
+  const groupFor = name => vmGroups.find(([, , names]) => names.includes(name))?.[0] || 'summary';
+
+  dialog.innerHTML = vmHardwareEditor ? `
+    <form class="dialog-body vsphere-settings-form">
+      <div class="dialog-head vsphere-dialog-head">
+        <div><span class="eyebrow">${eyebrow}</span><h2></h2><p class="muted" data-dialog-description></p></div>
+        <button class="dialog-close" type="button" data-dialog-close aria-label="Close">×</button>
+      </div>
+      <div class="vsphere-settings-layout">
+        <nav class="vsphere-settings-nav" aria-label="Virtual machine settings">
+          ${vmGroups.map(([key,label],index)=>`<button type="button" class="${index ? '' : 'active'}" data-vm-settings-tab="${key}"><span class="vsphere-nav-icon">${({summary:'▤',cpu:'▦',memory:'▥',disks:'◫',network:'⌁',media:'◉',video:'▣',pci:'⊞'})[key]}</span>${label}</button>`).join('')}
+        </nav>
+        <div class="vsphere-settings-content" data-dialog-fields></div>
+      </div>
+      <div class="form-error" role="alert"></div>
+      <div class="dialog-actions vsphere-dialog-actions">
+        <button class="secondary" type="button" data-editor-revert>Revert</button>
+        <span class="vsphere-action-spacer"></span>
+        <button class="secondary" type="button" data-dialog-close>Cancel</button>
+        <button class="${danger ? 'secondary danger-button' : 'primary'}" type="submit">${submitLabel}</button>
+      </div>
+    </form>` : `
     <form class="dialog-body">
       <div class="dialog-head">
         <div><span class="eyebrow">${eyebrow}</span><h2></h2></div>
@@ -34,9 +67,35 @@ function showEditor({ eyebrow, title, description, fields, submitLabel = 'Save c
   dialog.querySelector('h2').textContent = title;
   dialog.querySelector('[data-dialog-description]').textContent = description;
   const fieldRoot = dialog.querySelector('[data-dialog-fields]');
+
+  if (vmHardwareEditor) {
+    for (const [key,label] of vmGroups) {
+      const section = document.createElement('section');
+      section.className = 'vsphere-settings-panel';
+      section.dataset.vmSettingsPanel = key;
+      section.hidden = key !== 'summary';
+      section.innerHTML = `<div class="vsphere-panel-title"><div><h3>${label}</h3><p class="muted">${({
+        summary:'Virtual machine identity and startup behavior.',
+        cpu:'Configure virtual processor resources.',
+        memory:'Configure guest memory.',
+        disks:'Review and change virtual disk and storage controller settings.',
+        network:'Review the primary adapter and add another virtual NIC.',
+        media:'Mount installation media and configure the first boot device.',
+        video:'Select the virtual display adapter.',
+        pci:'Review or add PCI / GPU passthrough hardware.'
+      })[key]}</p></div></div><div class="vsphere-field-grid" data-vm-field-group="${key}"></div>`;
+      fieldRoot.append(section);
+    }
+  }
+
   for (const field of fields) {
     const label = document.createElement('label');
-    label.textContent = field.label;
+    label.className = vmHardwareEditor ? 'vsphere-field' : '';
+    const labelText = document.createElement('span');
+    labelText.className = vmHardwareEditor ? 'vsphere-field-label' : '';
+    labelText.textContent = field.label;
+    label.append(labelText);
+
     const input = document.createElement(field.type === 'select' ? 'select' : 'input');
     input.name = field.name;
     if (field.type && field.type !== 'select') input.type = field.type;
@@ -61,7 +120,17 @@ function showEditor({ eyebrow, title, description, fields, submitLabel = 'Save c
       if (field.value !== undefined) input.value = field.value;
     }
     label.append(input);
-    fieldRoot.append(label);
+    if (vmHardwareEditor) {
+      dialog.querySelector(`[data-vm-field-group="${groupFor(field.name)}"]`)?.append(label);
+    } else fieldRoot.append(label);
+  }
+
+  if (vmHardwareEditor) {
+    const showPanel = key => {
+      dialog.querySelectorAll('[data-vm-settings-tab]').forEach(button => button.classList.toggle('active', button.dataset.vmSettingsTab === key));
+      dialog.querySelectorAll('[data-vm-settings-panel]').forEach(panel => { panel.hidden = panel.dataset.vmSettingsPanel !== key; });
+    };
+    dialog.querySelectorAll('[data-vm-settings-tab]').forEach(button => button.addEventListener('click', () => showPanel(button.dataset.vmSettingsTab)));
   }
 
   dialog.querySelectorAll('[data-dialog-close]').forEach(button => button.addEventListener('click', () => closeDialog(dialog)));
@@ -88,7 +157,7 @@ function showEditor({ eyebrow, title, description, fields, submitLabel = 'Save c
 
   document.body.append(dialog);
   dialog.showModal();
-  setTimeout(() => dialog.querySelector('input,select')?.focus(), 0);
+  setTimeout(() => dialog.querySelector('input:not([readonly]),select:not([disabled])')?.focus(), 0);
   return dialog;
 }
 
@@ -365,7 +434,7 @@ async function showRuntimeWizard(kind) {
 
   const dialog = document.createElement('dialog');
   dialog.className = 'lightnas-dialog runtime-create-dialog';
-  const title = isContainer ? 'Create system container' : 'Create virtual machine';
+  const title = isContainer ? 'Create New Container' : 'Create New Virtual Machine';
   const imageLabel = isContainer ? 'Linux image / template' : 'Installer ISO';
   const defaultName = isContainer ? 'debian-services' : 'new-vm';
   dialog.innerHTML = `
@@ -374,14 +443,14 @@ async function showRuntimeWizard(kind) {
         <div><span class="eyebrow">${isContainer ? 'SYSTEM CONTAINER' : 'VIRTUAL MACHINE'} WIZARD</span><h2>${title}</h2></div>
         <button class="dialog-close" type="button" data-dialog-close aria-label="Close">×</button>
       </div>
-      <div class="wizard-steps" aria-label="Creation steps">
-        <span class="active" data-step-indicator="0"><b>1</b>Identity</span>
-        <span data-step-indicator="1"><b>2</b>Resources</span>
-        <span data-step-indicator="2"><b>3</b>Network</span>
-        <span data-step-indicator="3"><b>4</b>Review</span>
+      <div class="wizard-steps vsphere-wizard-steps" aria-label="Creation steps">
+        <span class="active" data-step-indicator="0"><b>1</b><i>Guest OS</i><small>Name & media</small></span>
+        <span data-step-indicator="1"><b>2</b><i>Virtual Hardware</i><small>CPU, memory & disk</small></span>
+        <span data-step-indicator="2"><b>3</b><i>Network & Options</i><small>Adapter & boot</small></span>
+        <span data-step-indicator="3"><b>4</b><i>Ready to Complete</i><small>Review configuration</small></span>
       </div>
       <section class="wizard-page active" data-wizard-page="0">
-        <h3>Identity and installation media</h3>
+        <h3>Name and guest operating system</h3>
         <p class="muted">Choose a unique name and the image that will be installed.</p>
         <div class="wizard-grid">
           <label>${isContainer ? 'Container' : 'VM'} name<input name="name" value="${defaultName}" pattern="[A-Za-z][A-Za-z0-9-]{1,39}" required></label>
@@ -391,7 +460,7 @@ async function showRuntimeWizard(kind) {
         <p class="module-note">${isContainer ? 'The root password is sent only to the local privileged host agent and is not stored by the LightNAS web service.' : 'Upload or download ISO images from Storage → Pools & datasets → ISO images.'}</p>
       </section>
       <section class="wizard-page" data-wizard-page="1">
-        <h3>Compute and storage</h3>
+        <h3>Customize virtual hardware</h3>
         <p class="muted">Select where the guest lives and how many resources it can use.</p>
         <div class="wizard-grid">
           <label>Storage<select name="pool" required>${storages.map((item, index) => wizardOption(item.id, `${item.name || item.id}${item.availableBytes !== undefined ? ` · ${Math.round(item.availableBytes / 1073741824)} GiB free` : ''}`, index === 0)).join('')}</select></label>
@@ -401,7 +470,7 @@ async function showRuntimeWizard(kind) {
         </div>
       </section>
       <section class="wizard-page" data-wizard-page="2">
-        <h3>Network and advanced options</h3>
+        <h3>Network and VM options</h3>
         <div class="wizard-grid">
           <label>Network / bridge<select name="network" required>${networks.map((item, index) => wizardOption(item.value, item.label, index === 0)).join('')}</select></label>
           ${isContainer ? `
@@ -422,7 +491,7 @@ async function showRuntimeWizard(kind) {
         </div>
       </section>
       <section class="wizard-page" data-wizard-page="3">
-        <h3>Review and create</h3>
+        <h3>Ready to complete</h3>
         <p class="muted">Confirm the configuration. Creation may take several minutes while an image is unpacked or an operating system is installed.</p>
         <div class="wizard-review" data-wizard-review></div>
       </section>
