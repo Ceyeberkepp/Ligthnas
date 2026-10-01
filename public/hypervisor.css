@@ -163,3 +163,90 @@
   .hv-status-grid { grid-template-columns:1fr; }
   .hv-topbar { padding:0 10px; }
 }
+
+
+/* Hypervisor navigation and task-dock fixes */
+.console[data-workspace-mode="hypervisor"] .task-dock,
+.console[data-workspace-mode="hypervisor"].sidebar-collapsed .task-dock {
+  left:232px !important;
+}
+.hv-nav-item small {
+  margin-left:auto;
+  color:#7590a5;
+  font-size:9px;
+  font-weight:700;
+}
+.hv-datacenter-card {
+  margin:0 0 4px;
+}
+.hv-datacenter-link > span:nth-child(2) {
+  display:grid;
+  gap:1px;
+  min-width:0;
+  flex:1;
+}
+.hv-datacenter-link > span:nth-child(2) b {
+  font-size:11px;
+}
+.hv-datacenter-link > span:nth-child(2) small {
+  margin:0;
+  font-size:9px;
+  color:#7590a5;
+}
+.hv-host-summary {
+  min-height:30px;
+  margin:1px 8px 2px 28px;
+  padding:5px 8px;
+  display:flex;
+  align-items:center;
+  gap:7px;
+  color:#c7d5e1;
+}
+.hv-host-summary > span:last-child {
+  display:grid;
+  gap:1px;
+}
+.hv-host-summary b {
+  font-size:10px;
+}
+.hv-host-summary small {
+  color:#70899d;
+  font-size:8px;
+}
+.hv-back-dashboard {
+  min-height:30px;
+  padding:0 10px;
+  border:1px solid #355269;
+  border-radius:4px;
+  background:#152d41;
+  color:#d9e5ee;
+  font:inherit;
+  font-size:10px;
+  cursor:pointer;
+  white-space:nowrap;
+}
+.hv-back-dashboard:hover {
+  background:#1c3a52;
+}
+.hv-subview-content {
+  padding:18px;
+  min-width:0;
+}
+.console[data-workspace-mode="hypervisor"] .hv-subview-content .page-head {
+  display:flex;
+}
+.console[data-workspace-mode="hypervisor"] .hv-subview-content > .page-head:first-child {
+  margin-top:0;
+}
+.console[data-workspace-mode="hypervisor"] .hv-subview-content .content {
+  padding-bottom:0;
+}
+
+@media (max-width:760px) {
+  .console[data-workspace-mode="hypervisor"] .task-dock,
+  .console[data-workspace-mode="hypervisor"].sidebar-collapsed .task-dock {
+    left:0 !important;
+  }
+  .hv-back-dashboard { display:none; }
+  .hv-subview-content { padding:10px; }
+}
