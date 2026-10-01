@@ -1479,7 +1479,9 @@ function adminView() {
 function moduleView(view) {
   if (view === 'apps') {
     const docker = state.runtimes?.docker;
-    const apps = state.runtimes?.catalog || [];
+    const builtInApps = state.runtimes?.catalog || [];
+    const communityApps = state.communityCatalog?.apps || [];
+    const apps = [...builtInApps, ...communityApps];
     const categories = [...new Set(apps.map(app => app.category).filter(Boolean))].sort();
     return `${pageHead('App Store', 'Install curated open-source applications directly from LightNAS.', '<button class="secondary" data-action="refresh-runtime">Refresh apps</button>')}
       ${runtimeBanner('docker')}
@@ -2075,22 +2077,14 @@ function bindViewActions() {
     button.disabled = true;
     button.textContent = 'Refreshing…';
     try {
-      if (state.uiMode === 'hypervisor') {
-        const jobs = [loadRuntimes(), request('/api/overview').then(data => { state.overview = data; captureOverviewMetrics(); })];
-        if (state.view === 'containers') jobs.push(loadContainers());
-        await Promise.all(jobs);
-        render(state.view);
-        toast('Hypervisor inventory refreshed.');
-      } else if (state.view === 'containers') {
-        await Promise.all([loadContainers(), loadRuntimes()]);
-      } else {
-        await loadRuntimes();
-      }
+      state.runtimes = await request('/api/runtimes');
+      if (state.view === 'apps') state.communityCatalog = await request('/api/catalog/community?refresh=1');
+      render(state.view);
+      toast(state.view === 'apps' ? 'App catalog refreshed.' : 'Runtime inventory refreshed.');
     } catch (error) {
-      toast(error.message || 'Unable to refresh hypervisor inventory.');
-    } finally {
-      const live = $('#content [data-action="refresh-runtime"]');
-      if (live) { live.disabled = false; live.textContent = original || 'Refresh'; }
+      toast(error.message);
+      button.disabled = false;
+      button.textContent = original || 'Refresh';
     }
   }));
   $$('[data-community-install]', $('#content')).forEach(button => button.addEventListener('click', async () => {
