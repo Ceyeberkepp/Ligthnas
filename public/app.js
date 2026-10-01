@@ -473,36 +473,62 @@ function hypervisorInventoryRows() {
 }
 
 
-function hypervisorResourceTree(nodeName, pools, networks, vms, containers) {
-  const vmItems = vms.slice(0, 14).map(item => `<button class="hv-tree-item child" data-view-link="vms"><span class="hv-tree-glyph vm">▣</span><span>${escapeHtml(item.name || item.id || 'VM')}</span><small>${escapeHtml(item.status || '')}</small></button>`).join('');
-  const ctItems = containers.slice(0, 14).map(item => `<button class="hv-tree-item child" data-view-link="containers"><span class="hv-tree-glyph ct">⬡</span><span>${escapeHtml(item.name || item.id || 'Container')}</span><small>${escapeHtml(item.status || '')}</small></button>`).join('');
-  const storageItems = pools.slice(0, 10).map(pool => `<button class="hv-tree-item child" data-view-link="storage"><span class="hv-tree-glyph">◫</span><span>${escapeHtml(pool.name || 'Storage')}</span></button>`).join('');
-  const networkItems = networks.slice(0, 10).map(net => `<button class="hv-tree-item child" data-view-link="network"><span class="hv-tree-glyph">⌁</span><span>${escapeHtml(net.name || net.bridge || 'Network')}</span></button>`).join('');
-
-  return `<aside class="hv-resource-tree" aria-label="Datacenter navigation">
+function hypervisorResourceTree(nodeName, pools, networks, vms, containers, activeView = 'hypervisor') {
+  const active = view => {
+    const normalized = ['home','hypervisor'].includes(activeView) ? 'hypervisor' : activeView;
+    return normalized === view ? ' active' : '';
+  };
+  return `<aside class="hv-resource-tree" aria-label="Hypervisor navigation">
     <div class="hv-brand"><span class="hv-brand-mark">◢</span><span>LIGHT<span>VISOR</span></span></div>
     <nav class="hv-primary-nav">
-      <button class="hv-nav-item active" data-view-link="hypervisor"><span>⌂</span>Dashboard</button>
+      <button class="hv-nav-item${active('hypervisor')}" data-view-link="hypervisor"><span>⌂</span>Dashboard</button>
+
       <div class="hv-nav-label">DATACENTER</div>
-      <details open class="hv-tree-group hv-datacenter">
-        <summary><span>▦</span><b>Local Datacenter</b><small>⌄</small></summary>
-        <button class="hv-tree-item host" data-view-link="hypervisor"><span class="hv-state-dot ok"></span><span>${escapeHtml(nodeName)}</span></button>
-        <details open class="hv-tree-group nested"><summary><span>▣</span><b>Virtual Machines</b><small>${vms.length}</small></summary>${vmItems || '<span class="hv-tree-empty">No virtual machines</span>'}</details>
-        <details class="hv-tree-group nested"><summary><span>⬡</span><b>Containers</b><small>${containers.length}</small></summary>${ctItems || '<span class="hv-tree-empty">No containers</span>'}</details>
-        <details class="hv-tree-group nested"><summary><span>◫</span><b>Storage</b><small>${pools.length}</small></summary>${storageItems || '<span class="hv-tree-empty">No pools</span>'}</details>
-        <details class="hv-tree-group nested"><summary><span>⌁</span><b>Networking</b><small>${networks.length}</small></summary>${networkItems || '<span class="hv-tree-empty">No networks</span>'}</details>
-      </details>
+      <div class="hv-datacenter-card">
+        <button class="hv-nav-item hv-datacenter-link${active('hypervisor')}" data-view-link="hypervisor">
+          <span>▦</span><span><b>Local Datacenter</b><small>1 host</small></span>
+        </button>
+        <div class="hv-host-summary"><span class="hv-state-dot ok"></span><span><b>${escapeHtml(nodeName)}</b><small>Online</small></span></div>
+      </div>
+
       <div class="hv-nav-label">INFRASTRUCTURE</div>
-      <button class="hv-nav-item" data-view-link="vms"><span>▣</span>Virtual Machines</button>
-      <button class="hv-nav-item" data-view-link="containers"><span>⬡</span>Containers</button>
-      <button class="hv-nav-item" data-view-link="storage"><span>◫</span>Storage</button>
-      <button class="hv-nav-item" data-view-link="network"><span>⌁</span>Networking</button>
-      <button class="hv-nav-item" data-view-link="backups"><span>↶</span>Backups</button>
-      <button class="hv-nav-item" data-view-link="monitoring"><span>⌁</span>Monitoring</button>
-      <button class="hv-nav-item" data-view-link="users"><span>◎</span>Users & RBAC</button>
-      <button class="hv-nav-item" data-view-link="settings"><span>⚙</span>Settings</button>
+      <button class="hv-nav-item${active('vms')}" data-view-link="vms"><span>▣</span>Virtual Machines <small>${vms.length}</small></button>
+      <button class="hv-nav-item${active('containers')}" data-view-link="containers"><span>⬡</span>Containers <small>${containers.length}</small></button>
+      <button class="hv-nav-item${active('storage')}" data-view-link="storage"><span>◫</span>Storage <small>${pools.length}</small></button>
+      <button class="hv-nav-item${active('network')}" data-view-link="network"><span>⌁</span>Networking <small>${networks.length}</small></button>
+      <button class="hv-nav-item${active('backups')}" data-view-link="backups"><span>↶</span>Backups</button>
+      <button class="hv-nav-item${active('analytics')}" data-view-link="analytics"><span>⌁</span>Monitoring</button>
+      <button class="hv-nav-item${active('users')}" data-view-link="users"><span>◎</span>Users & RBAC</button>
+      <button class="hv-nav-item${active('settings')}" data-view-link="settings"><span>⚙</span>Settings</button>
     </nav>
   </aside>`;
+}
+
+function hypervisorSubViewShell(body, activeView) {
+  const storage = state.overview?.storage || {};
+  const pools = storage.configuredPools || [];
+  const vms = state.runtimes?.virtualization?.machineDetails || [];
+  const containers = state.runtimes?.containers?.containers || [];
+  const networks = state.runtimes?.virtualization?.networkDetails || [];
+  const nodeName = state.overview?.appliance?.deviceName || 'LightNAS';
+
+  return `<section class="hv-console-shell hv-subview-shell">
+    <div class="hv-three-pane">
+      ${hypervisorResourceTree(nodeName, pools, networks, vms, containers, activeView)}
+      <main class="hv-workspace">
+        <header class="hv-topbar">
+          <button class="hv-back-dashboard" type="button" data-view-link="hypervisor">← Dashboard</button>
+          <div class="hv-search">⌕ <span>Search VMs, containers, storage, networks…</span><kbd>Ctrl + K</kbd></div>
+          <div class="hv-topbar-actions">
+            <span class="hv-environment">▦ Local Datacenter</span>
+            <button class="icon-button" data-action="refresh-runtime" title="Refresh">↻</button>
+            <button class="icon-button" data-open-node-shell title="Open shell">›_</button>
+          </div>
+        </header>
+        <div class="hv-subview-content">${body}</div>
+      </main>
+    </div>
+  </section>`;
 }
 
 function hypervisorRing(label, value, detail) {
@@ -540,7 +566,7 @@ function hypervisorView() {
 
   return `<section class="hv-console-shell">
     <div class="hv-three-pane">
-      ${hypervisorResourceTree(nodeName, pools, networks, vms, containers)}
+      ${hypervisorResourceTree(nodeName, pools, networks, vms, containers, 'hypervisor')}
 
       <main class="hv-workspace">
         <header class="hv-topbar">
@@ -1795,7 +1821,11 @@ function render(view) {
   state.view = ['home', 'hypervisor', 'storage', 'pools', 'files', 'users', 'permissions', 'shell', 'smtp', 'admin', 'shares', 'backups', 'analytics', 'logs', 'capabilities', 'apps', 'ai', 'containers', 'vms', 'settings', 'network', 'firewall', 'integrations'].includes(view) ? view : 'home';
   if (!canView(state.view)) state.view = canView('home') ? 'home' : 'files';
   const content = $('#content');
-  content.innerHTML = state.view === 'home' ? (state.uiMode === 'hypervisor' ? hypervisorView() : homeView()) : state.view === 'hypervisor' ? hypervisorView() : state.view === 'storage' ? storageView() : state.view === 'pools' ? poolsView() : state.view === 'files' ? filesView() : state.view === 'media' ? mediaView() : state.view === 'users' ? usersView() : state.view === 'permissions' ? permissionsView() : state.view === 'shell' ? shellView() : state.view === 'smtp' ? smtpView() : state.view === 'admin' ? adminView() : state.view === 'shares' ? sharesView() : state.view === 'backups' ? backupsView() : state.view === 'analytics' ? analyticsView() : state.view === 'logs' ? logsView() : state.view === 'containers' ? containersView() : state.view === 'vms' ? vmsView() : state.view === 'settings' ? settingsView() : state.view === 'capabilities' ? capabilitiesView() : state.view === 'monitoring' ? monitoringView() : state.view === 'ai' ? aiView() : state.view === 'network' ? networkView() : state.view === 'firewall' ? firewallView() : state.view === 'integrations' ? integrationsView() : moduleView(state.view);
+  let rendered = state.view === 'home' ? (state.uiMode === 'hypervisor' ? hypervisorView() : homeView()) : state.view === 'hypervisor' ? hypervisorView() : state.view === 'storage' ? storageView() : state.view === 'pools' ? poolsView() : state.view === 'files' ? filesView() : state.view === 'media' ? mediaView() : state.view === 'users' ? usersView() : state.view === 'permissions' ? permissionsView() : state.view === 'shell' ? shellView() : state.view === 'smtp' ? smtpView() : state.view === 'admin' ? adminView() : state.view === 'shares' ? sharesView() : state.view === 'backups' ? backupsView() : state.view === 'analytics' ? analyticsView() : state.view === 'logs' ? logsView() : state.view === 'containers' ? containersView() : state.view === 'vms' ? vmsView() : state.view === 'settings' ? settingsView() : state.view === 'capabilities' ? capabilitiesView() : state.view === 'monitoring' ? monitoringView() : state.view === 'ai' ? aiView() : state.view === 'network' ? networkView() : state.view === 'firewall' ? firewallView() : state.view === 'integrations' ? integrationsView() : moduleView(state.view);
+  if (window.LIGHTNAS_PRODUCT_MODE === 'hypervisor' && !['home','hypervisor'].includes(state.view)) {
+    rendered = hypervisorSubViewShell(rendered, state.view);
+  }
+  content.innerHTML = rendered;
   $$('[data-view]').forEach(link => link.classList.toggle('active', link.dataset.view === state.view));
   $(`[data-view="${state.view}"]`, $('#nav'))?.closest('details')?.setAttribute('open', '');
   content.focus({ preventScroll: true });
