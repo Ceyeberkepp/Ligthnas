@@ -295,7 +295,7 @@ function warmOverviewStorage() {
 let runtimeInventoryCache = null;
 let runtimeInventoryCacheAt = 0;
 let runtimeInventoryRefresh = null;
-const RUNTIME_INVENTORY_TTL_MS = 4000;
+const RUNTIME_INVENTORY_TTL_MS = 30000;
 
 function invalidateRuntimeInventory() {
   runtimeInventoryCache = null;
@@ -1618,6 +1618,10 @@ async function api(req, res, url) {
     containers.templateCount = (templateLibrary.templates || []).length;
     return send(res, 200, containerPublisher.decorate(containers));
   }
+  if (req.method === 'GET' && url.pathname === '/api/catalog/builtin') {
+    if (!requirePermission(res, permissions, 'apps.manage')) return;
+    return send(res, 200, { catalog, count: catalog.length });
+  }
   if (req.method === 'GET' && url.pathname === '/api/catalog/community') {
     if (!requirePermission(res, permissions, 'apps.manage')) return;
     const refresh = url.searchParams.get('refresh') === '1';
@@ -2295,6 +2299,8 @@ function keepWebSocketAlive(ws) {
 
 function bridgeWebSocketToSocket(ws, backend) {
   keepWebSocketAlive(ws);
+  backend.setNoDelay?.(true);
+  ws._socket?.setNoDelay?.(true);
   const close = () => {
     if (!backend.destroyed) backend.destroy();
     if (ws.readyState === 0 || ws.readyState === 1) ws.close();
@@ -2383,5 +2389,24 @@ export function createServer() {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const host = process.env.NAS_HOST || '127.0.0.1';
   const port = Number(process.env.NAS_PORT || 3080);
-  createServer().listen(port, host, () => console.log(`LightNAS is running at http://${host}:${port}`));
+  createServer().listen(port, host, () => {
+    console.log(`LightNAS is running at http://${host}:${port}`);
+    // Prime the community App Store cache shortly after boot. Fresh installs
+    // often reach the UI before WAN/DNS is fully ready, so retry quietly in
+    // the background instead of making the operator press Refresh apps.
+    let attempts = 0;
+    const warmCatalog = async () => {
+      attempts += 1;
+      try {
+        const result = await communityCatalog();
+        if (result?.apps?.length) return;
+      } catch {}
+      if (attempts < 5) {
+        const timer = setTimeout(warmCatalog, 15000);
+        timer.unref?.();
+      }
+    };
+    const timer = setTimeout(warmCatalog, 1500);
+    timer.unref?.();
+  });
 }

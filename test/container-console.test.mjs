@@ -92,7 +92,8 @@ test('VM console connects before accepting the browser and remains open while id
     readFile(new URL('../public/vm-console.js', import.meta.url), 'utf8')
   ]);
   assert.match(agent, /def open_vm_console/);
-  assert.match(agent, /socket\.create_connection\(\(host, port\), timeout=2\)/);
+  assert.match(agent, /socket\.create_connection\(\(host, port\), timeout=1\)/);
+  assert.match(agent, /backend\.setsockopt\(socket\.IPPROTO_TCP, socket\.TCP_NODELAY, 1\)/);
   assert.match(agent, /backend\.settimeout\(None\)/);
   assert.match(agent, /backend = open_vm_console[\s\S]+?\{"ok":true,"data":\{"mode":"raw-vnc"\}\}/);
   assert.match(agent, /VM display is not ready/);

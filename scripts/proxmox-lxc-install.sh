@@ -322,6 +322,18 @@ pct exec "$ctid" -- bash -lc '
 '
 pct exec "$ctid" -- systemctl restart lightnas-host-agent lightnas
 
+# Prime the same fast App Store path used by bare-metal/VM installs. This is
+# intentionally best-effort: a fresh LXC may receive DNS/default-route a few
+# seconds after the service starts, and the server itself will keep retrying.
+pct exec "$ctid" -- bash -lc '
+  for attempt in 1 2 3 4 5; do
+    curl -fsS --max-time 5 http://127.0.0.1:3080/api/status >/dev/null 2>&1 && break
+    sleep 1
+  done
+  curl -fsS --max-time 8 http://127.0.0.1:3080/api/catalog/builtin >/dev/null 2>&1 || true
+  curl -fsS --max-time 8 http://127.0.0.1:3080/api/catalog/community >/dev/null 2>&1 || true
+' || true
+
 echo
 echo "LightNAS local-runtime installation finished in LXC $ctid."
 echo 'Containers: native LXC/liblxc inside LightNAS.'

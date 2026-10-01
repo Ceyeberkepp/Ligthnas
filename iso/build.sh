@@ -831,10 +831,18 @@ if ! grep -Rqs -- 'Install LightNAS (Graphical)' binary 2>/dev/null; then
   exit 1
 fi
 if ! grep -Rqs -- 'Install LightNAS (Terminal UI)' binary 2>/dev/null; then
-  echo "ERROR: final ISO tree does not contain the terminal installer fallback entry." >&2
+  echo "ERROR: final ISO tree does not contain the terminal installer entry." >&2
   exit 1
 fi
-echo "Graphical LightNAS installer and text fallback menu entries confirmed."
+if ! grep -Rqs -- 'Install LightNAS (VGA Safe Mode)' binary 2>/dev/null; then
+  echo "ERROR: final ISO tree does not contain the VGA-safe installer entry." >&2
+  exit 1
+fi
+if ! grep -Rqs -- 'Install LightNAS (Serial Console)' binary 2>/dev/null; then
+  echo "ERROR: final ISO tree does not contain the serial-console installer entry." >&2
+  exit 1
+fi
+echo "Graphical, VGA-safe, terminal, and serial LightNAS installer entries confirmed."
 
 #
 # Verify the final SquashFS actually contains ZFS.

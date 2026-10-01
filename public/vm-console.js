@@ -56,6 +56,12 @@ function connectConsole() {
   rfb.clipViewport = false;
   rfb.viewOnly = false;
   rfb.background = '#000';
+  // Favor interactive latency over maximum compression. On a LAN this avoids
+  // extra CPU work on every framebuffer update while keeping image quality
+  // high enough for Windows administration.
+  if ('compressionLevel' in rfb) rfb.compressionLevel = 1;
+  if ('qualityLevel' in rfb) rfb.qualityLevel = 7;
+  if ('showDotCursor' in rfb) rfb.showDotCursor = true;
 
   rfb.addEventListener('connect', () => {
     reconnectDelay = 1000;
