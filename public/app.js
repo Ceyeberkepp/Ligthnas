@@ -2463,7 +2463,7 @@ function bindViewActions() {
     syncBrandingControls();
   }
 
-  $('[data-backup-job]', $('#content')).forEach(row => row.addEventListener('click', () => {
+  document.querySelectorAll('#content [data-backup-job]').forEach(row => row.addEventListener('click', () => {
     state.selectedBackupJobId = row.dataset.backupJob;
     render('backups');
   }));
