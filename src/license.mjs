@@ -5,6 +5,7 @@ import { createPublicKey, verify as verifySignature } from 'node:crypto';
 const receiptFile = resolve(process.env.LIGHTNAS_LICENSE_RECEIPT || '/var/lib/lightnas/license-receipt.json');
 const licenseServer = String(process.env.LIGHTNAS_LICENSE_SERVER_URL || '').trim();
 const publicKeyPem = String(process.env.LIGHTNAS_LICENSE_PUBLIC_KEY_PEM || '').trim();
+const publicKeyFile = String(process.env.LIGHTNAS_LICENSE_PUBLIC_KEY_FILE || '/etc/lightnas/license-public.pem').trim();
 
 function validReceiptPayload(payload, instanceId) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return false;
@@ -12,6 +13,11 @@ function validReceiptPayload(payload, instanceId) {
   if (!['community', 'pro', 'enterprise'].includes(String(payload.edition || ''))) return false;
   if (payload.expiresAt && !Number.isFinite(Date.parse(payload.expiresAt))) return false;
   return true;
+}
+
+async function configuredPublicKey() {
+  if (publicKeyPem) return publicKeyPem;
+  try { return (await readFile(publicKeyFile, 'utf8')).trim(); } catch { return ''; }
 }
 
 export async function licenseStatus({ instanceId, version }) {
@@ -24,14 +30,15 @@ export async function licenseStatus({ instanceId, version }) {
     verified: Boolean(payload && !expired),
     expiresAt: payload?.expiresAt || null,
     features: payload && !expired && payload.features && typeof payload.features === 'object' ? payload.features : {},
-    serverConfigured: Boolean(licenseServer && publicKeyPem),
+    serverConfigured: Boolean(licenseServer && await configuredPublicKey()),
     instanceId,
     version
   };
 }
 
 export async function verifyLicense({ licenseKey, instanceId, version }) {
-  if (!licenseServer || !publicKeyPem) {
+  const verificationKey = await configuredPublicKey();
+  if (!licenseServer || !verificationKey) {
     throw Object.assign(new Error('The LightNAS license server is not configured yet.'), { status: 409 });
   }
   if (!/^https:\/\//i.test(licenseServer)) {
@@ -71,7 +78,7 @@ export async function verifyLicense({ licenseKey, instanceId, version }) {
   }
   if (!validReceiptPayload(payload, instanceId)) throw Object.assign(new Error('The license response does not match this LightNAS appliance.'), { status: 409 });
 
-  const publicKey = createPublicKey(publicKeyPem);
+  const publicKey = createPublicKey(verificationKey);
   const signature = Buffer.from(encodedSignature, 'base64url');
   if (!verifySignature(null, payloadBytes, publicKey, signature)) {
     throw Object.assign(new Error('The license signature could not be verified.'), { status: 409 });
