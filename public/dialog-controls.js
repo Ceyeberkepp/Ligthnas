@@ -692,22 +692,30 @@ function showRuntimeDeleteDialog(kind, id) {
 
 // Register before enhancements/admin-security so these native LightNAS dialogs
 async function showContainerManager(id) {
-  const [runtime, overview] = await Promise.all([
-    dialogApi('/api/containers/inventory'),
-    dialogApi('/api/overview').catch(() => ({ activity: [], appliance: {} }))
-  ]);
+  const cachedRuntime = window.LightNASContainerInventory;
+  const cachedOverview = window.LightNASOverview;
+  const runtimePromise = cachedRuntime ? Promise.resolve(cachedRuntime) : dialogApi('/api/containers/inventory?summary=1');
+  const overviewPromise = cachedOverview ? Promise.resolve(cachedOverview) : dialogApi('/api/overview').catch(() => ({ activity: [], appliance: {} }));
+  const [runtime, overview] = await Promise.all([runtimePromise, overviewPromise]);
+  window.LightNASContainerInventory = runtime;
+  window.LightNASOverview = overview;
+
   const item = (runtime.containers || []).find(entry => String(entry.id || entry.name) === id);
   if (!item) throw new Error('Container is no longer available.');
   const networks = [...new Set([...(runtime.networks || []), item.network].filter(Boolean))];
   const currentNetwork = item.network || networks[0] || '';
   let publication = item.publication || null;
   const privateNatAddress = /^10\.77\.0\.(?:\d{1,3})$/.test(String(item.ipv4 || publication?.targetHost || ''));
+
+  // Never block the settings window on application probing. Discovery may
+  // involve network timeouts and previously made Edit feel frozen for seconds.
   if (String(item.status || '').toLowerCase() === 'running' && (!publication || (privateNatAddress && publication.mode !== 'proxy'))) {
-    const detected = await dialogApi('/api/containers', {
-      method: 'POST',
-      body: JSON.stringify({ id, action: 'auto-publish' })
-    }).catch(() => null);
-    publication = detected?.mode ? detected : detected?.publication || publication;
+    queueMicrotask(() => {
+      dialogApi('/api/containers', {
+        method: 'POST',
+        body: JSON.stringify({ id, action: 'auto-publish' })
+      }).catch(() => null);
+    });
   }
   const applicationUrl = publication
     ? (publication.mode === 'direct'
