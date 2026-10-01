@@ -12,7 +12,7 @@ import { listFiles, listAllFiles, createFolder, uploadFile, downloadFile, downlo
 import { thumbnailFor } from './thumbnails.mjs';
 import { catalog, runtimeInventory, installCatalogApp, manageCatalogApp, updateCatalogApp, openContainerShell, createContainer, createVm } from './runtimes-next.mjs';
 import { proxmoxConsoleSocket, proxmoxUpdateStorage, proxmoxCleanDisk } from './proxmox.mjs';
-import { localContainerSummary, localContainerInventory, localManageContainer, localContainerConsoleSocket, localContainerCommand, localVmConsoleSocket, localNodeConsoleSocket, localNetworkInventory, localNetworkAction, localApplianceHealth, localApplianceRepair, localRepairNetworkShares, localSyncShareAdministrator } from './local-host.mjs';
+import { localContainerSummary, localContainerInventory, localManageContainer, localContainerConsoleSocket, localContainerCommand, localVmConsoleSocket, localNodeConsoleSocket, localNetworkInventory, localNetworkAction, localApplianceHealth, localApplianceRepair, localSoftwareStatus, localSoftwareUpdate, localRepairNetworkShares, localSyncShareAdministrator } from './local-host.mjs';
 import { validateSmtp, sendSmtpTest } from './mailer.mjs';
 import { mediaAvailable, convertMedia } from './media.mjs';
 import { createDataset, updateDataset } from './zfs.mjs';
@@ -1661,6 +1661,18 @@ async function api(req, res, url) {
   if (req.method === 'GET' && url.pathname === '/api/features') {
     if (!requireAnyPermission(res, permissions, ['overview.view', 'system.view', 'admin.view'])) return;
     return send(res, 200, await featureGateState());
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/software') {
+    if (!isAdmin && !permissions.includes('system.view')) return send(res, 403, { error: 'System information access is required.' });
+    return send(res, 200, await localSoftwareStatus(url.searchParams.get('check') === '1'));
+  }
+  if (req.method === 'POST' && url.pathname === '/api/software/update') {
+    if (!requireOwner(res, context)) return;
+    const result = await localSoftwareUpdate();
+    store.addActivity('update', 'LightNAS software update was started.', 'info');
+    await store.save();
+    return send(res, 202, result);
   }
 
   if (req.method === 'GET' && url.pathname === '/api/logs') {
