@@ -286,11 +286,18 @@
 .node-facts dt { color:var(--muted); font-size:11px; }
 .node-facts dd { margin:0; overflow-wrap:anywhere; font-size:11px; text-align:right; }
 .overview-graph-panel { min-width:0; display:flex; flex-direction:column; gap:10px; }
-.overview-graph-tabs { display:flex; gap:6px; padding:5px; width:100%; max-width:none; overflow:hidden; border:1px solid var(--line); border-radius:12px; background:var(--panel); box-sizing:border-box; }
-.overview-graph-tabs button { flex:1 1 0; min-width:0; min-height:34px; padding:7px 10px; border:0; border-radius:8px; background:transparent; color:var(--muted); font:inherit; font-weight:750; text-align:center; cursor:pointer; }
-.overview-graph-tabs button.active { background:var(--accent-soft); color:var(--accent); }
-.overview-chart { flex:1; min-height:310px; padding:0; overflow:hidden; }
+.overview-graph-tabs { display:flex; gap:6px; padding:5px; width:100%; max-width:none; overflow:hidden; border:1px solid var(--line); border-radius:12px; background:var(--performance-tabs); box-sizing:border-box; }
+.overview-graph-tabs button { flex:1 1 0; min-width:0; min-height:34px; padding:7px 10px; border:0; border-radius:8px; background:transparent; color:var(--performance-tabs-text); font:inherit; font-weight:750; text-align:center; cursor:pointer; transition:background .16s ease,color .16s ease; }
+.overview-graph-tabs button:hover { background:color-mix(in srgb,var(--performance-tabs-active) 10%,transparent); }
+.overview-graph-tabs button.active { background:var(--performance-tabs-active); color:var(--performance-tabs-active-text); }
+.overview-chart { flex:1; min-height:310px; padding:0; overflow:hidden; transition:min-height .16s ease; }
+.overview-chart.collapsed { min-height:0; }
 .overview-chart-head { display:flex; justify-content:space-between; align-items:flex-start; gap:14px; padding:16px 18px 8px; }
+.overview-chart.collapsed .overview-chart-head { padding-bottom:16px; }
+.overview-chart-head-actions { display:flex; align-items:flex-start; gap:10px; }
+.chart-collapse-button { flex:0 0 auto; width:32px; height:32px; display:grid; place-items:center; border:1px solid var(--line); border-radius:8px; background:var(--button); color:var(--text); font-size:16px; line-height:1; cursor:pointer; }
+.chart-collapse-button:hover { border-color:var(--performance-tabs-active); }
+.overview-chart-body[hidden] { display:none !important; }
 .overview-chart-head div { display:grid; gap:4px; }
 .overview-chart-head span,.overview-chart-head small { color:var(--muted); font-size:10px; }
 .overview-chart-head strong { font-size:18px; }
