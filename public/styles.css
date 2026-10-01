@@ -998,3 +998,252 @@ body:not(.product-hypervisor) .backup-status-line {
   body:not(.product-hypervisor) .backup-toolbar { flex-wrap:wrap; }
   body:not(.product-hypervisor) .backup-toolbar-spacer { display:none; }
 }
+
+
+/* VM settings editor — clean hardware tabs, scoped to the NAS VM dialog. */
+.vsphere-hardware-dialog {
+  width: min(1040px, calc(100vw - 32px));
+  max-width: none;
+  padding: 0;
+  overflow: hidden;
+}
+.vsphere-hardware-dialog .vsphere-settings-form {
+  display: flex;
+  flex-direction: column;
+  max-height: min(820px, 94vh);
+  overflow: hidden;
+}
+.vsphere-hardware-dialog .vsphere-dialog-head {
+  flex: 0 0 auto;
+  padding: 24px 26px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.vsphere-hardware-dialog .vsphere-dialog-head h2 {
+  margin: 6px 0 4px;
+}
+.vsphere-hardware-dialog .vsphere-dialog-head p {
+  margin: 0;
+  max-width: 780px;
+  line-height: 1.45;
+}
+.vsphere-hardware-dialog .vsphere-settings-layout {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+}
+.vsphere-hardware-dialog .vsphere-settings-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 18px;
+  min-height: 52px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 94%, var(--bg));
+  scrollbar-width: thin;
+}
+.vsphere-hardware-dialog .vsphere-settings-nav button {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 51px;
+  padding: 0 12px;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: none;
+}
+.vsphere-hardware-dialog .vsphere-settings-nav button:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+}
+.vsphere-hardware-dialog .vsphere-settings-nav button.active {
+  color: var(--text);
+  background: transparent;
+}
+.vsphere-hardware-dialog .vsphere-settings-nav button.active::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 0;
+  height: 3px;
+  border-radius: 3px 3px 0 0;
+  background: var(--accent);
+}
+.vsphere-hardware-dialog .vsphere-nav-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  color: currentColor;
+  font-size: 14px;
+  line-height: 1;
+  opacity: .9;
+}
+.vsphere-hardware-dialog .vsphere-settings-content {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 24px 26px 30px;
+}
+.vsphere-hardware-dialog .vsphere-settings-content.vsphere-settings-content,
+.vsphere-hardware-dialog [data-dialog-fields] {
+  display: block;
+}
+.vsphere-hardware-dialog .vsphere-settings-panel {
+  max-width: 780px;
+}
+.vsphere-hardware-dialog .vsphere-settings-panel[hidden] {
+  display: none !important;
+}
+.vsphere-hardware-dialog .vsphere-panel-title {
+  margin-bottom: 22px;
+}
+.vsphere-hardware-dialog .vsphere-panel-title h3 {
+  margin: 0 0 5px;
+  font-size: 20px;
+}
+.vsphere-hardware-dialog .vsphere-panel-title p {
+  margin: 0;
+}
+.vsphere-hardware-dialog .vsphere-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+.vsphere-hardware-dialog .vsphere-field {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+.vsphere-hardware-dialog .vsphere-field-label {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 750;
+}
+.vsphere-hardware-dialog .vsphere-field input,
+.vsphere-hardware-dialog .vsphere-field select {
+  width: 100%;
+  min-height: 44px;
+}
+.vsphere-hardware-dialog .form-error {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0 26px;
+}
+.vsphere-hardware-dialog .vsphere-dialog-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 14px 24px;
+  border-top: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 96%, var(--bg));
+}
+.vsphere-hardware-dialog .vsphere-action-spacer {
+  flex: 1;
+}
+.vsphere-hardware-dialog .vsphere-dialog-actions .primary,
+.vsphere-hardware-dialog .vsphere-dialog-actions .secondary {
+  min-height: 42px;
+  padding: 9px 16px;
+  border-radius: 9px;
+  box-shadow: none;
+}
+@media (max-width: 760px) {
+  .vsphere-hardware-dialog {
+    width: calc(100vw - 16px);
+  }
+  .vsphere-hardware-dialog .vsphere-dialog-head {
+    padding: 18px 18px 14px;
+  }
+  .vsphere-hardware-dialog .vsphere-settings-nav {
+    padding: 0 8px;
+  }
+  .vsphere-hardware-dialog .vsphere-settings-nav button {
+    padding: 0 10px;
+  }
+  .vsphere-hardware-dialog .vsphere-settings-content {
+    padding: 20px 18px 24px;
+  }
+  .vsphere-hardware-dialog .vsphere-field-grid {
+    grid-template-columns: 1fr;
+  }
+  .vsphere-hardware-dialog .vsphere-dialog-actions {
+    padding: 12px 16px;
+  }
+}
+
+
+/* VM settings tabs v2 — intentionally plain, compact and browser-default-proof. */
+.vsphere-hardware-dialog .vsphere-settings-nav {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  padding: 10px 18px !important;
+  min-height: 58px !important;
+  overflow-x: auto !important;
+  border-bottom: 1px solid var(--line) !important;
+  background: var(--panel-2) !important;
+}
+.vsphere-hardware-dialog .vm-settings-tab {
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  flex: 0 0 auto !important;
+  min-height: 36px !important;
+  padding: 8px 13px !important;
+  margin: 0 !important;
+  border: 1px solid transparent !important;
+  border-radius: 8px !important;
+  background: transparent !important;
+  color: var(--muted) !important;
+  box-shadow: none !important;
+  outline: none !important;
+  font: inherit !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  line-height: 1 !important;
+  text-decoration: none !important;
+  white-space: nowrap !important;
+}
+.vsphere-hardware-dialog .vm-settings-tab:hover {
+  background: var(--panel) !important;
+  border-color: var(--line) !important;
+  color: var(--text) !important;
+}
+.vsphere-hardware-dialog .vm-settings-tab.active {
+  background: var(--panel) !important;
+  border-color: var(--line-strong) !important;
+  color: var(--text) !important;
+  box-shadow: 0 1px 2px rgba(0,0,0,.08) !important;
+}
+.vsphere-hardware-dialog .vm-settings-tab.active::after {
+  content: none !important;
+}
+.vsphere-hardware-dialog .vsphere-nav-icon {
+  display: none !important;
+}
+.vsphere-hardware-dialog .vsphere-dialog-actions [data-editor-revert],
+.vsphere-hardware-dialog .vsphere-dialog-actions [data-dialog-close] {
+  background: transparent !important;
+  border: 1px solid var(--line-strong) !important;
+  color: var(--text) !important;
+  box-shadow: none !important;
+}
+.vsphere-hardware-dialog .vsphere-dialog-actions button[type="submit"] {
+  box-shadow: none !important;
+}
