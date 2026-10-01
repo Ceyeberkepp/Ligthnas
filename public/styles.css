@@ -926,3 +926,40 @@ dialog::backdrop { background: rgba(1,7,13,.76); backdrop-filter: blur(5px); }
 
 .auth-panel .primary { background:var(--login-button); color:var(--login-button-contrast); }
 .auth-panel .primary:hover { background:color-mix(in srgb,var(--login-button) 84%,white); }
+
+/* Workspace mode switch */
+.workspace-mode-switch {
+  position:absolute;
+  left:50%;
+  transform:translateX(-50%);
+  display:inline-flex;
+  align-items:center;
+  gap:4px;
+  padding:4px;
+  border:1px solid var(--line);
+  border-radius:10px;
+  background:var(--panel);
+}
+.workspace-mode-switch button {
+  min-width:104px;
+  min-height:34px;
+  padding:6px 14px;
+  border:0;
+  border-radius:7px;
+  background:transparent;
+  color:var(--muted);
+  font:inherit;
+  font-weight:800;
+  cursor:pointer;
+}
+.workspace-mode-switch button.active {
+  background:var(--primary-button);
+  color:var(--primary-button-contrast);
+}
+.console[data-workspace-mode="hypervisor"] [data-nas-only] { display:none !important; }
+.console[data-workspace-mode="nas"] [data-hypervisor-nav] { display:none !important; }
+
+@media (max-width:900px) {
+  .workspace-mode-switch { position:static; transform:none; margin-left:auto; }
+  .workspace-mode-switch button { min-width:74px; padding-inline:8px; }
+}
