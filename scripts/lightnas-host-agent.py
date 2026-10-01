@@ -2351,6 +2351,10 @@ def _cached_vm_console(name: str) -> tuple[str, int] | None:
         return None
     return target
 
+def _invalidate_vm_console(name: str) -> None:
+    with _VM_CONSOLE_CACHE_LOCK:
+        _VM_CONSOLE_CACHE.pop(name, None)
+
 def vm_console_target(name: str) -> tuple[str, int]:
     if not NAME_RE.fullmatch(name):
         raise ValueError("invalid VM name")
@@ -2407,6 +2411,9 @@ def open_vm_console(data: dict):
             return backend
         except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
             last_error = exc
+            # QEMU may choose a new autoport after a VM restart. Drop a cached
+            # target immediately so the next retry refreshes it from libvirt.
+            _invalidate_vm_console(name)
         time.sleep(0.20)
 
     raise RuntimeError(f"VM display is not ready yet: {last_error}")
