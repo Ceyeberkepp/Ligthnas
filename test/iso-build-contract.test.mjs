@@ -13,8 +13,10 @@ test('ISO builder uses supported compression and validates installer payload', a
   assert.match(build, /installer="gui"/);
   assert.match(build, /installer="text"/);
   assert.match(build, /menu label \^Install LightNAS \(Graphical\)/);
-  assert.match(build, /menu label Install LightNAS \(Text fallback\)/);
-  assert.match(build, /Graphical LightNAS installer and text fallback menu entries confirmed/);
+  assert.match(build, /menu label Install LightNAS \(Terminal UI\)/);
+  assert.match(build, /Install LightNAS \(VGA Safe Mode\)/);
+  assert.match(build, /Install LightNAS \(Serial Console\)/);
+  assert.match(build, /Graphical, VGA-safe, terminal, and serial LightNAS installer entries confirmed/);
   assert.match(build, /Installer payload confirmed inside final ISO/);
   assert.match(build, /LIGHTNAS_ISO_CLEAN/);
 });
