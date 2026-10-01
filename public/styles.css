@@ -867,3 +867,43 @@ dialog::backdrop { background: rgba(1,7,13,.76); backdrop-filter: blur(5px); }
     grid-template-columns:1fr;
   }
 }
+
+/* Profile editor refinement */
+.profile-dialog { width:min(900px,calc(100vw - 36px)); }
+.profile-dialog .profile-form { padding:24px 28px; overflow:auto; max-height:calc(100vh - 36px); }
+.profile-layout { grid-template-columns:320px minmax(0,1fr); gap:32px; }
+.profile-crop-stage {
+  width:280px;
+  height:280px;
+  aspect-ratio:1;
+  border-radius:50%;
+  border:2px solid var(--line-strong);
+  background:var(--panel-2);
+  overflow:hidden;
+  margin:0 auto 18px;
+  box-shadow:none;
+}
+.profile-crop-stage img {
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  transform-origin:center center;
+}
+.profile-crop-ring { display:none; }
+.profile-placeholder[hidden],
+.profile-crop-stage img[hidden] { display:none !important; }
+.profile-placeholder {
+  border-radius:50%;
+  inset:0;
+  background:transparent;
+}
+.profile-picture-actions {
+  justify-content:center;
+}
+.profile-account-fields .manager-summary {
+  margin-top:10px;
+}
+@media (max-width:780px) {
+  .profile-layout { grid-template-columns:1fr; }
+  .profile-crop-stage { width:min(280px,80vw); height:min(280px,80vw); }
+}
