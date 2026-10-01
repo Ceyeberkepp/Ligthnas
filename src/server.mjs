@@ -292,6 +292,33 @@ function warmOverviewStorage() {
   refreshOverviewStorage().catch(() => null);
 }
 
+let runtimeInventoryCache = null;
+let runtimeInventoryCacheAt = 0;
+let runtimeInventoryRefresh = null;
+const RUNTIME_INVENTORY_TTL_MS = 4000;
+
+function invalidateRuntimeInventory() {
+  runtimeInventoryCache = null;
+  runtimeInventoryCacheAt = 0;
+}
+
+async function getRuntimeInventoryCached(force = false) {
+  const now = Date.now();
+  if (!force && runtimeInventoryCache && now - runtimeInventoryCacheAt < RUNTIME_INVENTORY_TTL_MS) return runtimeInventoryCache;
+  if (runtimeInventoryRefresh) return runtimeInventoryRefresh;
+  runtimeInventoryRefresh = (async () => {
+    try {
+      const value = await runtimeInventory();
+      runtimeInventoryCache = value;
+      runtimeInventoryCacheAt = Date.now();
+      return value;
+    } finally {
+      runtimeInventoryRefresh = null;
+    }
+  })();
+  return runtimeInventoryRefresh;
+}
+
 
 async function containerReadyForPublication(id) {
   let started = false;
@@ -1599,7 +1626,7 @@ async function api(req, res, url) {
   }
   if (req.method === 'GET' && url.pathname === '/api/runtimes') {
     if (!requireAnyPermission(res, permissions, ['apps.manage', 'containers.manage', 'vms.manage', 'storage.view', 'system.view'])) return;
-    const runtimes = await runtimeInventory();
+    const runtimes = await getRuntimeInventoryCached(url.searchParams.get('refresh') === '1');
     containerPublisher.decorate(runtimes.containers);
     return send(res, 200, { ...runtimes, catalog });
   }
@@ -1609,6 +1636,7 @@ async function api(req, res, url) {
     const input = await bodyJson(req);
     const app = catalog.find(item => item.id === id);
     const installed = await installCatalogApp(id, input);
+    invalidateRuntimeInventory();
     let firewall = null;
     if (app?.port) {
       firewall = await localNetworkAction({ action: 'firewall-add', decision: 'allow', protocol: 'tcp', port: app.port, source: '' })
@@ -1622,6 +1650,7 @@ async function api(req, res, url) {
     if (!requirePermission(res, permissions, 'apps.manage')) return;
     const id = url.pathname.split('/')[3];
     const result = await updateCatalogApp(id, await bodyJson(req));
+    invalidateRuntimeInventory();
     store.addActivity('app', `App ${id} resource limits were updated.`);
     await store.save();
     return send(res, 200, result);
@@ -1631,6 +1660,7 @@ async function api(req, res, url) {
     if (!requirePermission(res, permissions, 'apps.manage')) return;
     const [, , , id, action] = url.pathname.split('/');
     const result = await manageCatalogApp(id, action);
+    invalidateRuntimeInventory();
     if (action === 'remove') {
       const app = catalog.find(item => item.id === id);
       if (app?.port) await localNetworkAction({ action: 'firewall-remove-port', protocol: 'tcp', port: app.port }).catch(() => null);
@@ -1775,6 +1805,73 @@ async function api(req, res, url) {
     store.addActivity('update', 'LightNAS software update was started.', 'info');
     await store.save();
     return send(res, 202, result);
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/backups/jobs') {
+    if (!requirePermission(res, permissions, 'backup.manage')) return;
+    return send(res, 200, { jobs: store.state.backupJobs || [] });
+  }
+  if (req.method === 'POST' && url.pathname === '/api/backups/jobs') {
+    if (!requirePermission(res, permissions, 'backup.manage')) return;
+    const input = await bodyJson(req);
+    const storage = String(input.storage || '').trim();
+    const schedule = String(input.schedule || '').trim() || 'daily 04:00';
+    const selection = String(input.selection || '').trim() || 'All NAS data';
+    if (!storage) return send(res, 400, { error:'Choose a backup storage target.' });
+    const job = {
+      id: randomUUID(),
+      enabled: input.enabled !== false,
+      node: String(input.node || store.state.config?.deviceName || 'LightNAS'),
+      schedule: schedule.slice(0, 80),
+      nextRun: null,
+      storage: storage.slice(0, 120),
+      comment: String(input.comment || '').slice(0, 240),
+      retention: String(input.retention || 'Keep last 7').slice(0, 120),
+      selection: selection.slice(0, 400),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    store.state.backupJobs ||= [];
+    store.state.backupJobs.push(job);
+    store.addActivity('backup', `Backup job ${job.id} was created for ${job.storage}.`);
+    await store.save();
+    return send(res, 201, job);
+  }
+  if (req.method === 'PATCH' && /^\/api\/backups\/jobs\/[^/]+$/.test(url.pathname)) {
+    if (!requirePermission(res, permissions, 'backup.manage')) return;
+    const id = decodeURIComponent(url.pathname.split('/').pop());
+    const job = (store.state.backupJobs || []).find(item => item.id === id);
+    if (!job) return send(res, 404, { error:'Backup job was not found.' });
+    const input = await bodyJson(req);
+    if ('enabled' in input) job.enabled = Boolean(input.enabled);
+    for (const key of ['node','schedule','storage','comment','retention','selection']) {
+      if (key in input) job[key] = String(input[key] || '').trim().slice(0, key === 'selection' ? 400 : key === 'comment' ? 240 : 120);
+    }
+    if (!job.storage) return send(res, 400, { error:'Choose a backup storage target.' });
+    job.updatedAt = new Date().toISOString();
+    store.addActivity('backup', `Backup job ${job.id} was updated.`);
+    await store.save();
+    return send(res, 200, job);
+  }
+  if (req.method === 'DELETE' && /^\/api\/backups\/jobs\/[^/]+$/.test(url.pathname)) {
+    if (!requirePermission(res, permissions, 'backup.manage')) return;
+    const id = decodeURIComponent(url.pathname.split('/').pop());
+    const before = (store.state.backupJobs || []).length;
+    store.state.backupJobs = (store.state.backupJobs || []).filter(item => item.id !== id);
+    if (store.state.backupJobs.length === before) return send(res, 404, { error:'Backup job was not found.' });
+    store.addActivity('backup', `Backup job ${id} was removed.`);
+    await store.save();
+    return send(res, 200, { id, removed:true });
+  }
+  if (req.method === 'POST' && /^\/api\/backups\/jobs\/[^/]+\/run$/.test(url.pathname)) {
+    if (!requirePermission(res, permissions, 'backup.manage')) return;
+    const id = decodeURIComponent(url.pathname.split('/')[4]);
+    const job = (store.state.backupJobs || []).find(item => item.id === id);
+    if (!job) return send(res, 404, { error:'Backup job was not found.' });
+    job.lastRequestedAt = new Date().toISOString();
+    store.addActivity('backup', `Manual backup run requested for ${job.selection} to ${job.storage}.`);
+    await store.save();
+    return send(res, 202, { id, queued:true, message:'Backup run request recorded. Execution depends on the selected storage backup provider.' });
   }
 
   if (req.method === 'GET' && url.pathname === '/api/logs') {
