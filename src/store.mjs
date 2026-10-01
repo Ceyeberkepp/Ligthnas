@@ -1,4 +1,5 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
 
 export class JsonStore {
@@ -56,15 +57,22 @@ export class JsonStore {
   }
 
   addActivity(type, message, severity = 'info') {
+    const previousHash = this.state.activity[0]?.hash || null;
     const event = {
       id: crypto.randomUUID(),
       type,
       message,
       severity,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      previousHash
     };
+    event.hash = createHash('sha256').update(JSON.stringify({
+      id:event.id, type:event.type, message:event.message, severity:event.severity,
+      timestamp:event.timestamp, previousHash:event.previousHash
+    })).digest('hex');
     this.state.activity.unshift(event);
-    this.state.activity = this.state.activity.slice(0, 500);
+    const limit = Math.max(500, Math.min(50000, Number(process.env.LIGHTNAS_AUDIT_MAX_EVENTS || 5000)));
+    this.state.activity = this.state.activity.slice(0, limit);
     if (this.activityListener) queueMicrotask(() => Promise.resolve(this.activityListener(event)).catch(() => {}));
     return event;
   }
