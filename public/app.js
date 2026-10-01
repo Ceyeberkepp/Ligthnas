@@ -2291,7 +2291,21 @@ function bindViewActions() {
   $('#app-search', $('#content'))?.addEventListener('input', filterApps);
   $('#app-category', $('#content'))?.addEventListener('change', filterApps);
   $$('[data-action="new-share"]', $('#content')).forEach(button => button.addEventListener('click', () => $('#share-dialog').showModal()));
-  $$('[data-view-link]', $('#content')).forEach(button => button.addEventListener('click', () => { location.hash = button.dataset.viewLink; }));
+  $('[data-view-link]', $('#content')).forEach(button => button.addEventListener('click', event => {
+    event.preventDefault();
+    const target = button.dataset.viewLink;
+    if (!target) return;
+    if (state.uiMode === 'hypervisor') {
+      const hypervisorTargets = new Set(['hypervisor', 'vms', 'containers', 'storage', 'network', 'firewall', 'backups']);
+      if (hypervisorTargets.has(target)) {
+        state.view = target;
+        location.hash = target;
+        render(target);
+        return;
+      }
+    }
+    location.hash = target;
+  }));
   $$('[data-action="refresh"]', $('#content')).forEach(button => button.addEventListener('click', async () => { try { state.overview = await request('/api/overview'); captureOverviewMetrics(); render(state.view); toast('Readings updated.'); } catch (error) { toast(error.message); } }));
   $$('[data-action="refresh-files"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     if (button.disabled) return;
