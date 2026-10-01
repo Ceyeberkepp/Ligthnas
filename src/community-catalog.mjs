@@ -8,9 +8,10 @@ const CACHE_FILE = join(CACHE_DIR, 'community-index.json');
 const CACHE_MS = 6 * 60 * 60 * 1000;
 
 const DEFAULT_SOURCES = Object.freeze([
-  { id:'zimaos-official', name:'ZimaOS / CasaOS Official', index:'https://appstore.zimaspace.com/index.json' },
+  { id:'zimaos-official', name:'ZimaOS / CasaOS Official', index:'https://raw.githubusercontent.com/IceWhaleTech/CasaOS-AppStore/main/dist/index.json' },
   { id:'big-bear', name:'Big Bear Community', index:'https://raw.githubusercontent.com/bigbeartechworld/big-bear-casaos/master/index.json' },
-  { id:'linuxserver', name:'LinuxServer Community', index:'https://raw.githubusercontent.com/WisdomSky/LinuxServer-AppStore/main/index.json' }
+  { id:'linuxserver', name:'LinuxServer Community', index:'https://raw.githubusercontent.com/WisdomSky/LinuxServer-AppStore/main/index.json' },
+  { id:'truenas', name:'TrueNAS Apps', index:'https://raw.githubusercontent.com/truenas/apps/master/catalog.json', type:'truenas' }
 ]);
 
 const machineArch = () => ({ x64:'amd64', arm64:'arm64', arm:'arm' }[arch()] || arch());
@@ -49,9 +50,30 @@ async function fetchJson(url) {
   return response.json();
 }
 
-function itemsFromIndex(data) {
+function itemsFromIndex(data, source = {}) {
   if (Array.isArray(data)) return data;
   for (const key of ['apps','items','data','list']) if (Array.isArray(data?.[key])) return data[key];
+  if (source.type === 'truenas' && data && typeof data === 'object') {
+    const items = [];
+    const trains = data.trains || data;
+    for (const [train, apps] of Object.entries(trains || {})) {
+      if (!apps || typeof apps !== 'object' || Array.isArray(apps)) continue;
+      for (const [id, raw] of Object.entries(apps)) {
+        const app = raw && typeof raw === 'object' ? raw : {};
+        items.push({
+          id,
+          title: app.title || app.name || id,
+          description: app.description || app.home || '',
+          category: Array.isArray(app.categories) ? app.categories[0] : (app.category || 'TrueNAS'),
+          icon: app.icon_url || app.icon || '',
+          version: app.latest_version || app.version || '',
+          architectures: app.architectures || [],
+          truenasTrain: train
+        });
+      }
+    }
+    return items;
+  }
   return [];
 }
 
@@ -69,7 +91,7 @@ export async function communityCatalog({ refresh=false } = {}) {
   for (const source of DEFAULT_SOURCES) {
     try {
       const data = await fetchJson(source.index);
-      const normalized = itemsFromIndex(data).map(item => normalize(item, source)).filter(Boolean);
+      const normalized = itemsFromIndex(data, source).map(item => normalize(item, source)).filter(Boolean);
       apps.push(...normalized);
       sources.push({ id:source.id, name:source.name, ok:true, count:normalized.length });
     } catch (error) {

@@ -748,7 +748,7 @@ async function loadRuntimes() {
     state.runtimes = await request('/api/runtimes');
     state.runtimeError = null;
     if (state.view === 'apps') {
-      try { state.communityCatalog = await request('/api/catalog/community'); }
+      try { state.communityCatalog = await request('/api/catalog/community?refresh=1'); }
       catch (error) { state.communityCatalog = { apps: [], sources: [], error: error.message }; }
     }
   } catch (error) { state.runtimeError = error.message; }
