@@ -2047,7 +2047,21 @@ function bindViewActions() {
     } catch (error) { if (error.status !== 409) return toast(error.message); }
     state.folder = folder; state.files = null; location.hash = 'files';
   }));
-  $$('[data-action="refresh-network"]', $('#content')).forEach(button => button.addEventListener('click', loadNetwork));
+  $('[data-action="refresh-network"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+    if (button.disabled) return;
+    const original = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Refreshing…';
+    try {
+      await loadNetwork();
+      toast('Network refreshed.');
+    } catch (error) {
+      toast(error.message || 'Unable to refresh network.');
+    } finally {
+      const live = $('#content [data-action="refresh-network"]');
+      if (live) { live.disabled = false; live.textContent = original || 'Refresh'; }
+    }
+  }));
   $('[data-action="refresh-runtime"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     const original = button.textContent;
     button.disabled = true;
@@ -2347,8 +2361,12 @@ function bindViewActions() {
       render(state.view);
       toast('Storage rescan complete.');
     } catch (error) { toast(error.message); }
+    finally {
+      const liveButton = $('#content [data-action="refresh-storage"]');
+      if (liveButton) { liveButton.disabled = false; liveButton.textContent = 'Refresh'; }
+    }
   }));
-  $$('[data-file-view]', $('#content')).forEach(button => button.addEventListener('click', () => {
+  $('[data-file-view]', $('#content')).forEach(button => button.addEventListener('click', () => {
     state.fileView = ['list','grid','gallery'].includes(button.dataset.fileView) ? button.dataset.fileView : 'grid';
     localStorage.setItem('lightnas-file-view', state.fileView);
     render('files');
