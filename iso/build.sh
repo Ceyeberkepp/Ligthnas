@@ -485,64 +485,59 @@ chmod 0755 /usr/local/bin/lightnas-kiosk
 cat >/usr/local/bin/lightnas-xsession <<'XSESSION'
 #!/bin/bash
 set -Eeuo pipefail
-export HOME=/var/lib/lightnas-ui
-export USER=lightnas-ui
-export LOGNAME=lightnas-ui
 xsetroot -solid '#08111f' >/dev/null 2>&1 || true
 xhost +SI:localuser:lightnas-ui >/dev/null 2>&1 || true
-openbox >/var/log/lightnas-openbox.log 2>&1 &
-exec runuser -u lightnas-ui -- env DISPLAY="${DISPLAY:-:0}" /usr/local/bin/lightnas-kiosk
+exec runuser -u lightnas-ui -- env \
+  HOME=/var/lib/lightnas-ui \
+  USER=lightnas-ui \
+  LOGNAME=lightnas-ui \
+  DISPLAY="${DISPLAY:-:0}" \
+  XDG_SESSION_TYPE=x11 \
+  openbox-session
 XSESSION
 chmod 0755 /usr/local/bin/lightnas-xsession
 
-# LightDM is the normal path. Some virtual graphics adapters reach
-# graphical.target but the display manager never creates :0. This fallback
-# starts Xorg directly on VT7 after a grace period so VirtualBox, VMware, KVM
-# and bare-metal systems still reach the local LightNAS control center.
-cat >/usr/local/sbin/lightnas-display-fallback <<'DISPLAY_FALLBACK'
+# LightNAS is an appliance, not a Debian desktop. Start the local control center
+# directly on VT7 so boot can never fall through to a Debian/LightDM login screen.
+cat >/usr/local/sbin/lightnas-display-console <<'DISPLAY_CONSOLE'
 #!/bin/bash
 set -Eeuo pipefail
-for _ in $(seq 1 15); do
-  if [[ -S /tmp/.X11-unix/X0 ]]; then
-    exit 0
-  fi
-  sleep 1
-done
 exec /usr/bin/xinit /usr/local/bin/lightnas-xsession -- :0 vt7 -keeptty -nolisten tcp
-DISPLAY_FALLBACK
-chmod 0755 /usr/local/sbin/lightnas-display-fallback
+DISPLAY_CONSOLE
+chmod 0755 /usr/local/sbin/lightnas-display-console
 
-cat >/etc/systemd/system/lightnas-display-fallback.service <<'DISPLAY_UNIT'
+cat >/etc/systemd/system/lightnas-display-console.service <<'DISPLAY_UNIT'
 [Unit]
-Description=LightNAS graphical console fallback
-After=lightdm.service lightnas.service
+Description=LightNAS local graphical control center
+After=systemd-user-sessions.service lightnas.service
 Wants=lightnas.service
-Conflicts=getty@tty7.service
+Conflicts=display-manager.service lightdm.service getty@tty7.service
 
 [Service]
 Type=simple
 User=root
-ExecStart=/usr/local/sbin/lightnas-display-fallback
+TTYPath=/dev/tty7
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+ExecStart=/usr/local/sbin/lightnas-display-console
 Restart=on-failure
-RestartSec=5
+RestartSec=3
 
 [Install]
 WantedBy=graphical.target
 DISPLAY_UNIT
-systemctl enable lightnas-display-fallback.service >/dev/null 2>&1 || true
+
 cat >/var/lib/lightnas-ui/.config/openbox/autostart <<'AUTOSTART'
 /usr/local/bin/lightnas-kiosk &
 AUTOSTART
 chown lightnas-ui:lightnas-ui /var/lib/lightnas-ui/.config/openbox/autostart
 
-install -d -m 0755 /etc/lightdm/lightdm.conf.d
-cat >/etc/lightdm/lightdm.conf.d/50-lightnas.conf <<'LIGHTDM'
-[Seat:*]
-autologin-user=lightnas-ui
-autologin-user-timeout=0
-user-session=openbox
-greeter-hide-users=true
-LIGHTDM
+# Keep LightDM installed only as an emergency package dependency. It must not
+# own the display or expose a generic Debian login screen on the appliance.
+systemctl disable lightdm.service >/dev/null 2>&1 || true
+systemctl mask lightdm.service >/dev/null 2>&1 || true
+systemctl enable lightnas-display-console.service >/dev/null 2>&1 || true
 
 cat >/etc/issue <<'ISSUE'
 LightNAS 1.0
@@ -586,7 +581,9 @@ ss.SetY(Window.GetHeight()/2 + 10);
 PLYMOUTH_SCRIPT
 plymouth-set-default-theme lightnas || true
 
-systemctl enable lightdm.service >/dev/null 2>&1 || true
+systemctl disable lightdm.service >/dev/null 2>&1 || true
+systemctl mask lightdm.service >/dev/null 2>&1 || true
+systemctl enable lightnas-display-console.service >/dev/null 2>&1 || true
 systemctl set-default graphical.target >/dev/null 2>&1 || true
 
 #
