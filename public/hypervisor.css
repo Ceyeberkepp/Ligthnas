@@ -650,3 +650,57 @@
   position: relative;
   z-index: 1;
 }
+
+
+/* Hypervisor visual language: light enterprise console by default.
+   Dark surfaces are only used when the user explicitly selects dark/system-dark. */
+:root:not([data-theme="dark"]) .console[data-workspace-mode="hypervisor"] {
+  --hv-bg: #f5f7fa;
+  --hv-panel: #ffffff;
+  --hv-side: #f8fafc;
+  --hv-border: #d8dee7;
+  --hv-text: #172033;
+  --hv-muted: #65748a;
+}
+:root:not([data-theme="dark"]) .console[data-workspace-mode="hypervisor"] .hv-console-shell,
+:root:not([data-theme="dark"]) .console[data-workspace-mode="hypervisor"] .hv-workspace {
+  background: var(--hv-bg);
+  color: var(--hv-text);
+}
+:root:not([data-theme="dark"]) .console[data-workspace-mode="hypervisor"] .hv-resource-tree,
+:root:not([data-theme="dark"]) .console[data-workspace-mode="hypervisor"] .hv-inspector {
+  background: var(--hv-side);
+  border-color: var(--hv-border);
+}
+:root:not([data-theme="dark"]) .console[data-workspace-mode="hypervisor"] .hv-commandbar,
+:root:not([data-theme="dark"]) .console[data-workspace-mode="hypervisor"] .hv-tabs,
+:root:not([data-theme="dark"]) .console[data-workspace-mode="hypervisor"] .hv-metrics-bar,
+:root:not([data-theme="dark"]) .console[data-workspace-mode="hypervisor"] .hv-section {
+  background: var(--hv-panel);
+  border-color: var(--hv-border);
+}
+
+/* Smaller, discreet NAS / Hypervisor mode selector. */
+.console[data-workspace-mode] .workspace-mode-switch {
+  width: auto !important;
+  min-width: 0 !important;
+  min-height: 24px !important;
+  padding: 1px !important;
+  gap: 1px !important;
+  border-radius: 4px !important;
+}
+.console[data-workspace-mode] .workspace-mode-switch button {
+  min-height: 22px !important;
+  padding: 2px 7px !important;
+  border-radius: 3px !important;
+  font-size: 10px !important;
+  font-weight: 600 !important;
+}
+
+/* Resource rows are visibly interactive. */
+.console[data-workspace-mode="hypervisor"] .hv-tree-item.child:hover {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+.console[data-workspace-mode="hypervisor"] .hv-tree-item.child:active {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
