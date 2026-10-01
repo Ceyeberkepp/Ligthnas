@@ -37,12 +37,14 @@ test('Files refresh and storage hot-plug detection are explicit', async () => {
   assert.match(app, /New or changed storage detected\./);
 });
 
-test('ISO has a branded graphical fallback instead of relying only on LightDM', async () => {
+test('ISO boots directly into the LightNAS graphical control center without a Debian login', async () => {
   const iso = await read('iso/build.sh');
   assert.match(iso, /Install LightNAS \(Graphical\)/);
   assert.match(iso, /xinit/);
-  assert.match(iso, /lightnas-display-fallback\.service/);
+  assert.match(iso, /lightnas-display-console\.service/);
   assert.match(iso, /\/usr\/bin\/xinit \/usr\/local\/bin\/lightnas-xsession/);
+  assert.match(iso, /systemctl mask lightdm\.service/);
+  assert.match(iso, /openbox-session/);
   assert.match(iso, /PRETTY_NAME="LightNAS 1\.0 \(Debian 13\)"/);
   assert.match(iso, /Name=LightNAS/);
   assert.match(iso, /plymouth-set-default-theme lightnas/);
