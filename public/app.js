@@ -2595,11 +2595,13 @@ window.addEventListener('hashchange', () => render(location.hash.slice(1) || 'ho
 
 async function boot() {
   try {
-    try {
-      const branding = await request('/api/branding');
-      applyApplianceBranding(branding);
-    } catch {}
-    const status = await request('/api/status');
+    const [statusResult, brandingResult] = await Promise.allSettled([
+      request('/api/status'),
+      request('/api/branding')
+    ]);
+    if (brandingResult.status === 'fulfilled') applyApplianceBranding(brandingResult.value);
+    if (statusResult.status !== 'fulfilled') throw statusResult.reason;
+    const status = statusResult.value;
     if (status.setupRequired) return showAuth('setup');
     try { await showConsole(); } catch (error) { if (error.status === 401) showAuth('login'); else throw error; }
   } catch (error) {
