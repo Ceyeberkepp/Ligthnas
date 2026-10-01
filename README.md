@@ -2,6 +2,24 @@
 
 LightNAS is an independent lightweight NAS and infrastructure operating environment with storage, files/media, networking, native system containers, virtual machines, applications, and administration in one interface. It is designed to run on bare metal or a standard Linux virtual machine without requiring any particular external hypervisor platform.
 
+## Two installation editions, one repository
+
+LightNAS has two separate appliance installs maintained from this repository. They share backend/runtime code and updates, but an installed appliance has one dedicated interface rather than a NAS/Hypervisor runtime switch.
+
+**NAS edition:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Ceyeberkepp/Ligthnas/main/install.sh | bash
+```
+
+**Hypervisor edition:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Ceyeberkepp/Ligthnas/main/install-hypervisor.sh | bash
+```
+
+Use the NAS installer for the storage/files/media appliance. Use the Hypervisor installer for the dedicated virtualization host interface. Both remain in this repository.
+
 ## Platform design targets
 
 LightNAS is being designed around a **2 GB RAM / 35 GB system-storage minimum**
