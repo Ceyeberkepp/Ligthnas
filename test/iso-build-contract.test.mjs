@@ -43,6 +43,8 @@ test('ISO workflow avoids doc-only rebuild noise and performs a QEMU smoke boot'
   assert.match(workflow, /sha256sum -c/);
   assert.doesNotMatch(workflow, /README\.md/);
   assert.doesNotMatch(workflow, /docs\/\*\*/);
-  assert.doesNotMatch(workflow, /src\/\*\*/);
-  assert.doesNotMatch(workflow, /public\/\*\*/);
+  // The appliance ISO embeds src/public, so source changes must rebuild it.
+  assert.match(workflow, /src\/\*\*/);
+  assert.match(workflow, /public\/\*\*/);
+  assert.match(workflow, /config\/\*\*/);
 });
