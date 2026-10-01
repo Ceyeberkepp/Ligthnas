@@ -510,7 +510,7 @@ function hypervisorView() {
     <div class="hv-commandbar">
       <div class="hv-commandbar-primary">
         <button class="primary compact" data-action="create-vm">+ Create VM</button>
-        <button class="secondary compact" data-view-link="containers">+ Create Container</button>
+        <button class="secondary compact" data-action="create-container">+ Create Container</button>
         <span class="hv-command-separator"></span>
         <button class="secondary compact" data-view-link="vms">Virtual Machines</button>
         <button class="secondary compact" data-view-link="containers">Containers</button>
@@ -536,7 +536,7 @@ function hypervisorView() {
             <p>Local virtualization host · ${escapeHtml(provider)}</p>
           </div>
           <div class="hv-host-actions">
-            <button class="secondary compact" id="node-shell-top-proxy" data-action="open-node-shell">Shell</button>
+            <button class="secondary compact" id="node-shell-top-proxy" data-open-node-shell>Shell</button>
             <button class="secondary compact" data-view-link="settings">Host settings</button>
           </div>
         </header>
