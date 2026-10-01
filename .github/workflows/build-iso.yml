@@ -81,6 +81,37 @@ jobs:
           fi
           echo "ISO remained bootable for the smoke-test window."
 
+      - name: VGA compatibility smoke test
+        run: |
+          set +e
+          timeout 30s qemu-system-x86_64 \
+            -m 2048 \
+            -smp 2 \
+            -vga std \
+            -cdrom dist/LightNAS-amd64.iso \
+            -boot d \
+            -display none \
+            -serial stdio \
+            -no-reboot
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ]; then
+            echo "Standard VGA boot smoke test failed with exit code $rc"
+            exit "$rc"
+          fi
+          echo "ISO remained bootable with a standard VGA adapter."
+
+      - name: Installer compatibility menu check
+        run: |
+          set -Eeuo pipefail
+          mkdir -p /tmp/lightnas-iso
+          xorriso -osirrox on -indev dist/LightNAS-amd64.iso -extract / /tmp/lightnas-iso >/dev/null 2>&1
+          grep -Rqs 'Install LightNAS (Graphical)' /tmp/lightnas-iso
+          grep -Rqs 'Install LightNAS (VGA Safe Mode)' /tmp/lightnas-iso
+          grep -Rqs 'Install LightNAS (Terminal UI)' /tmp/lightnas-iso
+          grep -Rqs 'Install LightNAS (Serial Console)' /tmp/lightnas-iso
+          echo "All universal LightNAS installer modes are present."
+
       - name: UEFI boot smoke test
         run: |
           set -Eeuo pipefail
