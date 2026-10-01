@@ -2299,6 +2299,8 @@ function keepWebSocketAlive(ws) {
 
 function bridgeWebSocketToSocket(ws, backend) {
   keepWebSocketAlive(ws);
+  backend.setNoDelay?.(true);
+  ws._socket?.setNoDelay?.(true);
   const close = () => {
     if (!backend.destroyed) backend.destroy();
     if (ws.readyState === 0 || ws.readyState === 1) ws.close();
