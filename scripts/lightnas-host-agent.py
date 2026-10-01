@@ -28,6 +28,7 @@ from pathlib import Path
 
 SOCKET_PATH = Path(os.environ.get("LIGHTNAS_HOST_SOCKET", "/run/lightnas/host-agent.sock"))
 LOCAL_STORAGE_ROOT = Path(os.environ.get("LIGHTNAS_LOCAL_STORAGE_ROOT", "/var/lib/lightnas/storage/local")).resolve()
+INSTALL_ROOT = Path(os.environ.get("LIGHTNAS_INSTALL_ROOT", "/opt/lightnas")).resolve()
 MAX_REQUEST = 64 * 1024
 NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9-]{1,39}$")
 IFACE_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,32}$")
@@ -3168,6 +3169,61 @@ def vm_storage_access(data: dict) -> dict:
     }
 
 
+def software_status(data: dict | None = None) -> dict:
+    fetch_remote = bool((data or {}).get("fetch"))
+    if not (INSTALL_ROOT / ".git").exists():
+        raise RuntimeError("LightNAS installation is not a Git checkout")
+    version = "unknown"
+    try:
+        package = json.loads((INSTALL_ROOT / "package.json").read_text(encoding="utf-8"))
+        version = str(package.get("version") or "unknown")
+    except Exception:
+        pass
+    if fetch_remote:
+        result = subprocess.run(
+            ["git", "-C", str(INSTALL_ROOT), "fetch", "--quiet", "origin", "main"],
+            text=True, capture_output=True, timeout=45,
+        )
+        if result.returncode != 0:
+            raise RuntimeError((result.stderr or result.stdout or "Unable to check for updates").strip()[:500])
+    current = run(["git", "-C", str(INSTALL_ROOT), "rev-parse", "--short=12", "HEAD"], timeout=10)
+    branch = run(["git", "-C", str(INSTALL_ROOT), "rev-parse", "--abbrev-ref", "HEAD"], timeout=10)
+    latest = current
+    update_available = False
+    try:
+        latest = run(["git", "-C", str(INSTALL_ROOT), "rev-parse", "--short=12", "origin/main"], timeout=10)
+        behind = run(["git", "-C", str(INSTALL_ROOT), "rev-list", "--count", "HEAD..origin/main"], timeout=10)
+        update_available = int(behind or "0") > 0
+    except Exception:
+        pass
+    return {
+        "version": version,
+        "commit": current,
+        "branch": branch,
+        "latestCommit": latest,
+        "updateAvailable": update_available,
+    }
+
+
+def software_update(data: dict | None = None) -> dict:
+    if not (INSTALL_ROOT / ".git").exists():
+        raise RuntimeError("LightNAS installation is not a Git checkout")
+    installer = INSTALL_ROOT / "install.sh"
+    if not installer.is_file():
+        raise RuntimeError("LightNAS installer is missing")
+    unit = f"lightnas-update-{int(time.time())}"
+    result = subprocess.run(
+        [
+            "systemd-run", f"--unit={unit}", "--collect", "--no-block",
+            "--property=Type=oneshot", "/bin/bash", str(installer),
+        ],
+        text=True, capture_output=True, timeout=20,
+    )
+    if result.returncode != 0:
+        raise RuntimeError((result.stderr or result.stdout or "Unable to start LightNAS update").strip()[:500])
+    return {"started": True, "unit": unit}
+
+
 def dispatch(request: dict) -> dict:
     action = str(request.get("action") or "")
     data = request.get("data") or {}
@@ -3209,6 +3265,10 @@ def dispatch(request: dict) -> dict:
         return appliance_health()
     if action == "appliance-repair":
         return appliance_repair()
+    if action == "software-status":
+        return software_status(data)
+    if action == "software-update":
+        return software_update(data)
     raise ValueError("unsupported LightNAS host operation")
 
 
