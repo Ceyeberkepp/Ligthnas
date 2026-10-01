@@ -1,4 +1,5 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { arch } from 'node:os';
 
@@ -86,4 +87,52 @@ export async function communityCatalog({ refresh=false } = {}) {
 export async function communityApp(id, { refresh=false } = {}) {
   const catalog = await communityCatalog({refresh});
   return catalog.apps.find(app => app.id === id) || null;
+}
+
+async function command(file, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(file, args, { ...options, stdio:['ignore','pipe','pipe'] });
+    let stdout='', stderr='';
+    child.stdout?.on('data', d => stdout += d);
+    child.stderr?.on('data', d => stderr += d);
+    child.once('error', reject);
+    child.once('close', code => code === 0 ? resolve(stdout.trim()) : reject(new Error((stderr || stdout || file + ' failed').trim())));
+  });
+}
+
+async function fetchText(url) {
+  const response = await fetch(url, { signal: AbortSignal.timeout(20000), headers:{ 'User-Agent':'LightNAS-AppStore/1.0' } });
+  if (!response.ok) throw new Error('HTTP ' + response.status);
+  return response.text();
+}
+
+export async function installCommunityApp(id) {
+  if (process.env.LIGHTNAS_DOCKER_ENABLED !== '1') throw Object.assign(new Error('Docker applications are disabled on this host.'), { status:409 });
+  const app = await communityApp(id);
+  if (!app) throw Object.assign(new Error('Unknown community application.'), { status:404 });
+  if (!app.compatible) throw Object.assign(new Error('This application does not support this CPU architecture.'), { status:409 });
+  if (!app.composeUrl) throw Object.assign(new Error('This catalog entry does not publish a Compose package.'), { status:409 });
+  const appRoot = join(process.env.LIGHTNAS_DATA_DIRECTORY || '/var/lib/lightnas', 'apps', app.id);
+  await mkdir(appRoot, { recursive:true });
+  const composePath = join(appRoot, 'compose.yaml');
+  const compose = await fetchText(app.composeUrl);
+  if (!/\bservices\s*:/m.test(compose)) throw Object.assign(new Error('The community package is not a valid Docker Compose application.'), { status:409 });
+  await writeFile(composePath, compose, { mode:0o600 });
+  const project = safeId('lightnas-' + app.id).slice(0,63);
+  await command('docker', ['compose','-p',project,'-f',composePath,'pull']);
+  await command('docker', ['compose','-p',project,'-f',composePath,'up','-d','--remove-orphans']);
+  return { id:app.id, name:app.name, project, installed:true, composePath, message:'Community application installed with Docker Compose.' };
+}
+
+export async function manageCommunityApp(id, action) {
+  if (!['start','stop','restart','remove'].includes(action)) throw Object.assign(new Error('Invalid application action.'), { status:400 });
+  const app = await communityApp(id);
+  if (!app) throw Object.assign(new Error('Unknown community application.'), { status:404 });
+  const appRoot = join(process.env.LIGHTNAS_DATA_DIRECTORY || '/var/lib/lightnas', 'apps', app.id);
+  const composePath = join(appRoot, 'compose.yaml');
+  const project = safeId('lightnas-' + app.id).slice(0,63);
+  if (action === 'remove') await command('docker',['compose','-p',project,'-f',composePath,'down']);
+  else if (action === 'restart') await command('docker',['compose','-p',project,'-f',composePath,'restart']);
+  else await command('docker',['compose','-p',project,'-f',composePath,action]);
+  return { id, action, dataPreserved:true };
 }
