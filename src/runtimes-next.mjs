@@ -740,6 +740,62 @@ function requireDeletionConfirmation(input, id, label) {
   }
 }
 
+export async function vmEditorInventory(id) {
+  const name = String(id || '');
+  if (!/^[A-Za-z][A-Za-z0-9-]{1,39}$/.test(name)) throw Object.assign(new Error('Invalid VM name.'), { status:400 });
+
+  const [machineDetails, vmNetworks, hostBridges, defaultRoute, lightnasStorage, storageIsos] = await Promise.all([
+    localVmDetails([name]),
+    command('virsh', ['-c', 'qemu:///system', 'net-list', '--name'], 3000),
+    command('ip', ['-j', 'link', 'show', 'type', 'bridge'], 3000),
+    command('ip', ['-j', '-4', 'route', 'show', 'default'], 3000),
+    listStoragePools().catch(() => ({ pools: [] })),
+    listContentAcrossPools('iso').catch(() => [])
+  ]);
+
+  const storageDetails = (lightnasStorage.pools || []).filter(pool => pool.online && pool.writable && pool.content.includes('images'));
+  const libvirtNetworks = vmNetworks.ok && vmNetworks.output ? vmNetworks.output.split('\n').filter(Boolean) : [];
+  let bridges = [];
+  if (hostBridges.ok && hostBridges.output) {
+    try {
+      bridges = JSON.parse(hostBridges.output)
+        .filter(item => item.ifname !== 'docker0' && (item.flags || []).includes('UP'))
+        .map(item => item.ifname)
+        .filter(value => /^[A-Za-z0-9_.:-]{1,32}$/.test(value || ''));
+      let defaultBridge = '';
+      if (defaultRoute.ok && defaultRoute.output) {
+        try { defaultBridge = String((JSON.parse(defaultRoute.output)[0] || {}).dev || ''); } catch {}
+      }
+      if (defaultBridge && bridges.includes(defaultBridge)) bridges = [defaultBridge, ...bridges.filter(value => value !== defaultBridge)];
+      else if (bridges.includes('virbr0')) bridges = ['virbr0', ...bridges.filter(value => value !== 'virbr0')];
+    } catch {}
+  }
+
+  const networkDetails = [
+    ...bridges.filter(value => !libvirtNetworks.includes(value)).map((value, index) => ({ name:value, type:'host-bridge', label:index === 0 ? `${value} · appliance LAN bridge` : `${value} · host bridge` })),
+    ...libvirtNetworks.map(value => ({ name:value, type:'libvirt-network', label:`${value} · LightNAS managed NAT` })),
+    { name:'qemu-user', type:'qemu-user', label:'QEMU user NAT fallback' }
+  ].filter((item, index, all) => all.findIndex(other => other.name === item.name) === index);
+
+  const details = machineDetails.map(item => {
+    const media = storageIsos.find(iso => iso.path === item.installationMediaPath);
+    const { installationMediaPath: _privatePath, ...visible } = item;
+    return { ...visible, installationMediaId: media?.id || '', installationMediaName: media?.name || '' };
+  });
+
+  return {
+    virtualization: {
+      machineDetails: details,
+      storageDetails,
+      pools: storageDetails.map(pool => pool.id),
+      networkDetails,
+      networks: networkDetails.map(item => item.name),
+      isoDetails: storageIsos.map(item => ({ id:item.id, name:item.name, storageId:item.storageId, storageName:item.storageName, sizeBytes:item.sizeBytes })),
+      images: storageIsos.map(item => item.id)
+    }
+  };
+}
+
 export async function runtimeInventory() {
   const [dockerInfo, vmInfo, vmNetworks, installer, hostBridges, lightnasStorage, storageIsos] = await Promise.all([
     command('docker', ['info', '--format', '{{.ServerVersion}}']),
