@@ -2047,7 +2047,7 @@ function bindViewActions() {
     } catch (error) { if (error.status !== 409) return toast(error.message); }
     state.folder = folder; state.files = null; location.hash = 'files';
   }));
-  $('[data-action="refresh-network"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+  $$('[data-action="refresh-network"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     if (button.disabled) return;
     const original = button.textContent;
     button.disabled = true;
@@ -2062,7 +2062,7 @@ function bindViewActions() {
       if (live) { live.disabled = false; live.textContent = original || 'Refresh'; }
     }
   }));
-  $('[data-action="refresh-runtime"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+  $$('[data-action="refresh-runtime"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     const original = button.textContent;
     button.disabled = true;
     button.textContent = 'Refreshing…';
@@ -2315,7 +2315,7 @@ function bindViewActions() {
   $('#app-search', $('#content'))?.addEventListener('input', filterApps);
   $('#app-category', $('#content'))?.addEventListener('change', filterApps);
   $$('[data-action="new-share"]', $('#content')).forEach(button => button.addEventListener('click', () => $('#share-dialog').showModal()));
-  $('[data-view-link]', $('#content')).forEach(button => button.addEventListener('click', event => {
+  $$('[data-view-link]', $('#content')).forEach(button => button.addEventListener('click', event => {
     event.preventDefault();
     const target = button.dataset.viewLink;
     if (!target) return;
@@ -2366,7 +2366,7 @@ function bindViewActions() {
       if (liveButton) { liveButton.disabled = false; liveButton.textContent = 'Refresh'; }
     }
   }));
-  $('[data-file-view]', $('#content')).forEach(button => button.addEventListener('click', () => {
+  $$('[data-file-view]', $('#content')).forEach(button => button.addEventListener('click', () => {
     state.fileView = ['list','grid','gallery'].includes(button.dataset.fileView) ? button.dataset.fileView : 'grid';
     localStorage.setItem('lightnas-file-view', state.fileView);
     render('files');
