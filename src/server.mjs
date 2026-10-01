@@ -12,7 +12,7 @@ import { hashPassword, Sessions, verifyPassword } from './auth.mjs';
 import { listFiles, listAllFiles, createFolder, uploadFile, downloadFile, downloadEntry, deleteEntry } from './files.mjs';
 import { thumbnailFor } from './thumbnails.mjs';
 import { catalog, runtimeInventory, installCatalogApp, manageCatalogApp, updateCatalogApp, openContainerShell, createContainer, createVm } from './runtimes-next.mjs';
-import { communityCatalog } from './community-catalog.mjs';
+import { communityCatalog, installCommunityApp, manageCommunityApp } from './community-catalog.mjs';
 import { proxmoxConsoleSocket, proxmoxUpdateStorage, proxmoxCleanDisk } from './proxmox.mjs';
 import { localContainerSummary, localContainerInventory, localManageContainer, localContainerConsoleSocket, localContainerCommand, localVmConsoleSocket, localNodeConsoleSocket, localNetworkInventory, localNetworkAction, localApplianceHealth, localApplianceRepair, localSoftwareStatus, localSoftwareUpdate, localRepairNetworkShares, localSyncShareAdministrator } from './local-host.mjs';
 import { validateSmtp, sendSmtpTest } from './mailer.mjs';
@@ -1590,6 +1590,22 @@ async function api(req, res, url) {
     ];
     containers.templateCount = (templateLibrary.templates || []).length;
     return send(res, 200, containerPublisher.decorate(containers));
+  }
+  if (req.method === 'POST' && /^\\/api\\/catalog\\/community\\/[a-z0-9._-]+\\/install$/.test(url.pathname)) {
+    if (!requirePermission(res, permissions, 'apps.manage')) return;
+    const id = url.pathname.split('/')[4];
+    const installed = await installCommunityApp(id);
+    store.addActivity('app', `Community app ${id} installed with Docker Compose.`);
+    await store.save();
+    return send(res, 201, installed);
+  }
+  if (req.method === 'POST' && /^\\/api\\/catalog\\/community\\/[a-z0-9._-]+\\/(start|stop|restart|remove)$/.test(url.pathname)) {
+    if (!requirePermission(res, permissions, 'apps.manage')) return;
+    const parts = url.pathname.split('/');
+    const result = await manageCommunityApp(parts[4], parts[5]);
+    store.addActivity('app', `Community app ${parts[4]}: ${parts[5]}.`);
+    await store.save();
+    return send(res, 200, result);
   }
   if (req.method === 'GET' && url.pathname === '/api/catalog/community') {
     if (!requirePermission(res, permissions, 'apps.manage')) return;
