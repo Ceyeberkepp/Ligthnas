@@ -124,8 +124,9 @@ export async function communityCatalog({ refresh=false } = {}) {
   const apps = [], sources = [];
   for (const source of DEFAULT_SOURCES) {
     try {
-      const data = await fetchJson(source.index);
-      const normalized = itemsFromIndex(data, source).map(item => normalize(item, source)).filter(Boolean);
+      const data = source.type === 'casaos-repo' ? await casaosRepoItems(source) : await fetchJson(source.index);
+      const items = source.type === 'casaos-repo' ? data : itemsFromIndex(data, source);
+      const normalized = items.map(item => normalize(item, source)).filter(Boolean);
       apps.push(...normalized);
       sources.push({ id:source.id, name:source.name, ok:true, count:normalized.length });
     } catch (error) {
