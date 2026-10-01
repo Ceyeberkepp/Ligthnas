@@ -1,5 +1,5 @@
 if (window.LIGHTNAS_PRODUCT_MODE === 'hypervisor') document.body.classList.add('product-hypervisor');
-const state = { overview: null, view: 'home', uiMode: window.LIGHTNAS_PRODUCT_MODE === 'hypervisor' ? 'hypervisor' : 'nas', folder: '', files: null, fileError: null, filesSettingsOpen: false, aiMessages: [], logs: null, fileView: ['list','grid','gallery'].includes(localStorage.getItem('lightnas-file-view')) ? localStorage.getItem('lightnas-file-view') : 'grid', fileTruncated: false, overviewMetric: localStorage.getItem('lightnas-overview-metric') || 'cpu', lastNetworkSample: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, smtp: undefined, media: null, network: null, software: null, license: null, communityCatalog: null, communityCatalogLoading: false, communityCatalogError: null, backupJobs: null, selectedBackupJobId: null, metricHistory: { cpu: [], load: [], memory: [], storage: [], networkIn: [], networkOut: [] } };
+const state = { overview: null, view: 'home', uiMode: window.LIGHTNAS_PRODUCT_MODE === 'hypervisor' ? 'hypervisor' : 'nas', folder: '', files: null, fileError: null, filesSettingsOpen: false, aiMessages: [], logs: null, fileView: ['list','grid','gallery'].includes(localStorage.getItem('lightnas-file-view')) ? localStorage.getItem('lightnas-file-view') : 'grid', fileTruncated: false, overviewMetric: localStorage.getItem('lightnas-overview-metric') || 'cpu', lastNetworkSample: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, smtp: undefined, media: null, network: null, software: null, license: null, builtinCatalog: null, communityCatalog: null, communityCatalogLoading: false, communityCatalogError: null, appSearch: '', appCategory: '', appVisibleLimit: 72, backupJobs: null, selectedBackupJobId: null, metricHistory: { cpu: [], load: [], memory: [], storage: [], networkIn: [], networkOut: [] } };
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
 const themeChoices = ['system', 'light', 'dark'];
@@ -264,7 +264,17 @@ async function showConsole() {
   $('#node-shell-top')?.classList.toggle('hidden', !canView('shell', appliance));
   $$('.nav-group').forEach(group => group.classList.toggle('hidden', !group.querySelector('[data-view]:not(.hidden)')));
   render(location.hash.slice(1) || 'home');
-  $$('#nav a[data-view], .foot-admin[data-view]').forEach(link => {
+  // Paint first, then prewarm the data people open most often. This keeps
+  // navigation responsive and means App Store is normally populated before
+  // the first click instead of requiring a manual refresh on fresh installs.
+  queueMicrotask(() => {
+    loadBuiltinCatalog();
+    loadCommunityCatalog(false);
+    setTimeout(() => loadRuntimes(false), 250);
+    setTimeout(() => { if (!state.network) loadNetwork(); }, 700);
+    setTimeout(() => { if (state.spaces === null) loadSpaces(); }, 900);
+  });
+  $('#nav a[data-view], .foot-admin[data-view]').forEach(link => {
     const label = link.textContent.replace(/\s+/g, ' ').trim();
     if (label) link.title = label;
   });
@@ -875,6 +885,19 @@ async function loadMedia() {
 
 let runtimeLoadPromise = null;
 
+async function loadBuiltinCatalog() {
+  if (Array.isArray(state.builtinCatalog)) return state.builtinCatalog;
+  try {
+    const result = await request('/api/catalog/builtin');
+    state.builtinCatalog = result.catalog || [];
+    if (state.view === 'apps') render('apps');
+    return state.builtinCatalog;
+  } catch (error) {
+    state.builtinCatalog = state.runtimes?.catalog || [];
+    return state.builtinCatalog;
+  }
+}
+
 async function loadCommunityCatalog(forceRefresh = false) {
   if (state.communityCatalogLoading && !forceRefresh) return;
   state.communityCatalogLoading = true;
@@ -904,6 +927,7 @@ async function loadRuntimes(forceRefresh = false) {
   })();
   if (!forceRefresh) runtimeLoadPromise = work.finally(() => { runtimeLoadPromise = null; });
   await work;
+  if (state.view === 'apps' && state.builtinCatalog === null) loadBuiltinCatalog();
   if (state.view === 'apps' && !state.communityCatalog && !state.communityCatalogLoading) loadCommunityCatalog(false);
 }
 
@@ -1643,27 +1667,43 @@ function adminView() {
 function moduleView(view) {
   if (view === 'apps') {
     const docker = state.runtimes?.docker;
-    const builtInApps = state.runtimes?.catalog || [];
+    const builtInApps = state.builtinCatalog || state.runtimes?.catalog || [];
     const communityApps = state.communityCatalog?.apps || [];
-    const apps = [...builtInApps, ...communityApps];
-    const categories = [...new Set(apps.map(app => app.category).filter(Boolean))].sort();
+    const allApps = [...new Map([...builtInApps, ...communityApps].map(app => [app.id || `${app.source || ''}:${app.name}`, app])).values()];
+    const categories = [...new Set(allApps.map(app => app.category).filter(Boolean))].sort();
+    const search = String(state.appSearch || '').trim().toLowerCase();
+    const category = state.appCategory || '';
+    const filteredApps = allApps.filter(app => {
+      const searchText = `${app.name || ''} ${app.category || ''} ${app.description || ''} ${app.image || ''} ${app.source || ''}`.toLowerCase();
+      return (!search || searchText.includes(search)) && (!category || app.category === category);
+    });
+    const limit = Math.max(24, Number(state.appVisibleLimit) || 72);
+    const visibleApps = filteredApps.slice(0, limit);
+    const more = Math.max(0, filteredApps.length - visibleApps.length);
+    const catalogStatus = state.communityCatalogLoading
+      ? '<p class="muted app-catalog-status">Community catalog is updating automatically in the background…</p>'
+      : state.communityCatalogError
+        ? `<p class="muted app-catalog-status">Community catalog retrying automatically: ${escapeHtml(state.communityCatalogError)}</p>`
+        : '';
+
     return `${pageHead('App Store', 'Install curated open-source applications directly from LightNAS.', '<button class="secondary" data-action="refresh-runtime">Refresh apps</button>')}
       ${runtimeBanner('docker')}
       <section class="app-catalog-toolbar panel">
-        <div><span class="eyebrow">LIGHTNAS APPLICATION CATALOG</span><h2>${apps.length} one-click apps</h2><p class="muted">Built-in apps load immediately. Community sources are cached locally and refresh in the background.</p>${state.communityCatalogLoading ? '<p class="muted app-catalog-status">Updating community catalog in background…</p>' : state.communityCatalogError ? `<p class="muted app-catalog-status">Community catalog: ${escapeHtml(state.communityCatalogError)}</p>` : ''}</div>
+        <div><span class="eyebrow">LIGHTNAS APPLICATION CATALOG</span><h2>${allApps.length} one-click apps</h2><p class="muted">Built-in apps appear immediately. Community apps load automatically from the local cache and refresh in the background.</p>${catalogStatus}</div>
         <div class="app-filter-controls">
-          <label>Search<input id="app-search" type="search" placeholder="Search apps, categories, or images…"></label>
-          <label>Category<select id="app-category"><option value="">All categories</option>${categories.map(category => `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`).join('')}</select></label>
+          <label>Search<input id="app-search" type="search" value="${escapeHtml(state.appSearch || '')}" placeholder="Search apps, categories, or images…"></label>
+          <label>Category<select id="app-category"><option value="">All categories</option>${categories.map(item => `<option value="${escapeHtml(item)}" ${item === category ? 'selected' : ''}>${escapeHtml(item)}</option>`).join('')}</select></label>
         </div>
       </section>
-      <div class="tool-grid app-catalog-grid">${apps.map(app => {
+      <div class="tool-grid app-catalog-grid">${visibleApps.map(app => {
         const instance = docker?.containers?.find(container => container.name === `lightnas-app-${app.id}`);
         const appUrl = `http://${location.hostname}:${app.port}/`;
         const running = instance?.state === 'running';
         const searchText = `${app.name} ${app.category} ${app.description} ${app.image} ${app.source || ''}`.toLowerCase();
         return `<article class="panel app-card" data-app-card data-category="${escapeHtml(app.category)}" data-search="${escapeHtml(searchText)}"><span class="eyebrow">${escapeHtml(app.category)}</span><h2>${escapeHtml(app.name)}</h2><p class="muted">${escapeHtml(app.description)}</p><p class="muted app-source">${escapeHtml(app.source || 'Open source')}${app.image ? ` · ${escapeHtml(app.image)}` : ''}${app.port ? ` · Port ${app.port}` : ''}</p>${instance ? `<p class="muted">${escapeHtml(instance.status || instance.state)} · Container IP ${escapeHtml(instance.ip || 'not assigned')}</p><div class="head-actions">${running ? `<a class="primary" href="${escapeHtml(appUrl)}" target="_blank" rel="noopener">Open application</a><button class="secondary" type="button" data-app-terminal="${escapeHtml(instance.name)}" data-app-name="${escapeHtml(app.name)}">Terminal</button>` : ''}<button class="secondary" data-app-action="${running ? 'stop' : 'start'}" data-app-id="${app.id}">${running ? 'Stop' : 'Start'}</button><button class="secondary" type="button" data-app-edit="${app.id}" data-app-container="${escapeHtml(instance.name)}">Edit resources</button><button class="secondary" data-app-action="restart" data-app-id="${app.id}">Restart</button><button class="secondary" data-app-action="remove" data-app-id="${app.id}">Remove</button></div>` : app.community ? `<button class="secondary" type="button" disabled title="Compose installer integration is required before this community app can be deployed safely.">Community package</button>` : `<button class="primary" data-install="${app.id}">Install app</button>`}</article>`;
-      }).join('') || '<div class="empty"><p>Loading catalog…</p></div>'}</div>
-      <section class="module-hero"><h2>Managed app hosting</h2><p>LightNAS downloads each app, creates its persistent storage, publishes its web service on the LightNAS LAN address, starts it after reboot, and verifies that the service is reachable. No external hypervisor configuration or manual port forwarding is required for managed catalog apps. ${docker?.available && docker?.enabled ? 'The integrated App Store engine is ready.' : 'Rerun the one-click LightNAS installer to provision the integrated App Store engine.'}</p></section>`;
+      }).join('') || (state.builtinCatalog === null ? '<div class="empty"><p>Loading built-in catalog…</p></div>' : '<div class="empty"><p>No apps match this filter.</p></div>')}</div>
+      ${more ? `<div class="app-catalog-more"><button class="secondary" type="button" data-app-more>Show ${Math.min(72, more)} more</button><span class="muted">Showing ${visibleApps.length} of ${filteredApps.length} matching apps</span></div>` : filteredApps.length ? `<p class="muted app-catalog-count">Showing ${filteredApps.length} matching app${filteredApps.length === 1 ? '' : 's'}.</p>` : ''}
+      <section class="module-hero"><h2>Managed app hosting</h2><p>LightNAS downloads each app, creates its persistent storage, publishes its web service on the LightNAS LAN address, starts it after reboot, and verifies that the service is reachable. No external hypervisor configuration or manual port forwarding is required for managed catalog apps. ${docker?.available && docker?.enabled ? 'The integrated App Store engine is ready.' : 'The catalog stays available while the App Store engine finishes starting.'}</p></section>`;
   }
   return `${pageHead('Monitoring', 'Current readings from this host.', '<button class="secondary" data-action="refresh">Refresh readings</button>')}<section class="metric-grid">${metric('CPU load', `${state.overview.system.cpu.loadPercent}%`, state.overview.system.cpu.loadPercent, state.overview.system.cpu.model)}${metric('Memory', bytes(state.overview.system.memory.usedBytes), state.overview.system.memory.usedPercent, `${bytes(state.overview.system.memory.freeBytes)} free`)}${metric('Uptime', duration(state.overview.system.uptimeSeconds), 0, state.overview.system.kernel)}${metric('Mounts', state.overview.filesystems.length, 0, 'Currently visible')}</section><h2>Activity</h2><div class="activity-list">${state.overview.activity.map(item => `<div class="activity"><div><b>${escapeHtml(item.message)}</b><time>${relativeTime(item.timestamp)}</time></div></div>`).join('') || '<p>No activity recorded.</p>'}</div>`;
 }
@@ -2607,17 +2647,27 @@ function bindViewActions() {
       toast('Default LightNAS logo restored.');
     } catch (problem) { toast(problem.message); }
   });
-  const filterApps = () => {
-    const search = ($('#app-search', $('#content'))?.value || '').trim().toLowerCase();
-    const category = $('#app-category', $('#content'))?.value || '';
-    $$('[data-app-card]', $('#content')).forEach(card => {
-      const matchesText = !search || String(card.dataset.search || '').includes(search);
-      const matchesCategory = !category || card.dataset.category === category;
-      card.hidden = !(matchesText && matchesCategory);
-    });
-  };
-  $('#app-search', $('#content'))?.addEventListener('input', filterApps);
-  $('#app-category', $('#content'))?.addEventListener('change', filterApps);
+  let appFilterTimer = null;
+  $('#app-search', $('#content'))?.addEventListener('input', event => {
+    state.appSearch = event.currentTarget.value;
+    state.appVisibleLimit = 72;
+    clearTimeout(appFilterTimer);
+    appFilterTimer = setTimeout(() => {
+      if (state.view !== 'apps') return;
+      render('apps');
+      const input = $('#app-search', $('#content'));
+      if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
+    }, 120);
+  });
+  $('#app-category', $('#content'))?.addEventListener('change', event => {
+    state.appCategory = event.currentTarget.value;
+    state.appVisibleLimit = 72;
+    render('apps');
+  });
+  $('[data-app-more]', $('#content'))?.addEventListener('click', () => {
+    state.appVisibleLimit = (Number(state.appVisibleLimit) || 72) + 72;
+    render('apps');
+  });
   $$('[data-action="new-share"]', $('#content')).forEach(button => button.addEventListener('click', () => $('#share-dialog').showModal()));
   $$('[data-view-link]', $('#content')).forEach(button => button.addEventListener('click', event => {
     event.preventDefault();
