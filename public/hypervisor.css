@@ -555,3 +555,64 @@
   width: 100%;
   min-width: 0;
 }
+
+
+/* Full-width hypervisor layout.
+   The base app grid still assigns topbar/content to column 2, so explicitly
+   move every application surface to the only remaining column. */
+.console[data-workspace-mode="hypervisor"] {
+  grid-template: 72px minmax(0, 1fr) / minmax(0, 1fr) !important;
+}
+.console[data-workspace-mode="hypervisor"] > .topbar {
+  grid-column: 1 / -1 !important;
+  width: 100%;
+  min-width: 0;
+  padding-left: 16px;
+  padding-right: 16px;
+}
+.console[data-workspace-mode="hypervisor"] > #content {
+  grid-column: 1 / -1 !important;
+  width: 100%;
+  max-width: none !important;
+  min-width: 0;
+}
+.console[data-workspace-mode="hypervisor"] > .task-dock {
+  left: 0 !important;
+  width: 100%;
+}
+.console[data-workspace-mode="hypervisor"] .workspace-mode-switch {
+  margin-left: auto;
+}
+.console[data-workspace-mode="hypervisor"] .hv-console-shell {
+  width: 100%;
+  max-width: none;
+}
+.console[data-workspace-mode="hypervisor"] .hv-three-pane {
+  width: 100%;
+  grid-template-columns: 250px minmax(0, 1fr) 280px;
+}
+.console[data-workspace-mode="hypervisor"] .hv-resource-tree {
+  min-height: calc(100vh - 116px);
+}
+.console[data-workspace-mode="hypervisor"] .hv-tree-item,
+.console[data-workspace-mode="hypervisor"] .hv-tree-group summary,
+.console[data-workspace-mode="hypervisor"] .hv-compact-list > button {
+  cursor: pointer;
+}
+.console[data-workspace-mode="hypervisor"] .hv-tree-item:focus-visible,
+.console[data-workspace-mode="hypervisor"] .hv-tree-group summary:focus-visible,
+.console[data-workspace-mode="hypervisor"] .hv-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+@media (max-width: 1320px) {
+  .console[data-workspace-mode="hypervisor"] .hv-three-pane {
+    grid-template-columns: 220px minmax(0,1fr);
+  }
+}
+@media (max-width: 1000px) {
+  .console[data-workspace-mode="hypervisor"] .hv-three-pane {
+    grid-template-columns: 1fr;
+  }
+}
