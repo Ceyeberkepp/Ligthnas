@@ -7,6 +7,9 @@ on:
       - 'iso/**'
       - '.github/workflows/build-iso.yml'
       - 'scripts/**'
+      - 'src/**'
+      - 'public/**'
+      - 'config/**'
       - 'package.json'
       - 'install.sh'
   pull_request:
@@ -14,6 +17,9 @@ on:
       - 'iso/**'
       - '.github/workflows/build-iso.yml'
       - 'scripts/**'
+      - 'src/**'
+      - 'public/**'
+      - 'config/**'
       - 'package.json'
       - 'install.sh'
   workflow_dispatch:
