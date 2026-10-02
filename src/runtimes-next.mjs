@@ -1010,13 +1010,20 @@ export async function runtimeInventory() {
               const name = String(value?.Name || '').replace(/^\//, '');
               const networks = Object.values(value?.NetworkSettings && value.NetworkSettings.Networks ? value.NetworkSettings.Networks : {});
               const nanoCpus = Number(value?.HostConfig?.NanoCpus || 0);
+              const labels = value?.Config?.Labels || {};
+              const ports = value?.NetworkSettings?.Ports || {};
+              const webContainerPort = Number(labels['lightnas.web.containerPort'] || labels['lightnas.web.port'] || 0);
+              const published = webContainerPort > 0 ? (ports[`${webContainerPort}/tcp`] || [])[0] : null;
               return [[name, {
                 ip: String(networks.find(entry => entry?.IPAddress)?.IPAddress || ''),
                 memory: Number(value?.HostConfig?.Memory || 0),
                 cpus: nanoCpus > 0 ? nanoCpus / 1e9 : 0,
                 cpuUnlimited: nanoCpus <= 0,
                 restartPolicy: String(value?.HostConfig?.RestartPolicy?.Name || 'no'),
-                createdAt: value?.Created || null
+                createdAt: value?.Created || null,
+                catalogId: String(labels['lightnas.catalog'] || ''),
+                instanceName: String(labels['lightnas.instance'] || ''),
+                webPort: Number(published?.HostPort || labels['lightnas.web.hostPort'] || 0)
               }]];
             } catch { return []; }
           }));
@@ -1093,20 +1100,59 @@ async function waitForAppPort(port, timeoutMs = 90000) {
   return false;
 }
 
+async function catalogInstances(id) {
+  const listed = await command('docker', ['ps', '-a', '--filter', `label=lightnas.catalog=${id}`, '--format', '{{.Names}}']);
+  return listed.ok ? listed.output.split('\n').filter(Boolean) : [];
+}
+
+function normalizeInstanceName(value, fallback = 'default') {
+  const text = String(value || fallback).trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
+  if (!/^[a-z0-9][a-z0-9-]{0,30}$/.test(text)) {
+    throw Object.assign(new Error('Use an instance name containing letters, numbers, and dashes only.'), { status: 400 });
+  }
+  return text;
+}
+
+async function containerPublishedPort(name, containerPort) {
+  const result = await command('docker', ['port', name, `${containerPort}/tcp`], 10000);
+  if (!result.ok) return 0;
+  const line = result.output.split('\n').find(Boolean) || '';
+  const match = line.match(/:(\d+)$/);
+  return match ? Number(match[1]) : 0;
+}
+
 export async function installCatalogApp(id, input = {}) {
   if (process.env.LIGHTNAS_DOCKER_ENABLED !== '1') throw Object.assign(new Error('Docker actions are disabled on this host.'), { status: 409 });
   const app = catalog.find(item => item.id === id);
   if (!app) throw Object.assign(new Error('Unknown catalog app.'), { status: 404 });
-  const name = `lightnas-app-${app.id}`;
+
+  const existing = await catalogInstances(id);
+  const instanceName = normalizeInstanceName(input.instanceName, existing.length ? `instance-${existing.length + 1}` : 'default');
+  const name = instanceName === 'default' ? `lightnas-app-${app.id}` : `lightnas-app-${app.id}-${instanceName}`;
+  if (existing.includes(name)) throw Object.assign(new Error(`An instance named ${instanceName} already exists.`), { status: 409 });
+
+  const requestedPort = input.hostPort === undefined || input.hostPort === '' ? (existing.length ? 0 : Number(app.port || 0)) : Number(input.hostPort);
+  if (!Number.isInteger(requestedPort) || requestedPort < 0 || requestedPort > 65535) {
+    throw Object.assign(new Error('Host port must be 0 (automatic) or a valid TCP port from 1 to 65535.'), { status: 400 });
+  }
+
   await pullDockerImage(app.image);
+  const publish = requestedPort > 0
+    ? `0.0.0.0:${requestedPort}:${app.containerPort}`
+    : `0.0.0.0::${app.containerPort}`;
   const args = ['run', '-d', '--name', name,
+    '--label', 'lightnas.managed=true',
     '--label', `lightnas.catalog=${app.id}`,
-    '--label', `lightnas.web.port=${app.port}`,
+    '--label', `lightnas.instance=${instanceName}`,
+    '--label', `lightnas.web.containerPort=${app.containerPort}`,
     '--restart', 'unless-stopped', '--memory', app.memory, '--pids-limit', '256',
-    '--security-opt', 'no-new-privileges', '-p', `0.0.0.0:${app.port}:${app.containerPort}`];
+    '--security-opt', 'no-new-privileges', '-p', publish];
   for (const mapping of app.extraPorts || []) {
     const [hostPort, containerPort, protocol = 'tcp'] = mapping;
-    args.push('-p', `0.0.0.0:${hostPort}:${containerPort}/${protocol}`);
+    // Additional fixed ports only belong to the legacy/default instance.
+    // Extra instances avoid collisions until per-instance advanced port
+    // mapping is exposed in the installer.
+    if (instanceName === 'default') args.push('-p', `0.0.0.0:${hostPort}:${containerPort}/${protocol}`);
   }
   const environment = [...(app.environment || [])];
   if (app.requiresAdminPassword) {
@@ -1119,34 +1165,46 @@ export async function installCatalogApp(id, input = {}) {
   if (app.requiresAccessKeyEncryption) environment.push(['SEMAPHORE_ACCESS_KEY_ENCRYPTION', randomBytes(32).toString('base64')]);
   for (const [key, value] of environment) args.push('-e', `${key}=${value}`);
   for (const [folder, target] of app.volumes) {
-    if (app.namedVolumes && folder !== '@files') {
-      args.push('-v', `lightnas-app-${id}-${folder}:${target}`);
+    if (folder === '@files') {
+      args.push('-v', `${join(dataRoot, 'files')}:${target}`);
       continue;
     }
-    const hostPath = folder === '@files' ? join(dataRoot, 'files') : join(dataRoot, 'apps', id, folder);
+    if (app.namedVolumes) {
+      const volumeName = instanceName === 'default'
+        ? `lightnas-app-${id}-${folder}`
+        : `lightnas-app-${id}-${instanceName}-${folder}`;
+      args.push('-v', `${volumeName}:${target}`);
+      continue;
+    }
+    const hostPath = instanceName === 'default'
+      ? join(dataRoot, 'apps', id, folder)
+      : join(dataRoot, 'apps', id, instanceName, folder);
     await mkdir(hostPath, { recursive: true, mode: 0o700 });
     args.push('-v', `${hostPath}:${target}`);
   }
   args.push(app.image);
   for (const argument of app.command || []) args.push(String(argument));
   const containerId = await runDocker(args);
-  const ready = await waitForAppPort(app.port);
+  const hostPort = await containerPublishedPort(name, app.containerPort);
+  const ready = hostPort > 0 ? await waitForAppPort(hostPort) : false;
   return {
     id: app.id,
+    instanceName,
+    containerName: name,
     image: app.image,
     containerId,
-    port: app.port,
+    port: hostPort,
     ready,
-    access: { scheme: 'http', port: app.port, path: '/' },
-    message: ready ? 'Application installed and reachable through LightNAS.' : 'Application was started but is still initializing. LightNAS will keep it running; refresh Installed Apps shortly.'
+    access: { scheme: 'http', port: hostPort, path: '/' },
+    message: ready ? 'Application instance installed and reachable through LightNAS.' : 'Application instance was started but is still initializing.'
   };
 }
-
 export async function updateCatalogApp(id, input = {}) {
   if (process.env.LIGHTNAS_DOCKER_ENABLED !== '1') throw Object.assign(new Error('Docker actions are disabled on this host.'), { status: 409 });
   const app = catalog.find(item => item.id === id);
   if (!app) throw Object.assign(new Error('Unknown catalog app.'), { status: 404 });
-  const name = `lightnas-app-${id}`;
+  const instanceName = normalizeInstanceName(input.instanceName, 'default');
+  const name = instanceName === 'default' ? `lightnas-app-${id}` : `lightnas-app-${id}-${instanceName}`;
   await assertManagedContainer(name);
 
   const memoryMiB = Number(input.memoryMiB);
@@ -1169,12 +1227,14 @@ export async function updateCatalogApp(id, input = {}) {
   return { id, memoryMiB, cpus, restartPolicy };
 }
 
-export async function manageCatalogApp(id, action) {
+export async function manageCatalogApp(id, action, instanceName = 'default') {
   if (!catalog.some(app => app.id === id)) throw Object.assign(new Error('Unknown catalog app.'), { status: 404 });
   if (!['start', 'stop', 'restart', 'remove'].includes(action)) throw Object.assign(new Error('Invalid app action.'), { status: 400 });
-  const name = `lightnas-app-${id}`;
+  const instance = normalizeInstanceName(instanceName, 'default');
+  const name = instance === 'default' ? `lightnas-app-${id}` : `lightnas-app-${id}-${instance}`;
+  await assertManagedContainer(name);
   await runDocker(action === 'remove' ? ['rm', '-f', name] : [action, name]);
-  return { id, action, dataPreserved: action === 'remove' };
+  return { id, instanceName: instance, action, dataPreserved: action === 'remove' };
 }
 
 async function assertManagedContainer(name) {

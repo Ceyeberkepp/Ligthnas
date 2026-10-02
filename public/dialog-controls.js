@@ -1068,7 +1068,8 @@ document.addEventListener('click', async event => {
       const inventory = window.LightNASRuntimeInventory || await dialogApi('/api/runtimes');
       window.LightNASRuntimeInventory = inventory;
       const id = appEdit.dataset.appEdit;
-      const containerName = appEdit.dataset.appContainer || `lightnas-app-${id}`;
+      const instanceName = appEdit.dataset.appInstance || 'default';
+      const containerName = appEdit.dataset.appContainer || (instanceName === 'default' ? `lightnas-app-${id}` : `lightnas-app-${id}-${instanceName}`);
       const item = (inventory.docker?.containers || []).find(candidate => candidate.name === containerName);
       const app = (inventory.catalog || []).find(candidate => candidate.id === id);
       if (!item || !app) throw new Error('Managed application is no longer available.');
@@ -1076,7 +1077,7 @@ document.addEventListener('click', async event => {
       const memoryMiB = Math.max(128, Math.round(Number(item.memory || 0) / 1048576) || parseInt(String(app.memory || '512'), 10) || 512);
       showEditor({
         eyebrow: 'MANAGED APPLICATION',
-        title: `Edit ${app.name}`,
+        title: `Edit ${app.name} · ${instanceName}`,
         description: 'Change Docker CPU, memory, and restart limits without reinstalling the application. CPU 0 means no CPU cap.',
         fields: [
           { name:'container', label:'Container', value:item.name, readonly:true },
@@ -1090,7 +1091,7 @@ document.addEventListener('click', async event => {
             { value:'on-failure', label:'On failure' },
             { value:'no', label:'Never' }
           ]},
-          { name:'publishedPort', label:'Published app port', value:String(app.port || ''), readonly:true }
+          { name:'publishedPort', label:'Published app port', value:String(item.webPort || (instanceName === 'default' ? app.port : '') || ''), readonly:true }
         ],
         submitLabel: 'Save application',
         onSubmit: async values => {
@@ -1103,7 +1104,8 @@ document.addEventListener('click', async event => {
             body:JSON.stringify({
               memoryMiB: memoryMiBValue,
               cpus: cpuValue,
-              restartPolicy: values.restartPolicy
+              restartPolicy: values.restartPolicy,
+              instanceName
             })
           });
           refreshRuntime();
