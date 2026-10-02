@@ -2683,6 +2683,56 @@ def appliance_health() -> dict:
     }
 
 
+def nested_libvirt_repair() -> dict:
+    if not in_container():
+        return {"changed": False, "nested": False, "detail": "Nested libvirt compatibility is not required on this host."}
+
+    config = Path("/etc/libvirt/qemu.conf")
+    config.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        original = config.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        original = ""
+
+    keys = ("remember_owner", "dynamic_ownership", "user", "group")
+    kept = []
+    for line in original.splitlines():
+        stripped = line.strip()
+        if any(re.match(rf"^#?\s*{re.escape(key)}\s*=", stripped) for key in keys):
+            continue
+        kept.append(line)
+
+    block = [
+        "",
+        "# LightNAS nested-LXC compatibility",
+        'user = "root"',
+        'group = "root"',
+        "dynamic_ownership = 0",
+        "remember_owner = 0",
+        "",
+    ]
+    updated = "\n".join(kept).rstrip() + "\n" + "\n".join(block)
+    changed = updated != original
+    if changed:
+        config.write_text(updated, encoding="utf-8")
+
+    if available("systemctl") and changed:
+        for unit in ("virtqemud.service", "virtqemud.socket", "libvirtd.service", "libvirtd.socket"):
+            subprocess.run(
+                ["systemctl", "try-restart", unit],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=30,
+                check=False,
+            )
+
+    return {
+        "changed": changed,
+        "nested": True,
+        "detail": "Nested libvirt ownership compatibility is active.",
+    }
+
+
 def appliance_repair() -> dict:
     # Fixed, appliance-owned recovery actions only. This endpoint never accepts
     # commands or paths from the browser.
@@ -3305,6 +3355,8 @@ def dispatch(request: dict) -> dict:
         return vm_iso_access(data)
     if action == "appliance-health":
         return appliance_health()
+    if action == "nested-libvirt-repair":
+        return nested_libvirt_repair()
     if action == "appliance-repair":
         return appliance_repair()
     if action == "software-status":
