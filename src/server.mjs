@@ -626,8 +626,12 @@ function requireAnyPermission(res, permissionSet, choices) {
 }
 
 function privateFileScope(context, globalPermissions = []) {
-  if (context.isAdmin || globalPermissions.some(permission => context.permissions.includes(permission))) return '';
+  if (context.isAdmin) return '';
+  // A signed-in local user with files.own is always confined to their own
+  // library, even if another file permission is added later. This prevents
+  // accidental cross-user visibility through an overly broad permission set.
   if (!context.apiToken && context.permissions.includes('files.own')) return `Users/${context.username}`;
+  if (globalPermissions.some(permission => context.permissions.includes(permission))) return '';
   return null;
 }
 
@@ -676,6 +680,7 @@ function userPublic(user) {
     disabled: Boolean(user.disabled),
     totpEnabled: Boolean(user.totpEnabled),
     storageQuotaBytes: Number(user.storageQuotaBytes) > 0 ? Number(user.storageQuotaBytes) : DEFAULT_USER_STORAGE_QUOTA_BYTES,
+    showDeviceName: Boolean(user.showDeviceName),
     permissions: normalizePermissions(user.permissions, PERMISSIONS, []),
     effectivePermissions: effectivePermissions({ state: store.state, username: user.username, account: user, isAdmin: false, allowed: PERMISSIONS, defaults: DEFAULT_USER_PERMISSIONS }),
     groups: groups.map(group => ({ id: group.id, name: group.name }))
@@ -1236,6 +1241,7 @@ async function api(req, res, url) {
       passwordHash: await hashPassword(input.password),
       permissions: normalizePermissions(input.permissions, PERMISSIONS, []),
       storageQuotaBytes: Math.round(requestedQuotaGiB * 1024 * 1024 * 1024),
+      showDeviceName: false,
       createdAt: new Date().toISOString(),
       totpEnabled: false
     };
@@ -1264,6 +1270,7 @@ async function api(req, res, url) {
     if (typeof input.currentPassword !== 'string' || !(await verifyPassword(input.currentPassword, store.state.config.passwordHash))) return send(res, 403, { error: 'Current administrator password is incorrect.' });
     let changed = false;
     if (typeof input.disabled === 'boolean') { user.disabled = input.disabled; changed = true; }
+    if (typeof input.showDeviceName === 'boolean') { user.showDeviceName = input.showDeviceName; changed = true; }
     if (typeof input.password === 'string' && input.password) {
       if (input.password.length < 10 || input.password.length > 1024) return send(res, 400, { error: 'New password must contain at least 10 characters.' });
       user.passwordHash = await hashPassword(input.password); changed = true;
@@ -1950,7 +1957,9 @@ async function api(req, res, url) {
     if (!overviewStorageCache || Date.now() - overviewStorageCacheAt >= OVERVIEW_STORAGE_TTL_MS) warmOverviewStorage();
     return send(res, 200, {
       appliance: {
-        deviceName: store.state.config.deviceName,
+        deviceName: isAdmin || account.showDeviceName ? store.state.config.deviceName : '',
+        deviceNameVisible: Boolean(isAdmin || account.showDeviceName),
+        online: true,
         brandName: store.state.config.brandName || 'LightNAS',
         logoMode: store.state.config.logoMode === 'picture' && store.state.config.logoExt ? 'picture' : 'text',
         accentColor: /^#[0-9a-f]{6}$/i.test(String(store.state.config.accentColor || '')) ? store.state.config.accentColor : '#087b70',
@@ -2155,8 +2164,30 @@ async function api(req, res, url) {
     return send(res, 200, result);
   }
 
+  if (req.method === 'POST' && url.pathname === '/api/admin/user-files/list') {
+    if (!requireOwner(res, context)) return;
+    const input = await bodyJson(req);
+    if (typeof input.currentPassword !== 'string' || !(await verifyPassword(input.currentPassword, store.state.config.passwordHash))) {
+      return send(res, 403, { error: 'Administrator password is incorrect.' });
+    }
+    const target = String(input.username || '').trim();
+    if (!/^[a-zA-Z0-9._-]{3,32}$/.test(target) || !store.state.users.some(user => user.username === target)) {
+      return send(res, 404, { error: 'User not found.' });
+    }
+    const relative = String(input.path || '').replace(/^\/+|\/+$/g, '');
+    const scoped = [`Users/${target}`, relative].filter(Boolean).join('/');
+    return send(res, 200, {
+      username: target,
+      path: relative,
+      entries: await listFiles(scoped)
+    });
+  }
+
   if (url.pathname === '/api/files') {
     const requestedPath = url.searchParams.get('path') || '';
+    if (context.isAdmin && /^Users(?:\/|$)/i.test(requestedPath)) {
+      return send(res, 403, { error: 'Private user libraries are protected. Open them from the password-protected Users area.' });
+    }
     if (req.method === 'GET') {
       if (!requireAnyPermission(res, permissions, ['files.own', 'files.read'])) return;
       const scope = privateFileScope(context, ['files.read']);
@@ -2166,7 +2197,12 @@ async function api(req, res, url) {
         return send(res, 200, { path: '', ...all });
       }
       const path = scopedFilePath(context, requestedPath, ['files.read']);
-      return send(res, 200, { path: requestedPath, entries: await listFiles(path), truncated: false });
+      const entries = await listFiles(path);
+      return send(res, 200, {
+        path: requestedPath,
+        entries: context.isAdmin && !requestedPath ? entries.filter(entry => entry.name !== 'Users') : entries,
+        truncated: false
+      });
     }
     if (req.method === 'DELETE') {
       if (!requireAnyPermission(res, permissions, ['files.own', 'files.delete', 'files.write'])) return;
