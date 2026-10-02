@@ -1453,16 +1453,6 @@ body:not(.product-hypervisor) .backup-status-line {
   background-position:center;
   background-repeat:no-repeat;
 }
-#mini-name.online-only::before {
-  content:'';
-  display:inline-block;
-  width:7px;
-  height:7px;
-  margin-right:6px;
-  border-radius:50%;
-  background:var(--success);
-  vertical-align:1px;
-}
 .field-hint {
   display:block;
   margin-top:5px;
@@ -1595,4 +1585,24 @@ body:not(.product-hypervisor) .backup-status-line {
   .user-folders-admin .section-heading > button {
     width: 100%;
   }
+}
+
+
+/* Compact icon-only refresh controls */
+.refresh-icon-button {
+  min-width: 38px;
+  width: 38px;
+  padding-inline: 0;
+  display: inline-grid;
+  place-items: center;
+  font-size: 18px;
+  line-height: 1;
+}
+.refresh-icon-button:disabled {
+  cursor: wait;
+}
+
+.files-settings-card .section-heading {
+  margin: 0 0 14px;
+  align-items: flex-start;
 }
