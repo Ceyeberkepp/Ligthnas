@@ -258,7 +258,8 @@ async function showConsole() {
   window.LightNASOverview = state.overview;
   captureOverviewMetrics();
   const { appliance } = state.overview;
-  $('#mini-name').textContent = appliance.deviceName;
+  $('#mini-name').textContent = appliance.deviceNameVisible && appliance.deviceName ? appliance.deviceName : 'Online';
+  $('#mini-name').classList.toggle('online-only', !appliance.deviceNameVisible);
   applyApplianceBranding(appliance);
   const avatar = $('#avatar');
   avatar.textContent = appliance.avatar ? '' : appliance.username[0].toUpperCase();
@@ -850,6 +851,8 @@ async function openUserManager(username) {
       <section class="panel">
         <h3>Account status</h3>
         <label class="check-line"><input name="enabled" type="checkbox" ${user.disabled ? '' : 'checked'}> Account enabled</label>
+        <label class="check-line"><input name="showDeviceName" type="checkbox" ${user.showDeviceName ? 'checked' : ''}> Show server name to this user</label>
+        <p class="muted">When disabled, this account sees only Online in the footer instead of the LightNAS server hostname.</p>
       </section>
 
       <section class="panel">
@@ -922,6 +925,7 @@ async function openUserManager(username) {
         body: JSON.stringify({
           currentPassword,
           disabled: !form.elements.enabled.checked,
+          showDeviceName: form.elements.showDeviceName.checked,
           storageQuotaGiB: Number(form.elements.storageQuotaGiB.value),
           permissions: selectedPermissions,
           groups: selectedGroups
@@ -963,7 +967,7 @@ function usersView() {
       <div class="section-heading"><div><span class="eyebrow">NEW ACCOUNT</span><h2>Create local user</h2><p class="muted">Create the account and optionally assign direct permissions and groups now.</p></div><button class="secondary" type="button" data-toggle-user-create>Cancel</button></div>
       <div class="user-form-grid">
         <label>Username<input name="username" pattern="[a-zA-Z0-9._-]{3,32}" required placeholder="username"></label>
-        <label>Temporary password<input name="password" type="password" minlength="10" autocomplete="new-password" required placeholder="At least 10 characters"></label>
+        <label>Temporary password<input name="password" type="password" minlength="10" maxlength="1024" autocomplete="new-password" required placeholder="At least 10 characters"><small class="field-hint">Required · minimum 10 characters</small></label>
         <label>File storage quota (GiB)<input name="storageQuotaGiB" type="number" min="0.1" max="1048576" step="0.1" value="5" required></label>
       </div>
       <details class="user-create-access">
@@ -1357,7 +1361,10 @@ function filesView() {
 
   const quota = state.fileQuota?.scoped ? state.fileQuota : null;
   const quotaPercent = quota?.quotaBytes ? Math.min(100, Math.round((quota.usedBytes / quota.quotaBytes) * 100)) : 0;
-  return `<section class="files-page ${state.fileView === 'gallery' ? 'photo-mode' : 'grid-mode'}">${pageHead('Files & media', 'Browse and manage the actual files stored in LightNAS.', '<button class="secondary" data-action="refresh-files">Refresh</button>')}
+  const protectedUsersAction = state.overview.appliance.role === 'administrator'
+    ? '<button class="secondary" type="button" data-action="private-user-files">🔒 Users</button>'
+    : '';
+  return `<section class="files-page ${state.fileView === 'gallery' ? 'photo-mode' : 'grid-mode'}">${pageHead('Files & media', 'Browse and manage the actual files stored in LightNAS.', `${protectedUsersAction}<button class="secondary" data-action="refresh-files">Refresh</button>`)}
     ${quota ? `<section class="panel file-quota-panel"><div class="panel-head"><div><span class="eyebrow">MY STORAGE</span><h2>${bytes(quota.usedBytes)} of ${bytes(quota.quotaBytes)}</h2></div><strong>${quotaPercent}%</strong></div><div class="track"><span style="width:${quotaPercent}%"></span></div><p class="muted">${bytes(quota.remainingBytes)} remaining in your private file library.</p></section>` : ''}
     <section class="desktop-files-settings-panel ${state.filesSettingsOpen ? '' : 'hidden'}">
       <article class="panel files-settings-card">
@@ -1402,6 +1409,113 @@ function filesView() {
     </div>
     <button class="secondary mobile-files-settings-button" type="button" data-mobile-files-settings aria-label="Files & media settings">⚙ Settings</button>
   </section>`;
+}
+
+
+async function openProtectedUserFiles() {
+  if (state.overview?.appliance?.role !== 'administrator') return;
+  if (!state.users) await loadUsers();
+  const users = state.users || [];
+  if (!users.length) return toast('No local user accounts are available.');
+
+  const dialog = document.createElement('dialog');
+  dialog.className = 'lightnas-dialog protected-user-files-dialog';
+  dialog.innerHTML = `
+    <form class="protected-user-files-form" method="dialog">
+      <div class="dialog-head">
+        <div><span class="eyebrow">PRIVATE STORAGE</span><h2>User libraries</h2><p class="muted">User files are excluded from the normal administrator Files & media view.</p></div>
+        <button class="icon-button" type="button" data-private-close aria-label="Close">×</button>
+      </div>
+      <section class="protected-user-files-auth">
+        <label>User
+          <select name="username">${users.map(user => `<option value="${escapeHtml(user.username)}">${escapeHtml(user.username)}</option>`).join('')}</select>
+        </label>
+        <label>Administrator password
+          <input name="currentPassword" type="password" autocomplete="current-password" required placeholder="Required to unlock">
+        </label>
+        <button class="primary" type="button" data-private-unlock>Unlock files</button>
+      </section>
+      <div class="module-note"><b>Private by default.</b> Each account has its own Documents, Photos, Videos, and Audio library. The administrator password is required to inspect a user's library.</div>
+      <section class="protected-user-files-browser" data-private-browser hidden>
+        <div class="protected-user-files-toolbar">
+          <div data-private-breadcrumbs></div>
+          <button class="secondary" type="button" data-private-lock>Lock</button>
+        </div>
+        <div class="protected-user-files-list" data-private-list></div>
+      </section>
+      <div class="form-error" data-private-error role="alert"></div>
+    </form>`;
+  document.body.append(dialog);
+
+  const form = dialog.querySelector('form');
+  const browser = dialog.querySelector('[data-private-browser]');
+  const list = dialog.querySelector('[data-private-list]');
+  const crumbs = dialog.querySelector('[data-private-breadcrumbs]');
+  const error = dialog.querySelector('[data-private-error]');
+  let unlockedPassword = '';
+  let currentPath = '';
+
+  const close = () => dialog.close();
+  dialog.querySelectorAll('[data-private-close]').forEach(button => button.addEventListener('click', close));
+
+  async function loadPrivatePath(path = '') {
+    error.textContent = '';
+    const username = form.elements.username.value;
+    const result = await request('/api/admin/user-files/list', {
+      method: 'POST',
+      body: JSON.stringify({ username, currentPassword: unlockedPassword, path })
+    });
+    currentPath = result.path || '';
+    const segments = currentPath.split('/').filter(Boolean);
+    crumbs.innerHTML = [
+      '<button class="panel-link" type="button" data-private-path="">User files</button>',
+      ...segments.map((segment, index) => `<span> / </span><button class="panel-link" type="button" data-private-path="${escapeHtml(segments.slice(0, index + 1).join('/'))}">${escapeHtml(segment)}</button>`)
+    ].join('');
+    const entries = Array.isArray(result.entries) ? result.entries : [];
+    list.innerHTML = entries.length ? entries.map(entry => {
+      const next = [currentPath, entry.name].filter(Boolean).join('/');
+      return `<article class="protected-user-file-row">
+        <button class="file-name" type="button" ${entry.directory ? `data-private-path="${escapeHtml(next)}"` : 'disabled'}>
+          <span>${entry.directory ? '▣' : '▤'}</span>
+          <span><b>${escapeHtml(entry.name)}</b><small>${entry.directory ? 'Folder' : bytes(entry.sizeBytes)}</small></span>
+        </button>
+      </article>`;
+    }).join('') : '<div class="empty"><p>This private library is empty.</p></div>';
+    browser.hidden = false;
+    dialog.querySelectorAll('[data-private-path]').forEach(button => button.addEventListener('click', () => {
+      loadPrivatePath(button.dataset.privatePath || '').catch(problem => { error.textContent = problem.message; });
+    }));
+  }
+
+  dialog.querySelector('[data-private-unlock]').addEventListener('click', async () => {
+    unlockedPassword = form.elements.currentPassword.value;
+    if (!unlockedPassword) { error.textContent = 'Enter the administrator password.'; return; }
+    try { await loadPrivatePath(''); }
+    catch (problem) { unlockedPassword = ''; error.textContent = problem.message; }
+  });
+
+  form.elements.username.addEventListener('change', () => {
+    currentPath = '';
+    browser.hidden = true;
+    list.innerHTML = '';
+    unlockedPassword = '';
+    form.elements.currentPassword.value = '';
+  });
+
+  dialog.querySelector('[data-private-lock]').addEventListener('click', () => {
+    unlockedPassword = '';
+    currentPath = '';
+    form.elements.currentPassword.value = '';
+    list.innerHTML = '';
+    browser.hidden = true;
+  });
+
+  dialog.addEventListener('close', () => {
+    unlockedPassword = '';
+    form.elements.currentPassword.value = '';
+    dialog.remove();
+  }, { once: true });
+  dialog.showModal();
 }
 
 async function loadFiles(forceRefresh = false) {
@@ -2462,9 +2576,14 @@ function bindViewActions() {
     event.preventDefault();
     const form = event.currentTarget;
     const data = new FormData(form);
+    const password = String(data.get('password') || '');
+    if (password.length < 10) {
+      $('.form-error', form).textContent = 'Password must contain at least 10 characters.';
+      return;
+    }
     const payload = {
       username: data.get('username'),
-      password: data.get('password'),
+      password,
       storageQuotaGiB: Number(data.get('storageQuotaGiB') || 5),
       permissions: data.getAll('permissions'),
       groups: data.getAll('groups')
@@ -2877,7 +2996,10 @@ function bindViewActions() {
     location.hash = target;
   }));
   $$('[data-action="refresh"]', $('#content')).forEach(button => button.addEventListener('click', async () => { try { state.overview = await request('/api/overview'); captureOverviewMetrics(); render(state.view); toast('Readings updated.'); } catch (error) { toast(error.message); } }));
-  $$('[data-action="refresh-files"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+  $('[data-action="private-user-files"]', $('#content')).forEach(button => button.addEventListener('click', () => {
+    openProtectedUserFiles().catch(error => toast(error.message));
+  }));
+  $('[data-action="refresh-files"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     if (button.disabled) return;
     const original = button.textContent;
     button.disabled = true;
@@ -3226,6 +3348,7 @@ function ensureProfileDialog() {
       </div>
       <div class="profile-layout">
         <section class="profile-picture-editor">
+          <div class="profile-section-head"><span class="eyebrow">PROFILE PHOTO</span><h3>Your picture</h3><p class="muted">Drag to reposition. Zoom only when you want a tighter crop.</p></div>
           <div class="profile-crop-stage" data-profile-crop-stage>
             <img data-profile-preview alt="Profile picture preview">
             <div class="profile-crop-ring" aria-hidden="true"></div>
@@ -3245,6 +3368,7 @@ function ensureProfileDialog() {
           <p class="muted">Drag the image inside the circle or use the sliders to position it.</p>
         </section>
         <section class="profile-account-fields">
+          <div class="profile-section-head"><span class="eyebrow">ACCOUNT DETAILS</span><h3>Profile information</h3><p class="muted">These details are visible only inside this LightNAS appliance.</p></div>
           <label>Username<input name="username" readonly></label>
           <label>Display name<input name="displayName" maxlength="80" placeholder="Your name"></label>
           <label>Email address<input name="email" type="email" maxlength="160" placeholder="you@example.com"></label>
@@ -3391,7 +3515,7 @@ async function openProfileDialog() {
         canvas.width = 512; canvas.height = 512;
         const ctx = canvas.getContext('2d');
         const scale = Number(zoom.value || 1);
-        const fit = Math.max(512 / image.naturalWidth, 512 / image.naturalHeight) * scale;
+        const fit = Math.min(512 / image.naturalWidth, 512 / image.naturalHeight) * scale;
         const drawW = image.naturalWidth * fit;
         const drawH = image.naturalHeight * fit;
         const offsetX = Number(x.value || 0) * 2.56;
