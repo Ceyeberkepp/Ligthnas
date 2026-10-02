@@ -981,8 +981,19 @@ function usersView() {
       <div class="form-error" role="alert"></div>
     </form>
 
+    <section class="panel user-folders-admin">
+      <div class="section-heading">
+        <div>
+          <span class="eyebrow">PRIVATE STORAGE</span>
+          <h2>User folders</h2>
+          <p class="muted">Open a user's private Documents, Photos, Videos, and Audio library. Administrator password is required.</p>
+        </div>
+        <button class="secondary" type="button" data-action="private-user-files">Open user folders</button>
+      </div>
+    </section>
+
     <section class="user-list-section">
-      <div class="section-heading"><div><span class="eyebrow">ACCOUNTS</span><h2>Local users</h2><p class="muted">Use Manage user for password reset, permissions, groups, disable/enable, and deletion.</p></div><small>${users.length + 1} total</small></div>
+      <div class="section-heading"><div><span class="eyebrow">ACCOUNTS</span><h2>Local users</h2><p class="muted">Use Manage user for password reset, permissions, groups, disable/enable, deletion, and server-name visibility.</p></div><small>${users.length + 1} total</small></div>
       <div class="user-card-grid">
         <article class="panel user-card owner-card"><div class="user-card-avatar">${escapeHtml(owner[0]?.toUpperCase() || 'A')}</div><div class="user-card-copy"><div class="user-card-title"><h3>${escapeHtml(owner)}</h3><span class="user-status active">OWNER</span></div><p>Full appliance administration and security control.</p></div><button class="secondary" type="button" data-view-link="settings">Account settings</button></article>
         ${users.map(user => `<article class="panel user-card ${user.disabled ? 'disabled' : ''}">
@@ -1361,10 +1372,7 @@ function filesView() {
 
   const quota = state.fileQuota?.scoped ? state.fileQuota : null;
   const quotaPercent = quota?.quotaBytes ? Math.min(100, Math.round((quota.usedBytes / quota.quotaBytes) * 100)) : 0;
-  const protectedUsersAction = state.overview.appliance.role === 'administrator'
-    ? '<button class="secondary" type="button" data-action="private-user-files">🔒 Users</button>'
-    : '';
-  return `<section class="files-page ${state.fileView === 'gallery' ? 'photo-mode' : 'grid-mode'}">${pageHead('Files & media', 'Browse and manage the actual files stored in LightNAS.', `${protectedUsersAction}<button class="secondary" data-action="refresh-files">Refresh</button>`)}
+  return `<section class="files-page ${state.fileView === 'gallery' ? 'photo-mode' : 'grid-mode'}">${pageHead('Files & media', 'Browse and manage the actual files stored in LightNAS.', '<button class="secondary" data-action="refresh-files">Refresh</button>')}
     ${quota ? `<section class="panel file-quota-panel"><div class="panel-head"><div><span class="eyebrow">MY STORAGE</span><h2>${bytes(quota.usedBytes)} of ${bytes(quota.quotaBytes)}</h2></div><strong>${quotaPercent}%</strong></div><div class="track"><span style="width:${quotaPercent}%"></span></div><p class="muted">${bytes(quota.remainingBytes)} remaining in your private file library.</p></section>` : ''}
     <section class="desktop-files-settings-panel ${state.filesSettingsOpen ? '' : 'hidden'}">
       <article class="panel files-settings-card">

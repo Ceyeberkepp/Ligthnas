@@ -1570,3 +1570,29 @@ body:not(.product-hypervisor) .backup-status-line {
     grid-template-columns:1fr;
   }
 }
+
+
+/* Administration > Users: private user folder entry */
+.user-folders-admin {
+  margin: 16px 0 24px;
+}
+.user-folders-admin .section-heading {
+  margin: 0;
+  align-items: center;
+}
+.user-folders-admin h2 {
+  margin: 3px 0 4px;
+  font-size: 17px;
+}
+.user-folders-admin p {
+  margin: 0;
+  max-width: 720px;
+}
+@media (max-width:760px) {
+  .user-folders-admin .section-heading {
+    align-items: stretch;
+  }
+  .user-folders-admin .section-heading > button {
+    width: 100%;
+  }
+}

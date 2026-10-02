@@ -22,7 +22,9 @@ test('administrator private-user browser requires the owner password and normal 
   assert.match(server, /verifyPassword\(input\.currentPassword, store\.state\.config\.passwordHash\)/);
   assert.match(server, /entries\.filter\(entry => entry\.name !== 'Users'\)/);
   assert.match(server, /Private user libraries are protected/);
+  assert.match(app, /User folders/);
   assert.match(app, /data-action="private-user-files"/);
+  assert.doesNotMatch(app, /protectedUsersAction/);
   assert.match(app, /Administrator password/);
 });
 
