@@ -1871,7 +1871,7 @@ function moduleView(view) {
           const instanceName = instance.instanceName || (instance.name === `lightnas-app-${app.id}` ? 'default' : instance.name.replace(`lightnas-app-${app.id}-`, ''));
           const hostPort = Number(instance.webPort || (instanceName === 'default' ? app.port : 0));
           return `<section class="app-instance-row">
-            <div class="app-instance-summary"><b>${escapeHtml(instanceName)}</b><span class="muted">${escapeHtml(instance.status || instance.state)} · IP ${escapeHtml(instance.ip || 'not assigned')}${hostPort ? ` · Port ${hostPort}` : ''}</span></div>
+            <div class="app-instance-summary">${instanceName === 'default' ? '' : `<b>${escapeHtml(instanceName)}</b>`}<span class="muted">${escapeHtml(instance.status || instance.state)}${hostPort ? ` · Port ${hostPort}` : ''}</span></div>
           </section>`;
         }).join('')}</div>` : '';
         const installControl = app.community
