@@ -107,6 +107,35 @@ async function directoryEntries(path) {
   }));
 }
 
+async function directorySize(path) {
+  let total = 0;
+  let names = [];
+  try { names = await readdir(path); } catch (error) {
+    if (error.code === 'ENOENT') return 0;
+    throw error;
+  }
+  for (let offset = 0; offset < names.length; offset += 48) {
+    const batch = names.slice(offset, offset + 48);
+    const inspected = await Promise.all(batch.map(async name => {
+      const absolute = join(path, name);
+      try { return { absolute, info: await lstat(absolute) }; }
+      catch { return null; }
+    }));
+    for (const item of inspected) {
+      if (!item || item.info.isSymbolicLink()) continue;
+      if (item.info.isFile()) total += item.info.size;
+      else if (item.info.isDirectory()) total += await directorySize(item.absolute);
+    }
+  }
+  return total;
+}
+
+export async function fileUsage(relative = '') {
+  const path = await checked(relative, false);
+  await mkdir(path, { recursive: true, mode: 0o700 });
+  return await directorySize(path);
+}
+
 async function recursiveFileEntries(path, prefix = '', output = [], limits = { count: 0, max: 10000 }) {
   if (limits.count >= limits.max) return output;
   let names = [];
@@ -217,16 +246,25 @@ export async function createFolder(relative) {
   invalidateAllFilesCache();
 }
 
-export async function uploadFile(relative, req) {
+export async function uploadFile(relative, req, options = {}) {
   const segments = parts(relative);
   if (!segments.length || (segments.length <= 2 && segments[0] === ATTACHED_ROOT)) throw Object.assign(new Error('Enter a file name inside a writable location.'), { status: 400 });
   const path = await checked(relative, false);
+  const quotaBytes = Number(options.quotaBytes || 0);
+  const quotaRoot = String(options.quotaRoot || '');
+  const usedBefore = quotaBytes > 0 && quotaRoot ? await fileUsage(quotaRoot) : 0;
+  if (quotaBytes > 0 && usedBefore >= quotaBytes) {
+    throw Object.assign(new Error('Your LightNAS file storage quota is full.'), { status: 413 });
+  }
   const file = await open(path, 'wx', 0o600);
   let size = 0;
   try {
     await pipeline(req, new Transform({ transform(chunk, encoding, callback) {
       size += chunk.length;
-      callback(MAX_UPLOAD > 0 && size > MAX_UPLOAD ? Object.assign(new Error('File exceeds the configured upload limit.'), { status: 413 }) : null, chunk);
+      let error = null;
+      if (MAX_UPLOAD > 0 && size > MAX_UPLOAD) error = Object.assign(new Error('File exceeds the configured upload limit.'), { status: 413 });
+      else if (quotaBytes > 0 && usedBefore + size > quotaBytes) error = Object.assign(new Error('Upload would exceed your LightNAS file storage quota.'), { status: 413 });
+      callback(error, chunk);
     } }), file.createWriteStream());
   } catch (error) {
     await unlink(path).catch(() => {});
