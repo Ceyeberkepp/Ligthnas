@@ -1867,26 +1867,16 @@ function moduleView(view) {
           container.catalogId === app.id || container.name === `lightnas-app-${app.id}`
         );
         const searchText = `${app.name} ${app.category} ${app.description} ${app.image} ${app.source || ''}`.toLowerCase();
-        const instanceList = instances.length ? `<div class="app-instance-list">${instances.map((instance, index) => {
+        const instanceList = instances.length ? `<div class="app-instance-list">${instances.map(instance => {
           const instanceName = instance.instanceName || (instance.name === `lightnas-app-${app.id}` ? 'default' : instance.name.replace(`lightnas-app-${app.id}-`, ''));
           const hostPort = Number(instance.webPort || (instanceName === 'default' ? app.port : 0));
-          const appUrl = hostPort ? `http://${location.hostname}:${hostPort}/` : '';
-          const running = instance.state === 'running';
           return `<section class="app-instance-row">
             <div class="app-instance-summary"><b>${escapeHtml(instanceName)}</b><span class="muted">${escapeHtml(instance.status || instance.state)} · IP ${escapeHtml(instance.ip || 'not assigned')}${hostPort ? ` · Port ${hostPort}` : ''}</span></div>
-            <div class="head-actions">
-              ${running && appUrl ? `<a class="primary" href="${escapeHtml(appUrl)}" target="_blank" rel="noopener">Open</a>` : ''}
-              ${running ? `<button class="secondary" type="button" data-app-terminal="${escapeHtml(instance.name)}" data-app-name="${escapeHtml(app.name)} · ${escapeHtml(instanceName)}">Terminal</button>` : ''}
-              <button class="secondary" data-app-action="${running ? 'stop' : 'start'}" data-app-id="${app.id}" data-app-instance="${escapeHtml(instanceName)}" data-app-host-port="${hostPort}">${running ? 'Stop' : 'Start'}</button>
-              <button class="secondary" type="button" data-app-edit="${app.id}" data-app-container="${escapeHtml(instance.name)}" data-app-instance="${escapeHtml(instanceName)}">Edit</button>
-              <button class="secondary" data-app-action="restart" data-app-id="${app.id}" data-app-instance="${escapeHtml(instanceName)}" data-app-host-port="${hostPort}">Restart</button>
-              <button class="secondary" data-app-action="remove" data-app-id="${app.id}" data-app-instance="${escapeHtml(instanceName)}" data-app-host-port="${hostPort}">Remove</button>
-            </div>
           </section>`;
         }).join('')}</div>` : '';
         const installControl = app.community
           ? `<button class="secondary" type="button" disabled title="Compose installer integration is required before this community app can be deployed safely.">Community package</button>`
-          : `<button class="primary" data-install="${app.id}" data-instance-count="${instances.length}">${instances.length ? 'Install another instance' : 'Install app'}</button>`;
+          : `<button class="primary" data-install="${app.id}" data-instance-count="${instances.length}">Install</button>`;
         return `<article class="panel app-card" data-app-card data-category="${escapeHtml(app.category)}" data-search="${escapeHtml(searchText)}"><span class="eyebrow">${escapeHtml(app.category)}</span><h2>${escapeHtml(app.name)}</h2><p class="muted">${escapeHtml(app.description)}</p><p class="muted app-source">${escapeHtml(app.source || 'Open source')}${app.image ? ` · ${escapeHtml(app.image)}` : ''}${app.port ? ` · Default port ${app.port}` : ''}</p>${instances.length ? `<p class="muted"><b>${instances.length}</b> installed instance${instances.length === 1 ? '' : 's'}</p>` : ''}${instanceList}<div class="head-actions app-install-actions">${installControl}</div></article>`;
       }).join('') || (state.builtinCatalog === null ? '<div class="empty"><p>Loading built-in catalog…</p></div>' : '<div class="empty"><p>No apps match this filter.</p></div>')}</div>
       ${more ? `<div class="app-catalog-more"><button class="secondary" type="button" data-app-more>Show ${Math.min(72, more)} more</button><span class="muted">Showing ${visibleApps.length} of ${filteredApps.length} matching apps</span></div>` : filteredApps.length ? `<p class="muted app-catalog-count">Showing ${filteredApps.length} matching app${filteredApps.length === 1 ? '' : 's'}.</p>` : ''}
