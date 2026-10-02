@@ -76,6 +76,26 @@ store.state.security.apiTokens ||= [];
 store.state.security.webhooks ||= [];
 store.state.security.identityProviders ||= [];
 
+// Backward-compatible permission migration: managing a private library has
+// always implied being able to view it. Persist the new explicit view scope so
+// older users/groups render consistently in the permissions UI.
+let privateFilePermissionMigrated = false;
+for (const user of store.state.users) {
+  user.permissions ||= [];
+  if (user.permissions.includes('files.own') && !user.permissions.includes('files.view.own')) {
+    user.permissions.push('files.view.own');
+    privateFilePermissionMigrated = true;
+  }
+}
+for (const group of store.state.groups) {
+  group.permissions ||= [];
+  if (group.permissions.includes('files.own') && !group.permissions.includes('files.view.own')) {
+    group.permissions.push('files.view.own');
+    privateFilePermissionMigrated = true;
+  }
+}
+if (privateFilePermissionMigrated) await store.save();
+
 queueMicrotask(async () => {
   if (!store.state.shares?.length) return;
   try {
