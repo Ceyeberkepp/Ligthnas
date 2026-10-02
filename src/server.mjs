@@ -471,7 +471,7 @@ queueMicrotask(() => reconcilePrivateNatPublications().catch(() => null));
 
 export const PERMISSIONS = Object.freeze([
   'overview.view',
-  'files.own', 'files.read', 'files.write', 'files.download', 'files.delete', 'media.convert',
+  'files.view.own', 'files.own', 'files.read', 'files.write', 'files.download', 'files.delete', 'media.convert',
   'storage.view', 'storage.manage', 'pools.view', 'shares.view', 'shares.manage',
   'apps.view', 'apps.manage', 'containers.view', 'containers.manage', 'vms.view', 'vms.manage',
   'network.view', 'network.manage', 'firewall.view', 'firewall.manage', 'integrations.view', 'integrations.manage',
@@ -479,7 +479,7 @@ export const PERMISSIONS = Object.freeze([
   'monitoring.view', 'capabilities.view', 'system.view', 'system.shell',
   'users.manage', 'smtp.manage', 'settings.manage', 'admin.view'
 ]);
-const DEFAULT_USER_PERMISSIONS = Object.freeze(['files.own']);
+const DEFAULT_USER_PERMISSIONS = Object.freeze(['files.view.own', 'files.own']);
 const DEFAULT_USER_STORAGE_QUOTA_BYTES = 5 * 1024 * 1024 * 1024;
 
 store.setActivityListener(async event => {
@@ -630,7 +630,7 @@ function privateFileScope(context, globalPermissions = []) {
   // A signed-in local user with files.own is always confined to their own
   // library, even if another file permission is added later. This prevents
   // accidental cross-user visibility through an overly broad permission set.
-  if (!context.apiToken && context.permissions.includes('files.own')) return `Users/${context.username}`;
+  if (!context.apiToken && (context.permissions.includes('files.view.own') || context.permissions.includes('files.own'))) return `Users/${context.username}`;
   if (globalPermissions.some(permission => context.permissions.includes(permission))) return '';
   return null;
 }
@@ -1246,6 +1246,11 @@ async function api(req, res, url) {
       totpEnabled: false
     };
     store.state.users.push(user);
+    // Initialize the user's private library immediately so their first visit
+    // to Files & media never fails because Users/<username> does not exist yet.
+    await Promise.all(['Documents','Photos','Videos','Audio'].map(folder =>
+      createFolder(`Users/${input.username}/${folder}`).catch(() => null)
+    ));
     applyUserGroups(input.username, input.groups);
     store.addActivity('user', `User ${input.username} was created.`);
     await store.save();
@@ -1461,12 +1466,12 @@ async function api(req, res, url) {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/media') {
-    if (!requireAnyPermission(res, permissions, ['files.own', 'files.read'])) return;
+    if (!requireAnyPermission(res, permissions, ['files.view.own', 'files.own', 'files.read'])) return;
     return send(res, 200, { converterAvailable: await mediaAvailable(), formats: ['mp4', 'webm', 'mp3', 'jpg', 'png', 'webp'] });
   }
   if (req.method === 'POST' && url.pathname === '/api/media/convert') {
     if (!requirePermission(res, permissions, 'media.convert')) return;
-    if (!requireAnyPermission(res, permissions, ['files.own', 'files.read'])) return;
+    if (!requireAnyPermission(res, permissions, ['files.view.own', 'files.own', 'files.read'])) return;
     const input = await bodyJson(req);
     const source = scopedFilePath(context, input.path, ['files.read']);
     if (source === null) return send(res, 403, { error: 'File access is required.' });
@@ -2189,7 +2194,7 @@ async function api(req, res, url) {
       return send(res, 403, { error: 'Private user libraries are protected. Open them from the password-protected Users area.' });
     }
     if (req.method === 'GET') {
-      if (!requireAnyPermission(res, permissions, ['files.own', 'files.read'])) return;
+      if (!requireAnyPermission(res, permissions, ['files.view.own', 'files.own', 'files.read'])) return;
       const scope = privateFileScope(context, ['files.read']);
       if (scope === null) return send(res, 403, { error: 'File access is required.' });
       if (!requestedPath && url.searchParams.get('all') === '1') {
@@ -2224,7 +2229,7 @@ async function api(req, res, url) {
     }
   }
   if (req.method === 'GET' && url.pathname === '/api/files/quota') {
-    if (!requireAnyPermission(res, permissions, ['files.own', 'files.read'])) return;
+    if (!requireAnyPermission(res, permissions, ['files.view.own', 'files.own', 'files.read'])) return;
     const scope = privateFileScope(context, ['files.read']);
     if (!scope) return send(res, 200, { scoped: false, quotaBytes: null, usedBytes: null, remainingBytes: null });
     const quotaBytes = Number(account?.storageQuotaBytes) > 0 ? Number(account.storageQuotaBytes) : DEFAULT_USER_STORAGE_QUOTA_BYTES;
@@ -2233,7 +2238,7 @@ async function api(req, res, url) {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/files/thumbnail') {
-    if (!requireAnyPermission(res, permissions, ['files.own', 'files.read'])) return;
+    if (!requireAnyPermission(res, permissions, ['files.view.own', 'files.own', 'files.read'])) return;
     const path = scopedFilePath(context, url.searchParams.get('path') || '', ['files.read']);
     if (path === null) return send(res, 403, { error: 'File access is required.' });
     const thumbnail = await thumbnailFor(path, { preview: url.searchParams.get('preview') === '1' });
@@ -2242,7 +2247,7 @@ async function api(req, res, url) {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/files/archive') {
-    if (!requireAnyPermission(res, permissions, ['files.own', 'files.download', 'files.read'])) return;
+    if (!requireAnyPermission(res, permissions, ['files.view.own', 'files.own', 'files.download', 'files.read'])) return;
     const requested = url.searchParams.get('path') || '';
     const relative = scopedFilePath(context, requested, ['files.download', 'files.read']);
     if (relative === null) return send(res, 403, { error: 'File download access is required.' });
@@ -2268,7 +2273,7 @@ async function api(req, res, url) {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/files/video-preview') {
-    if (!requireAnyPermission(res, permissions, ['files.own', 'files.read'])) return;
+    if (!requireAnyPermission(res, permissions, ['files.view.own', 'files.own', 'files.read'])) return;
     const relative = scopedFilePath(context, url.searchParams.get('path') || '', ['files.read']);
     if (relative === null) return send(res, 403, { error: 'File access is required.' });
     const filename = relative.split('/').pop() || 'video';
@@ -2297,7 +2302,7 @@ async function api(req, res, url) {
     return ffmpeg.stdout.pipe(res);
   }
   if (req.method === 'GET' && url.pathname === '/api/files/download') {
-    if (!requireAnyPermission(res, permissions, ['files.own', 'files.download', 'files.read'])) return;
+    if (!requireAnyPermission(res, permissions, ['files.view.own', 'files.own', 'files.download', 'files.read'])) return;
     const requested = url.searchParams.get('path') || '';
     const path = scopedFilePath(context, requested, ['files.download', 'files.read']);
     if (path === null) return send(res, 403, { error: 'File download access is required.' });
