@@ -2716,20 +2716,40 @@ def nested_libvirt_repair() -> dict:
     if changed:
         config.write_text(updated, encoding="utf-8")
 
-    if available("systemctl") and changed:
-        for unit in ("virtqemud.service", "virtqemud.socket", "libvirtd.service", "libvirtd.socket"):
+    if available("systemctl"):
+        subprocess.run(
+            ["systemctl", "daemon-reload"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=30,
+            check=False,
+        )
+        # Debian/Ubuntu may expose either monolithic libvirtd or split
+        # virtqemud sockets. Start whichever units exist. Do this even when the
+        # qemu.conf content was already correct so a stopped libvirt daemon is
+        # recovered by the same lightweight repair.
+        for unit in ("virtqemud.socket", "libvirtd.socket", "virtqemud.service", "libvirtd.service"):
             subprocess.run(
-                ["systemctl", "try-restart", unit],
+                ["systemctl", "enable", "--now", unit],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 timeout=30,
                 check=False,
             )
+        if changed:
+            for unit in ("virtqemud.service", "libvirtd.service"):
+                subprocess.run(
+                    ["systemctl", "try-restart", unit],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=30,
+                    check=False,
+                )
 
     return {
         "changed": changed,
         "nested": True,
-        "detail": "Nested libvirt ownership compatibility is active.",
+        "detail": "Nested libvirt ownership compatibility is active and the VM service was started.",
     }
 
 
