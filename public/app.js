@@ -420,7 +420,7 @@ function homeView() {
     : state.overviewMetric === 'memory' ? overviewChart('Memory usage', `${system.memory.usedPercent}`, '%', state.metricHistory.memory, 100, `${bytes(system.memory.usedBytes)} used · ${bytes(system.memory.totalBytes)} total · ${bytes(system.memory.freeBytes)} free`)
     : state.overviewMetric === 'storage' ? overviewChart('Storage usage', `${storagePercent}`, '%', state.metricHistory.storage, 100, `${bytes(used)} used · ${bytes(total)} total · ${bytes(available)} free`)
     : overviewChart('CPU usage', `${system.cpu.loadPercent}`, '%', state.metricHistory.cpu, 100, `${system.cpu.cores} logical CPUs · load ${loadAverage[0]} · ${system.cpu.model || 'CPU model unavailable'}`);
-  return `${pageHead('Overview', 'Live system health and storage at a glance.', '<button class="secondary" data-action="refresh">Refresh</button>')}
+  return `${pageHead('Overview', 'Live system health and storage at a glance.', '<button class="secondary refresh-icon-button" data-action="refresh" aria-label="Refresh" title="Refresh">↻</button>')}
     <section class="node-overview-grid">
       <article class="panel node-summary-card"><div class="panel-head"><div><span class="eyebrow">${escapeHtml(appliance.deviceName)}</span><h2>System status</h2></div><span class="volume-state writable">ONLINE</span></div>
         <div class="node-usage-row"><span>CPU usage</span><div class="track"><span style="width:${system.cpu.loadPercent}%"></span></div><b>${system.cpu.loadPercent}% of ${system.cpu.cores} CPU(s)</b></div>
@@ -671,7 +671,7 @@ function hypervisorView() {
         <div class="hv-dashboard">
           <header class="hv-page-title">
             <div><h1>Dashboard</h1><p>Overview of your virtualization infrastructure</p></div>
-            <div class="hv-page-actions"><span class="hv-updated">Host: ${escapeHtml(nodeName)} · ${escapeHtml(managementIp)}</span><button class="secondary compact" data-action="refresh-runtime">Refresh</button></div>
+            <div class="hv-page-actions"><span class="hv-updated">Host: ${escapeHtml(nodeName)} · ${escapeHtml(managementIp)}</span><button class="secondary compact refresh-icon-button" data-action="refresh-runtime" aria-label="Refresh" title="Refresh">↻</button></div>
           </header>
 
           <section class="hv-status-grid">
@@ -765,7 +765,7 @@ function storageAddMenuHeader() {
 
 function storageView() {
   const spaces = Array.isArray(state.spaces) ? state.spaces : [];
-  const actions = `<div class="head-actions"><button class="secondary" type="button" data-storage-refresh>Refresh</button><button class="secondary" data-action="refresh-storage">Rescan drives</button><button class="primary" data-view-link="pools">Manage storage</button>${storageAddMenuHeader()}</div>`;
+  const actions = `<div class="head-actions"><button class="secondary refresh-icon-button" type="button" data-storage-refresh aria-label="Refresh" title="Refresh">↻</button><button class="secondary refresh-icon-button" data-action="refresh-storage" aria-label="Refresh" title="Refresh">↻</button><button class="primary" data-view-link="pools">Manage storage</button>${storageAddMenuHeader()}</div>`;
   return `${pageHead('Storage', 'LightNAS storage pools, capacity and content libraries.', actions)}
     <div id="storage-manager"></div>
     ${spaces.length ? `<section class="storage-spaces-section"><div class="section-heading"><div><span class="eyebrow">FILE STORAGE</span><h2>LightNAS storage spaces</h2></div></div><div class="storage-list">${spaces.map(space => `<article class="storage-row"><div><h3>${escapeHtml(space.label)}</h3><p>Spaces/${escapeHtml(space.name)}</p></div><button class="secondary" data-open-space="${escapeHtml(space.name)}">Open</button></article>`).join('')}</div></section>` : ''}`;
@@ -779,7 +779,7 @@ function poolsView() {
   const availableSources = storage.availableSources || [];
   const poolOptions = [...(zfs.pools || []), ...(zfs.datasets || []).filter(item => !(zfs.pools || []).some(pool => pool.name === item.name))];
   const deviceCount = disks.length + availableSources.length;
-  return `${pageHead('Pools & datasets', 'Manage LightNAS storage pools, volumes and ZFS datasets from one place.', '<div class="head-actions"><button class="secondary" data-action="refresh-storage">Rescan drives</button><button class="secondary" data-view-link="storage">Storage inventory</button><button class="primary" type="button" data-create-storage>+ Add storage</button></div>')}
+  return `${pageHead('Pools & datasets', 'Manage LightNAS storage pools, volumes and ZFS datasets from one place.', '<div class="head-actions"><button class="secondary refresh-icon-button" data-action="refresh-storage" aria-label="Refresh" title="Refresh">↻</button><button class="secondary" data-view-link="storage">Storage inventory</button><button class="primary" type="button" data-create-storage>+ Add storage</button></div>')}
     <section class="pool-summary-grid">
       <article class="panel pool-summary"><span class="eyebrow">STORAGE POOLS</span><strong>${configuredPools.length}</strong><p>${configuredPools.length ? 'available to LightNAS' : 'inventory is still empty'}</p></article>
       <article class="panel pool-summary"><span class="eyebrow">DEVICES & VOLUMES</span><strong>${deviceCount}</strong><p>${deviceCount ? 'detected by the appliance' : 'none exposed by this host'}</p></article>
@@ -1223,7 +1223,7 @@ function containersView() {
         }).join('')}</div>`
       : '<div class="empty compact-empty"><p>No App Store containers are installed.</p></div>';
 
-  return `${pageHead('Containers', 'Create and manage native system containers and App Store application containers.', '<div class="head-actions"><button class="secondary" data-action="refresh-runtime">Refresh</button><button class="primary" data-action="create-container">+ Create system container</button></div>')}
+  return `${pageHead('Containers', 'Create and manage native system containers and App Store application containers.', '<div class="head-actions"><button class="secondary refresh-icon-button" data-action="refresh-runtime" aria-label="Refresh" title="Refresh">↻</button><button class="primary" data-action="create-container">+ Create system container</button></div>')}
     ${runtimeBanner('containers')}
     ${runtimeResourceSummary([...containers, ...appContainers], 'containers')}
     ${runtime?.available && runtime?.enabled && !ready ? '<div class="module-hero"><h2>Container resources needed</h2><p>LightNAS needs a usable container image and network before a new system container can be created.</p></div>' : ''}
@@ -1249,7 +1249,7 @@ function vmsView() {
   <button class="secondary danger-button" type="button" data-vm-action="delete" data-vm-id="${escapeHtml(item.id || item.name)}">Delete</button>
 </div></article>`).join('')}</div>`
     : '<div class="empty compact-empty"><p>No local virtual machines are visible.</p></div>';
-  return `${pageHead('Virtual machines', 'Create, monitor and manage QEMU/libvirt virtual machines.', '<div class="head-actions"><button class="secondary" data-action="refresh-runtime">Refresh</button><button class="primary" data-action="create-vm">+ Create VM</button></div>')}
+  return `${pageHead('Virtual machines', 'Create, monitor and manage QEMU/libvirt virtual machines.', '<div class="head-actions"><button class="secondary refresh-icon-button" data-action="refresh-runtime" aria-label="Refresh" title="Refresh">↻</button><button class="primary" data-action="create-vm">+ Create VM</button></div>')}
     ${runtimeBanner('virtualization')}
     ${runtimeResourceSummary(machines, 'virtual machines')}
     ${runtime?.warning ? `<div class="module-note"><b>Virtualization note:</b> ${escapeHtml(runtime.warning)}</div>` : ''}
@@ -1385,11 +1385,11 @@ function filesView() {
 
   const quota = state.fileQuota?.scoped ? state.fileQuota : null;
   const quotaPercent = quota?.quotaBytes ? Math.min(100, Math.round((quota.usedBytes / quota.quotaBytes) * 100)) : 0;
-  return `<section class="files-page ${state.fileView === 'gallery' ? 'photo-mode' : 'grid-mode'}">${pageHead('Files & media', 'Browse and manage the actual files stored in LightNAS.', '<button class="secondary" data-action="refresh-files">Refresh</button>')}
+  return `<section class="files-page ${state.fileView === 'gallery' ? 'photo-mode' : 'grid-mode'}">${pageHead('Files & media', 'Browse and manage the actual files stored in LightNAS.', '<button class="secondary refresh-icon-button" data-action="refresh-files" aria-label="Refresh" title="Refresh">↻</button>')}
     ${quota ? `<section class="panel file-quota-panel"><div class="panel-head"><div><span class="eyebrow">MY STORAGE</span><h2>${bytes(quota.usedBytes)} of ${bytes(quota.quotaBytes)}</h2></div><strong>${quotaPercent}%</strong></div><div class="track"><span style="width:${quotaPercent}%"></span></div><p class="muted">${bytes(quota.remainingBytes)} remaining in your private file library.</p></section>` : ''}
     <section class="desktop-files-settings-panel ${state.filesSettingsOpen ? '' : 'hidden'}">
       <article class="panel files-settings-card">
-        <div><span class="eyebrow">FILES & MEDIA SETTINGS</span><h2>Library settings</h2><p class="muted">Manage phone library sync and desktop file display preferences.</p></div>
+        <div class="section-heading"><div><span class="eyebrow">FILES & MEDIA SETTINGS</span><h2>Library settings</h2><p class="muted">Manage phone library sync and desktop file display preferences.</p></div><button class="secondary" type="button" data-files-settings-close>Back to files</button></div>
         <div class="files-settings-grid">
           <div class="files-setting-box"><b>Desktop view</b><p class="muted">Choose List, Grid, or Photos view on desktop.</p><div class="head-actions"><button class="secondary" type="button" data-file-view="list">☷ List</button><button class="secondary" type="button" data-file-view="grid">▦ Grid</button><button class="secondary" type="button" data-file-view="gallery">▦ Photos</button></div></div>
           ${state.overview.appliance.role === 'administrator' && state.overview.appliance.features?.phoneSync !== false ? '<div class="files-setting-box"><b>Phone library sync</b><p class="muted">Automatically route phone photos to Photos and phone videos to Videos.</p><button class="primary phone-sync-button" type="button" data-phone-sync>Configure phone sync</button></div>' : ''}
@@ -1426,7 +1426,7 @@ function filesView() {
     ${canManageOwnFiles ? '<div class="file-drop-zone" data-file-drop tabindex="0"><b>Drop files here</b><span>Multiple files and ZIP archives are supported. Use “Upload folder” to preserve a whole folder tree.</span></div>' : '<div class="module-note"><b>View only.</b> You can browse and preview your private files. Upload, create, and delete actions are disabled for this account.</div>'}
     <p class="muted">${allFiles ? 'All files shows only your Documents, Photos, Videos, and Audio libraries.' : 'Open folders normally or switch back to All files to see all four libraries together.'} ZIP and other file types are accepted, uploads have visible progress.${quota ? ` Your account can store up to ${bytes(quota.quotaBytes)}.` : ' Administrators are limited only by available storage unless a host upload limit is configured.'}</p>
     ${state.fileTruncated && allFiles ? '<div class="module-note">Showing the newest 10,000 files. Open a category or folder to browse beyond that safety limit.</div>' : ''}
-    <div class="${state.fileView === 'gallery' ? 'file-photo-gallery' : state.fileView === 'grid' ? 'file-browser-grid' : 'storage-list'}">${state.fileError ? `<div class="empty error-state"><p><b>Files could not be loaded.</b></p><p>${escapeHtml(state.fileError)}</p><button class="secondary" data-action="refresh-files">Try again</button></div>` : entries === null ? '<div class="empty"><p>Loading files…</p></div>' : entries.length ? entries.map(item).join('') : `<div class="empty"><p>${allFiles ? 'No files have been uploaded yet.' : 'This folder is empty.'}</p></div>`}</div>
+    <div class="${state.fileView === 'gallery' ? 'file-photo-gallery' : state.fileView === 'grid' ? 'file-browser-grid' : 'storage-list'}">${state.fileError ? `<div class="empty error-state"><p><b>Files could not be loaded.</b></p><p>${escapeHtml(state.fileError)}</p><button class="secondary refresh-icon-button" data-action="refresh-files" aria-label="Try again" title="Try again">↻</button></div>` : entries === null ? '<div class="empty"><p>Loading files…</p></div>' : entries.length ? entries.map(item).join('') : `<div class="empty"><p>${allFiles ? 'No files have been uploaded yet.' : 'This folder is empty.'}</p></div>`}</div>
     </div>
     <button class="secondary mobile-files-settings-button" type="button" data-mobile-files-settings aria-label="Files & media settings">⚙ Settings</button>
   </section>`;
@@ -1673,7 +1673,7 @@ function monitoringView() {
   const networkOut = seriesStats(state.metricHistory.networkOut);
   const analyticsEnabled = state.overview.appliance.features?.monitoringAnalytics !== false;
   const activity = state.overview.activity || [];
-  return `${pageHead('Monitoring & analytics', 'Live performance graphs, session analytics, and recent system activity.', '<button class="secondary" data-action="refresh">Refresh now</button>')}
+  return `${pageHead('Monitoring & analytics', 'Live performance graphs, session analytics, and recent system activity.', '<button class="secondary refresh-icon-button" data-action="refresh" aria-label="Refresh" title="Refresh">↻</button>')}
     <section class="monitoring-live-grid">
       ${overviewChart('CPU usage', `${system.cpu?.loadPercent || 0}`, '%', state.metricHistory.cpu)}
       ${overviewChart('Memory usage', `${system.memory?.usedPercent || 0}`, '%', state.metricHistory.memory)}
@@ -1988,7 +1988,7 @@ function moduleView(view) {
         ? `<p class="muted app-catalog-status">Community catalog retrying automatically: ${escapeHtml(state.communityCatalogError)}</p>`
         : '';
 
-    return `${pageHead('App Store', 'Install curated open-source applications directly from LightNAS.', '<button class="secondary" data-action="refresh-runtime">Refresh apps</button>')}
+    return `${pageHead('App Store', 'Install curated open-source applications directly from LightNAS.', '<button class="secondary refresh-icon-button" data-action="refresh-runtime" aria-label="Refresh" title="Refresh">↻</button>')}
       ${runtimeBanner('docker')}
       <section class="app-catalog-toolbar panel">
         <div><span class="eyebrow">LIGHTNAS APPLICATION CATALOG</span><h2>${allApps.length} one-click apps</h2><p class="muted">Built-in apps appear immediately. Community apps load automatically from the local cache and refresh in the background.</p>${catalogStatus}</div>
@@ -2015,7 +2015,7 @@ function moduleView(view) {
       ${more ? `<div class="app-catalog-more"><button class="secondary" type="button" data-app-more>Show ${Math.min(72, more)} more</button><span class="muted">Showing ${visibleApps.length} of ${filteredApps.length} matching apps</span></div>` : filteredApps.length ? `<p class="muted app-catalog-count">Showing ${filteredApps.length} matching app${filteredApps.length === 1 ? '' : 's'}.</p>` : ''}
       <section class="module-hero"><h2>Managed app hosting</h2><p>LightNAS downloads each app, creates its persistent storage, publishes its web service on the LightNAS LAN address, starts it after reboot, and verifies that the service is reachable. No external hypervisor configuration or manual port forwarding is required for managed catalog apps. ${docker?.available && docker?.enabled ? 'The integrated App Store engine is ready.' : 'The catalog stays available while the App Store engine finishes starting.'}</p></section>`;
   }
-  return `${pageHead('Monitoring', 'Current readings from this host.', '<button class="secondary" data-action="refresh">Refresh readings</button>')}<section class="metric-grid">${metric('CPU load', `${state.overview.system.cpu.loadPercent}%`, state.overview.system.cpu.loadPercent, state.overview.system.cpu.model)}${metric('Memory', bytes(state.overview.system.memory.usedBytes), state.overview.system.memory.usedPercent, `${bytes(state.overview.system.memory.freeBytes)} free`)}${metric('Uptime', duration(state.overview.system.uptimeSeconds), 0, state.overview.system.kernel)}${metric('Mounts', state.overview.filesystems.length, 0, 'Currently visible')}</section><h2>Activity</h2><div class="activity-list">${state.overview.activity.map(item => `<div class="activity"><div><b>${escapeHtml(item.message)}</b><time>${relativeTime(item.timestamp)}</time></div></div>`).join('') || '<p>No activity recorded.</p>'}</div>`;
+  return `${pageHead('Monitoring', 'Current readings from this host.', '<button class="secondary refresh-icon-button" data-action="refresh" aria-label="Refresh" title="Refresh">↻</button>')}<section class="metric-grid">${metric('CPU load', `${state.overview.system.cpu.loadPercent}%`, state.overview.system.cpu.loadPercent, state.overview.system.cpu.model)}${metric('Memory', bytes(state.overview.system.memory.usedBytes), state.overview.system.memory.usedPercent, `${bytes(state.overview.system.memory.freeBytes)} free`)}${metric('Uptime', duration(state.overview.system.uptimeSeconds), 0, state.overview.system.kernel)}${metric('Mounts', state.overview.filesystems.length, 0, 'Currently visible')}</section><h2>Activity</h2><div class="activity-list">${state.overview.activity.map(item => `<div class="activity"><div><b>${escapeHtml(item.message)}</b><time>${relativeTime(item.timestamp)}</time></div></div>`).join('') || '<p>No activity recorded.</p>'}</div>`;
 }
 
 async function loadNetwork() {
@@ -2026,7 +2026,7 @@ async function loadNetwork() {
 function networkView() {
   const info = state.network;
   const control = info?.control;
-  if (!info) return `${pageHead('Networking', 'Manage interfaces, bridges, VLANs, bonds, routes and DNS.', '<button class="secondary" data-action="refresh-network">Refresh</button>')}<div class="empty">Loading network inventory…</div>`;
+  if (!info) return `${pageHead('Networking', 'Manage interfaces, bridges, VLANs, bonds, routes and DNS.', '<button class="secondary refresh-icon-button" data-action="refresh-network" aria-label="Refresh" title="Refresh">↻</button>')}<div class="empty">Loading network inventory…</div>`;
 
   const defaultRoute = [...(info.routes || [])].filter(item => item.destination === 'default').sort((a, b) => (a.metric ?? 0) - (b.metric ?? 0))[0] || null;
   const bridge = control?.bridge || null;
@@ -2066,7 +2066,7 @@ function networkView() {
   const routes = (info.routes || []).filter(route => !/^docker|^veth|^tap|^tun/i.test(route.device || ''));
   const wifiDevices = devices.filter(item => item.type === 'wifi' && !['unavailable','unmanaged'].includes(item.state));
 
-  return `${pageHead('Networking', 'LightNAS host networking. Create configuration first, then explicitly activate changes that could affect management connectivity.', '<div class="head-actions"><button class="secondary" data-action="refresh-network">Refresh</button><button class="primary" data-network-add-bridge>+ Bridge</button><button class="secondary" data-network-add-vlan>+ VLAN</button><button class="secondary" data-network-add-bond>+ Bond</button><button class="secondary" data-network-add-route>+ Route</button></div>')}
+  return `${pageHead('Networking', 'LightNAS host networking. Create configuration first, then explicitly activate changes that could affect management connectivity.', '<div class="head-actions"><button class="secondary refresh-icon-button" data-action="refresh-network" aria-label="Refresh" title="Refresh">↻</button><button class="primary" data-network-add-bridge>+ Bridge</button><button class="secondary" data-network-add-vlan>+ VLAN</button><button class="secondary" data-network-add-bond>+ Bond</button><button class="secondary" data-network-add-route>+ Route</button></div>')}
     <section class="network-status-strip">
       <div><span>Manager</span><strong>${escapeHtml(control?.manager || 'Kernel')}</strong></div>
       <div><span>Connectivity</span><strong>${escapeHtml(control?.connectivity || 'unknown')}</strong></div>
@@ -2132,7 +2132,7 @@ function networkView() {
 
 function firewallView() {
   const firewall = state.network?.firewall;
-  return `${pageHead('Firewall', 'Manage the firewall on this LightNAS host.', '<div class="head-actions"><button class="secondary" data-action="refresh-network">Refresh</button><button class="primary" data-firewall-add>+ Rule</button></div>')}
+  return `${pageHead('Firewall', 'Manage the firewall on this LightNAS host.', '<div class="head-actions"><button class="secondary refresh-icon-button" data-action="refresh-network" aria-label="Refresh" title="Refresh">↻</button><button class="primary" data-firewall-add>+ Rule</button></div>')}
     <div class="module-hero"><h2>${escapeHtml(firewall?.status || 'Loading…')}</h2><p>Backend: ${escapeHtml(firewall?.backend || 'detecting')}. Rules here protect LightNAS itself and are applied locally.</p><div class="head-actions"><button class="secondary" data-firewall-toggle="enable">Enable</button><button class="secondary danger-button" data-firewall-toggle="disable">Disable</button></div></div>
     <h2>Rules</h2><div class="storage-list">${firewall?.rules?.map(item => `<article class="storage-row"><div><h3>${escapeHtml(item.action)} ${escapeHtml(item.target)}</h3><p>Source: ${escapeHtml(item.source)}</p></div><button class="secondary danger-button" data-firewall-delete="${item.number}">Delete</button></article>`).join('') || '<div class="empty">No numbered UFW rules visible.</div>'}</div>
     <h2>Visible nftables tables</h2><div class="storage-list">${firewall?.tables?.map(item => `<article class="storage-row">${escapeHtml(item)}</article>`).join('') || '<div class="empty">No nftables tables visible.</div>'}</div>`;
@@ -2172,7 +2172,7 @@ function integrationsView() {
       target:'smtp'
     }
   ];
-  return `${pageHead('Integrations', 'Connected runtimes, services, and LightNAS providers.', '<button class="secondary" data-action="refresh-runtime">Refresh</button>')}
+  return `${pageHead('Integrations', 'Connected runtimes, services, and LightNAS providers.', '<button class="secondary refresh-icon-button" data-action="refresh-runtime" aria-label="Refresh" title="Refresh">↻</button>')}
     <section class="integration-summary-grid">
       <article class="panel integration-summary"><span class="eyebrow">CONNECTED</span><strong>${integrations.filter(item => item.online).length}</strong><p>services currently ready</p></article>
       <article class="panel integration-summary"><span class="eyebrow">AVAILABLE</span><strong>${integrations.length}</strong><p>managed integration points</p></article>
@@ -2191,7 +2191,7 @@ function backupsView() {
 
   // Keep the LightVisor/hypervisor workspace unchanged. This redesign is NAS-only.
   if (window.LIGHTNAS_PRODUCT_MODE === 'hypervisor') {
-    return `${pageHead('Backups', 'Backup storage, restore activity and protection status.', '<div class="head-actions"><button class="secondary" data-action="refresh-storage">Refresh storage</button><button class="secondary" data-action="refresh-logs">Refresh activity</button></div>')}
+    return `${pageHead('Backups', 'Backup storage, restore activity and protection status.', '<div class="head-actions"><button class="secondary refresh-icon-button" data-action="refresh-storage" aria-label="Refresh storage" title="Refresh storage">↻</button><button class="secondary refresh-icon-button" data-action="refresh-logs" aria-label="Refresh activity" title="Refresh activity">↻</button></div>')}
       <section class="metric-grid">
         ${metric('Backup-capable pools', String(eligible.length), eligible.length ? 100 : 0, eligible.length ? 'Ready for backup content' : 'No pool currently advertises backup content')}
         ${metric('Recent backup events', String(activity.length), Math.min(100, activity.length * 10), 'Recorded in the LightNAS activity log')}
@@ -2252,7 +2252,7 @@ function analyticsView() {
   const successful = activity.filter(item => !/error|fail|warning/i.test(String(item.severity || ''))).length;
   const warnings = activity.filter(item => /warning/i.test(String(item.severity || ''))).length;
   const errors = activity.filter(item => /error|fail/i.test(String(item.severity || ''))).length;
-  return `${pageHead('Analytics', 'Operational analytics, capacity and recorded activity.', '<button class="secondary" data-action="refresh-logs">Refresh analytics</button>')}
+  return `${pageHead('Analytics', 'Operational analytics, capacity and recorded activity.', '<button class="secondary refresh-icon-button" data-action="refresh-logs" aria-label="Refresh" title="Refresh">↻</button>')}
     <section class="metric-grid">
       ${metric('Recorded operations', String(activity.length), activity.length ? 100 : 0, 'Persisted LightNAS activity events')}
       ${metric('Successful / informational', String(successful), activity.length ? Math.round((successful/activity.length)*100) : 0, 'Operations without warning or error severity')}
@@ -2298,7 +2298,7 @@ function renderLogsModal(dialog) {
 
 function logsView() {
   const logs = state.logs || [];
-  return `${pageHead('Logs', 'Persisted LightNAS activity and audit events.', '<button class="secondary" data-action="refresh-logs">Refresh logs</button>')}
+  return `${pageHead('Logs', 'Persisted LightNAS activity and audit events.', '<button class="secondary refresh-icon-button" data-action="refresh-logs" aria-label="Refresh" title="Refresh">↻</button>')}
     <section class="panel logs-panel"><div class="panel-head"><div><span class="eyebrow">AUDIT & ACTIVITY</span><h2>System activity log</h2></div><small>${logs.length} events loaded</small></div>
       <div class="logs-table">
         <div class="logs-head"><span>Time</span><span>Type</span><span>Severity</span><span>Message</span></div>
@@ -2629,7 +2629,7 @@ function bindViewActions() {
     if (button.disabled) return;
     const original = button.textContent;
     button.disabled = true;
-    button.textContent = 'Refreshing…';
+    button.textContent = '↻'; button.title = 'Refreshing…'; button.setAttribute('aria-label', 'Refreshing');
     try {
       await loadNetwork();
       toast('Network refreshed.');
@@ -2637,13 +2637,13 @@ function bindViewActions() {
       toast(error.message || 'Unable to refresh network.');
     } finally {
       const live = $('#content [data-action="refresh-network"]');
-      if (live) { live.disabled = false; live.textContent = original || 'Refresh'; }
+      if (live) { live.disabled = false; live.textContent = '↻'; live.title = 'Refresh'; live.setAttribute('aria-label', 'Refresh'); }
     }
   }));
   document.querySelectorAll('#content [data-action="refresh-runtime"]').forEach(button => button.addEventListener('click', async () => {
     const original = button.textContent;
     button.disabled = true;
-    button.textContent = 'Refreshing…';
+    button.textContent = '↻'; button.title = 'Refreshing…'; button.setAttribute('aria-label', 'Refreshing');
     try {
       if (state.view === 'apps') {
         await Promise.all([loadRuntimes(true), loadCommunityCatalog(true)]);
@@ -2656,7 +2656,7 @@ function bindViewActions() {
       toast(error.message);
     } finally {
       const live = $('#content [data-action="refresh-runtime"]');
-      if (live) { live.disabled = false; live.textContent = original || 'Refresh'; }
+      if (live) { live.disabled = false; live.textContent = '↻'; live.title = 'Refresh'; live.setAttribute('aria-label', 'Refresh'); }
     }
   }));
   $$('[data-community-install]', $('#content')).forEach(button => button.addEventListener('click', async () => {
@@ -3024,7 +3024,7 @@ function bindViewActions() {
     if (button.disabled) return;
     const original = button.textContent;
     button.disabled = true;
-    button.textContent = 'Refreshing…';
+    button.textContent = '↻'; button.title = 'Refreshing…'; button.setAttribute('aria-label', 'Refreshing');
     try {
       state.fileError = null;
       await loadFiles(true);
@@ -3036,13 +3036,13 @@ function bindViewActions() {
       const liveButton = $('#content [data-action="refresh-files"]');
       if (liveButton) {
         liveButton.disabled = false;
-        liveButton.textContent = original || 'Refresh';
+        liveButton.textContent = '↻'; liveButton.title = 'Refresh'; liveButton.setAttribute('aria-label', 'Refresh');
       }
     }
   }));
   $$('[data-action="refresh-storage"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     button.disabled = true;
-    button.textContent = 'Scanning…';
+    button.textContent = '↻'; button.title = 'Refreshing…'; button.setAttribute('aria-label', 'Refreshing');
     try {
       await request('/api/storage/scan');
       state.overview = await request('/api/overview');
@@ -3052,7 +3052,7 @@ function bindViewActions() {
     } catch (error) { toast(error.message); }
     finally {
       const liveButton = $('#content [data-action="refresh-storage"]');
-      if (liveButton) { liveButton.disabled = false; liveButton.textContent = 'Refresh'; }
+      if (liveButton) { liveButton.disabled = false; liveButton.textContent = '↻'; liveButton.title = 'Refresh'; liveButton.setAttribute('aria-label', 'Refresh'); }
     }
   }));
   $$('[data-file-view]', $('#content')).forEach(button => button.addEventListener('click', () => {
@@ -3162,7 +3162,11 @@ function bindViewActions() {
     render('files');
   });
   $('[data-files-settings-tab]', $('#content'))?.addEventListener('click', () => {
-    state.filesSettingsOpen = true;
+    state.filesSettingsOpen = !state.filesSettingsOpen;
+    render('files');
+  });
+  $('[data-files-settings-close]', $('#content'))?.addEventListener('click', () => {
+    state.filesSettingsOpen = false;
     render('files');
   });
   document.querySelectorAll('#content [data-folder]').forEach(button => button.addEventListener('click', () => { state.folder = button.dataset.folder; state.files = null; render('files'); }));
