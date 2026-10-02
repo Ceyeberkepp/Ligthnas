@@ -399,11 +399,6 @@ function looksLikeWindowsMedia(value) {
 
 async function showRuntimeWizard(kind) {
   const isContainer = kind === 'containers';
-  const loading = openProgressDialog(
-    isContainer ? 'Opening container wizard' : 'Opening VM wizard',
-    'Loading live storage, image, network, and runtime choices…',
-    { modal:false }
-  );
   let inventory;
   try {
     if (isContainer) {
@@ -411,13 +406,14 @@ async function showRuntimeWizard(kind) {
       window.LightNASContainerInventory = containers;
       inventory = { containers };
     } else {
-      inventory = window.LightNASRuntimeInventory || await dialogApi('/api/runtimes');
-      window.LightNASRuntimeInventory = inventory;
+      // Creation does not need Docker status or per-VM inspection. Use the
+      // small creation-options endpoint so clicking Create VM never waits on
+      // the full runtime inventory path.
+      inventory = await dialogApi('/api/vms/create-options');
+      window.LightNASVmCreateOptions = inventory;
     }
-    loading.succeed('Runtime choices loaded.');
   } catch (problem) {
-    loading.fail(problem.message || 'Runtime inventory could not be loaded.');
-    throw problem;
+    throw new Error(`Unable to open ${isContainer ? 'container' : 'VM'} wizard: ${problem.message || 'runtime choices could not be loaded.'}`);
   }
   const runtime = inventory?.[kind];
   if (!runtime?.available || !runtime?.enabled) throw new Error(runtime?.reason || `${isContainer ? 'Container' : 'VM'} runtime is unavailable.`);
@@ -1052,8 +1048,13 @@ document.addEventListener('click', async event => {
     event.stopImmediatePropagation();
     try { await showRuntimeWizard(createContainerButton ? 'containers' : 'virtualization'); }
     catch (problem) {
-      window.LightNASToast?.show?.(problem.message) || console.warn(problem.message);
-      if (!window.LightNASToast?.show && typeof window.toast === 'function') window.toast(problem.message);
+      const message = problem.message || 'Unable to open creation wizard.';
+      window.LightNASToast?.show?.(message);
+      if (typeof window.toast === 'function') window.toast(message);
+      else {
+        console.error(message);
+        window.alert(message);
+      }
     }
     return;
   }
