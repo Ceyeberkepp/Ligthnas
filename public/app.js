@@ -1,5 +1,5 @@
 if (window.LIGHTNAS_PRODUCT_MODE === 'hypervisor') document.body.classList.add('product-hypervisor');
-const state = { overview: null, view: 'home', uiMode: window.LIGHTNAS_PRODUCT_MODE === 'hypervisor' ? 'hypervisor' : 'nas', folder: '', files: null, fileError: null, filesSettingsOpen: false, aiMessages: [], logs: null, fileView: ['list','grid','gallery'].includes(localStorage.getItem('lightnas-file-view')) ? localStorage.getItem('lightnas-file-view') : 'grid', fileTruncated: false, overviewMetric: localStorage.getItem('lightnas-overview-metric') || 'cpu', lastNetworkSample: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, smtp: undefined, media: null, network: null, software: null, license: null, builtinCatalog: null, communityCatalog: null, communityCatalogLoading: false, communityCatalogError: null, appSearch: '', appCategory: '', appVisibleLimit: 72, backupJobs: null, selectedBackupJobId: null, metricHistory: { cpu: [], load: [], memory: [], storage: [], networkIn: [], networkOut: [] } };
+const state = { overview: null, view: 'home', uiMode: window.LIGHTNAS_PRODUCT_MODE === 'hypervisor' ? 'hypervisor' : 'nas', folder: '', files: null, fileError: null, filesSettingsOpen: false, aiMessages: [], logs: null, fileView: ['list','grid','gallery'].includes(localStorage.getItem('lightnas-file-view')) ? localStorage.getItem('lightnas-file-view') : 'grid', fileTruncated: false, overviewMetric: localStorage.getItem('lightnas-overview-metric') || 'cpu', lastNetworkSample: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, userAccess: null, smtp: undefined, media: null, network: null, software: null, license: null, builtinCatalog: null, communityCatalog: null, communityCatalogLoading: false, communityCatalogError: null, appSearch: '', appCategory: '', appVisibleLimit: 72, backupJobs: null, selectedBackupJobId: null, metricHistory: { cpu: [], load: [], memory: [], storage: [], networkIn: [], networkOut: [] } };
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
 const themeChoices = ['system', 'light', 'dark'];
@@ -809,33 +809,177 @@ async function loadSpaces() {
 }
 
 async function loadUsers() {
-  try { state.users = (await request('/api/users')).users; if (['users', 'permissions'].includes(state.view)) render(state.view); } catch (error) { toast(error.message); }
+  try {
+    const data = await request('/api/users');
+    state.users = data.users || [];
+    state.userAccess = { permissionOptions: data.permissionOptions || [], groups: data.groups || [] };
+    if (['users', 'permissions'].includes(state.view)) render(state.view);
+  } catch (error) { toast(error.message); }
+}
+
+function permissionLabel(value) {
+  return String(value || '').replaceAll('.', ' · ').replaceAll('_', ' ').replace(/\b\w/g, letter => letter.toUpperCase());
+}
+
+function userAccessCheckboxes(options, selected = [], name = 'permissions') {
+  const chosen = new Set(selected || []);
+  return `<div class="security-check-grid">${(options || []).map(value => `<label><input type="checkbox" name="${name}" value="${escapeHtml(value)}" ${chosen.has(value) ? 'checked' : ''}><span>${escapeHtml(permissionLabel(value))}</span></label>`).join('') || '<p class="muted">No access scopes are available.</p>'}</div>`;
+}
+
+function groupMembershipCheckboxes(groups, selected = []) {
+  const chosen = new Set((selected || []).map(group => typeof group === 'string' ? group : group.id));
+  return `<div class="security-check-grid">${(groups || []).map(group => `<label><input type="checkbox" name="groups" value="${escapeHtml(group.id)}" ${chosen.has(group.id) ? 'checked' : ''}><span>${escapeHtml(group.name)}</span></label>`).join('') || '<p class="muted">No groups have been created yet.</p>'}</div>`;
+}
+
+async function openUserManager(username) {
+  if (!state.userAccess) await loadUsers();
+  const user = (state.users || []).find(item => item.username === username);
+  if (!user) return toast('User is no longer available.');
+  const permissions = state.userAccess?.permissionOptions || [];
+  const groups = state.userAccess?.groups || [];
+
+  const dialog = document.createElement('dialog');
+  dialog.className = 'lightnas-dialog user-management-dialog';
+  dialog.innerHTML = `
+    <form class="dialog-body user-management-form">
+      <div class="dialog-head">
+        <div><span class="eyebrow">USER MANAGEMENT</span><h2>${escapeHtml(user.username)}</h2><p class="muted">Reset the password, change access, assign groups, disable the account, or delete it.</p></div>
+        <button class="dialog-close" type="button" data-user-manager-close aria-label="Close">×</button>
+      </div>
+
+      <section class="panel">
+        <h3>Account status</h3>
+        <label class="check-line"><input name="enabled" type="checkbox" ${user.disabled ? '' : 'checked'}> Account enabled</label>
+      </section>
+
+      <section class="panel">
+        <h3>Reset password</h3>
+        <div class="form-grid">
+          <label>New password<input name="newPassword" type="password" minlength="10" autocomplete="new-password" placeholder="At least 10 characters"></label>
+          <label>Administrator password<input name="currentPassword" type="password" autocomplete="current-password" required></label>
+        </div>
+        <button class="secondary" type="button" data-user-reset-password>Reset password</button>
+      </section>
+
+      <section class="panel">
+        <h3>Direct permissions</h3>
+        <p class="muted">These permissions apply directly to this account. Group permissions are added automatically.</p>
+        ${userAccessCheckboxes(permissions, user.permissions || [])}
+      </section>
+
+      <section class="panel">
+        <h3>Groups</h3>
+        <p class="muted">Add this account to one or more permission groups.</p>
+        ${groupMembershipCheckboxes(groups, user.groups || [])}
+      </section>
+
+      <div class="form-error" role="alert"></div>
+      <div class="dialog-actions">
+        <button class="secondary danger-button" type="button" data-user-delete>Delete user</button>
+        <span class="dialog-action-spacer"></span>
+        <button class="secondary" type="button" data-user-manager-close>Cancel</button>
+        <button class="primary" type="submit">Save changes</button>
+      </div>
+    </form>`;
+  document.body.append(dialog);
+
+  const form = dialog.querySelector('form');
+  const error = dialog.querySelector('.form-error');
+  const close = () => dialog.close();
+  dialog.querySelectorAll('[data-user-manager-close]').forEach(button => button.addEventListener('click', close));
+
+  dialog.querySelector('[data-user-reset-password]').addEventListener('click', async () => {
+    error.textContent = '';
+    const password = form.elements.newPassword.value;
+    const currentPassword = form.elements.currentPassword.value;
+    if (!password || password.length < 10) { error.textContent = 'Enter a new password of at least 10 characters.'; return; }
+    try {
+      await request(`/api/users/${encodeURIComponent(username)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ currentPassword, password })
+      });
+      form.elements.newPassword.value = '';
+      await loadUsers();
+      toast('Password reset and old sessions ended.');
+    } catch (problem) { error.textContent = problem.message; }
+  });
+
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    error.textContent = '';
+    const currentPassword = form.elements.currentPassword.value;
+    const selectedPermissions = [...form.querySelectorAll('input[name="permissions"]:checked')].map(input => input.value);
+    const selectedGroups = [...form.querySelectorAll('input[name="groups"]:checked')].map(input => input.value);
+    try {
+      await request(`/api/users/${encodeURIComponent(username)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          currentPassword,
+          disabled: !form.elements.enabled.checked,
+          permissions: selectedPermissions,
+          groups: selectedGroups
+        })
+      });
+      await loadUsers();
+      toast('User permissions and groups updated.');
+      close();
+    } catch (problem) { error.textContent = problem.message; }
+  });
+
+  dialog.querySelector('[data-user-delete]').addEventListener('click', async () => {
+    if (!confirm(`Delete user ${username}? This ends their sessions and removes their account.`)) return;
+    try {
+      await request(`/api/users/${encodeURIComponent(username)}`, { method: 'DELETE' });
+      await loadUsers();
+      toast('User deleted.');
+      close();
+    } catch (problem) { error.textContent = problem.message; }
+  });
+
+  dialog.addEventListener('close', () => dialog.remove(), { once: true });
+  dialog.showModal();
 }
 
 function usersView() {
   const owner = state.overview.appliance.username;
   const users = state.users || [];
+  const access = state.userAccess || { permissionOptions: [], groups: [] };
   const activeCount = users.filter(user => !user.disabled).length + 1;
-  return `${pageHead('Users', 'Create and manage local LightNAS accounts.', '<button class="primary" type="button" data-toggle-user-create>+ Add user</button>')}
+  return `${pageHead('Users', 'Create and fully manage local LightNAS accounts.', '<button class="primary" type="button" data-toggle-user-create>+ Add user</button>')}
     <section class="user-summary-grid">
       <article class="panel user-summary"><span class="eyebrow">OWNER</span><strong>${escapeHtml(owner)}</strong><p>Appliance administrator</p></article>
       <article class="panel user-summary"><span class="eyebrow">ACCOUNTS</span><strong>${users.length + 1}</strong><p>${activeCount} active</p></article>
-      <article class="panel user-summary"><span class="eyebrow">LOCAL ACCESS</span><strong>LightNAS</strong><p>Separate from Linux and SMB identities</p></article>
+      <article class="panel user-summary"><span class="eyebrow">GROUPS</span><strong>${access.groups.length}</strong><p>Permission groups</p></article>
     </section>
+
     <form id="user-form" class="panel user-create-card" hidden>
-      <div class="section-heading"><div><span class="eyebrow">NEW ACCOUNT</span><h2>Create local user</h2><p class="muted">Add a browser account, then use Permissions to choose what it can access.</p></div><button class="secondary" type="button" data-toggle-user-create>Cancel</button></div>
-      <div class="user-form-grid"><label>Username<input name="username" pattern="[a-zA-Z0-9._-]{3,32}" required placeholder="username"></label><label>Temporary password<input name="password" type="password" minlength="10" autocomplete="new-password" required placeholder="At least 10 characters"></label></div>
-      <div class="head-actions"><button class="primary" type="submit">Create user</button><button class="secondary" type="button" data-view-link="permissions">Configure permissions</button></div>
+      <div class="section-heading"><div><span class="eyebrow">NEW ACCOUNT</span><h2>Create local user</h2><p class="muted">Create the account and optionally assign direct permissions and groups now.</p></div><button class="secondary" type="button" data-toggle-user-create>Cancel</button></div>
+      <div class="user-form-grid">
+        <label>Username<input name="username" pattern="[a-zA-Z0-9._-]{3,32}" required placeholder="username"></label>
+        <label>Temporary password<input name="password" type="password" minlength="10" autocomplete="new-password" required placeholder="At least 10 characters"></label>
+      </div>
+      <details class="user-create-access">
+        <summary>Permissions and groups</summary>
+        <h4>Direct permissions</h4>
+        ${userAccessCheckboxes(access.permissionOptions, ['files.own'])}
+        <h4>Groups</h4>
+        ${groupMembershipCheckboxes(access.groups, [])}
+      </details>
+      <div class="head-actions"><button class="primary" type="submit">Create user</button><button class="secondary" type="button" data-view-link="permissions">Manage groups</button></div>
       <div class="form-error" role="alert"></div>
     </form>
+
     <section class="user-list-section">
-      <div class="section-heading"><div><span class="eyebrow">ACCOUNTS</span><h2>Local users</h2></div><small>${users.length + 1} total</small></div>
+      <div class="section-heading"><div><span class="eyebrow">ACCOUNTS</span><h2>Local users</h2><p class="muted">Use Manage user for password reset, permissions, groups, disable/enable, and deletion.</p></div><small>${users.length + 1} total</small></div>
       <div class="user-card-grid">
         <article class="panel user-card owner-card"><div class="user-card-avatar">${escapeHtml(owner[0]?.toUpperCase() || 'A')}</div><div class="user-card-copy"><div class="user-card-title"><h3>${escapeHtml(owner)}</h3><span class="user-status active">OWNER</span></div><p>Full appliance administration and security control.</p></div><button class="secondary" type="button" data-view-link="settings">Account settings</button></article>
         ${users.map(user => `<article class="panel user-card ${user.disabled ? 'disabled' : ''}">
           <div class="user-card-avatar">${escapeHtml(user.username[0]?.toUpperCase() || 'U')}</div>
-          <div class="user-card-copy"><div class="user-card-title"><h3>${escapeHtml(user.username)}</h3><span class="user-status ${user.disabled ? 'disabled' : 'active'}">${user.disabled ? 'DISABLED' : 'ACTIVE'}</span></div><p>${user.groups?.length ? `Groups: ${user.groups.map(group => escapeHtml(group.name)).join(', ')}` : 'No groups assigned'} · ${user.effectivePermissions?.length || 0} effective permissions</p></div>
-          <details class="user-manager"><summary>Manage</summary><form data-manage-user="${escapeHtml(user.username)}"><label>Administrator password<input name="currentPassword" type="password" autocomplete="current-password" required></label><label>New user password<input name="password" type="password" minlength="10" autocomplete="new-password" placeholder="Only for password reset"></label><div class="head-actions"><button class="secondary" type="submit" value="password">Reset password</button><button class="secondary" type="submit" value="${user.disabled ? 'enable' : 'disable'}">${user.disabled ? 'Enable' : 'Disable'}</button><button class="secondary" type="button" data-view-link="permissions">Permissions</button><button class="secondary danger-button" type="button" data-remove-user="${escapeHtml(user.username)}">Remove</button></div><div class="form-error" role="alert"></div></form></details>
+          <div class="user-card-copy">
+            <div class="user-card-title"><h3>${escapeHtml(user.username)}</h3><span class="user-status ${user.disabled ? 'disabled' : 'active'}">${user.disabled ? 'DISABLED' : 'ACTIVE'}</span></div>
+            <p>${user.groups?.length ? `Groups: ${user.groups.map(group => escapeHtml(group.name)).join(', ')}` : 'No groups assigned'} · ${user.effectivePermissions?.length || 0} effective permissions</p>
+          </div>
+          <button class="secondary" type="button" data-open-user-manager="${escapeHtml(user.username)}">Manage user</button>
         </article>`).join('') || ''}
       </div>
     </section>`;
@@ -2294,22 +2438,21 @@ function bindViewActions() {
   $('#user-form', $('#content'))?.addEventListener('submit', async event => {
     event.preventDefault();
     const form = event.currentTarget;
-    try { await request('/api/users', { method: 'POST', body: JSON.stringify(Object.fromEntries(new FormData(form))) }); await loadUsers(); toast('User created.'); }
-    catch (error) { $('.form-error', form).textContent = error.message; }
+    const data = new FormData(form);
+    const payload = {
+      username: data.get('username'),
+      password: data.get('password'),
+      permissions: data.getAll('permissions'),
+      groups: data.getAll('groups')
+    };
+    try {
+      await request('/api/users', { method: 'POST', body: JSON.stringify(payload) });
+      await loadUsers();
+      toast('User created.');
+    } catch (error) { $('.form-error', form).textContent = error.message; }
   });
-  $$('[data-remove-user]', $('#content')).forEach(button => button.addEventListener('click', async () => {
-    if (!confirm(`Remove user ${button.dataset.removeUser}?`)) return;
-    try { await request(`/api/users/${encodeURIComponent(button.dataset.removeUser)}`, { method: 'DELETE' }); await loadUsers(); toast('User removed.'); }
-    catch (error) { toast(error.message); }
-  }));
-  $$('[data-manage-user]', $('#content')).forEach(form => form.addEventListener('submit', async event => {
-    event.preventDefault();
-    const action = event.submitter.value;
-    const input = Object.fromEntries(new FormData(form));
-    if (action === 'password' && (!input.password || input.password.length < 10)) { $('.form-error', form).textContent = 'Enter a password of at least 10 characters.'; return; }
-    const change = action === 'password' ? { currentPassword: input.currentPassword, password: input.password } : { currentPassword: input.currentPassword, disabled: action === 'disable' };
-    try { await request(`/api/users/${encodeURIComponent(form.dataset.manageUser)}`, { method: 'PATCH', body: JSON.stringify(change) }); await loadUsers(); toast('Account updated; old sessions ended.'); }
-    catch (error) { $('.form-error', form).textContent = error.message; }
+  $('[data-open-user-manager]', $('#content')).forEach(button => button.addEventListener('click', () => {
+    openUserManager(button.dataset.openUserManager);
   }));
   $$('[data-media-folder]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     const folder = button.dataset.mediaFolder;
