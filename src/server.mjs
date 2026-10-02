@@ -651,7 +651,7 @@ function requireOwner(res, context) {
 function validateSetup(input) {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9-]{1,31}$/.test(input.deviceName || '')) return 'Device name must contain 2–32 letters, numbers, or hyphens.';
   if (!/^[a-zA-Z0-9._-]{3,32}$/.test(input.username || '')) return 'Administrator username must contain 3–32 valid characters.';
-  if (typeof input.password !== 'string' || input.password.length < 10) return 'Password must contain at least 10 characters.';
+  if (typeof input.password !== 'string' || input.password.length < 4) return 'Password must contain at least 4 characters.';
   return null;
 }
 
@@ -1232,7 +1232,7 @@ async function api(req, res, url) {
   }
   if (req.method === 'POST' && url.pathname === '/api/users') {
     const input = await bodyJson(req);
-    if (!/^[a-zA-Z0-9._-]{3,32}$/.test(input.username || '') || typeof input.password !== 'string' || input.password.length < 10) return send(res, 400, { error: 'Use a 3–32 character username and a password of at least 10 characters.' });
+    if (!/^[a-zA-Z0-9._-]{3,32}$/.test(input.username || '') || typeof input.password !== 'string' || input.password.length < 4) return send(res, 400, { error: 'Use a 3–32 character username and a password of at least 4 characters.' });
     if (input.username === store.state.config.username || store.state.users.some(user => user.username === input.username)) return send(res, 409, { error: 'Username already exists.' });
     const requestedQuotaGiB = input.storageQuotaGiB === undefined || input.storageQuotaGiB === '' ? 5 : Number(input.storageQuotaGiB);
     if (!Number.isFinite(requestedQuotaGiB) || requestedQuotaGiB <= 0 || requestedQuotaGiB > 1048576) return send(res, 400, { error: 'Storage quota must be greater than 0 and no more than 1,048,576 GiB.' });
@@ -1272,7 +1272,7 @@ async function api(req, res, url) {
     if (typeof input.disabled === 'boolean') { user.disabled = input.disabled; changed = true; }
     if (typeof input.showDeviceName === 'boolean') { user.showDeviceName = input.showDeviceName; changed = true; }
     if (typeof input.password === 'string' && input.password) {
-      if (input.password.length < 10 || input.password.length > 1024) return send(res, 400, { error: 'New password must contain at least 10 characters.' });
+      if (input.password.length < 4 || input.password.length > 1024) return send(res, 400, { error: 'New password must contain at least 4 characters.' });
       user.passwordHash = await hashPassword(input.password); changed = true;
     }
     if (Array.isArray(input.permissions)) { user.permissions = normalizePermissions(input.permissions, PERMISSIONS, []); changed = true; }
@@ -1601,7 +1601,7 @@ async function api(req, res, url) {
     const changedPassword = Boolean(input.newPassword);
     if (changedPassword) {
       if (typeof input.currentPassword !== 'string' || !(await verifyPassword(input.currentPassword, store.state.config.passwordHash))) return send(res, 403, { error: 'Current administrator password is required to change the password.' });
-      if (typeof input.newPassword !== 'string' || input.newPassword.length < 10) return send(res, 400, { error: 'New password must contain at least 10 characters.' });
+      if (typeof input.newPassword !== 'string' || input.newPassword.length < 4) return send(res, 400, { error: 'New password must contain at least 4 characters.' });
     }
     store.state.config.deviceName = input.deviceName;
     store.state.config.brandName = brandName;
