@@ -6,7 +6,7 @@ import { access, mkdir, mkdtemp, readdir, lstat, readFile, rm, writeFile } from 
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { proxmoxInventory, proxmoxCreateVm, proxmoxManageVm, proxmoxUpdateVm } from './proxmox.mjs';
-import { localContainerInventory, localCreateContainer, localManageContainer, localUpdateContainer, localPrepareVmStorageAccess, localPrepareVmIsoAccess } from './local-host.mjs';
+import { localContainerInventory, localCreateContainer, localManageContainer, localUpdateContainer, localPrepareVmStorageAccess, localPrepareVmIsoAccess, localApplianceRepair } from './local-host.mjs';
 import { listContainerTemplates, resolveContainerTemplate } from './templates.mjs';
 import { listStoragePools, listContentAcrossPools, resolveStoragePool } from './storage-pools.mjs';
 import { ensureWindowsVirtioDrivers, vmGuestToolsInventory } from './guest-tools.mjs';
@@ -1249,7 +1249,27 @@ export async function createVm(input) {
   else args.push('--import', '--osinfo', 'generic');
   if (guestDrivers?.path) args.push('--disk', `path=${guestDrivers.path},device=cdrom,readonly=on,bus=sata`);
   args.push('--boot', firmware === 'uefi' ? (isoEntry ? 'uefi,cdrom,hd,menu=on' : 'uefi,hd,menu=on') : (isoEntry ? 'cdrom,hd,menu=on' : 'hd,menu=on'));
-  const response = await exclusive(() => command('virt-install', args, 180000));
+  let response = await exclusive(() => command('virt-install', args, 180000));
+  const nestedOwnershipFailure = /Failed to chown device \/dev\/urandom|trusted\.libvirt\.security\.dac|Operation not permitted/i.test(response.error || '');
+  if (!response.ok && nestedOwnershipFailure) {
+    // A nested/unprivileged LXC can reject libvirt's DAC ownership changes on
+    // host-provided device nodes. Repair the appliance-owned libvirt config,
+    // remove the partial domain, and retry this request once automatically.
+    await command('virsh', ['-c', 'qemu:///system', 'destroy', input.name], 30000).catch(() => {});
+    await command('virsh', ['-c', 'qemu:///system', 'undefine', input.name, '--nvram'], 30000).catch(() => {});
+    await rm(diskDirectory, { recursive: true, force: true }).catch(() => {});
+    await localApplianceRepair().catch(() => null);
+    await mkdir(diskDirectory, { recursive: true });
+    await localPrepareVmStorageAccess({
+      isoPath: isoEntry?.path || '',
+      diskDirectory,
+      diskPath
+    });
+    if (guestDrivers?.path) {
+      await localPrepareVmStorageAccess({ isoPath: guestDrivers.path, diskDirectory, diskPath });
+    }
+    response = await exclusive(() => command('virt-install', args, 180000));
+  }
   if (!response.ok) {
     // virt-install may define a domain and create its qcow2 before libvirt
     // reports a startup failure. Remove only the domain/path created by this
@@ -1257,8 +1277,8 @@ export async function createVm(input) {
     await command('virsh', ['-c', 'qemu:///system', 'destroy', input.name], 30000).catch(() => {});
     await command('virsh', ['-c', 'qemu:///system', 'undefine', input.name, '--nvram'], 30000).catch(() => {});
     await rm(diskDirectory, { recursive: true, force: true }).catch(() => {});
-    const nestedHint = /trusted\.libvirt\.security\.dac|Operation not permitted/i.test(response.error || '')
-      ? ' LightNAS detected a nested-libvirt ownership restriction; rerun the one-click installer to apply the automatic compatibility setting.'
+    const nestedHint = /Failed to chown device \/dev\/urandom|trusted\.libvirt\.security\.dac|Operation not permitted/i.test(response.error || '')
+      ? ' LightNAS could not apply nested-LXC libvirt compatibility automatically. Run Appliance Repair or rerun the one-click installer, then retry.'
       : '';
     throw Object.assign(new Error(`VM creation failed: ${response.error}${nestedHint}`), { status: 409 });
   }
