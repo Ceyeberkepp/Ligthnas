@@ -47,3 +47,25 @@ test('profile image editor fits the whole image at default zoom and uses modern 
   assert.match(styles, /\.profile-crop-stage img[\s\S]*?object-fit:contain/);
   assert.match(styles, /\.profile-dialog[\s\S]*?border-radius:20px/);
 });
+
+
+test('private users have an explicit view-own-files permission and missing libraries initialize automatically', () => {
+  assert.match(server, /'files\.view\.own', 'files\.own'/);
+  assert.match(server, /DEFAULT_USER_PERMISSIONS = Object\.freeze\(\['files\.view\.own', 'files\.own'\]\)/);
+  assert.match(server, /permissions\.includes\('files\.view\.own'\) \|\| context\.permissions\.includes\('files\.own'\)/);
+  assert.match(server, /createFolder\(`Users\/\$\{input\.username\}\/\$\{folder\}`\)/);
+  assert.match(app, /'files\.view\.own': 'View my own files'/);
+  assert.match(app, /files: \['files\.view\.own', 'files\.own', 'files\.read'\]/);
+});
+
+test('view-only private users do not get file modification controls', () => {
+  assert.match(app, /canManageOwnFiles/);
+  assert.match(app, /View only\.<\/b> You can browse and preview your private files/);
+  assert.match(app, /canDeleteFiles/);
+});
+
+test('scoped all-files listing creates a missing user library root recursively', async () => {
+  const files = await readFile(new URL('../src/files.mjs', import.meta.url), 'utf8');
+  assert.match(files, /const base = prefixSegments\.length \? join\(root, \.\.\.prefixSegments\) : root/);
+  assert.match(files, /await mkdir\(base, \{ recursive: true, mode: 0o700 \}\)/);
+});
