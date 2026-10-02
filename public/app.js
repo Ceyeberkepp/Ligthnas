@@ -858,7 +858,7 @@ async function openUserManager(username) {
       <section class="panel">
         <h3>Reset password</h3>
         <div class="form-grid">
-          <label>New password<input name="newPassword" type="password" minlength="10" autocomplete="new-password" placeholder="At least 10 characters"></label>
+          <label>New password<input name="newPassword" type="password" minlength="4" autocomplete="new-password" placeholder="At least 10 characters"></label>
           <label>Administrator password<input name="currentPassword" type="password" autocomplete="current-password" required></label>
         </div>
         <button class="secondary" type="button" data-user-reset-password>Reset password</button>
@@ -901,7 +901,7 @@ async function openUserManager(username) {
     error.textContent = '';
     const password = form.elements.newPassword.value;
     const currentPassword = form.elements.currentPassword.value;
-    if (!password || password.length < 10) { error.textContent = 'Enter a new password of at least 10 characters.'; return; }
+    if (!password || password.length < 4) { error.textContent = 'Enter a new password of at least 4 characters.'; return; }
     try {
       await request(`/api/users/${encodeURIComponent(username)}`, {
         method: 'PATCH',
@@ -967,7 +967,7 @@ function usersView() {
       <div class="section-heading"><div><span class="eyebrow">NEW ACCOUNT</span><h2>Create local user</h2><p class="muted">Create the account and optionally assign direct permissions and groups now.</p></div><button class="secondary" type="button" data-toggle-user-create>Cancel</button></div>
       <div class="user-form-grid">
         <label>Username<input name="username" pattern="[a-zA-Z0-9._-]{3,32}" required placeholder="username"></label>
-        <label>Temporary password<input name="password" type="password" minlength="10" maxlength="1024" autocomplete="new-password" required placeholder="At least 10 characters"><small class="field-hint">Required · minimum 10 characters</small></label>
+        <label>Temporary password<input name="password" type="password" minlength="4" maxlength="1024" autocomplete="new-password" required placeholder="At least 10 characters"><small class="field-hint">Required · minimum 4 characters</small></label>
         <label>File storage quota (GiB)<input name="storageQuotaGiB" type="number" min="0.1" max="1048576" step="0.1" value="5" required></label>
       </div>
       <details class="user-create-access">
@@ -1853,7 +1853,7 @@ function settingsView() {
         <div class="settings-card-head"><div><span class="eyebrow">PASSWORD</span><h2>Change administrator password</h2><p class="muted">Password verification is required only when changing the password.</p></div>${settingsCollapseButton('password','Change administrator password')}</div>
         <div class="settings-section-body" ${settingsSectionCollapsed('password') ? 'hidden' : ''}>
         <label>Current password<input name="currentPassword" type="password" autocomplete="current-password" required></label>
-        <label>New password<input name="newPassword" type="password" minlength="10" autocomplete="new-password" required placeholder="At least 10 characters"></label>
+        <label>New password<input name="newPassword" type="password" minlength="4" autocomplete="new-password" required placeholder="At least 10 characters"></label>
         <button class="secondary" type="submit">Change password</button><div class="form-error" role="alert"></div>
         </div>
       </form>
@@ -2577,8 +2577,8 @@ function bindViewActions() {
     const form = event.currentTarget;
     const data = new FormData(form);
     const password = String(data.get('password') || '');
-    if (password.length < 10) {
-      $('.form-error', form).textContent = 'Password must contain at least 10 characters.';
+    if (password.length < 4) {
+      $('.form-error', form).textContent = 'Password must contain at least 4 characters.';
       return;
     }
     const payload = {
