@@ -1698,11 +1698,11 @@ async function api(req, res, url) {
     const installed = await installCatalogApp(id, input);
     invalidateRuntimeInventory();
     let firewall = null;
-    if (app?.port) {
-      firewall = await localNetworkAction({ action: 'firewall-add', decision: 'allow', protocol: 'tcp', port: app.port, source: '' })
+    if (installed?.port) {
+      firewall = await localNetworkAction({ action: 'firewall-add', decision: 'allow', protocol: 'tcp', port: installed.port, source: '' })
         .catch(error => ({ warning: error.message }));
     }
-    store.addActivity('app', `Catalog app ${id} was installed as a Docker container.`);
+    store.addActivity('app', `Catalog app ${id} instance ${installed.instanceName || 'default'} was installed as a Docker container.`);
     await store.save();
     return send(res, 201, { ...installed, firewall });
   }
@@ -1719,13 +1719,13 @@ async function api(req, res, url) {
   if (req.method === 'POST' && /^\/api\/catalog\/[a-z0-9-]+\/(start|stop|restart|remove)$/.test(url.pathname)) {
     if (!requirePermission(res, permissions, 'apps.manage')) return;
     const [, , , id, action] = url.pathname.split('/');
-    const result = await manageCatalogApp(id, action);
+    const input = await bodyJson(req);
+    const result = await manageCatalogApp(id, action, input.instanceName || 'default');
     invalidateRuntimeInventory();
-    if (action === 'remove') {
-      const app = catalog.find(item => item.id === id);
-      if (app?.port) await localNetworkAction({ action: 'firewall-remove-port', protocol: 'tcp', port: app.port }).catch(() => null);
+    if (action === 'remove' && Number(input.hostPort) > 0) {
+      await localNetworkAction({ action: 'firewall-remove-port', protocol: 'tcp', port: Number(input.hostPort) }).catch(() => null);
     }
-    store.addActivity('app', `App ${id}: ${action}.`);
+    store.addActivity('app', `App ${id} instance ${result.instanceName}: ${action}.`);
     await store.save();
     return send(res, 200, result);
   }
