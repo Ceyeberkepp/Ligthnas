@@ -6,7 +6,7 @@ import { access, mkdir, mkdtemp, readdir, lstat, readFile, rm, writeFile } from 
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { proxmoxInventory, proxmoxCreateVm, proxmoxManageVm, proxmoxUpdateVm } from './proxmox.mjs';
-import { localContainerInventory, localCreateContainer, localManageContainer, localUpdateContainer, localPrepareVmStorageAccess, localPrepareVmIsoAccess, localApplianceRepair, localRepairNestedLibvirt } from './local-host.mjs';
+import { localContainerInventory, localCreateContainer, localManageContainer, localUpdateContainer, localPrepareVmStorageAccess, localPrepareVmIsoAccess, localRepairNestedLibvirt } from './local-host.mjs';
 import { listContainerTemplates, resolveContainerTemplate } from './templates.mjs';
 import { listStoragePools, listContentAcrossPools, resolveStoragePool } from './storage-pools.mjs';
 import { ensureWindowsVirtioDrivers, vmGuestToolsInventory } from './guest-tools.mjs';
