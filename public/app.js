@@ -1,5 +1,5 @@
 if (window.LIGHTNAS_PRODUCT_MODE === 'hypervisor') document.body.classList.add('product-hypervisor');
-const state = { overview: null, view: 'home', uiMode: window.LIGHTNAS_PRODUCT_MODE === 'hypervisor' ? 'hypervisor' : 'nas', folder: '', files: null, fileError: null, filesSettingsOpen: false, aiMessages: [], logs: null, fileView: ['list','grid','gallery'].includes(localStorage.getItem('lightnas-file-view')) ? localStorage.getItem('lightnas-file-view') : 'grid', fileTruncated: false, overviewMetric: localStorage.getItem('lightnas-overview-metric') || 'cpu', lastNetworkSample: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, userAccess: null, smtp: undefined, media: null, network: null, software: null, license: null, builtinCatalog: null, communityCatalog: null, communityCatalogLoading: false, communityCatalogError: null, appSearch: '', appCategory: '', appVisibleLimit: 72, backupJobs: null, selectedBackupJobId: null, metricHistory: { cpu: [], load: [], memory: [], storage: [], networkIn: [], networkOut: [] } };
+const state = { overview: null, view: 'home', uiMode: window.LIGHTNAS_PRODUCT_MODE === 'hypervisor' ? 'hypervisor' : 'nas', folder: '', files: null, fileError: null, filesSettingsOpen: false, aiMessages: [], logs: null, fileView: ['list','grid','gallery'].includes(localStorage.getItem('lightnas-file-view')) ? localStorage.getItem('lightnas-file-view') : 'grid', fileTruncated: false, fileQuota: null, overviewMetric: localStorage.getItem('lightnas-overview-metric') || 'cpu', lastNetworkSample: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, userAccess: null, smtp: undefined, media: null, network: null, software: null, license: null, builtinCatalog: null, communityCatalog: null, communityCatalogLoading: false, communityCatalogError: null, appSearch: '', appCategory: '', appVisibleLimit: 72, backupJobs: null, selectedBackupJobId: null, metricHistory: { cpu: [], load: [], memory: [], storage: [], networkIn: [], networkOut: [] } };
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
 const themeChoices = ['system', 'light', 'dark'];
@@ -862,6 +862,12 @@ async function openUserManager(username) {
       </section>
 
       <section class="panel">
+        <h3>File storage quota</h3>
+        <label>Storage quota (GiB)<input name="storageQuotaGiB" type="number" min="0.1" max="1048576" step="0.1" value="${Math.max(0.1, Number(user.storageQuotaBytes || 5368709120) / 1073741824)}"></label>
+        <p class="muted">Users with <code>files.own</code> are limited to this amount across their private Documents, Photos, Videos, and Audio libraries. Default is 5 GiB.</p>
+      </section>
+
+      <section class="panel">
         <h3>Direct permissions</h3>
         <p class="muted">These permissions apply directly to this account. Group permissions are added automatically.</p>
         ${userAccessCheckboxes(permissions, user.permissions || [])}
@@ -916,6 +922,7 @@ async function openUserManager(username) {
         body: JSON.stringify({
           currentPassword,
           disabled: !form.elements.enabled.checked,
+          storageQuotaGiB: Number(form.elements.storageQuotaGiB.value),
           permissions: selectedPermissions,
           groups: selectedGroups
         })
@@ -957,6 +964,7 @@ function usersView() {
       <div class="user-form-grid">
         <label>Username<input name="username" pattern="[a-zA-Z0-9._-]{3,32}" required placeholder="username"></label>
         <label>Temporary password<input name="password" type="password" minlength="10" autocomplete="new-password" required placeholder="At least 10 characters"></label>
+        <label>File storage quota (GiB)<input name="storageQuotaGiB" type="number" min="0.1" max="1048576" step="0.1" value="5" required></label>
       </div>
       <details class="user-create-access">
         <summary>Permissions and groups</summary>
@@ -977,7 +985,7 @@ function usersView() {
           <div class="user-card-avatar">${escapeHtml(user.username[0]?.toUpperCase() || 'U')}</div>
           <div class="user-card-copy">
             <div class="user-card-title"><h3>${escapeHtml(user.username)}</h3><span class="user-status ${user.disabled ? 'disabled' : 'active'}">${user.disabled ? 'DISABLED' : 'ACTIVE'}</span></div>
-            <p>${user.groups?.length ? `Groups: ${user.groups.map(group => escapeHtml(group.name)).join(', ')}` : 'No groups assigned'} · ${user.effectivePermissions?.length || 0} effective permissions</p>
+            <p>${user.groups?.length ? `Groups: ${user.groups.map(group => escapeHtml(group.name)).join(', ')}` : 'No groups assigned'} · ${user.effectivePermissions?.length || 0} effective permissions · ${(Number(user.storageQuotaBytes || 5368709120) / 1073741824).toFixed(1).replace(/\.0$/, '')} GiB file quota</p>
           </div>
           <button class="secondary" type="button" data-open-user-manager="${escapeHtml(user.username)}">Manage user</button>
         </article>`).join('') || ''}
@@ -1347,7 +1355,10 @@ function filesView() {
         </article>`;
   };
 
+  const quota = state.fileQuota?.scoped ? state.fileQuota : null;
+  const quotaPercent = quota?.quotaBytes ? Math.min(100, Math.round((quota.usedBytes / quota.quotaBytes) * 100)) : 0;
   return `<section class="files-page ${state.fileView === 'gallery' ? 'photo-mode' : 'grid-mode'}">${pageHead('Files & media', 'Browse and manage the actual files stored in LightNAS.', '<button class="secondary" data-action="refresh-files">Refresh</button>')}
+    ${quota ? `<section class="panel file-quota-panel"><div class="panel-head"><div><span class="eyebrow">MY STORAGE</span><h2>${bytes(quota.usedBytes)} of ${bytes(quota.quotaBytes)}</h2></div><strong>${quotaPercent}%</strong></div><div class="track"><span style="width:${quotaPercent}%"></span></div><p class="muted">${bytes(quota.remainingBytes)} remaining in your private file library.</p></section>` : ''}
     <section class="desktop-files-settings-panel ${state.filesSettingsOpen ? '' : 'hidden'}">
       <article class="panel files-settings-card">
         <div><span class="eyebrow">FILES & MEDIA SETTINGS</span><h2>Library settings</h2><p class="muted">Manage phone library sync and desktop file display preferences.</p></div>
@@ -1385,7 +1396,7 @@ function filesView() {
       ${state.overview.appliance.role === 'administrator' && state.overview.appliance.features?.phoneSync !== false ? '<button class="secondary phone-sync-button files-sync-trigger" type="button" data-phone-sync>Phone sync</button>' : ''}
     </div></div>
     <div class="file-drop-zone" data-file-drop tabindex="0"><b>Drop files here</b><span>Multiple files and ZIP archives are supported. Use “Upload folder” to preserve a whole folder tree.</span></div>
-    <p class="muted">${allFiles ? 'All files shows only your Documents, Photos, Videos, and Audio libraries.' : 'Open folders normally or switch back to All files to see all four libraries together.'} ZIP and other file types are accepted, uploads have visible progress, and LightNAS does not impose an application-level file-size ceiling.</p>
+    <p class="muted">${allFiles ? 'All files shows only your Documents, Photos, Videos, and Audio libraries.' : 'Open folders normally or switch back to All files to see all four libraries together.'} ZIP and other file types are accepted, uploads have visible progress.${quota ? ` Your account can store up to ${bytes(quota.quotaBytes)}.` : ' Administrators are limited only by available storage unless a host upload limit is configured.'}</p>
     ${state.fileTruncated && allFiles ? '<div class="module-note">Showing the newest 10,000 files. Open a category or folder to browse beyond that safety limit.</div>' : ''}
     <div class="${state.fileView === 'gallery' ? 'file-photo-gallery' : state.fileView === 'grid' ? 'file-browser-grid' : 'storage-list'}">${state.fileError ? `<div class="empty error-state"><p><b>Files could not be loaded.</b></p><p>${escapeHtml(state.fileError)}</p><button class="secondary" data-action="refresh-files">Try again</button></div>` : entries === null ? '<div class="empty"><p>Loading files…</p></div>' : entries.length ? entries.map(item).join('') : `<div class="empty"><p>${allFiles ? 'No files have been uploaded yet.' : 'This folder is empty.'}</p></div>`}</div>
     </div>
@@ -1399,9 +1410,13 @@ async function loadFiles(forceRefresh = false) {
     const endpoint = state.folder === ''
       ? `/api/files?all=1${forceRefresh ? '&refresh=1' : ''}`
       : `/api/files?path=${encodeURIComponent(state.folder)}`;
-    const result = await request(endpoint);
+    const [result, quota] = await Promise.all([
+      request(endpoint),
+      request('/api/files/quota').catch(() => null)
+    ]);
     state.files = Array.isArray(result.entries) ? result.entries.filter(entry => entry.supported) : [];
     state.fileTruncated = Boolean(result.truncated);
+    state.fileQuota = quota;
   } catch (error) {
     state.files = [];
     state.fileTruncated = false;
@@ -2442,6 +2457,7 @@ function bindViewActions() {
     const payload = {
       username: data.get('username'),
       password: data.get('password'),
+      storageQuotaGiB: Number(data.get('storageQuotaGiB') || 5),
       permissions: data.getAll('permissions'),
       groups: data.getAll('groups')
     };

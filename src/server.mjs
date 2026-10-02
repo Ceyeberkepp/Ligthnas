@@ -9,7 +9,7 @@ import { WebSocketServer } from 'ws';
 import { JsonStore } from './store.mjs';
 import { getFilesystems, getStorageInventory, getSystemSnapshot } from './system.mjs';
 import { hashPassword, Sessions, verifyPassword } from './auth.mjs';
-import { listFiles, listAllFiles, createFolder, uploadFile, downloadFile, downloadEntry, deleteEntry } from './files.mjs';
+import { listFiles, listAllFiles, createFolder, uploadFile, downloadFile, downloadEntry, deleteEntry, fileUsage } from './files.mjs';
 import { thumbnailFor } from './thumbnails.mjs';
 import { catalog, runtimeInventory, vmEditorInventory, installCatalogApp, manageCatalogApp, updateCatalogApp, openContainerShell, createContainer, createVm } from './runtimes-next.mjs';
 import { communityCatalog } from './community-catalog.mjs';
@@ -480,6 +480,7 @@ export const PERMISSIONS = Object.freeze([
   'users.manage', 'smtp.manage', 'settings.manage', 'admin.view'
 ]);
 const DEFAULT_USER_PERMISSIONS = Object.freeze(['files.own']);
+const DEFAULT_USER_STORAGE_QUOTA_BYTES = 5 * 1024 * 1024 * 1024;
 
 store.setActivityListener(async event => {
   await deliverEvent(store.state, event);
@@ -674,6 +675,7 @@ function userPublic(user) {
     createdAt: user.createdAt,
     disabled: Boolean(user.disabled),
     totpEnabled: Boolean(user.totpEnabled),
+    storageQuotaBytes: Number(user.storageQuotaBytes) > 0 ? Number(user.storageQuotaBytes) : DEFAULT_USER_STORAGE_QUOTA_BYTES,
     permissions: normalizePermissions(user.permissions, PERMISSIONS, []),
     effectivePermissions: effectivePermissions({ state: store.state, username: user.username, account: user, isAdmin: false, allowed: PERMISSIONS, defaults: DEFAULT_USER_PERMISSIONS }),
     groups: groups.map(group => ({ id: group.id, name: group.name }))
@@ -1227,7 +1229,16 @@ async function api(req, res, url) {
     const input = await bodyJson(req);
     if (!/^[a-zA-Z0-9._-]{3,32}$/.test(input.username || '') || typeof input.password !== 'string' || input.password.length < 10) return send(res, 400, { error: 'Use a 3–32 character username and a password of at least 10 characters.' });
     if (input.username === store.state.config.username || store.state.users.some(user => user.username === input.username)) return send(res, 409, { error: 'Username already exists.' });
-    const user = { username: input.username, passwordHash: await hashPassword(input.password), permissions: normalizePermissions(input.permissions, PERMISSIONS, []), createdAt: new Date().toISOString(), totpEnabled: false };
+    const requestedQuotaGiB = input.storageQuotaGiB === undefined || input.storageQuotaGiB === '' ? 5 : Number(input.storageQuotaGiB);
+    if (!Number.isFinite(requestedQuotaGiB) || requestedQuotaGiB <= 0 || requestedQuotaGiB > 1048576) return send(res, 400, { error: 'Storage quota must be greater than 0 and no more than 1,048,576 GiB.' });
+    const user = {
+      username: input.username,
+      passwordHash: await hashPassword(input.password),
+      permissions: normalizePermissions(input.permissions, PERMISSIONS, []),
+      storageQuotaBytes: Math.round(requestedQuotaGiB * 1024 * 1024 * 1024),
+      createdAt: new Date().toISOString(),
+      totpEnabled: false
+    };
     store.state.users.push(user);
     applyUserGroups(input.username, input.groups);
     store.addActivity('user', `User ${input.username} was created.`);
@@ -1258,6 +1269,12 @@ async function api(req, res, url) {
       user.passwordHash = await hashPassword(input.password); changed = true;
     }
     if (Array.isArray(input.permissions)) { user.permissions = normalizePermissions(input.permissions, PERMISSIONS, []); changed = true; }
+    if (input.storageQuotaGiB !== undefined) {
+      const storageQuotaGiB = Number(input.storageQuotaGiB);
+      if (!Number.isFinite(storageQuotaGiB) || storageQuotaGiB <= 0 || storageQuotaGiB > 1048576) return send(res, 400, { error: 'Storage quota must be greater than 0 and no more than 1,048,576 GiB.' });
+      user.storageQuotaBytes = Math.round(storageQuotaGiB * 1024 * 1024 * 1024);
+      changed = true;
+    }
     if (Array.isArray(input.groups)) { applyUserGroups(userName, input.groups); changed = true; }
     if (!changed) return send(res, 400, { error: 'Choose a password, enable/disable state, groups, or permissions to update.' });
     sessions.clearUser(userName);
@@ -2157,8 +2174,24 @@ async function api(req, res, url) {
     const path = scopedFilePath(context, requestedPath, ['files.write']);
     if (path === null) return send(res, 403, { error: 'File modification access is required.' });
     if (req.method === 'POST') { await createFolder(path); store.addActivity('file', `Folder ${requestedPath} was created.`); await store.save(); return send(res, 201, { ok: true }); }
-    if (req.method === 'PUT') { await uploadFile(path, req); store.addActivity('file', `File ${requestedPath} was uploaded.`); await store.save(); return send(res, 201, { ok: true }); }
+    if (req.method === 'PUT') {
+      const scope = privateFileScope(context, ['files.write']);
+      const quotaBytes = scope ? (Number(account?.storageQuotaBytes) > 0 ? Number(account.storageQuotaBytes) : DEFAULT_USER_STORAGE_QUOTA_BYTES) : 0;
+      await uploadFile(path, req, { quotaRoot: scope || '', quotaBytes });
+      store.addActivity('file', `File ${requestedPath} was uploaded.`);
+      await store.save();
+      return send(res, 201, { ok: true });
+    }
   }
+  if (req.method === 'GET' && url.pathname === '/api/files/quota') {
+    if (!requireAnyPermission(res, permissions, ['files.own', 'files.read'])) return;
+    const scope = privateFileScope(context, ['files.read']);
+    if (!scope) return send(res, 200, { scoped: false, quotaBytes: null, usedBytes: null, remainingBytes: null });
+    const quotaBytes = Number(account?.storageQuotaBytes) > 0 ? Number(account.storageQuotaBytes) : DEFAULT_USER_STORAGE_QUOTA_BYTES;
+    const usedBytes = await fileUsage(scope);
+    return send(res, 200, { scoped: true, quotaBytes, usedBytes, remainingBytes: Math.max(0, quotaBytes - usedBytes) });
+  }
+
   if (req.method === 'GET' && url.pathname === '/api/files/thumbnail') {
     if (!requireAnyPermission(res, permissions, ['files.own', 'files.read'])) return;
     const path = scopedFilePath(context, url.searchParams.get('path') || '', ['files.read']);

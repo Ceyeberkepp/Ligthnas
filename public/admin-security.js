@@ -119,13 +119,13 @@ async function renderGroups() {
 
     <div class="admin-section-head"><div><span class="eyebrow">GROUP POLICY</span><h2>Groups & inherited permissions</h2><p class="muted">Users receive their direct permissions plus every permission granted by groups they belong to.</p></div><button class="primary" type="button" data-create-group>+ Create group</button></div>
     <div class="group-grid">${groups.map(group => `<article class="panel group-card" data-group-id="${group.id}">
-      <div class="volume-title"><div><h3>${escapeText(group.name)}</h3><p>${escapeText(group.description || 'No description')}</p></div><span class="content-badge">${group.members.length} members</span></div>
-      <details><summary>Manage group</summary><form data-group-form="${group.id}">
+      <div class="volume-title"><div><h3>${escapeText(group.name)}</h3><p>${escapeText(group.description || 'No description')}</p></div><div class="head-actions"><span class="content-badge">${group.members.length} members</span><button class="secondary" type="button" data-edit-group="${group.id}">Edit</button><button class="secondary danger-button" type="button" data-delete-group="${group.id}">Delete</button></div></div>
+      <details data-group-details="${group.id}"><summary>Group settings</summary><form data-group-form="${group.id}">
         <label>Name<input name="name" value="${escapeText(group.name)}" maxlength="64" required></label>
         <label>Description<input name="description" value="${escapeText(group.description || '')}" maxlength="160"></label>
         <h4>Permissions</h4>${checkboxes(permissions, group.permissions, 'permissions')}
         <h4>Members</h4>${memberCheckboxes(users, group.members)}
-        <div class="head-actions"><button class="primary" type="submit">Save group</button><button class="secondary danger-button" type="button" data-delete-group="${group.id}">Delete</button></div>
+        <div class="head-actions"><button class="primary" type="submit">Save group</button></div>
         <div class="form-error" role="alert"></div>
       </form></details>
     </article>`).join('') || '<div class="empty"><p>No groups yet. Create one to assign permissions to multiple users together.</p></div>'}</div>
@@ -268,6 +268,12 @@ function refreshCurrent() {
   requestAnimationFrame(() => { location.hash = hash; });
 }
 
+async function refreshGroupsPanel() {
+  if (location.hash !== '#permissions') return;
+  q('.groups-admin', q('#content'))?.remove();
+  await renderGroups();
+}
+
 async function enhance() {
   // Security/admin enhancements must never rewrite Files & media thumbnails.
   // app.js owns thumbnail URLs so opening settings, MFA, or other admin panels
@@ -288,10 +294,20 @@ document.addEventListener('click', async event => {
   if (createGroup) { q('[data-group-dialog]')?.showModal(); return; }
   if (event.target.closest('[data-close-group]')) { q('[data-group-dialog]')?.close(); return; }
 
+  const editGroup = event.target.closest('[data-edit-group]');
+  if (editGroup) {
+    const details = q(`[data-group-details="${editGroup.dataset.editGroup}"]`);
+    if (details) {
+      details.open = true;
+      q('input[name="name"]', details)?.focus();
+    }
+    return;
+  }
+
   const deleteGroup = event.target.closest('[data-delete-group]');
   if (deleteGroup) {
     if (!confirm('Delete this group? Users keep their direct permissions.')) return;
-    try { await api(`/api/groups/${deleteGroup.dataset.deleteGroup}`, { method:'DELETE' }); refreshCurrent(); } catch (error) { alert(error.message); }
+    try { await api(`/api/groups/${deleteGroup.dataset.deleteGroup}`, { method:'DELETE' }); await refreshGroupsPanel(); } catch (error) { alert(error.message); }
     return;
   }
 
@@ -350,7 +366,7 @@ document.addEventListener('submit', async event => {
     const data = new FormData(form);
     const permissions = qa('input[name="permissions"]:checked', form).map(input => input.value);
     const members = qa('input[name="members"]:checked', form).map(input => input.value);
-    try { await api('/api/groups', { method:'POST', body:JSON.stringify({ name:data.get('name'), description:data.get('description'), permissions, members }) }); q('[data-group-dialog]')?.close(); refreshCurrent(); } catch (error) { q('.form-error', form).textContent = error.message; }
+    try { await api('/api/groups', { method:'POST', body:JSON.stringify({ name:data.get('name'), description:data.get('description'), permissions, members }) }); q('[data-group-dialog]')?.close(); await refreshGroupsPanel(); } catch (error) { q('.form-error', form).textContent = error.message; }
     return;
   }
   if (form.matches('[data-group-form]')) {
@@ -358,7 +374,7 @@ document.addEventListener('submit', async event => {
     const data = new FormData(form);
     const permissions = qa('input[name="permissions"]:checked', form).map(input => input.value);
     const members = qa('input[name="members"]:checked', form).map(input => input.value);
-    try { await api(`/api/groups/${form.dataset.groupForm}`, { method:'PATCH', body:JSON.stringify({ name:data.get('name'), description:data.get('description'), permissions, members }) }); refreshCurrent(); } catch (error) { q('.form-error', form).textContent = error.message; }
+    try { await api(`/api/groups/${form.dataset.groupForm}`, { method:'PATCH', body:JSON.stringify({ name:data.get('name'), description:data.get('description'), permissions, members }) }); await refreshGroupsPanel(); } catch (error) { q('.form-error', form).textContent = error.message; }
     return;
   }
   if (form.matches('[data-totp-setup]')) {
