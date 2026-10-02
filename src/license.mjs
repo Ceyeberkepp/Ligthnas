@@ -25,14 +25,21 @@ export async function licenseStatus({ instanceId, version }) {
   try { receipt = JSON.parse(await readFile(receiptFile, 'utf8')); } catch {}
   const payload = receipt?.payload && validReceiptPayload(receipt.payload, instanceId) ? receipt.payload : null;
   const expired = payload?.expiresAt ? Date.parse(payload.expiresAt) <= Date.now() : false;
+  const edition = payload && !expired ? payload.edition : 'community';
+  const paidProduction = Boolean(payload && !expired && ['pro', 'enterprise'].includes(edition));
   return {
-    edition: payload && !expired ? payload.edition : 'community',
+    edition,
     verified: Boolean(payload && !expired),
     expiresAt: payload?.expiresAt || null,
     features: payload && !expired && payload.features && typeof payload.features === 'object' ? payload.features : {},
     serverConfigured: Boolean(licenseServer && await configuredPublicKey()),
     instanceId,
-    version
+    version,
+    licenseName: 'LightNAS Development and Community Evaluation License',
+    developmentOnly: !paidProduction,
+    productionAllowed: paidProduction,
+    enterpriseUseAllowed: edition === 'enterprise' && Boolean(payload && !expired),
+    communityUse: edition === 'community' && !paidProduction
   };
 }
 

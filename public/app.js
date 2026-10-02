@@ -1745,13 +1745,13 @@ function settingsView() {
       </form>
 
       <section class="panel software-card settings-collapsible ${settingsSectionCollapsed('software') ? 'collapsed' : ''}" data-settings-section="software">
-        <div class="settings-card-head"><div><span class="eyebrow">SOFTWARE & EDITION</span><h2>LightNAS version and updates</h2><p class="muted">Check the installed build, install signed source updates, and verify a future Pro or Enterprise entitlement.</p></div>${settingsCollapseButton('software','LightNAS version and updates')}</div>
+        <div class="settings-card-head"><div><span class="eyebrow">SOFTWARE & EDITION</span><h2>LightNAS version and updates</h2><p class="muted">Check the installed build and verify a paid Pro or Enterprise entitlement for permitted production or organizational use.</p></div>${settingsCollapseButton('software','LightNAS version and updates')}</div>
         <div class="settings-section-body" ${settingsSectionCollapsed('software') ? 'hidden' : ''}>
         <div class="manager-summary software-summary">
           <div><span>Version</span><b>${escapeHtml(state.software?.version || 'Loading…')}</b></div>
           <div><span>Commit</span><b>${escapeHtml(state.software?.commit || '—')}</b></div>
           <div><span>Update</span><b>${state.software?.updateAvailable ? 'Available' : state.software ? 'Current' : 'Checking…'}</b></div>
-          <div><span>Edition</span><b>${escapeHtml(state.license?.edition || 'community')}</b></div>
+          <div><span>Edition</span><b>${escapeHtml(state.license?.edition === 'community' ? 'Community development / evaluation' : (state.license?.edition || 'Community development / evaluation'))}</b></div>
           <div><span>License verification</span><b>${state.license?.verified ? 'Verified' : state.license?.serverConfigured ? 'Not verified' : 'Server not configured'}</b></div>
           <div><span>Instance ID</span><b class="mono">${escapeHtml(state.license?.instanceId || '—')}</b></div>
         </div>
@@ -1764,7 +1764,7 @@ function settingsView() {
           <button class="secondary" type="submit">Verify edition</button>
           <div class="form-error" role="alert"></div>
         </form>
-        <p class="module-note">Community remains fully unlocked while paid-feature enforcement is disabled. Future license responses are accepted only from the configured HTTPS license server and must carry a valid signed receipt for this appliance.</p>
+        <p class="module-note"><b>Pre-production license:</b> Community use is free only for development, lab, education, evaluation, and early testing. Production, enterprise, commercial, hosting, managed-service, and organizational operational use require a separate paid license. A verified Pro/Enterprise receipt is accepted only from the configured HTTPS license server and must carry a valid signed receipt for this appliance.</p>
         </div>
       </section>
     </section>`;
@@ -1823,9 +1823,9 @@ function adminView() {
     <section class="panel legal-notice-panel">
       <div>
         <span class="eyebrow">LICENSE & RESPONSIBILITY</span>
-        <h2>LightNAS · Apache License 2.0</h2>
+        <h2>LightNAS · Development & Community Evaluation License</h2>
         <p class="muted">LightNAS is an independent product from Cyverax LLC. Third-party platform names are used only when describing optional deployment, migration, compatibility, or integration features.</p>
-        <p class="muted">Virtual machines, containers, applications, storage, services, networks, data, backups, security, third-party licenses, and other instances created or managed on your infrastructure remain the operator's responsibility.</p>
+        <p class="muted">LightNAS is currently for development and early testing only and is not licensed for production or enterprise use without a separate paid license. The current source is not open source. Community use is free only within the permitted development/evaluation scope. Virtual machines, containers, applications, storage, services, networks, data, backups, security, third-party licenses, and other instances created or managed on your infrastructure remain the operator's responsibility.</p>
       </div>
     </section>`;
 }

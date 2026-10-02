@@ -247,7 +247,23 @@ See `Lightweight_AI_NAS_OS_Design_Brief.md` for the complete product vision and 
 
 ## License and responsibility
 
-LightNAS is licensed under the **Apache License 2.0**. See [LICENSE](LICENSE).
+**LightNAS is currently pre-production software for development and early testing only.**
+
+The current source is **not open source**. It is available to the community at no charge under the **LightNAS Development and Community Evaluation License** for personal lab, development, evaluation, education, and early testing use.
+
+Current restrictions include:
+
+- no production use;
+- no enterprise or organizational operational use without a separate paid license;
+- no commercial or hosted-service use without a separate paid license;
+- no public redistribution or repackaging except as allowed by the license;
+- community access is free for permitted non-enterprise development/testing use.
+
+Enterprise, commercial, production, OEM, hosting, managed-service, and similar organizational uses require a separate paid LightNAS license.
+
+The project may release designated portions under an open-source license after development and testing reach an appropriate stage. No current or future open-source release is promised by the present license, and any later open-source release will identify the exact files/version and license that apply.
+
+See [LICENSE](LICENSE) for the complete terms.
 
 LightNAS is an independent product. Third-party names are used only where
 needed to describe optional compatibility, deployment, migration, or
