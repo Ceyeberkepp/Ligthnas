@@ -2452,7 +2452,7 @@ function bindViewActions() {
     } catch (error) { $('.form-error', form).textContent = error.message; }
   });
   $('[data-open-user-manager]', $('#content')).forEach(button => button.addEventListener('click', () => {
-    openUserManager(button.dataset.openUserManager);
+    openUserManager(button.dataset.openUserManager).catch(error => toast(error.message));
   }));
   $$('[data-media-folder]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     const folder = button.dataset.mediaFolder;
