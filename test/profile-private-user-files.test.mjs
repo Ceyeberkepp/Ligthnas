@@ -69,3 +69,16 @@ test('scoped all-files listing creates a missing user library root recursively',
   assert.match(files, /const base = prefixSegments\.length \? join\(root, \.\.\.prefixSegments\) : root/);
   assert.match(files, /await mkdir\(base, \{ recursive: true, mode: 0o700 \}\)/);
 });
+
+
+test('refresh controls are icon-only and Files settings can return to files', () => {
+  assert.doesNotMatch(app, />Refresh(?: now| apps| readings| storage| activity| analytics| logs)?<\/button>/);
+  assert.match(app, /refresh-icon-button[^>]*aria-label="Refresh"[^>]*>↻<\/button>/);
+  assert.match(app, /data-files-settings-close>Back to files<\/button>/);
+  assert.match(app, /state\.filesSettingsOpen = !state\.filesSettingsOpen/);
+});
+
+test('online footer does not add a second status dot', async () => {
+  const styles = await readFile(new URL('../public/styles.css', import.meta.url), 'utf8');
+  assert.doesNotMatch(styles, /#mini-name\.online-only::before/);
+});
