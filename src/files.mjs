@@ -194,7 +194,10 @@ export async function listAllFiles(forceRefresh = false, scopePrefix = '') {
   if (!forceRefresh && cached?.value && cached.expiresAt > now) return cached.value;
 
   await mkdir(root, { recursive: true, mode: 0o700 });
-  const base = prefixSegments.length ? await checked(cacheKey, false) : root;
+  // A brand-new private user scope may not exist yet. Build the validated
+  // scope path below the LightNAS files root and create it recursively.
+  // parts() already rejects traversal and invalid path segments.
+  const base = prefixSegments.length ? join(root, ...prefixSegments) : root;
   await mkdir(base, { recursive: true, mode: 0o700 });
   const limits = { count: 0, max: 10000 };
   const entries = [];
