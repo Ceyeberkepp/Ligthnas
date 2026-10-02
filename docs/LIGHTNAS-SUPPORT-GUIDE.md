@@ -346,3 +346,17 @@ Support documentation should distinguish between:
 3. future architecture
 
 The repository and running system are the source of truth for what is implemented.
+
+## 19. Licensing and release stage
+
+LightNAS is currently **pre-production software for development and early testing only**.
+
+The current source is distributed under the **LightNAS Development and Community Evaluation License** and is **not currently open source**.
+
+Community users may use the current build without a license fee for permitted personal lab, development, evaluation, education, and early testing purposes. Production, enterprise, commercial, hosting, managed-service, and organizational operational use require a separate paid LightNAS license.
+
+The default Community status in the interface does not authorize production or enterprise use.
+
+The project may release designated portions under an open-source license after development and testing reach an appropriate stage. Any future open-source release will explicitly identify the applicable version/files and license.
+
+See the repository `LICENSE` file for the complete terms.
