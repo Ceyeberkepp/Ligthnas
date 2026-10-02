@@ -150,7 +150,7 @@ function canView(view, appliance = state.overview?.appliance) {
   if (appliance.role === 'administrator') return true;
   const allowed = new Set(appliance.permissions || []);
   const required = {
-    home: ['overview.view'], hypervisor: ['overview.view', 'vms.view', 'containers.view'], files: ['files.own', 'files.read'], media: ['files.own', 'files.read'], storage: ['storage.view'], pools: ['pools.view', 'storage.manage'], shares: ['shares.view', 'shares.manage'], backups: ['backup.manage', 'storage.view'],
+    home: ['overview.view'], hypervisor: ['overview.view', 'vms.view', 'containers.view'], files: ['files.view.own', 'files.own', 'files.read'], media: ['files.view.own', 'files.own', 'files.read'], storage: ['storage.view'], pools: ['pools.view', 'storage.manage'], shares: ['shares.view', 'shares.manage'], backups: ['backup.manage', 'storage.view'],
     apps: ['apps.view', 'apps.manage'], ai: ['apps.view', 'apps.manage', 'system.view'], containers: ['containers.view', 'containers.manage', 'containers.console'], vms: ['vms.view', 'vms.manage', 'vms.console'],
     network: ['network.view'], firewall: ['firewall.view', 'firewall.manage', 'network.manage'], monitoring: ['monitoring.view', 'system.view'], analytics: ['monitoring.view', 'system.view'], logs: ['audit.view'], capabilities: ['capabilities.view', 'system.view'],
     integrations: ['integrations.view', 'integrations.manage'], assistant: ['admin.view', 'system.view'], users: ['users.manage'], permissions: ['users.manage'], shell: ['system.shell'], smtp: ['smtp.manage'], settings: ['settings.manage'], admin: ['admin.view']
@@ -819,7 +819,16 @@ async function loadUsers() {
 }
 
 function permissionLabel(value) {
-  return String(value || '').replaceAll('.', ' · ').replaceAll('_', ' ').replace(/\b\w/g, letter => letter.toUpperCase());
+  const labels = {
+    'files.view.own': 'View my own files',
+    'files.own': 'Manage only my own files',
+    'files.read': 'Read / preview all files',
+    'files.write': 'Upload / create files anywhere',
+    'files.download': 'Download all files & folders',
+    'files.delete': 'Delete files & folders anywhere',
+    'media.convert': 'Convert media'
+  };
+  return labels[value] || String(value || '').replaceAll('.', ' · ').replaceAll('_', ' ').replace(/\b\w/g, letter => letter.toUpperCase());
 }
 
 function userAccessCheckboxes(options, selected = [], name = 'permissions') {
@@ -867,7 +876,7 @@ async function openUserManager(username) {
       <section class="panel">
         <h3>File storage quota</h3>
         <label>Storage quota (GiB)<input name="storageQuotaGiB" type="number" min="0.1" max="1048576" step="0.1" value="${Math.max(0.1, Number(user.storageQuotaBytes || 5368709120) / 1073741824)}"></label>
-        <p class="muted">Users with <code>files.own</code> are limited to this amount across their private Documents, Photos, Videos, and Audio libraries. Default is 5 GiB.</p>
+        <p class="muted">Users with private file access are limited to this amount across their Documents, Photos, Videos, and Audio libraries. Default is 5 GiB.</p>
       </section>
 
       <section class="panel">
@@ -973,7 +982,7 @@ function usersView() {
       <details class="user-create-access">
         <summary>Permissions and groups</summary>
         <h4>Direct permissions</h4>
-        ${userAccessCheckboxes(access.permissionOptions, ['files.own'])}
+        ${userAccessCheckboxes(access.permissionOptions, ['files.view.own', 'files.own'])}
         <h4>Groups</h4>
         ${groupMembershipCheckboxes(access.groups, [])}
       </details>
@@ -1320,6 +1329,10 @@ function fileEntryPath(entry) {
 
 function filesView() {
   const mobileFiles = matchMedia('(max-width: 760px)').matches;
+  const filePermissions = new Set(state.overview?.appliance?.permissions || []);
+  const isFileAdmin = state.overview?.appliance?.role === 'administrator';
+  const canManageOwnFiles = isFileAdmin || filePermissions.has('files.own') || filePermissions.has('files.write');
+  const canDeleteFiles = isFileAdmin || filePermissions.has('files.own') || filePermissions.has('files.delete') || filePermissions.has('files.write');
   if (mobileFiles && state.fileView === 'list') state.fileView = 'grid';
   const segments = state.folder.split('/').filter(Boolean);
   const section = librarySections.some(([folder]) => folder === (segments[0] || '')) ? (segments[0] || '') : '';
@@ -1358,7 +1371,7 @@ function filesView() {
           <div class="file-card-actions">
             ${entry.directory ? `<button class="secondary" data-download-folder="${escapeHtml(path)}">Download folder</button>` : ''}
             ${!entry.directory && state.media?.converterAvailable && state.overview.appliance.role === 'administrator' ? `<button class="secondary" data-convert-file="${escapeHtml(entry.name)}" data-path="${escapeHtml(path)}">Convert</button>` : ''}
-            <button class="secondary" data-delete-file="${escapeHtml(entry.name)}" data-path="${escapeHtml(path)}">Delete</button>
+            ${canDeleteFiles ? `<button class="secondary" data-delete-file="${escapeHtml(entry.name)}" data-path="${escapeHtml(path)}">Delete</button>` : ''}
           </div>
         </article>`
       : `<article class="file-row">
@@ -1366,7 +1379,7 @@ function filesView() {
           <span class="muted">${entry.directory ? 'Folder' : `${kind} · ${bytes(entry.sizeBytes)}`}</span>
           ${entry.directory ? `<button class="secondary" data-download-folder="${escapeHtml(path)}">Download</button>` : ''}
           ${!entry.directory && state.media?.converterAvailable && state.overview.appliance.role === 'administrator' ? `<button class="secondary" data-convert-file="${escapeHtml(entry.name)}" data-path="${escapeHtml(path)}">Convert</button>` : ''}
-          <button class="secondary" data-delete-file="${escapeHtml(entry.name)}" data-path="${escapeHtml(path)}">Delete</button>
+          ${canDeleteFiles ? `<button class="secondary" data-delete-file="${escapeHtml(entry.name)}" data-path="${escapeHtml(path)}">Delete</button>` : ''}
         </article>`;
   };
 
@@ -1397,7 +1410,7 @@ function filesView() {
           <option value="gallery" ${state.fileView === 'gallery' ? 'selected' : ''}>▦ Photos</option>
         </select>
       </label>
-      <button class="secondary" data-action="new-folder">+ Folder</button>
+      ${canManageOwnFiles ? `<button class="secondary" data-action="new-folder">+ Folder</button>
       <label class="file-toolbar-select upload-select-only">
         <select data-file-upload-select aria-label="Upload">
           <option value="">Choose…</option>
@@ -1406,11 +1419,11 @@ function filesView() {
         </select>
       </label>
       <input id="file-upload" type="file" ${section === 'Photos' ? 'accept="image/*"' : section === 'Videos' ? 'accept="video/*"' : section === 'Audio' ? 'accept="audio/*"' : ''} multiple hidden>
-      <input id="folder-upload" type="file" webkitdirectory directory multiple hidden>
+      <input id="folder-upload" type="file" webkitdirectory directory multiple hidden>` : ''}
       <button class="secondary desktop-files-settings-button" type="button" data-files-settings-tab>⚙ Settings</button>
       ${state.overview.appliance.role === 'administrator' && state.overview.appliance.features?.phoneSync !== false ? '<button class="secondary phone-sync-button files-sync-trigger" type="button" data-phone-sync>Phone sync</button>' : ''}
     </div></div>
-    <div class="file-drop-zone" data-file-drop tabindex="0"><b>Drop files here</b><span>Multiple files and ZIP archives are supported. Use “Upload folder” to preserve a whole folder tree.</span></div>
+    ${canManageOwnFiles ? '<div class="file-drop-zone" data-file-drop tabindex="0"><b>Drop files here</b><span>Multiple files and ZIP archives are supported. Use “Upload folder” to preserve a whole folder tree.</span></div>' : '<div class="module-note"><b>View only.</b> You can browse and preview your private files. Upload, create, and delete actions are disabled for this account.</div>'}
     <p class="muted">${allFiles ? 'All files shows only your Documents, Photos, Videos, and Audio libraries.' : 'Open folders normally or switch back to All files to see all four libraries together.'} ZIP and other file types are accepted, uploads have visible progress.${quota ? ` Your account can store up to ${bytes(quota.quotaBytes)}.` : ' Administrators are limited only by available storage unless a host upload limit is configured.'}</p>
     ${state.fileTruncated && allFiles ? '<div class="module-note">Showing the newest 10,000 files. Open a category or folder to browse beyond that safety limit.</div>' : ''}
     <div class="${state.fileView === 'gallery' ? 'file-photo-gallery' : state.fileView === 'grid' ? 'file-browser-grid' : 'storage-list'}">${state.fileError ? `<div class="empty error-state"><p><b>Files could not be loaded.</b></p><p>${escapeHtml(state.fileError)}</p><button class="secondary" data-action="refresh-files">Try again</button></div>` : entries === null ? '<div class="empty"><p>Loading files…</p></div>' : entries.length ? entries.map(item).join('') : `<div class="empty"><p>${allFiles ? 'No files have been uploaded yet.' : 'This folder is empty.'}</p></div>`}</div>
