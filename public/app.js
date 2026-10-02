@@ -1863,11 +1863,31 @@ function moduleView(view) {
         </div>
       </section>
       <div class="tool-grid app-catalog-grid">${visibleApps.map(app => {
-        const instance = docker?.containers?.find(container => container.name === `lightnas-app-${app.id}`);
-        const appUrl = `http://${location.hostname}:${app.port}/`;
-        const running = instance?.state === 'running';
+        const instances = (docker?.containers || []).filter(container =>
+          container.catalogId === app.id || container.name === `lightnas-app-${app.id}`
+        );
         const searchText = `${app.name} ${app.category} ${app.description} ${app.image} ${app.source || ''}`.toLowerCase();
-        return `<article class="panel app-card" data-app-card data-category="${escapeHtml(app.category)}" data-search="${escapeHtml(searchText)}"><span class="eyebrow">${escapeHtml(app.category)}</span><h2>${escapeHtml(app.name)}</h2><p class="muted">${escapeHtml(app.description)}</p><p class="muted app-source">${escapeHtml(app.source || 'Open source')}${app.image ? ` · ${escapeHtml(app.image)}` : ''}${app.port ? ` · Port ${app.port}` : ''}</p>${instance ? `<p class="muted">${escapeHtml(instance.status || instance.state)} · Container IP ${escapeHtml(instance.ip || 'not assigned')}</p><div class="head-actions">${running ? `<a class="primary" href="${escapeHtml(appUrl)}" target="_blank" rel="noopener">Open application</a><button class="secondary" type="button" data-app-terminal="${escapeHtml(instance.name)}" data-app-name="${escapeHtml(app.name)}">Terminal</button>` : ''}<button class="secondary" data-app-action="${running ? 'stop' : 'start'}" data-app-id="${app.id}">${running ? 'Stop' : 'Start'}</button><button class="secondary" type="button" data-app-edit="${app.id}" data-app-container="${escapeHtml(instance.name)}">Edit resources</button><button class="secondary" data-app-action="restart" data-app-id="${app.id}">Restart</button><button class="secondary" data-app-action="remove" data-app-id="${app.id}">Remove</button></div>` : app.community ? `<button class="secondary" type="button" disabled title="Compose installer integration is required before this community app can be deployed safely.">Community package</button>` : `<button class="primary" data-install="${app.id}">Install app</button>`}</article>`;
+        const instanceList = instances.length ? `<div class="app-instance-list">${instances.map((instance, index) => {
+          const instanceName = instance.instanceName || (instance.name === `lightnas-app-${app.id}` ? 'default' : instance.name.replace(`lightnas-app-${app.id}-`, ''));
+          const hostPort = Number(instance.webPort || (instanceName === 'default' ? app.port : 0));
+          const appUrl = hostPort ? `http://${location.hostname}:${hostPort}/` : '';
+          const running = instance.state === 'running';
+          return `<section class="app-instance-row">
+            <div class="app-instance-summary"><b>${escapeHtml(instanceName)}</b><span class="muted">${escapeHtml(instance.status || instance.state)} · IP ${escapeHtml(instance.ip || 'not assigned')}${hostPort ? ` · Port ${hostPort}` : ''}</span></div>
+            <div class="head-actions">
+              ${running && appUrl ? `<a class="primary" href="${escapeHtml(appUrl)}" target="_blank" rel="noopener">Open</a>` : ''}
+              ${running ? `<button class="secondary" type="button" data-app-terminal="${escapeHtml(instance.name)}" data-app-name="${escapeHtml(app.name)} · ${escapeHtml(instanceName)}">Terminal</button>` : ''}
+              <button class="secondary" data-app-action="${running ? 'stop' : 'start'}" data-app-id="${app.id}" data-app-instance="${escapeHtml(instanceName)}" data-app-host-port="${hostPort}">${running ? 'Stop' : 'Start'}</button>
+              <button class="secondary" type="button" data-app-edit="${app.id}" data-app-container="${escapeHtml(instance.name)}" data-app-instance="${escapeHtml(instanceName)}">Edit</button>
+              <button class="secondary" data-app-action="restart" data-app-id="${app.id}" data-app-instance="${escapeHtml(instanceName)}" data-app-host-port="${hostPort}">Restart</button>
+              <button class="secondary" data-app-action="remove" data-app-id="${app.id}" data-app-instance="${escapeHtml(instanceName)}" data-app-host-port="${hostPort}">Remove</button>
+            </div>
+          </section>`;
+        }).join('')}</div>` : '';
+        const installControl = app.community
+          ? `<button class="secondary" type="button" disabled title="Compose installer integration is required before this community app can be deployed safely.">Community package</button>`
+          : `<button class="primary" data-install="${app.id}" data-instance-count="${instances.length}">${instances.length ? 'Install another instance' : 'Install app'}</button>`;
+        return `<article class="panel app-card" data-app-card data-category="${escapeHtml(app.category)}" data-search="${escapeHtml(searchText)}"><span class="eyebrow">${escapeHtml(app.category)}</span><h2>${escapeHtml(app.name)}</h2><p class="muted">${escapeHtml(app.description)}</p><p class="muted app-source">${escapeHtml(app.source || 'Open source')}${app.image ? ` · ${escapeHtml(app.image)}` : ''}${app.port ? ` · Default port ${app.port}` : ''}</p>${instances.length ? `<p class="muted"><b>${instances.length}</b> installed instance${instances.length === 1 ? '' : 's'}</p>` : ''}${instanceList}<div class="head-actions app-install-actions">${installControl}</div></article>`;
       }).join('') || (state.builtinCatalog === null ? '<div class="empty"><p>Loading built-in catalog…</p></div>' : '<div class="empty"><p>No apps match this filter.</p></div>')}</div>
       ${more ? `<div class="app-catalog-more"><button class="secondary" type="button" data-app-more>Show ${Math.min(72, more)} more</button><span class="muted">Showing ${visibleApps.length} of ${filteredApps.length} matching apps</span></div>` : filteredApps.length ? `<p class="muted app-catalog-count">Showing ${filteredApps.length} matching app${filteredApps.length === 1 ? '' : 's'}.</p>` : ''}
       <section class="module-hero"><h2>Managed app hosting</h2><p>LightNAS downloads each app, creates its persistent storage, publishes its web service on the LightNAS LAN address, starts it after reboot, and verifies that the service is reachable. No external hypervisor configuration or manual port forwarding is required for managed catalog apps. ${docker?.available && docker?.enabled ? 'The integrated App Store engine is ready.' : 'The catalog stays available while the App Store engine finishes starting.'}</p></section>`;
@@ -2535,6 +2555,15 @@ function bindViewActions() {
     const app = state.runtimes?.catalog?.find(item => item.id === button.dataset.install);
     if (!app) return toast('The selected application is no longer in the catalog.');
     const setup = {};
+    const instanceCount = Number(button.dataset.instanceCount || 0);
+    if (instanceCount > 0) {
+      const suggested = `instance-${instanceCount + 1}`;
+      const instanceName = prompt(`Name this new ${app.name} instance:`, suggested);
+      if (instanceName === null) return;
+      if (!/^[A-Za-z0-9][A-Za-z0-9-]{0,30}$/.test(instanceName.trim())) return toast('Instance name can contain letters, numbers, and dashes.');
+      setup.instanceName = instanceName.trim().toLowerCase();
+      setup.hostPort = 0;
+    }
     if (app.requiresAdminPassword) {
       const password = prompt(`Create the ${app.name} administrator password (8–128 characters):`);
       if (password === null) return;
@@ -2562,10 +2591,18 @@ function bindViewActions() {
     window.open(`/container-console.html?id=${encodeURIComponent(id)}&name=${encodeURIComponent(name)}&type=app`, '_blank', 'noopener');
   }));
   $$('[data-app-action]', $('#content')).forEach(button => button.addEventListener('click', async () => {
-    const { appId, appAction } = button.dataset;
-    if (appAction === 'remove' && !confirm(`Remove ${appId}? Its saved app data will remain on this NAS.`)) return;
+    const { appId, appAction, appInstance, appHostPort } = button.dataset;
+    const instanceName = appInstance || 'default';
+    if (appAction === 'remove' && !confirm(`Remove ${appId} instance "${instanceName}"? Its saved app data will remain on this NAS.`)) return;
     button.disabled = true;
-    try { await request(`/api/catalog/${appId}/${appAction}`, { method: 'POST' }); await loadRuntimes(true); toast(`App ${appAction} complete.`); }
+    try {
+      await request(`/api/catalog/${appId}/${appAction}`, {
+        method: 'POST',
+        body: JSON.stringify({ instanceName, hostPort: Number(appHostPort || 0) })
+      });
+      await loadRuntimes(true);
+      toast(`${instanceName}: ${appAction} complete.`);
+    }
     catch (error) { toast(error.message); button.disabled = false; }
   }));
   for (const [selector, path, message] of [['#container-form', '/api/containers', 'Container created.'], ['#vm-form', '/api/vms', 'VM creation submitted. Check the host task status.']]) {
