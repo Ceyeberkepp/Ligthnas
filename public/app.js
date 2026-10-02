@@ -2996,10 +2996,10 @@ function bindViewActions() {
     location.hash = target;
   }));
   $$('[data-action="refresh"]', $('#content')).forEach(button => button.addEventListener('click', async () => { try { state.overview = await request('/api/overview'); captureOverviewMetrics(); render(state.view); toast('Readings updated.'); } catch (error) { toast(error.message); } }));
-  $('[data-action="private-user-files"]', $('#content')).forEach(button => button.addEventListener('click', () => {
+  $('#content').querySelectorAll('[data-action="private-user-files"]').forEach(button => button.addEventListener('click', () => {
     openProtectedUserFiles().catch(error => toast(error.message));
   }));
-  $('[data-action="refresh-files"]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+  $('#content').querySelectorAll('[data-action="refresh-files"]').forEach(button => button.addEventListener('click', async () => {
     if (button.disabled) return;
     const original = button.textContent;
     button.disabled = true;
