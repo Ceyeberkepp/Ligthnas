@@ -13,6 +13,7 @@ const infrastructureImageSuffixes = [
   '.vma', '.vma.zst', '.vma.gz', '.tar.zst', '.tar.xz', '.tgz'
 ];
 const allFilesCache = new Map();
+const quotaReservations = new Map();
 
 function infrastructureFile(name) {
   const value = String(name || '').toLowerCase();
@@ -253,9 +254,15 @@ export async function uploadFile(relative, req, options = {}) {
   const quotaBytes = Number(options.quotaBytes || 0);
   const quotaRoot = String(options.quotaRoot || '');
   const usedBefore = quotaBytes > 0 && quotaRoot ? await fileUsage(quotaRoot) : 0;
-  if (quotaBytes > 0 && usedBefore >= quotaBytes) {
+  const reservedBefore = quotaRoot ? Number(quotaReservations.get(quotaRoot) || 0) : 0;
+  const declaredBytes = Math.max(0, Number(req.headers?.['content-length'] || 0));
+  if (quotaBytes > 0 && usedBefore + reservedBefore >= quotaBytes) {
     throw Object.assign(new Error('Your LightNAS file storage quota is full.'), { status: 413 });
   }
+  if (quotaBytes > 0 && declaredBytes > 0 && usedBefore + reservedBefore + declaredBytes > quotaBytes) {
+    throw Object.assign(new Error('Upload would exceed your LightNAS file storage quota.'), { status: 413 });
+  }
+  if (quotaRoot && declaredBytes > 0) quotaReservations.set(quotaRoot, reservedBefore + declaredBytes);
   const file = await open(path, 'wx', 0o600);
   let size = 0;
   try {
@@ -263,12 +270,18 @@ export async function uploadFile(relative, req, options = {}) {
       size += chunk.length;
       let error = null;
       if (MAX_UPLOAD > 0 && size > MAX_UPLOAD) error = Object.assign(new Error('File exceeds the configured upload limit.'), { status: 413 });
-      else if (quotaBytes > 0 && usedBefore + size > quotaBytes) error = Object.assign(new Error('Upload would exceed your LightNAS file storage quota.'), { status: 413 });
+      else if (quotaBytes > 0 && usedBefore + reservedBefore + size > quotaBytes) error = Object.assign(new Error('Upload would exceed your LightNAS file storage quota.'), { status: 413 });
       callback(error, chunk);
     } }), file.createWriteStream());
   } catch (error) {
     await unlink(path).catch(() => {});
     throw error;
+  } finally {
+    if (quotaRoot && declaredBytes > 0) {
+      const remaining = Math.max(0, Number(quotaReservations.get(quotaRoot) || 0) - declaredBytes);
+      if (remaining) quotaReservations.set(quotaRoot, remaining);
+      else quotaReservations.delete(quotaRoot);
+    }
   }
   invalidateAllFilesCache();
 }
