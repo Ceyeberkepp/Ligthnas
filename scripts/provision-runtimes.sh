@@ -451,18 +451,29 @@ else
     command -v "$command" >/dev/null 2>&1 || vm_packages_ready=0
   done
   if [[ "$vm_packages_ready" == "1" ]] || apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils libvirt-daemon-system libvirt-clients virtinst; then
-    # Unprivileged outer LXC containers cannot write the trusted.* xattrs that
-    # libvirt normally uses to remember file ownership. Disable only that
-    # ownership-memory feature in nested appliance mode; libvirt still applies
-    # normal runtime DAC ownership while avoiding the
-    # trusted.libvirt.security.dac "Operation not permitted" failure.
+    # Nested/unprivileged LXC cannot chown host device nodes such as
+    # /dev/urandom. libvirt's normal DAC manager can therefore abort a VM at
+    # startup with "Failed to chown device /dev/urandom: Operation not
+    # permitted". In nested appliance mode, run QEMU as container-root and
+    # disable libvirt dynamic ownership changes. This is scoped only to the
+    # outer-container case; bare-metal/VM installs keep the normal libvirt
+    # account and ownership model.
     if systemd-detect-virt --container >/dev/null 2>&1; then
       install -d -m 0755 /etc/libvirt
       touch /etc/libvirt/qemu.conf
-      sed -Ei '/^[[:space:]]*#?[[:space:]]*remember_owner[[:space:]]*=/d' /etc/libvirt/qemu.conf
-      printf '\n# LightNAS nested-LXC compatibility\nremember_owner = 0\n' >>/etc/libvirt/qemu.conf
+      sed -Ei '/^[[:space:]]*#?[[:space:]]*(remember_owner|dynamic_ownership|user|group)[[:space:]]*=/d' /etc/libvirt/qemu.conf
+      cat >>/etc/libvirt/qemu.conf <<'EOF'
+
+# LightNAS nested-LXC compatibility
+user = "root"
+group = "root"
+dynamic_ownership = 0
+remember_owner = 0
+EOF
       systemctl try-restart virtqemud.service >/dev/null 2>&1 || true
+      systemctl try-restart virtqemud.socket >/dev/null 2>&1 || true
       systemctl try-restart libvirtd.service >/dev/null 2>&1 || true
+      systemctl try-restart libvirtd.socket >/dev/null 2>&1 || true
     fi
     if systemctl list-unit-files libvirtd.socket --no-legend 2>/dev/null | grep -q '^libvirtd.socket'; then
       systemctl enable --now libvirtd.socket >/dev/null 2>&1 || true
