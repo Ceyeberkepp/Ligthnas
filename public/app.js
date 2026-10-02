@@ -1867,13 +1867,11 @@ function moduleView(view) {
           container.catalogId === app.id || container.name === `lightnas-app-${app.id}`
         );
         const searchText = `${app.name} ${app.category} ${app.description} ${app.image} ${app.source || ''}`.toLowerCase();
-        const instanceList = instances.length ? `<div class="app-instance-list">${instances.map(instance => {
+        const namedInstances = instances.map(instance => {
           const instanceName = instance.instanceName || (instance.name === `lightnas-app-${app.id}` ? 'default' : instance.name.replace(`lightnas-app-${app.id}-`, ''));
-          const hostPort = Number(instance.webPort || (instanceName === 'default' ? app.port : 0));
-          return `<section class="app-instance-row">
-            <div class="app-instance-summary">${instanceName === 'default' ? '' : `<b>${escapeHtml(instanceName)}</b>`}<span class="muted">${escapeHtml(instance.status || instance.state)}${hostPort ? ` · Port ${hostPort}` : ''}</span></div>
-          </section>`;
-        }).join('')}</div>` : '';
+          return instanceName === 'default' ? '' : `<section class="app-instance-row"><div class="app-instance-summary"><b>${escapeHtml(instanceName)}</b></div></section>`;
+        }).filter(Boolean);
+        const instanceList = namedInstances.length ? `<div class="app-instance-list">${namedInstances.join('')}</div>` : '';
         const installControl = app.community
           ? `<button class="secondary" type="button" disabled title="Compose installer integration is required before this community app can be deployed safely.">Community package</button>`
           : `<button class="primary" data-install="${app.id}" data-instance-count="${instances.length}">Install</button>`;
