@@ -6,7 +6,7 @@ import { access, mkdir, mkdtemp, readdir, lstat, readFile, rm, writeFile } from 
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { proxmoxInventory, proxmoxCreateVm, proxmoxManageVm, proxmoxUpdateVm } from './proxmox.mjs';
-import { localContainerInventory, localCreateContainer, localManageContainer, localUpdateContainer, localPrepareVmStorageAccess, localPrepareVmIsoAccess, localApplianceRepair } from './local-host.mjs';
+import { localContainerInventory, localCreateContainer, localManageContainer, localUpdateContainer, localPrepareVmStorageAccess, localPrepareVmIsoAccess, localRepairNestedLibvirt } from './local-host.mjs';
 import { listContainerTemplates, resolveContainerTemplate } from './templates.mjs';
 import { listStoragePools, listContentAcrossPools, resolveStoragePool } from './storage-pools.mjs';
 import { ensureWindowsVirtioDrivers, vmGuestToolsInventory } from './guest-tools.mjs';
@@ -1244,6 +1244,13 @@ export async function createVm(input) {
   if (guestDrivers?.path) {
     await localPrepareVmStorageAccess({ isoPath: guestDrivers.path, diskDirectory, diskPath });
   }
+
+  // Nested LightNAS LXC installs cannot chown host-provided device nodes.
+  // Apply the small compatibility fix before launching virt-install instead
+  // of waiting for a failed launch and then running the full appliance repair.
+  if (virtualization.diagnostics?.nested) {
+    await localRepairNestedLibvirt().catch(() => null);
+  }
   const args = ['--connect', 'qemu:///system', '--virt-type', virtType, '--name', input.name, '--memory', String(memory), '--vcpus', String(cpus), '--disk', `path=${diskPath},size=${disk},format=qcow2,bus=${diskBus}`, ...diskController, '--network', networkArg, '--graphics', 'vnc,listen=127.0.0.1', '--video', 'vga', '--noautoconsole', '--wait', '0'];
   if (isoEntry) args.push('--cdrom', isoEntry.path, '--osinfo', 'detect=on,require=off');
   else args.push('--import', '--osinfo', 'generic');
@@ -1258,7 +1265,7 @@ export async function createVm(input) {
     await command('virsh', ['-c', 'qemu:///system', 'destroy', input.name], 30000).catch(() => {});
     await command('virsh', ['-c', 'qemu:///system', 'undefine', input.name, '--nvram'], 30000).catch(() => {});
     await rm(diskDirectory, { recursive: true, force: true }).catch(() => {});
-    await localApplianceRepair().catch(() => null);
+    await localRepairNestedLibvirt().catch(() => null);
     await mkdir(diskDirectory, { recursive: true });
     await localPrepareVmStorageAccess({
       isoPath: isoEntry?.path || '',

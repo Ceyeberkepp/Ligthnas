@@ -289,7 +289,9 @@ window.fetch = async (input, init = {}) => {
   const sameApi = url.startsWith('/api/') || url.startsWith(location.origin + '/api/');
   let action = '';
   try { if (typeof init.body === 'string' && init.body.startsWith('{')) action = String(JSON.parse(init.body)?.action || ''); } catch {}
-  const background = action === 'auto-publish' || /\/api\/(?:overview|storage\/scan|login\/options|console)\b/.test(url);
+  const headers = new Headers(init.headers || {});
+  const managedTask = headers.get('X-LightNAS-Task-Managed') === '1';
+  const background = managedTask || action === 'auto-publish' || /\/api\/(?:overview|storage\/scan|login\/options|console)\b/.test(url);
   const mutation = sameApi && ['POST','PATCH','PUT','DELETE'].includes(method) && !background;
   const labelPath = url.replace(location.origin,'').split('?')[0];
   const task = mutation ? lightnasTasks.create(action ? `${action} · ${labelPath}` : `${method} ${labelPath}`, 'Request submitted') : null;
@@ -603,10 +605,25 @@ async function showRuntimeWizard(kind) {
     };
     delete payload.passwordConfirm;
     create.disabled = true;
-    const progress = openProgressDialog(isContainer ? 'Creating system container' : 'Creating virtual machine', `Preparing ${name}. This can take several minutes.`, { modal:false });
+
+    // Once the operator confirms Create, get the wizard out of the way
+    // immediately. The bottom Tasks dock becomes the source of truth for the
+    // long-running operation so the rest of LightNAS remains usable.
+    const progress = openProgressDialog(
+      isContainer ? 'Creating system container' : 'Creating virtual machine',
+      `Submitted ${name}. Waiting for the host runtime…`,
+      { taskOnly:true }
+    );
+    dialog.close();
+    progress.update(10, `Submitting ${name} to the host runtime…`);
+
     try {
-      const result = await dialogApi(isContainer ? '/api/containers' : '/api/vms', { method: 'POST', body: JSON.stringify(payload) });
-      dialog.close();
+      const result = await dialogApi(isContainer ? '/api/containers' : '/api/vms', {
+        method: 'POST',
+        headers: { 'X-LightNAS-Task-Managed': '1' },
+        body: JSON.stringify(payload)
+      });
+      progress.update(90, `${name} was created. Refreshing runtime inventory…`);
       refreshRuntime();
       const selectedImage = images.find(item => item.value === (isContainer ? payload.image : payload.iso))?.label || payload.image || payload.iso || '';
       const createdApplication = result.application;
@@ -622,9 +639,8 @@ async function showRuntimeWizard(kind) {
         ? `${name} was created, ${result.installedImage || selectedImage} was verified and installed, and the container is running.${lanStatus}${createdUrl ? ` Application access: ${createdUrl}` : ' LightNAS will detect any web application automatically.'}`
         : `${name} was created successfully and is ready to use.`);
     } catch (problem) {
-      progress.fail(problem.message);
-      error.textContent = problem.message;
-      create.disabled = false;
+      progress.fail(problem.message || `${name} could not be created.`);
+      refreshRuntime();
     }
   });
 

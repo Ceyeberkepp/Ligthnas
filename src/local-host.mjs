@@ -98,6 +98,10 @@ export async function localApplianceHealth() {
   return await request('appliance-health', undefined, 60000);
 }
 
+export async function localRepairNestedLibvirt() {
+  return await request('nested-libvirt-repair', undefined, 60000);
+}
+
 export async function localApplianceRepair() {
   return await request('appliance-repair', undefined, 15 * 60 * 1000);
 }
