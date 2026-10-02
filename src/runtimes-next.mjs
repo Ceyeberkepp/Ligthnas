@@ -741,7 +741,8 @@ function requireDeletionConfirmation(input, id, label) {
 }
 
 export async function vmCreateInventory() {
-  const [vmNetworks, hostBridges, defaultRoute, installer, lightnasStorage, storageIsos] = await Promise.all([
+  let [vmInfo, vmNetworks, hostBridges, defaultRoute, installer, lightnasStorage, storageIsos] = await Promise.all([
+    command('virsh', ['-c', 'qemu:///system', 'list', '--all', '--name'], 2500),
     command('virsh', ['-c', 'qemu:///system', 'net-list', '--name'], 2500),
     command('ip', ['-j', 'link', 'show', 'type', 'bridge'], 2500),
     command('ip', ['-j', '-4', 'route', 'show', 'default'], 2500),
@@ -749,6 +750,14 @@ export async function vmCreateInventory() {
     listStoragePools().catch(() => ({ pools: [] })),
     listContentAcrossPools('iso').catch(() => [])
   ]);
+
+  if ((!vmInfo.ok || !vmNetworks.ok) && installer.ok) {
+    await localRepairNestedLibvirt().catch(() => null);
+    [vmInfo, vmNetworks] = await Promise.all([
+      command('virsh', ['-c', 'qemu:///system', 'list', '--all', '--name'], 4000),
+      command('virsh', ['-c', 'qemu:///system', 'net-list', '--name'], 4000)
+    ]);
+  }
 
   const storageDetails = (lightnasStorage.pools || []).filter(pool =>
     pool.online && pool.writable && pool.content.includes('images')
@@ -788,11 +797,13 @@ export async function vmCreateInventory() {
 
   return {
     virtualization: {
-      available: installer.ok,
-      enabled: process.env.LIGHTNAS_VM_ENABLED === '1',
+      available: vmInfo.ok && installer.ok,
+      enabled: vmInfo.ok && installer.ok,
       provider: process.env.LIGHTNAS_VM_ACCELERATION === 'kvm' ? 'libvirt-kvm' : 'libvirt-qemu',
       acceleration: process.env.LIGHTNAS_VM_ACCELERATION || 'auto',
-      reason: installer.ok ? null : 'QEMU/libvirt VM tooling is unavailable on this host.',
+      reason: vmInfo.ok && installer.ok ? null : (installer.ok
+        ? 'The libvirt VM service is not responding on this LightNAS host.'
+        : 'QEMU/libvirt VM tooling is unavailable on this host.'),
       storageDetails,
       pools: storageDetails.map(pool => pool.id),
       networkDetails,
@@ -866,7 +877,7 @@ export async function vmEditorInventory(id) {
 }
 
 export async function runtimeInventory() {
-  const [dockerInfo, vmInfo, vmNetworks, installer, hostBridges, lightnasStorage, storageIsos] = await Promise.all([
+  let [dockerInfo, vmInfo, vmNetworks, installer, hostBridges, lightnasStorage, storageIsos] = await Promise.all([
     command('docker', ['info', '--format', '{{.ServerVersion}}']),
     command('virsh', ['-c', 'qemu:///system', 'list', '--all', '--name']),
     command('virsh', ['-c', 'qemu:///system', 'net-list', '--name']),
@@ -875,13 +886,21 @@ export async function runtimeInventory() {
     listStoragePools().catch(() => ({ pools: [] })),
     listContentAcrossPools('iso').catch(() => [])
   ]);
+
+  if (!vmInfo.ok && installer.ok) {
+    await localRepairNestedLibvirt().catch(() => null);
+    [vmInfo, vmNetworks] = await Promise.all([
+      command('virsh', ['-c', 'qemu:///system', 'list', '--all', '--name'], 5000),
+      command('virsh', ['-c', 'qemu:///system', 'net-list', '--name'], 5000)
+    ]);
+  }
   const vmStoragePools = (lightnasStorage.pools || []).filter(pool => pool.online && pool.writable && pool.content.includes('images'));
   const containerStoragePools = (lightnasStorage.pools || []).filter(pool => pool.online && pool.writable && pool.content.includes('rootdir'));
   const images = storageIsos.map(item => item.id);
   const runtime = {
     docker: { available: dockerInfo.ok, enabled: process.env.LIGHTNAS_DOCKER_ENABLED === '1', reason: dockerInfo.ok ? null : 'Optional app runtime is not installed or not accessible.', containers: [], presets: containerImages },
     containers: { available: false, enabled: false, provider: 'local-lxc', reason: 'Native LXC is not available on this LightNAS host.', containers: [], images: [], networks: [], pools: containerStoragePools.map(pool => pool.id), storageDetails: containerStoragePools, storageRoot: null },
-    virtualization: { available: vmInfo.ok && installer.ok, enabled: process.env.LIGHTNAS_VM_ENABLED === '1', provider: 'libvirt', acceleration: process.env.LIGHTNAS_VM_ACCELERATION || 'auto', reason: vmInfo.ok && installer.ok ? null : 'QEMU/libvirt is unavailable on this LightNAS host.', warning: null, machines: [], machineDetails: [], pools: vmStoragePools.map(pool => pool.id), storageDetails: vmStoragePools, networks: [], networkDetails: [], images, isoDetails: storageIsos.map(item => ({ id: item.id, name: item.name, storageId: item.storageId, storageName: item.storageName, sizeBytes: item.sizeBytes })), guestTools: await vmGuestToolsInventory().catch(() => ({ windows:{ available:false, canDownload:false }, linux:{ available:true, builtIn:true } })) }
+    virtualization: { available: vmInfo.ok && installer.ok, enabled: vmInfo.ok && installer.ok, provider: 'libvirt', acceleration: process.env.LIGHTNAS_VM_ACCELERATION || 'auto', reason: vmInfo.ok && installer.ok ? null : (installer.ok ? 'The libvirt VM service is not responding on this LightNAS host.' : 'QEMU/libvirt is unavailable on this LightNAS host.'), warning: null, machines: [], machineDetails: [], pools: vmStoragePools.map(pool => pool.id), storageDetails: vmStoragePools, networks: [], networkDetails: [], images, isoDetails: storageIsos.map(item => ({ id: item.id, name: item.name, storageId: item.storageId, storageName: item.storageName, sizeBytes: item.sizeBytes })), guestTools: await vmGuestToolsInventory().catch(() => ({ windows:{ available:false, canDownload:false }, linux:{ available:true, builtIn:true } })) }
   };
   try {
     runtime.containers = await localContainerInventory();
