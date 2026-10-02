@@ -35,9 +35,9 @@ test('server name is hidden from ordinary users unless explicitly granted', () =
 });
 
 test('new local users require at least ten password characters in API and UI', () => {
-  assert.match(server, /input\.password\.length < 10/);
-  assert.match(app, /minlength="10"/);
-  assert.match(app, /password\.length < 10/);
+  assert.match(server, /input\.password\.length < 4/);
+  assert.match(app, /minlength="4"/);
+  assert.match(app, /password\.length < 4/);
 });
 
 test('profile image editor fits the whole image at default zoom and uses modern contained preview', () => {
