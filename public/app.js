@@ -1355,7 +1355,7 @@ function filesView() {
 
     if (state.fileView === 'gallery') {
       return `<article class="file-gallery-item ${kind.toLowerCase()}">
-        <button class="file-name file-gallery-open" data-open="${escapeHtml(entry.name)}" data-path="${escapeHtml(path)}" data-directory="${entry.directory}" aria-label="Open ${escapeHtml(entry.name)}">
+        <button class="file-name file-gallery-open" data-open="${escapeHtml(entry.name)}" data-path="${escapeHtml(path)}" data-directory="${entry.directory}" data-modified="${escapeHtml(entry.modifiedAt || '')}" data-size="${Number(entry.sizeBytes || 0)}" aria-label="Open ${escapeHtml(entry.name)}">
           <span class="file-card-visual">${visual}</span>
         </button>
       </article>`;
@@ -1363,7 +1363,7 @@ function filesView() {
 
     return state.fileView === 'grid'
       ? `<article class="file-card">
-          <button class="file-name file-card-open" data-open="${escapeHtml(entry.name)}" data-path="${escapeHtml(path)}" data-directory="${entry.directory}">
+          <button class="file-name file-card-open" data-open="${escapeHtml(entry.name)}" data-path="${escapeHtml(path)}" data-directory="${entry.directory}" data-modified="${escapeHtml(entry.modifiedAt || '')}" data-size="${Number(entry.sizeBytes || 0)}">
             <span class="file-card-visual">${visual}</span>
             <span class="file-card-title">${escapeHtml(entry.name)}</span>
           </button>
@@ -1375,7 +1375,7 @@ function filesView() {
           </div>
         </article>`
       : `<article class="file-row">
-          <button class="file-name" data-open="${escapeHtml(entry.name)}" data-path="${escapeHtml(path)}" data-directory="${entry.directory}">${entry.directory ? '▣' : kind === 'Photo' ? '▧' : kind === 'Video' ? '▷' : kind === 'Audio' ? '♪' : '▤'} ${escapeHtml(entry.name)}${location ? `<small>${escapeHtml(location)}</small>` : ''}</button>
+          <button class="file-name" data-open="${escapeHtml(entry.name)}" data-path="${escapeHtml(path)}" data-directory="${entry.directory}" data-modified="${escapeHtml(entry.modifiedAt || '')}" data-size="${Number(entry.sizeBytes || 0)}">${entry.directory ? '▣' : kind === 'Photo' ? '▧' : kind === 'Video' ? '▷' : kind === 'Audio' ? '♪' : '▤'} ${escapeHtml(entry.name)}${location ? `<small>${escapeHtml(location)}</small>` : ''}</button>
           <span class="muted">${entry.directory ? 'Folder' : `${kind} · ${bytes(entry.sizeBytes)}`}</span>
           ${entry.directory ? `<button class="secondary" data-download-folder="${escapeHtml(path)}">Download</button>` : ''}
           ${!entry.directory && state.media?.converterAvailable && state.overview.appliance.role === 'administrator' ? `<button class="secondary" data-convert-file="${escapeHtml(entry.name)}" data-path="${escapeHtml(path)}">Convert</button>` : ''}
