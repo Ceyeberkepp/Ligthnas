@@ -574,6 +574,66 @@ async function cachedVideoPreview(relative) {
   return { path: output, size: info.size };
 }
 
+const warmImageExtensions = new Set([
+  '.jpg','.jpeg','.png','.gif','.webp','.bmp','.svg','.avif',
+  '.heic','.heif','.raw','.dng','.cr2','.cr3','.nef','.nrw','.arw','.srf','.sr2','.raf','.orf','.rw2','.pef','.srw','.x3f'
+]);
+const warmVideoExtensions = new Set([
+  '.mp4','.m4v','.mov','.qt','.webm','.ogv','.mkv','.avi','.wmv','.asf','.flv','.f4v',
+  '.mpeg','.mpg','.mpe','.m2v','.mts','.m2ts','.m2t','.ts','.3gp','.3g2','.vob','.mxf',
+  '.rm','.rmvb','.divx','.mod','.tod','.dat'
+]);
+const thumbnailWarmQueue = [];
+const thumbnailWarmQueued = new Set();
+const videoWarmQueue = [];
+const videoWarmQueued = new Set();
+let thumbnailWarmActive = 0;
+let videoWarmActive = 0;
+
+function pumpThumbnailWarmQueue() {
+  while (thumbnailWarmActive < 2 && thumbnailWarmQueue.length) {
+    const relative = thumbnailWarmQueue.shift();
+    thumbnailWarmQueued.delete(relative);
+    thumbnailWarmActive += 1;
+    (async () => {
+      try {
+        await thumbnailFor(relative);
+        await thumbnailFor(relative, { preview:true });
+      } catch {}
+      finally {
+        thumbnailWarmActive -= 1;
+        pumpThumbnailWarmQueue();
+      }
+    })();
+  }
+}
+
+function pumpVideoWarmQueue() {
+  while (videoWarmActive < 1 && videoWarmQueue.length) {
+    const relative = videoWarmQueue.shift();
+    videoWarmQueued.delete(relative);
+    videoWarmActive += 1;
+    cachedVideoPreview(relative).catch(() => {}).finally(() => {
+      videoWarmActive -= 1;
+      pumpVideoWarmQueue();
+    });
+  }
+}
+
+function enqueueMediaWarm(relative) {
+  const extension = extname(relative).toLowerCase();
+  if ((warmImageExtensions.has(extension) || warmVideoExtensions.has(extension)) && !thumbnailWarmQueued.has(relative)) {
+    thumbnailWarmQueued.add(relative);
+    thumbnailWarmQueue.push(relative);
+    pumpThumbnailWarmQueue();
+  }
+  if (warmVideoExtensions.has(extension) && !videoWarmQueued.has(relative)) {
+    videoWarmQueued.add(relative);
+    videoWarmQueue.push(relative);
+    pumpVideoWarmQueue();
+  }
+}
+
 function streamRangedMedia(req, res, file, mime, cacheControl = 'private, max-age=86400') {
   const range = String(req.headers.range || '');
   const headers = {
@@ -2350,6 +2410,7 @@ async function api(req, res, url) {
     if (result.complete) {
       store.addActivity('file', `File ${requestedPath} was uploaded in chunks.`);
       await store.save();
+      enqueueMediaWarm(path);
     }
     return send(res, result.complete ? 201 : 200, { ok: true, ...result });
   }
@@ -2391,6 +2452,7 @@ async function api(req, res, url) {
       await uploadFile(path, req, { quotaRoot: scope || '', quotaBytes });
       store.addActivity('file', `File ${requestedPath} was uploaded.`);
       await store.save();
+      enqueueMediaWarm(path);
       return send(res, 201, { ok: true });
     }
   }
@@ -2401,6 +2463,20 @@ async function api(req, res, url) {
     const quotaBytes = Number(account?.storageQuotaBytes) > 0 ? Number(account.storageQuotaBytes) : DEFAULT_USER_STORAGE_QUOTA_BYTES;
     const usedBytes = await fileUsage(scope);
     return send(res, 200, { scoped: true, quotaBytes, usedBytes, remainingBytes: Math.max(0, quotaBytes - usedBytes) });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/files/prewarm') {
+    if (!requireAnyPermission(res, permissions, ['files.view.own', 'files.own', 'files.read'])) return;
+    const input = await bodyJson(req);
+    const paths = Array.isArray(input.paths) ? input.paths.slice(0, 24) : [];
+    let queued = 0;
+    for (const requested of paths) {
+      const relative = scopedFilePath(context, String(requested || ''), ['files.read']);
+      if (relative === null) continue;
+      enqueueMediaWarm(relative);
+      queued += 1;
+    }
+    return send(res, 202, { ok:true, queued });
   }
 
   if (req.method === 'GET' && url.pathname === '/api/files/thumbnail') {
