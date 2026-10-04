@@ -267,7 +267,7 @@ test('video playback supports byte ranges and mobile native playback fallback', 
   assert.match(server, /res\.writeHead\(206/);
   assert.match(server, /'Content-Range': `bytes \$\{start\}-\$\{end\}\/\$\{data\.size\}`/);
   assert.match(server, /createReadStream\(data\.path, \{ start, end \}\)/);
-  assert.match(enhancements, /const nativeVideo = \['mp4','m4v','mov','webm'\]\.includes\(extension\)/);
+  assert.match(enhancements, /const nativeMobile = \['mp4','m4v','mov'\]\.includes\(extension\)/);
   assert.match(enhancements, /viewer\.addEventListener\('error', fallback\)/);
   assert.match(enhancements, /\/api\/files\/video-preview\?path=/);
 });
@@ -284,10 +284,10 @@ test('mobile video playback normalizes source codecs for iPhone and Android', as
   assert.match(server, /'-c:a', 'aac'/);
   assert.match(server, /'-profile:a', 'aac_low'/);
   assert.match(server, /'format=yuv420p'/);
-  assert.match(server, /frag_keyframe\+empty_moov\+default_base_moof\+faststart/);
+  assert.match(server, /'-movflags', '\+faststart'/);
 
   assert.match(enhancements, /Android\|iPhone\|iPad\|iPod/);
-  assert.match(enhancements, /viewer\.src = mobileDevice \? compatibilityUrl : nativeUrl/);
+  assert.match(enhancements, /viewer\.src = usingCompatibility \? compatibilityUrl : nativeUrl/);
   assert.match(enhancements, /'mxf'/);
   assert.match(enhancements, /'rmvb'/);
 
@@ -313,4 +313,32 @@ test('mobile photo editor fills viewport and uses native-style single-control wo
   assert.match(styles, /dialog\.mobile-photo-editor[\s\S]*?height: 100dvh !important/);
   assert.match(styles, /\.mobile-adjust-tools[\s\S]*?overflow-x: auto !important/);
   assert.match(styles, /\.filter-preview[\s\S]*?width: 72px !important/);
+});
+
+
+test('mobile video preview is cached as a seekable MP4', async () => {
+  const server = await readFile(new URL('../src/server.mjs', import.meta.url), 'utf8');
+  assert.match(server, /const videoPreviewCacheRoot/);
+  assert.match(server, /async function cachedVideoPreview/);
+  assert.match(server, /videoPreviewJobs = new Map\(\)/);
+  assert.match(server, /'-f', 'mp4'/);
+  assert.match(server, /'-movflags', '\+faststart'/);
+  assert.match(server, /return streamRangedMedia\(req, res, preview, 'video\/mp4'\)/);
+});
+
+test('mobile Files prewarms metadata and uses small lazy thumbnails', async () => {
+  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  const thumbnails = await readFile(new URL('../src/thumbnails.mjs', import.meta.url), 'utf8');
+  assert.match(app, /restoreMobileFilesCache\(appliance\.username\)/);
+  assert.match(app, /setTimeout\(\(\) => \{ if \(state\.files === null\) loadFiles\(false\); \}, 120\)/);
+  assert.match(app, /loading="lazy" fetchpriority="low"/);
+  assert.match(thumbnails, /const maxWidth = preview \? 1600 : 320/);
+  assert.match(thumbnails, /source\.mtimeMs/);
+});
+
+test('photo viewer opens from the already visible tile and limits filmstrip work', async () => {
+  const enhancements = await readFile(new URL('../public/enhancements.js', import.meta.url), 'utf8');
+  assert.match(enhancements, /const immediate = tile\?\.currentSrc \|\| tile\?\.src \|\| urls\.preview/);
+  assert.match(enhancements, /const radius = 18/);
+  assert.match(enhancements, /loading="lazy" decoding="async"/);
 });

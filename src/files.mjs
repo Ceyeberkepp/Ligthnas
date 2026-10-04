@@ -402,7 +402,7 @@ export async function downloadFile(relative) {
   const path = await checked(relative);
   const info = await lstat(path);
   if (!info.isFile()) throw Object.assign(new Error('Not a file.'), { status: 400 });
-  return { path, size: info.size };
+  return { path, size: info.size, mtimeMs: info.mtimeMs };
 }
 
 export async function downloadEntry(relative) {

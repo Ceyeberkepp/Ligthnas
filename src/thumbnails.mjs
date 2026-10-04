@@ -23,17 +23,18 @@ export async function thumbnailFor(relative, options = {}) {
   if (!images.has(extension) && !rawImages.has(extension) && !videos.has(extension)) throw Object.assign(new Error('This file type does not support thumbnails.'), { status: 415 });
   const source = await downloadFile(relative);
 
-  // Browser-native image formats do not need FFmpeg. Returning the original
-  // file through the dedicated thumbnail route is both faster and much more
-  // reliable when many cards are visible or a preview is opened/closed.
-  if (nativeImageTypes.has(extension)) {
+  // Never send a multi-megabyte camera original just to paint a tiny grid
+  // tile. Mobile libraries can contain thousands of photos, so normal raster
+  // images get real cached thumbnails. SVG can stay native because it is
+  // already resolution-independent and generally small.
+  if (extension === '.svg') {
     return { path: source.path, size: source.size, contentType: nativeImageTypes.get(extension) };
   }
 
   await mkdir(cacheRoot, { recursive: true, mode: 0o700 });
   const preview = options.preview === true;
-  const maxWidth = preview ? 1920 : 320;
-  const key = createHash('sha256').update(`${relative}:${source.size}:${maxWidth}`).digest('hex');
+  const maxWidth = preview ? 1600 : 320;
+  const key = createHash('sha256').update(`${relative}:${source.size}:${source.mtimeMs || 0}:${maxWidth}`).digest('hex');
   const output = join(cacheRoot, `${key}.jpg`);
   try {
     const info = await stat(output);

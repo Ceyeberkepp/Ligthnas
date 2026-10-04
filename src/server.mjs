@@ -1,7 +1,7 @@
 import http from 'node:http';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { readFile, mkdir, rmdir, writeFile, rm } from 'node:fs/promises';
+import { readFile, mkdir, rmdir, writeFile, rm, rename, stat } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import { basename, dirname, extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -501,6 +501,125 @@ export const PERMISSIONS = Object.freeze([
 ]);
 const DEFAULT_USER_PERMISSIONS = Object.freeze(['files.view.own', 'files.own']);
 const DEFAULT_USER_STORAGE_QUOTA_BYTES = 5 * 1024 * 1024 * 1024;
+
+const videoPreviewCacheRoot = join(dirname(process.env.NAS_DATA_FILE || 'data/state.json'), 'video-previews');
+const videoPreviewJobs = new Map();
+
+async function cachedVideoPreview(relative) {
+  const source = await downloadFile(relative);
+  await mkdir(videoPreviewCacheRoot, { recursive: true, mode: 0o700 });
+  const key = createHash('sha256')
+    .update(`${relative}:${source.size}:${source.mtimeMs || 0}:h264-aac-v2`)
+    .digest('hex');
+  const output = join(videoPreviewCacheRoot, `${key}.mp4`);
+
+  try {
+    const info = await stat(output);
+    if (info.isFile() && info.size > 1024) return { path: output, size: info.size };
+  } catch {}
+
+  if (!videoPreviewJobs.has(key)) {
+    const job = (async () => {
+      const temp = `${output}.${process.pid}.${Date.now()}.tmp`;
+      let stderr = '';
+      try {
+        await new Promise((resolveJob, rejectJob) => {
+          const ffmpeg = spawn('ffmpeg', [
+            '-nostdin', '-hide_banner', '-loglevel', 'error',
+            '-fflags', '+genpts',
+            '-i', source.path,
+            '-map', '0:v:0', '-map', '0:a:0?',
+            '-sn', '-dn',
+            '-vf', 'scale=1920:1080:force_original_aspect_ratio=decrease:force_divisible_by=2,format=yuv420p',
+            '-c:v', 'libx264',
+            '-profile:v', 'main',
+            '-level:v', '4.1',
+            '-preset', 'veryfast',
+            '-crf', '24',
+            '-g', '48',
+            '-keyint_min', '48',
+            '-sc_threshold', '0',
+            '-c:a', 'aac',
+            '-profile:a', 'aac_low',
+            '-b:a', '160k',
+            '-ar', '48000',
+            '-ac', '2',
+            '-avoid_negative_ts', 'make_zero',
+            '-movflags', '+faststart',
+            '-f', 'mp4',
+            '-y', temp
+          ], { stdio: ['ignore', 'ignore', 'pipe'] });
+          ffmpeg.stderr.on('data', chunk => {
+            if (stderr.length < 16384) stderr += chunk.toString('utf8');
+          });
+          ffmpeg.on('error', rejectJob);
+          ffmpeg.on('close', code => {
+            if (code === 0) resolveJob();
+            else rejectJob(new Error(stderr.trim() || `FFmpeg could not decode or transcode this video (exit ${code}).`));
+          });
+        });
+        const info = await stat(temp);
+        if (!info.isFile() || info.size <= 1024) throw new Error('The compatible video preview was empty.');
+        await rename(temp, output);
+      } catch (error) {
+        await rm(temp, { force: true }).catch(() => {});
+        throw Object.assign(error, { status: 409 });
+      }
+    })().finally(() => videoPreviewJobs.delete(key));
+    videoPreviewJobs.set(key, job);
+  }
+
+  await videoPreviewJobs.get(key);
+  const info = await stat(output);
+  return { path: output, size: info.size };
+}
+
+function streamRangedMedia(req, res, file, mime, cacheControl = 'private, max-age=86400') {
+  const range = String(req.headers.range || '');
+  const headers = {
+    'Content-Type': mime,
+    'Accept-Ranges': 'bytes',
+    'Cache-Control': cacheControl,
+    'X-Content-Type-Options': 'nosniff',
+    'Content-Security-Policy': csp
+  };
+
+  if (range) {
+    const match = /^bytes=(\d*)-(\d*)$/.exec(range.trim());
+    if (!match) {
+      res.writeHead(416, { ...headers, 'Content-Range': `bytes */${file.size}` });
+      res.end();
+      return;
+    }
+    let start = match[1] ? Number(match[1]) : null;
+    let end = match[2] ? Number(match[2]) : null;
+    if (start === null && end !== null) {
+      const suffix = Math.max(0, Math.min(end, file.size));
+      start = Math.max(0, file.size - suffix);
+      end = file.size - 1;
+    } else {
+      start ??= 0;
+      end ??= file.size - 1;
+    }
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || start >= file.size) {
+      res.writeHead(416, { ...headers, 'Content-Range': `bytes */${file.size}` });
+      res.end();
+      return;
+    }
+    end = Math.min(end, file.size - 1);
+    res.writeHead(206, {
+      ...headers,
+      'Content-Length': end - start + 1,
+      'Content-Range': `bytes ${start}-${end}/${file.size}`
+    });
+    createReadStream(file.path, { start, end }).pipe(res);
+    return;
+  }
+
+  res.writeHead(200, { ...headers, 'Content-Length': file.size });
+  createReadStream(file.path).pipe(res);
+}
+
 
 store.setActivityListener(async event => {
   await deliverEvent(store.state, event);
@@ -2331,52 +2450,10 @@ async function api(req, res, url) {
       '.3gp', '.3g2', '.vob', '.mxf', '.rm', '.rmvb', '.divx', '.mod', '.tod', '.dat'
     ]);
     if (!supportedVideo.has(extension)) return send(res, 415, { error: 'This file is not a supported video preview format.' });
-    const data = await downloadFile(relative);
-    res.writeHead(200, {
-      'Content-Type': 'video/mp4',
-      'Cache-Control': 'no-store',
-      'X-Content-Type-Options': 'nosniff',
-      'Content-Security-Policy': csp
-    });
-    const ffmpeg = spawn('ffmpeg', [
-      '-nostdin', '-hide_banner', '-loglevel', 'error',
-      '-fflags', '+genpts',
-      '-i', data.path,
-      '-map', '0:v:0', '-map', '0:a:0?',
-      '-sn', '-dn',
-      '-vf', 'scale=1920:1080:force_original_aspect_ratio=decrease:force_divisible_by=2,format=yuv420p',
-      '-c:v', 'libx264',
-      '-profile:v', 'main',
-      '-level:v', '4.1',
-      '-preset', 'veryfast',
-      '-crf', '24',
-      '-g', '48',
-      '-keyint_min', '48',
-      '-sc_threshold', '0',
-      '-c:a', 'aac',
-      '-profile:a', 'aac_low',
-      '-b:a', '160k',
-      '-ar', '48000',
-      '-ac', '2',
-      '-avoid_negative_ts', 'make_zero',
-      '-movflags', 'frag_keyframe+empty_moov+default_base_moof+faststart',
-      '-f', 'mp4', 'pipe:1'
-    ], { stdio: ['ignore', 'pipe', 'pipe'] });
-    let ffmpegError = '';
-    ffmpeg.stderr.on('data', chunk => {
-      if (ffmpegError.length < 8192) ffmpegError += chunk.toString('utf8');
-    });
-    ffmpeg.on('error', error => {
-      if (!res.destroyed) res.destroy(error);
-    });
-    ffmpeg.on('close', code => {
-      if (code !== 0 && !res.destroyed && !res.writableEnded) {
-        res.destroy(new Error(ffmpegError.trim() || `FFmpeg could not decode or transcode this video (exit ${code}).`));
-      }
-    });
-    res.on('close', () => { if (!ffmpeg.killed) ffmpeg.kill('SIGTERM'); });
-    return ffmpeg.stdout.pipe(res);
+    const preview = await cachedVideoPreview(relative);
+    return streamRangedMedia(req, res, preview, 'video/mp4');
   }
+
   if (req.method === 'GET' && url.pathname === '/api/files/download') {
     if (!requireAnyPermission(res, permissions, ['files.view.own', 'files.own', 'files.download', 'files.read'])) return;
     const requested = url.searchParams.get('path') || '';

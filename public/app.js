@@ -1,5 +1,34 @@
 if (window.LIGHTNAS_PRODUCT_MODE === 'hypervisor') document.body.classList.add('product-hypervisor');
 const state = { overview: null, view: 'home', uiMode: window.LIGHTNAS_PRODUCT_MODE === 'hypervisor' ? 'hypervisor' : 'nas', folder: '', files: null, fileError: null, filesSettingsOpen: false, mobileFilesPeriod: localStorage.getItem('lightnas-mobile-files-period') || 'all', aiMessages: [], logs: null, fileView: ['list','grid','gallery'].includes(localStorage.getItem('lightnas-file-view')) ? localStorage.getItem('lightnas-file-view') : 'grid', fileTruncated: false, fileQuota: null, overviewMetric: localStorage.getItem('lightnas-overview-metric') || 'cpu', lastNetworkSample: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, userAccess: null, smtp: undefined, media: null, network: null, software: null, license: null, builtinCatalog: null, communityCatalog: null, communityCatalogLoading: false, communityCatalogError: null, appSearch: '', appCategory: '', appVisibleLimit: 72, backupJobs: null, selectedBackupJobId: null, metricHistory: { cpu: [], load: [], memory: [], storage: [], networkIn: [], networkOut: [] } };
+function mobileFilesCacheKey(username = state.overview?.appliance?.username || '') {
+  return username ? `lightnas-mobile-files-cache:${username}` : '';
+}
+
+function restoreMobileFilesCache(username) {
+  if (!matchMedia('(max-width: 760px)').matches) return;
+  const key = mobileFilesCacheKey(username);
+  if (!key) return;
+  try {
+    const cached = JSON.parse(sessionStorage.getItem(key) || 'null');
+    if (!cached || Date.now() - Number(cached.savedAt || 0) > 120000 || !Array.isArray(cached.files)) return;
+    state.files = cached.files;
+    state.fileTruncated = Boolean(cached.truncated);
+  } catch {}
+}
+
+function saveMobileFilesCache() {
+  if (!matchMedia('(max-width: 760px)').matches || state.folder !== '' || !Array.isArray(state.files)) return;
+  const key = mobileFilesCacheKey();
+  if (!key) return;
+  try {
+    sessionStorage.setItem(key, JSON.stringify({
+      savedAt: Date.now(),
+      files: state.files,
+      truncated: state.fileTruncated
+    }));
+  } catch {}
+}
+
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
 const themeChoices = ['system', 'light', 'dark'];
@@ -258,6 +287,7 @@ async function showConsole() {
   window.LightNASOverview = state.overview;
   captureOverviewMetrics();
   const { appliance } = state.overview;
+  restoreMobileFilesCache(appliance.username);
   $('#mini-name').textContent = appliance.deviceNameVisible && appliance.deviceName ? appliance.deviceName : 'Online';
   $('#mini-name').classList.toggle('online-only', !appliance.deviceNameVisible);
   applyApplianceBranding(appliance);
@@ -278,6 +308,9 @@ async function showConsole() {
     setTimeout(() => loadRuntimes(false), 250);
     setTimeout(() => { if (!state.network) loadNetwork(); }, 700);
     setTimeout(() => { if (state.spaces === null) loadSpaces(); }, 900);
+    if (matchMedia('(max-width: 760px)').matches) {
+      setTimeout(() => { if (state.files === null) loadFiles(false); }, 120);
+    }
   });
   document.querySelectorAll('#nav a[data-view], .foot-admin[data-view]').forEach(link => {
     const label = link.textContent.replace(/\s+/g, ' ').trim();
@@ -1350,7 +1383,7 @@ function filesView() {
     const visual = entry.directory
       ? '<span class="folder-glyph">▣</span>'
       : (kind === 'Photo' || kind === 'Video')
-        ? `<img class="file-thumb" loading="${state.fileView === 'gallery' ? 'eager' : 'lazy'}" decoding="async" alt="" src="/api/files/thumbnail?path=${encodeURIComponent(path)}&v=${thumbVersion}">`
+        ? `<img class="file-thumb" loading="lazy" fetchpriority="low" decoding="async" alt="" src="/api/files/thumbnail?path=${encodeURIComponent(path)}&v=${thumbVersion}">`
         : `<span class="file-glyph file-kind-${kind.toLowerCase()}">${kind === 'Audio' ? '♪' : '▤'}</span>`;
 
     if (state.fileView === 'gallery') {
@@ -1411,7 +1444,7 @@ function filesView() {
       body = `<div class="mobile-photo-years">${[...groups.entries()].sort((a,b) => Number(b[0]) - Number(a[0])).map(([year, group]) => {
         const cover = group.sort((a,b) => mobileDate(b) - mobileDate(a))[0];
         const path = fileEntryPath(cover);
-        return `<section class="mobile-year-card"><h2>${year}</h2><button class="file-name" data-open="${escapeHtml(cover.name)}" data-path="${escapeHtml(path)}" data-directory="false"><img src="/api/files/thumbnail?path=${encodeURIComponent(path)}&preview=1" alt=""></button><small>${group.length} item${group.length===1?'':'s'}</small></section>`;
+        return `<section class="mobile-year-card"><h2>${year}</h2><button class="file-name" data-open="${escapeHtml(cover.name)}" data-path="${escapeHtml(path)}" data-directory="false"><img loading="lazy" decoding="async" src="/api/files/thumbnail?path=${encodeURIComponent(path)}" alt=""></button><small>${group.length} item${group.length===1?'':'s'}</small></section>`;
       }).join('')}</div>`;
     } else if (period === 'months') {
       const groups = new Map();
@@ -1607,10 +1640,28 @@ async function openProtectedUserFiles() {
 
 async function loadFiles(forceRefresh = false) {
   state.fileError = null;
+  const mobile = matchMedia('(max-width: 760px)').matches;
   try {
     const endpoint = state.folder === ''
       ? `/api/files?all=1${forceRefresh ? '&refresh=1' : ''}`
       : `/api/files?path=${encodeURIComponent(state.folder)}`;
+
+    if (mobile) {
+      // Paint the mobile library as soon as metadata arrives. Quota calculation
+      // can walk a large private library and must not block the Files tab.
+      const result = await request(endpoint);
+      state.files = Array.isArray(result.entries) ? result.entries.filter(entry => entry.supported) : [];
+      state.fileTruncated = Boolean(result.truncated);
+      saveMobileFilesCache();
+      if (state.view === 'files') render('files');
+
+      request('/api/files/quota').then(quota => {
+        state.fileQuota = quota;
+        if (state.view === 'files' && !document.querySelector('.mobile-photos-experience')) render('files');
+      }).catch(() => {});
+      return;
+    }
+
     const [result, quota] = await Promise.all([
       request(endpoint),
       request('/api/files/quota').catch(() => null)
@@ -3511,7 +3562,14 @@ $('#login-use-passkey')?.addEventListener('click', async () => {
 $('#node-shell-top')?.addEventListener('click', () => {
   window.open(`/node-shell.html?v=${Date.now()}`, '_blank', 'noopener,width=1200,height=800');
 });
-$('#logout').addEventListener('click', async () => { await request('/api/logout', { method: 'POST' }); setLoginMethods([]); showAuth('login'); });
+$('#logout').addEventListener('click', async () => {
+  const key = mobileFilesCacheKey();
+  if (key) sessionStorage.removeItem(key);
+  await request('/api/logout', { method: 'POST' });
+  state.files = null;
+  setLoginMethods([]);
+  showAuth('login');
+});
 function setMobileSidebar(open) {
   const sidebar = $('.sidebar');
   const backdrop = $('#sidebar-backdrop');

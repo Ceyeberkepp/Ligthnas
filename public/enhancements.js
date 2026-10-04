@@ -116,9 +116,13 @@ function updateViewerNavigation(dialog, name) {
   dialog.querySelector('[data-viewer-position]').textContent = index >= 0 ? `${index + 1} of ${items.length}` : '';
   const filmstrip = dialog.querySelector('[data-viewer-filmstrip]');
   if (filmstrip) {
-    filmstrip.innerHTML = items.map((item, itemIndex) => {
+    const radius = 18;
+    const start = Math.max(0, index - radius);
+    const end = Math.min(items.length, index + radius + 1);
+    filmstrip.innerHTML = items.slice(start, end).map((item, offset) => {
+      const itemIndex = start + offset;
       const url = `/api/files/thumbnail?path=${encodeURIComponent(item.path)}`;
-      return `<button type="button" class="${itemIndex === index ? 'active' : ''}" data-filmstrip-index="${itemIndex}" aria-label="Open ${escapeHtml(item.name)}"><img src="${url}" alt=""></button>`;
+      return `<button type="button" class="${itemIndex === index ? 'active' : ''}" data-filmstrip-index="${itemIndex}" aria-label="Open ${escapeHtml(item.name)}"><img loading="lazy" decoding="async" src="${url}" alt=""></button>`;
     }).join('');
     filmstrip.querySelector('.active')?.scrollIntoView({ inline:'center', block:'nearest', behavior:'instant' });
   }
@@ -883,12 +887,22 @@ async function openPreview(name, explicitPath = '') {
   if (kind === 'image') {
     viewer = document.createElement('img');
     const urls = viewerUrls({ name, path });
-    viewer.src = urls.preview;
+    const tile = [...document.querySelectorAll('#content .file-name[data-path]')]
+      .find(button => button.dataset.path === path)
+      ?.querySelector('img');
+    const immediate = tile?.currentSrc || tile?.src || urls.preview;
+    viewer.src = immediate;
     viewer.alt = name;
     viewer.decoding = 'async';
     viewer.fetchPriority = 'high';
-    stage.style.setProperty('--viewer-bg', `url("${urls.preview.replaceAll('"', '%22')}")`);
-    warmViewerImage(urls.preview);
+    stage.style.setProperty('--viewer-bg', `url("${immediate.replaceAll('"', '%22')}")`);
+
+    warmViewerImage(urls.preview).then(preview => {
+      if (!preview || dialog.dataset.sourcePath !== path || !viewer.isConnected) return;
+      viewer.src = urls.preview;
+      stage.style.setProperty('--viewer-bg', `url("${urls.preview.replaceAll('"', '%22')}")`);
+    });
+
     if (urls.original) {
       warmViewerImage(urls.original).then(full => {
         if (!full || dialog.dataset.sourcePath !== path || !viewer.isConnected) return;
@@ -902,33 +916,32 @@ async function openPreview(name, explicitPath = '') {
     viewer.autoplay = true;
     viewer.playsInline = true;
     viewer.preload = 'auto';
+    viewer.poster = `/api/files/thumbnail?path=${encodeURIComponent(path)}`;
 
+    const extension = name.toLowerCase().split('.').pop();
     const mobileDevice = matchMedia('(max-width: 760px)').matches || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    const nativeMobile = ['mp4','m4v','mov'].includes(extension);
     const nativeUrl = `/api/files/download?path=${encodeURIComponent(path)}`;
     const compatibilityUrl = `/api/files/video-preview?path=${encodeURIComponent(path)}`;
 
-    // Phones always use the server-normalized H.264/AAC stream so playback
-    // does not depend on the source codec/container supported by Safari/Chrome.
-    viewer.src = mobileDevice ? compatibilityUrl : nativeUrl;
+    let usingCompatibility = mobileDevice && !nativeMobile;
+    viewer.src = usingCompatibility ? compatibilityUrl : nativeUrl;
 
-    if (!mobileDevice) {
-      let usedFallback = false;
-      const fallback = () => {
-        if (usedFallback) return;
-        usedFallback = true;
-        viewer.pause();
-        viewer.removeAttribute('src');
-        viewer.load();
-        viewer.src = compatibilityUrl;
-        viewer.load();
-        viewer.play().catch(() => {});
-      };
-      viewer.addEventListener('error', fallback);
-      viewer.addEventListener('stalled', () => {
-        if (!usedFallback && viewer.readyState < 2) fallback();
-      });
-    }
+    const fallback = () => {
+      if (usingCompatibility) return;
+      usingCompatibility = true;
+      viewer.pause();
+      viewer.removeAttribute('src');
+      viewer.load();
+      viewer.src = compatibilityUrl;
+      viewer.load();
+      viewer.play().catch(() => {});
+    };
 
+    viewer.addEventListener('error', fallback);
+    viewer.addEventListener('stalled', () => {
+      if (!usingCompatibility && viewer.readyState < 2) fallback();
+    });
     viewer.addEventListener('canplay', () => viewer.play().catch(() => {}), { once:true });
     viewer.play().catch(() => {});
   } else {
