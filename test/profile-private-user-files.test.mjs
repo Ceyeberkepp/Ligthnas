@@ -332,7 +332,7 @@ test('mobile Files prewarms metadata and uses small lazy thumbnails', async () =
   assert.match(app, /restoreMobileFilesCache\(appliance\.username\)/);
   assert.match(app, /setTimeout\(\(\) => \{ if \(state\.files === null\) loadFiles\(false\); \}, 120\)/);
   assert.match(app, /loading="lazy" fetchpriority="low"/);
-  assert.match(thumbnails, /const maxWidth = preview \? 1600 : 320/);
+  assert.match(thumbnails, /const maxWidth = preview \? 1280 : 320/);
   assert.match(thumbnails, /source\.mtimeMs/);
 });
 
@@ -341,4 +341,31 @@ test('photo viewer opens from the already visible tile and limits filmstrip work
   assert.match(enhancements, /const immediate = tile\?\.currentSrc \|\| tile\?\.src \|\| urls\.preview/);
   assert.match(enhancements, /const radius = 18/);
   assert.match(enhancements, /loading="lazy" decoding="async"/);
+});
+
+
+test('mobile media is prepared before the user opens it', async () => {
+  const server = await readFile(new URL('../src/server.mjs', import.meta.url), 'utf8');
+  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  const enhancements = await readFile(new URL('../public/enhancements.js', import.meta.url), 'utf8');
+  const thumbnails = await readFile(new URL('../src/thumbnails.mjs', import.meta.url), 'utf8');
+
+  assert.match(server, /function enqueueMediaWarm\(relative\)/);
+  assert.match(server, /thumbnailWarmActive < 2/);
+  assert.match(server, /videoWarmActive < 1/);
+  assert.match(server, /url\.pathname === '\/api\/files\/prewarm'/);
+  assert.match(server, /enqueueMediaWarm\(path\)/);
+  assert.match(server, /scale=1280:720/);
+  assert.match(server, /'-preset', 'ultrafast'/);
+
+  assert.match(app, /function queueMobileMediaPrewarm/);
+  assert.match(app, /\/api\/files\/prewarm/);
+  assert.match(app, /slice\(0, 18\)/);
+
+  assert.match(enhancements, /const mobileImageViewer/);
+  assert.match(enhancements, /if \(urls\.original && !mobileImageViewer\)/);
+  assert.match(enhancements, /body:JSON\.stringify\(\{ paths:nearby\.map/);
+
+  assert.match(thumbnails, /const thumbnailJobs = new Map\(\)/);
+  assert.match(thumbnails, /const maxWidth = preview \? 1280 : 320/);
 });
