@@ -3167,3 +3167,62 @@ small {
     background: transparent;
   }
 }
+
+
+/* Final mobile viewer fit + snap navigation refinement. */
+@media (max-width: 760px) {
+  .lightnas-viewer,
+  .lightnas-viewer .dialog-body,
+  .lightnas-viewer .viewer-shell,
+  .lightnas-viewer .viewer-stage {
+    width: 100vw !important;
+    height: 100dvh !important;
+    min-height: 100dvh !important;
+    max-height: 100dvh !important;
+  }
+
+  .lightnas-viewer .viewer-stage {
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    background: #000;
+    touch-action: none;
+  }
+
+  .lightnas-viewer .viewer-stage::before,
+  .lightnas-viewer .viewer-stage::after {
+    display: none !important;
+  }
+
+  .lightnas-viewer .viewer-stage > img,
+  .lightnas-viewer .viewer-stage > video {
+    width: 100vw !important;
+    height: 100dvh !important;
+    max-width: none !important;
+    max-height: none !important;
+    object-fit: cover !important;
+    object-position: center center;
+    background: #000;
+    will-change: transform, opacity;
+  }
+
+  .lightnas-viewer .viewer-stage > img.viewer-dragging {
+    transition: none !important;
+  }
+
+  .lightnas-viewer .viewer-stage > img.viewer-snapping {
+    transition: transform .16s cubic-bezier(.2,.8,.2,1), opacity .16s linear !important;
+  }
+
+  .lightnas-viewer .viewer-stage > img.viewer-swipe-out {
+    transition: transform .12s cubic-bezier(.2,.8,.2,1), opacity .1s linear !important;
+  }
+
+  .lightnas-viewer .dialog-head {
+    padding-top: calc(env(safe-area-inset-top) + 10px);
+  }
+
+  .lightnas-viewer .dialog-actions {
+    padding-bottom: calc(env(safe-area-inset-bottom) + 10px);
+  }
+}

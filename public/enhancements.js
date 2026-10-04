@@ -150,52 +150,77 @@ function ensureViewer() {
 
   const stage = dialog.querySelector('[data-viewer-stage]');
   let gesture = null;
+  const resetGestureVisual = (snapBack = true) => {
+    if (!gesture?.image) return;
+    gesture.image.classList.remove('viewer-dragging');
+    gesture.image.classList.toggle('viewer-snapping', snapBack);
+    gesture.image.style.transform = '';
+    gesture.image.style.opacity = '';
+    if (snapBack) setTimeout(() => gesture?.image?.classList.remove('viewer-snapping'), 180);
+  };
   stage.addEventListener('pointerdown', event => {
     if (event.pointerType !== 'touch') return;
     const image = stage.querySelector('img');
-    gesture = { id:event.pointerId, x:event.clientX, y:event.clientY, time:performance.now(), image };
+    gesture = {
+      id:event.pointerId,
+      x:event.clientX,
+      y:event.clientY,
+      time:performance.now(),
+      image,
+      axis:null,
+      lastX:event.clientX
+    };
     if (image) image.classList.add('viewer-dragging');
     try { stage.setPointerCapture(event.pointerId); } catch {}
   });
   stage.addEventListener('pointermove', event => {
-    if (!gesture || gesture.id !== event.pointerId || !gesture.image) return;
-    const dx = event.clientX - gesture.x;
-    const dy = event.clientY - gesture.y;
-    if (Math.abs(dx) > Math.abs(dy)) {
-      gesture.image.style.transform = `translate3d(${dx}px,0,0) scale(.985)`;
-      gesture.image.style.opacity = String(Math.max(.72, 1 - Math.abs(dx) / 900));
-    }
-  });
-  stage.addEventListener('pointerup', event => {
     if (!gesture || gesture.id !== event.pointerId) return;
     const dx = event.clientX - gesture.x;
     const dy = event.clientY - gesture.y;
-    const elapsed = performance.now() - gesture.time;
-    if (gesture.image) {
-      gesture.image.classList.remove('viewer-dragging');
-      gesture.image.style.transform = '';
-      gesture.image.style.opacity = '';
+    gesture.lastX = event.clientX;
+    if (!gesture.axis && (Math.abs(dx) > 7 || Math.abs(dy) > 7)) {
+      gesture.axis = Math.abs(dx) > Math.abs(dy) * 1.15 ? 'x' : 'y';
     }
-    gesture = null;
-    if (elapsed > 900) return;
-    if (Math.abs(dx) >= 34 && Math.abs(dx) > Math.abs(dy) * 1.08) {
-      navigatePreview(dx < 0 ? 1 : -1);
+    if (gesture.axis !== 'x' || !gesture.image) return;
+    event.preventDefault();
+    const bounded = Math.max(-window.innerWidth * .92, Math.min(window.innerWidth * .92, dx));
+    gesture.image.style.transform = `translate3d(${bounded}px,0,0) scale(.99)`;
+    gesture.image.style.opacity = String(Math.max(.58, 1 - Math.abs(bounded) / (window.innerWidth * 1.25)));
+  }, { passive:false });
+  stage.addEventListener('pointerup', event => {
+    if (!gesture || gesture.id !== event.pointerId) return;
+    const active = gesture;
+    const dx = event.clientX - active.x;
+    const dy = event.clientY - active.y;
+    const elapsed = Math.max(1, performance.now() - active.time);
+    const velocityX = dx / elapsed;
+    const horizontal = active.axis === 'x' && Math.abs(dx) > Math.abs(dy);
+    const commitSwipe = horizontal && (Math.abs(dx) >= Math.min(72, window.innerWidth * .14) || Math.abs(velocityX) > .48);
+    if (commitSwipe) {
+      const direction = dx < 0 ? 1 : -1;
+      if (active.image) {
+        active.image.classList.remove('viewer-dragging');
+        active.image.classList.add('viewer-swipe-out');
+        active.image.style.transform = `translate3d(${dx < 0 ? '-105vw' : '105vw'},0,0)`;
+        active.image.style.opacity = '0';
+      }
+      gesture = null;
+      requestAnimationFrame(() => navigatePreview(direction));
       return;
     }
-    if (dy > 110 && Math.abs(dy) > Math.abs(dx) * 1.2 && matchMedia('(max-width: 760px)').matches) {
+    if (active.axis === 'y' && dy > 120 && matchMedia('(max-width: 760px)').matches) {
+      resetGestureVisual(false);
+      gesture = null;
       dialog.close();
       return;
     }
-    if (Math.abs(dx) < 12 && Math.abs(dy) < 12 && matchMedia('(max-width: 760px)').matches) {
-      dialog.classList.toggle('viewer-chrome-hidden');
-    }
+    const wasTap = !active.axis && Math.abs(dx) < 10 && Math.abs(dy) < 10;
+    resetGestureVisual(true);
+    gesture = null;
+    if (wasTap && matchMedia('(max-width: 760px)').matches) dialog.classList.toggle('viewer-chrome-hidden');
   });
   stage.addEventListener('pointercancel', () => {
-    if (gesture?.image) {
-      gesture.image.classList.remove('viewer-dragging');
-      gesture.image.style.transform = '';
-      gesture.image.style.opacity = '';
-    }
+    resetGestureVisual(true);
     gesture = null;
   });
 
