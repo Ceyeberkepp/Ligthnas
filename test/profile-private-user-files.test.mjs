@@ -133,3 +133,15 @@ test('mobile Files binds period controls without aborting later upload handlers'
   assert.doesNotMatch(app, /\$\('\[data-mobile-period\]', content\)\.forEach/);
   assert.match(app, /\$\('#mobile-gallery-upload', content\)\?\.addEventListener\('change'/);
 });
+
+
+test('mobile file viewer uses swipe navigation instead of arrow buttons', async () => {
+  const enhancements = await readFile(new URL('../public/enhancements.js', import.meta.url), 'utf8');
+  const enhancementStyles = await readFile(new URL('../public/enhancements.css', import.meta.url), 'utf8');
+  assert.match(enhancements, /stage\.addEventListener\('pointerdown'/);
+  assert.match(enhancements, /navigatePreview\(dx < 0 \? 1 : -1\)/);
+  assert.match(enhancements, /viewer-chrome-hidden/);
+  assert.match(enhancementStyles, /@media \(max-width: 760px\)[\s\S]*?\.lightnas-viewer \.viewer-arrow[\s\S]*?display: none !important/);
+  assert.match(enhancementStyles, /height: 100dvh/);
+  assert.match(enhancementStyles, /touch-action: pan-y pinch-zoom/);
+});
