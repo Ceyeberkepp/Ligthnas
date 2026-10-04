@@ -106,3 +106,23 @@ test('mobile file and folder uploads use direct native file inputs', async () =>
   assert.match(styles, /\.mobile-native-file-input[\s\S]*?position: absolute[\s\S]*?opacity: 0/);
   assert.match(styles, /@media \(max-width: 760px\)[\s\S]*?\.desktop-upload-select[\s\S]*?display: none !important/);
 });
+
+
+test('mobile uploads retry duplicate names instead of failing the batch', async () => {
+  const files = await readFile(new URL('../src/files.mjs', import.meta.url), 'utf8');
+  assert.match(files, /FILE_EXISTS/);
+  assert.match(app, /function uniqueUploadPath\(/);
+  assert.match(app, /error\.status !== 409/);
+  assert.match(app, /path = uniqueUploadPath\(targets\[index\]\.path, attempt\)/);
+});
+
+test('mobile Files uses a photo-library style Years Months All experience', async () => {
+  const styles = await readFile(new URL('../public/styles.css', import.meta.url), 'utf8');
+  assert.match(app, /data-mobile-period="years"/);
+  assert.match(app, /data-mobile-period="months"/);
+  assert.match(app, /data-mobile-period="all"/);
+  assert.match(app, /id="mobile-gallery-upload" type="file" multiple/);
+  assert.match(app, /mobile-photo-grid/);
+  assert.match(styles, /\.mobile-photo-period/);
+  assert.match(styles, /grid-template-columns: repeat\(3, 1fr\)/);
+});

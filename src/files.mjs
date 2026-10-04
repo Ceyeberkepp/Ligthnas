@@ -266,7 +266,15 @@ export async function uploadFile(relative, req, options = {}) {
     throw Object.assign(new Error('Upload would exceed your LightNAS file storage quota.'), { status: 413 });
   }
   if (quotaRoot && declaredBytes > 0) quotaReservations.set(quotaRoot, reservedBefore + declaredBytes);
-  const file = await open(path, 'wx', 0o600);
+  let file;
+  try {
+    file = await open(path, 'wx', 0o600);
+  } catch (error) {
+    if (error?.code === 'EEXIST') {
+      throw Object.assign(new Error('A file with this name already exists.'), { status: 409, code: 'FILE_EXISTS' });
+    }
+    throw error;
+  }
   let size = 0;
   try {
     await pipeline(req, new Transform({ transform(chunk, encoding, callback) {

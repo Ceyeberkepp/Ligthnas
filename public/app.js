@@ -1,5 +1,5 @@
 if (window.LIGHTNAS_PRODUCT_MODE === 'hypervisor') document.body.classList.add('product-hypervisor');
-const state = { overview: null, view: 'home', uiMode: window.LIGHTNAS_PRODUCT_MODE === 'hypervisor' ? 'hypervisor' : 'nas', folder: '', files: null, fileError: null, filesSettingsOpen: false, aiMessages: [], logs: null, fileView: ['list','grid','gallery'].includes(localStorage.getItem('lightnas-file-view')) ? localStorage.getItem('lightnas-file-view') : 'grid', fileTruncated: false, fileQuota: null, overviewMetric: localStorage.getItem('lightnas-overview-metric') || 'cpu', lastNetworkSample: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, userAccess: null, smtp: undefined, media: null, network: null, software: null, license: null, builtinCatalog: null, communityCatalog: null, communityCatalogLoading: false, communityCatalogError: null, appSearch: '', appCategory: '', appVisibleLimit: 72, backupJobs: null, selectedBackupJobId: null, metricHistory: { cpu: [], load: [], memory: [], storage: [], networkIn: [], networkOut: [] } };
+const state = { overview: null, view: 'home', uiMode: window.LIGHTNAS_PRODUCT_MODE === 'hypervisor' ? 'hypervisor' : 'nas', folder: '', files: null, fileError: null, filesSettingsOpen: false, mobileFilesPeriod: localStorage.getItem('lightnas-mobile-files-period') || 'all', aiMessages: [], logs: null, fileView: ['list','grid','gallery'].includes(localStorage.getItem('lightnas-file-view')) ? localStorage.getItem('lightnas-file-view') : 'grid', fileTruncated: false, fileQuota: null, overviewMetric: localStorage.getItem('lightnas-overview-metric') || 'cpu', lastNetworkSample: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, userAccess: null, smtp: undefined, media: null, network: null, software: null, license: null, builtinCatalog: null, communityCatalog: null, communityCatalogLoading: false, communityCatalogError: null, appSearch: '', appCategory: '', appVisibleLimit: 72, backupJobs: null, selectedBackupJobId: null, metricHistory: { cpu: [], load: [], memory: [], storage: [], networkIn: [], networkOut: [] } };
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
 const themeChoices = ['system', 'light', 'dark'];
@@ -1383,9 +1383,63 @@ function filesView() {
         </article>`;
   };
 
+  const mobileMediaEntries = Array.isArray(entries)
+    ? entries.filter(entry => !entry.directory && ['Photo','Video'].includes(libraryKindForName(entry.name)))
+    : [];
+  const mobileDate = entry => {
+    const date = new Date(entry.modifiedAt || Date.now());
+    return Number.isNaN(date.getTime()) ? new Date() : date;
+  };
+  const mobileGallery = () => {
+    if (!mobileFiles) return '';
+    const period = ['years','months','all'].includes(state.mobileFilesPeriod) ? state.mobileFilesPeriod : 'all';
+    const periodTabs = `<div class="mobile-photo-period" role="tablist" aria-label="Photo grouping">
+      <button type="button" data-mobile-period="years" class="${period === 'years' ? 'active' : ''}">Years</button>
+      <button type="button" data-mobile-period="months" class="${period === 'months' ? 'active' : ''}">Months</button>
+      <button type="button" data-mobile-period="all" class="${period === 'all' ? 'active' : ''}">All</button>
+    </div>`;
+    let body = '';
+    if (!mobileMediaEntries.length) {
+      body = '<div class="mobile-photo-empty">No photos or videos yet.</div>';
+    } else if (period === 'years') {
+      const groups = new Map();
+      for (const entry of mobileMediaEntries) {
+        const key = String(mobileDate(entry).getFullYear());
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(entry);
+      }
+      body = `<div class="mobile-photo-years">${[...groups.entries()].sort((a,b) => Number(b[0]) - Number(a[0])).map(([year, group]) => {
+        const cover = group.sort((a,b) => mobileDate(b) - mobileDate(a))[0];
+        const path = fileEntryPath(cover);
+        return `<section class="mobile-year-card"><h2>${year}</h2><button class="file-name" data-open="${escapeHtml(cover.name)}" data-path="${escapeHtml(path)}" data-directory="false"><img src="/api/files/thumbnail?path=${encodeURIComponent(path)}&preview=1" alt=""></button><small>${group.length} item${group.length===1?'':'s'}</small></section>`;
+      }).join('')}</div>`;
+    } else if (period === 'months') {
+      const groups = new Map();
+      for (const entry of mobileMediaEntries) {
+        const date = mobileDate(entry);
+        const key = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(entry);
+      }
+      body = `<div class="mobile-photo-months">${[...groups.entries()].sort((a,b) => b[0].localeCompare(a[0])).map(([key, group]) => {
+        const [year, month] = key.split('-').map(Number);
+        const label = new Date(year, month - 1, 1).toLocaleDateString(undefined, { month:'short', year:'numeric' });
+        return `<section class="mobile-month-group"><h2>${label}</h2><div class="mobile-photo-grid">${group.sort((a,b) => mobileDate(b)-mobileDate(a)).map(item).join('')}</div></section>`;
+      }).join('')}</div>`;
+    } else {
+      body = `<div class="mobile-photo-grid">${mobileMediaEntries.sort((a,b) => mobileDate(b)-mobileDate(a)).map(item).join('')}</div>`;
+    }
+    return `<section class="mobile-photos-experience">
+      <div class="mobile-photos-head"><div><span class="eyebrow">LIBRARY</span><h1>Files & media</h1></div><div class="mobile-photos-actions"><label class="mobile-library-picker"><span>Browse</span><select data-library-select aria-label="Library section">${libraryOptions}</select></label>${canManageOwnFiles ? `<label class="mobile-photo-add" aria-label="Upload photos and files"><span>＋</span><input id="mobile-gallery-upload" type="file" multiple></label>` : ''}</div></div>
+      ${body}
+      ${periodTabs}
+    </section>`;
+  };
+
   const quota = state.fileQuota?.scoped ? state.fileQuota : null;
   const quotaPercent = quota?.quotaBytes ? Math.min(100, Math.round((quota.usedBytes / quota.quotaBytes) * 100)) : 0;
-  return `<section class="files-page ${state.fileView === 'gallery' ? 'photo-mode' : 'grid-mode'}">${pageHead('Files & media', 'Browse and manage the actual files stored in LightNAS.', '<button class="secondary refresh-icon-button" data-action="refresh-files" aria-label="Refresh" title="Refresh">↻</button>')}
+  const mobileMediaMode = mobileFiles && ['', 'Photos', 'Videos'].includes(section) && !state.filesSettingsOpen;
+  return `<section class="files-page ${state.fileView === 'gallery' ? 'photo-mode' : 'grid-mode'} ${mobileMediaMode ? 'mobile-media-mode' : ''}">${pageHead('Files & media', 'Browse and manage the actual files stored in LightNAS.', '<button class="secondary refresh-icon-button" data-action="refresh-files" aria-label="Refresh" title="Refresh">↻</button>')}
     ${quota ? `<section class="panel file-quota-panel"><div class="panel-head"><div><span class="eyebrow">MY STORAGE</span><h2>${bytes(quota.usedBytes)} of ${bytes(quota.quotaBytes)}</h2></div><strong>${quotaPercent}%</strong></div><div class="track"><span style="width:${quotaPercent}%"></span></div><p class="muted">${bytes(quota.remainingBytes)} remaining in your private file library.</p></section>` : ''}
     <section class="desktop-files-settings-panel ${state.filesSettingsOpen ? '' : 'hidden'}">
       <article class="panel files-settings-card">
@@ -1396,7 +1450,8 @@ function filesView() {
         </div>
       </article>
     </section>
-    <div class="files-library-content ${state.filesSettingsOpen ? 'hidden' : ''}">
+    ${mobileFiles && ['', 'Photos', 'Videos'].includes(section) ? mobileGallery() : ''}
+    <div class="files-library-content desktop-files-library ${state.filesSettingsOpen ? 'hidden' : ''}">
     <div class="file-toolbar"><div class="breadcrumbs">${crumbs}</div><div class="file-toolbar-actions">
       <label class="file-toolbar-select select-only library-selector">
         <select data-library-select aria-label="File library section">
@@ -1586,7 +1641,7 @@ function uploadRequest(path, file, onProgress) {
       if (xhr.status >= 200 && xhr.status < 300) return resolve();
       let message = 'Upload failed.';
       try { message = JSON.parse(xhr.responseText || '{}').error || message; } catch {}
-      reject(new Error(message));
+      reject(Object.assign(new Error(message), { status: xhr.status }));
     });
     xhr.addEventListener('error', () => reject(new Error('The upload connection failed.')));
     xhr.addEventListener('abort', () => reject(new Error('The upload was cancelled.')));
@@ -1604,6 +1659,16 @@ async function ensureUploadDirectories(paths) {
     try { await request(`/api/files?path=${encodeURIComponent(folder)}`, { method: 'POST', body: '{}' }); }
     catch (error) { if (error.status !== 409) throw error; }
   }
+}
+
+function uniqueUploadPath(path, attempt = 1) {
+  const slash = path.lastIndexOf('/');
+  const folder = slash >= 0 ? path.slice(0, slash + 1) : '';
+  const name = slash >= 0 ? path.slice(slash + 1) : path;
+  const dot = name.lastIndexOf('.');
+  const stem = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : '';
+  return `${folder}${stem}-${Date.now()}-${attempt}${ext}`;
 }
 
 async function uploadFilesWithProgress(fileList, folderMode = false) {
@@ -1636,11 +1701,22 @@ async function uploadFilesWithProgress(fileList, folderMode = false) {
     while (true) {
       const index = nextIndex++;
       if (index >= targets.length) return;
-      const { file, path } = targets[index];
-      await uploadRequest(path, file, loaded => {
-        loadedByFile[index] = loaded;
-        updateProgress(file.name);
-      });
+      const { file } = targets[index];
+      let path = targets[index].path;
+      let attempt = 0;
+      while (true) {
+        try {
+          await uploadRequest(path, file, loaded => {
+            loadedByFile[index] = loaded;
+            updateProgress(file.name);
+          });
+          break;
+        } catch (error) {
+          if (error.status !== 409 || attempt >= 4) throw error;
+          attempt += 1;
+          path = uniqueUploadPath(targets[index].path, attempt);
+        }
+      }
       loadedByFile[index] = Number(file.size || 0);
       completedCount += 1;
       updateProgress();
@@ -3194,6 +3270,18 @@ function bindViewActions() {
     try { const response = await fetch(`/api/files/download?path=${encodeURIComponent(path)}`); if (!response.ok) throw new Error((await response.json()).error); const object = URL.createObjectURL(await response.blob()); const link = document.createElement('a'); link.href = object; link.download = button.dataset.open; link.click(); setTimeout(() => URL.revokeObjectURL(object), 60000); } catch (error) { toast(error.message); }
   }));
   $$('[data-action="new-folder"]', $('#content')).forEach(button => button.addEventListener('click', async () => { const name = prompt('New folder name'); if (name === null) return; try { await request(`/api/files?path=${encodeURIComponent([state.folder, name].filter(Boolean).join('/'))}`, { method: 'POST', body: '{}' }); await loadFiles(); toast('Folder created.'); } catch (error) { toast(error.message); } }));
+  $('[data-mobile-period]', content).forEach(button => button.addEventListener('click', () => {
+    state.mobileFilesPeriod = button.dataset.mobilePeriod || 'all';
+    localStorage.setItem('lightnas-mobile-files-period', state.mobileFilesPeriod);
+    render('files');
+  }));
+  $('#mobile-gallery-upload', content)?.addEventListener('change', async event => {
+    const files = [...event.target.files];
+    event.target.value = '';
+    if (!files.length) return;
+    toast(`Preparing ${files.length} item${files.length === 1 ? '' : 's'} for upload…`);
+    await uploadFilesWithProgress(files, false);
+  });
   $('[data-file-view-select]', content)?.addEventListener('change', event => {
     state.fileView = event.target.value;
     localStorage.setItem('lightnas-file-view', state.fileView);
