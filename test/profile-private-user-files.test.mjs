@@ -250,3 +250,11 @@ test('desktop viewer remains available while mobile controls are media-query sco
   assert.match(styles, /@media \(min-width: 761px\)[\s\S]*?\.viewer-mobile-back/);
   assert.match(styles, /\.viewer-desktop-close/);
 });
+
+
+test('mobile viewer dialog overrides Safari dialog max width and fills right edge', async () => {
+  const styles = await readFile(new URL('../public/enhancements.css', import.meta.url), 'utf8');
+  assert.match(styles, /dialog\.lightnas-viewer[\s\S]*?width: 100dvw !important/);
+  assert.match(styles, /dialog\.lightnas-viewer[\s\S]*?max-width: none !important/);
+  assert.match(styles, /dialog\.lightnas-viewer[\s\S]*?inset: 0 !important/);
+});
