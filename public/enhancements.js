@@ -660,10 +660,12 @@ async function openMobilePhotoEditor(initialEdits = null) {
   editor._historyIndex = 0;
   editor._sourcePath = viewer.dataset.sourcePath || '';
   editor._sourceName = viewer.querySelector('[data-viewer-title]')?.textContent || 'photo.jpg';
-  editor.querySelector('[data-editor-image]').src = image.currentSrc || image.src;
-  for (const input of editor.querySelectorAll('[data-edit-key]')) {
-    input.value = editor._lightnasEdits[input.dataset.editKey];
-  }
+  const editorSource = image.currentSrc || image.src;
+  editor.querySelector('[data-editor-image]').src = editorSource;
+  editor.querySelectorAll('.filter-preview').forEach(preview => {
+    preview.style.backgroundImage = `url("${editorSource.replaceAll('"', '%22')}")`;
+  });
+  editor._activeAdjustment = 'brightness';
   editor._syncPreview();
   editor.showModal();
 }
