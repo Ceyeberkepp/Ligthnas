@@ -135,12 +135,42 @@ function ensureViewer() {
         <button class="viewer-arrow viewer-next" type="button" data-viewer-next aria-label="Next file">›</button>
       </div>
       <div class="viewer-meta"><span data-viewer-meta></span><span data-viewer-position></span></div>
+      <div class="viewer-mobile-hint" aria-hidden="true">Swipe left or right</div>
       <div class="dialog-actions"><button class="secondary" type="button" data-viewer-download>Download</button><button class="primary" type="button" data-close-viewer>Close</button></div>
     </div>`;
   document.body.append(dialog);
   dialog.querySelectorAll('[data-close-viewer]').forEach(button => button.addEventListener('click', () => dialog.close()));
   dialog.querySelector('[data-viewer-previous]').addEventListener('click', () => navigatePreview(-1));
   dialog.querySelector('[data-viewer-next]').addEventListener('click', () => navigatePreview(1));
+
+  const stage = dialog.querySelector('[data-viewer-stage]');
+  let gesture = null;
+  stage.addEventListener('pointerdown', event => {
+    if (event.pointerType !== 'touch') return;
+    gesture = { id:event.pointerId, x:event.clientX, y:event.clientY, time:performance.now() };
+    try { stage.setPointerCapture(event.pointerId); } catch {}
+  });
+  stage.addEventListener('pointerup', event => {
+    if (!gesture || gesture.id !== event.pointerId) return;
+    const dx = event.clientX - gesture.x;
+    const dy = event.clientY - gesture.y;
+    const elapsed = performance.now() - gesture.time;
+    gesture = null;
+    if (elapsed > 800) return;
+    if (Math.abs(dx) >= 48 && Math.abs(dx) > Math.abs(dy) * 1.15) {
+      navigatePreview(dx < 0 ? 1 : -1);
+      return;
+    }
+    if (dy > 110 && Math.abs(dy) > Math.abs(dx) * 1.2 && matchMedia('(max-width: 760px)').matches) {
+      dialog.close();
+      return;
+    }
+    if (Math.abs(dx) < 12 && Math.abs(dy) < 12 && matchMedia('(max-width: 760px)').matches) {
+      dialog.classList.toggle('viewer-chrome-hidden');
+    }
+  });
+  stage.addEventListener('pointercancel', () => { gesture = null; });
+
   dialog.addEventListener('keydown', event => {
     if (event.key === 'ArrowLeft') { event.preventDefault(); navigatePreview(-1); }
     if (event.key === 'ArrowRight') { event.preventDefault(); navigatePreview(1); }
@@ -167,6 +197,7 @@ async function openPreview(name, explicitPath = '') {
   const extension = name.toLowerCase().split('.').pop();
   const raw = ['raw','dng','cr2','cr3','nef','nrw','arw','srf','sr2','raf','orf','rw2','pef','srw','x3f','heic','heif'].includes(extension);
   const dialog = ensureViewer();
+  dialog.classList.remove('viewer-chrome-hidden');
   if (dialog.dataset.objectUrl) URL.revokeObjectURL(dialog.dataset.objectUrl);
   delete dialog.dataset.objectUrl;
   dialog.dataset.sourcePath = path;
