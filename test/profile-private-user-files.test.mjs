@@ -145,3 +145,24 @@ test('mobile file viewer uses swipe navigation instead of arrow buttons', async 
   assert.match(enhancementStyles, /height: 100dvh/);
   assert.match(enhancementStyles, /touch-action: pan-y pinch-zoom/);
 });
+
+
+test('mobile viewer preloads neighbors and exposes edit save delete actions', async () => {
+  const enhancements = await readFile(new URL('../public/enhancements.js', import.meta.url), 'utf8');
+  const enhancementStyles = await readFile(new URL('../public/enhancements.css', import.meta.url), 'utf8');
+  assert.match(enhancements, /function preloadPreviewNeighbors\(/);
+  assert.match(enhancements, /\/api\/files\/download\?path=/);
+  assert.match(enhancements, /data-viewer-edit/);
+  assert.match(enhancements, /data-viewer-delete/);
+  assert.match(enhancements, /method:'DELETE'/);
+  assert.match(enhancements, /function editCurrentImage\(/);
+  assert.match(enhancementStyles, /background-image: var\(--viewer-bg\)/);
+  assert.match(enhancementStyles, /grid-template-columns: repeat\(3, minmax\(0,1fr\)\)/);
+});
+
+test('multi-select media upload continues after individual file failures', () => {
+  assert.match(app, /const failures = \[\]/);
+  assert.match(app, /failures\.push\(/);
+  assert.match(app, /const concurrency = Math\.min\(mobile \? 2 : 3, targets\.length\)/);
+  assert.match(app, /const succeeded = targets\.length - failed/);
+});
