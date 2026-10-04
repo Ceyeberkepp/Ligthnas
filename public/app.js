@@ -3270,7 +3270,7 @@ function bindViewActions() {
     try { const response = await fetch(`/api/files/download?path=${encodeURIComponent(path)}`); if (!response.ok) throw new Error((await response.json()).error); const object = URL.createObjectURL(await response.blob()); const link = document.createElement('a'); link.href = object; link.download = button.dataset.open; link.click(); setTimeout(() => URL.revokeObjectURL(object), 60000); } catch (error) { toast(error.message); }
   }));
   $$('[data-action="new-folder"]', $('#content')).forEach(button => button.addEventListener('click', async () => { const name = prompt('New folder name'); if (name === null) return; try { await request(`/api/files?path=${encodeURIComponent([state.folder, name].filter(Boolean).join('/'))}`, { method: 'POST', body: '{}' }); await loadFiles(); toast('Folder created.'); } catch (error) { toast(error.message); } }));
-  $('[data-mobile-period]', content).forEach(button => button.addEventListener('click', () => {
+  content.querySelectorAll('[data-mobile-period]').forEach(button => button.addEventListener('click', () => {
     state.mobileFilesPeriod = button.dataset.mobilePeriod || 'all';
     localStorage.setItem('lightnas-mobile-files-period', state.mobileFilesPeriod);
     render('files');
