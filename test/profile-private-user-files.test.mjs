@@ -271,3 +271,28 @@ test('video playback supports byte ranges and mobile native playback fallback', 
   assert.match(enhancements, /viewer\.addEventListener\('error', fallback\)/);
   assert.match(enhancements, /\/api\/files\/video-preview\?path=/);
 });
+
+
+test('mobile video playback normalizes source codecs for iPhone and Android', async () => {
+  const server = await readFile(new URL('../src/server.mjs', import.meta.url), 'utf8');
+  const enhancements = await readFile(new URL('../public/enhancements.js', import.meta.url), 'utf8');
+  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  const thumbnails = await readFile(new URL('../src/thumbnails.mjs', import.meta.url), 'utf8');
+
+  assert.match(server, /'-c:v', 'libx264'/);
+  assert.match(server, /'-profile:v', 'main'/);
+  assert.match(server, /'-c:a', 'aac'/);
+  assert.match(server, /'-profile:a', 'aac_low'/);
+  assert.match(server, /'format=yuv420p'/);
+  assert.match(server, /frag_keyframe\+empty_moov\+default_base_moof\+faststart/);
+
+  assert.match(enhancements, /Android\|iPhone\|iPad\|iPod/);
+  assert.match(enhancements, /viewer\.src = mobileDevice \? compatibilityUrl : nativeUrl/);
+  assert.match(enhancements, /'mxf'/);
+  assert.match(enhancements, /'rmvb'/);
+
+  assert.match(app, /'mxf'/);
+  assert.match(app, /'rmvb'/);
+  assert.match(thumbnails, /'\.mxf'/);
+  assert.match(thumbnails, /'\.rmvb'/);
+});
