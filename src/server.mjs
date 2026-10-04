@@ -2358,11 +2358,48 @@ async function api(req, res, url) {
     const extension = extname(filename).toLowerCase();
     const mime = mimeTypes[extension] || 'application/octet-stream';
     const previewable = mime.startsWith('image/') || mime.startsWith('video/') || mime.startsWith('audio/') || mime.startsWith('text/') || mime === 'application/pdf' || mime.startsWith('application/xml');
-    res.writeHead(200, {
-      'Content-Type': mime, 'Content-Length': data.size,
+
+    const range = String(req.headers.range || '');
+    const commonHeaders = {
+      'Content-Type': mime,
       'Content-Disposition': `${previewable ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(filename)}`,
-      'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': csp
-    });
+      'Cache-Control': mime.startsWith('video/') || mime.startsWith('audio/') ? 'private, max-age=300' : 'no-store',
+      'Accept-Ranges': 'bytes',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': csp
+    };
+
+    if (range) {
+      const match = /^bytes=(\d*)-(\d*)$/.exec(range.trim());
+      if (!match) {
+        res.writeHead(416, { ...commonHeaders, 'Content-Range': `bytes */${data.size}` });
+        return res.end();
+      }
+      let start = match[1] ? Number(match[1]) : null;
+      let end = match[2] ? Number(match[2]) : null;
+      if (start === null && end !== null) {
+        const suffix = Math.max(0, Math.min(end, data.size));
+        start = Math.max(0, data.size - suffix);
+        end = data.size - 1;
+      } else {
+        start ??= 0;
+        end ??= data.size - 1;
+      }
+      if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || start >= data.size) {
+        res.writeHead(416, { ...commonHeaders, 'Content-Range': `bytes */${data.size}` });
+        return res.end();
+      }
+      end = Math.min(end, data.size - 1);
+      const length = end - start + 1;
+      res.writeHead(206, {
+        ...commonHeaders,
+        'Content-Length': length,
+        'Content-Range': `bytes ${start}-${end}/${data.size}`
+      });
+      return createReadStream(data.path, { start, end }).pipe(res);
+    }
+
+    res.writeHead(200, { ...commonHeaders, 'Content-Length': data.size });
     return createReadStream(data.path).pipe(res);
   }
 
