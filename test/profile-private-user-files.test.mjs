@@ -90,11 +90,9 @@ test('mobile shell hides desktop top and task bars', async () => {
   assert.match(styles, /\.console,[\s\S]*?\.console\.sidebar-collapsed[\s\S]*?grid-template: 1fr \/ 1fr/);
 });
 
-test('mobile file upload offers camera photos and files sources', () => {
-  assert.match(app, /id="mobile-camera-upload"[^>]*capture="environment"/);
-  assert.match(app, /id="mobile-photo-upload"[^>]*accept="image\/\*,video\/\*"/);
-  assert.match(app, /data-mobile-upload-source="camera"/);
-  assert.match(app, /data-mobile-upload-source="photos"/);
-  assert.match(app, /data-mobile-upload-source="files"/);
-  assert.match(app, /openMobileUploadSourcePicker\(\)/);
+test('mobile upload uses the native browser picker directly', () => {
+  assert.match(app, /id="mobile-native-upload" type="file" multiple hidden/);
+  assert.match(app, /mobile \? \$\('#mobile-native-upload', content\) : \$\('#file-upload', content\)/);
+  assert.doesNotMatch(app, /openMobileUploadSourcePicker/);
+  assert.doesNotMatch(app, /data-mobile-upload-source=/);
 });
