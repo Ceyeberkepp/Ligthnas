@@ -126,3 +126,10 @@ test('mobile Files uses a photo-library style Years Months All experience', asyn
   assert.match(styles, /\.mobile-photo-period/);
   assert.match(styles, /grid-template-columns: repeat\(3, 1fr\)/);
 });
+
+
+test('mobile Files binds period controls without aborting later upload handlers', () => {
+  assert.match(app, /content\.querySelectorAll\('\[data-mobile-period\]'\)\.forEach/);
+  assert.doesNotMatch(app, /\$\('\[data-mobile-period\]', content\)\.forEach/);
+  assert.match(app, /\$\('#mobile-gallery-upload', content\)\?\.addEventListener\('change'/);
+});
