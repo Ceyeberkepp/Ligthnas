@@ -186,7 +186,7 @@ function maskPhone(value) {
 }
 
 const mobilePhotoExt = new Set(['jpg','jpeg','png','gif','webp','bmp','avif','heic','heif','dng','cr2','cr3','nef','arw','raf','orf','rw2']);
-const mobileVideoExt = new Set(['mp4','mov','m4v','webm','mkv','avi','mts','m2ts','3gp']);
+const mobileVideoExt = new Set(['mp4','m4v','mov','qt','webm','ogv','mkv','avi','wmv','asf','flv','f4v','mpeg','mpg','mpe','m2v','mts','m2ts','m2t','ts','3gp','3g2','vob','mxf','rm','rmvb','divx','mod','tod','dat']);
 const mobileAudioExt = new Set(['mp3','m4a','aac','wav','flac','ogg','opus']);
 
 function mobileLibraryDestination(filename, contentType = '') {
@@ -2325,7 +2325,11 @@ async function api(req, res, url) {
     if (relative === null) return send(res, 403, { error: 'File access is required.' });
     const filename = relative.split('/').pop() || 'video';
     const extension = extname(filename).toLowerCase();
-    const supportedVideo = new Set(['.mp4', '.webm', '.mov', '.m4v', '.ogv', '.mkv', '.avi', '.wmv', '.flv', '.mpeg', '.mpg', '.m2v', '.mts', '.m2ts', '.ts', '.3gp', '.3g2', '.vob']);
+    const supportedVideo = new Set([
+      '.mp4', '.m4v', '.mov', '.qt', '.webm', '.ogv', '.mkv', '.avi', '.wmv', '.asf',
+      '.flv', '.f4v', '.mpeg', '.mpg', '.mpe', '.m2v', '.mts', '.m2ts', '.m2t', '.ts',
+      '.3gp', '.3g2', '.vob', '.mxf', '.rm', '.rmvb', '.divx', '.mod', '.tod', '.dat'
+    ]);
     if (!supportedVideo.has(extension)) return send(res, 415, { error: 'This file is not a supported video preview format.' });
     const data = await downloadFile(relative);
     res.writeHead(200, {
@@ -2336,15 +2340,40 @@ async function api(req, res, url) {
     });
     const ffmpeg = spawn('ffmpeg', [
       '-nostdin', '-hide_banner', '-loglevel', 'error',
+      '-fflags', '+genpts',
       '-i', data.path,
       '-map', '0:v:0', '-map', '0:a:0?',
-      '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-pix_fmt', 'yuv420p',
-      '-c:a', 'aac', '-b:a', '128k',
-      '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+      '-sn', '-dn',
+      '-vf', 'scale=1920:1080:force_original_aspect_ratio=decrease:force_divisible_by=2,format=yuv420p',
+      '-c:v', 'libx264',
+      '-profile:v', 'main',
+      '-level:v', '4.1',
+      '-preset', 'veryfast',
+      '-crf', '24',
+      '-g', '48',
+      '-keyint_min', '48',
+      '-sc_threshold', '0',
+      '-c:a', 'aac',
+      '-profile:a', 'aac_low',
+      '-b:a', '160k',
+      '-ar', '48000',
+      '-ac', '2',
+      '-avoid_negative_ts', 'make_zero',
+      '-movflags', 'frag_keyframe+empty_moov+default_base_moof+faststart',
       '-f', 'mp4', 'pipe:1'
     ], { stdio: ['ignore', 'pipe', 'pipe'] });
-    ffmpeg.on('error', error => { if (!res.destroyed) res.destroy(error); });
-    ffmpeg.stderr.resume();
+    let ffmpegError = '';
+    ffmpeg.stderr.on('data', chunk => {
+      if (ffmpegError.length < 8192) ffmpegError += chunk.toString('utf8');
+    });
+    ffmpeg.on('error', error => {
+      if (!res.destroyed) res.destroy(error);
+    });
+    ffmpeg.on('close', code => {
+      if (code !== 0 && !res.destroyed && !res.writableEnded) {
+        res.destroy(new Error(ffmpegError.trim() || `FFmpeg could not decode or transcode this video (exit ${code}).`));
+      }
+    });
     res.on('close', () => { if (!ffmpeg.killed) ffmpeg.kill('SIGTERM'); });
     return ffmpeg.stdout.pipe(res);
   }
