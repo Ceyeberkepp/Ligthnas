@@ -1450,7 +1450,7 @@ function filesView() {
         </div>
       </article>
     </section>
-    ${mobileGallery()}
+    ${mobileFiles && ['', 'Photos', 'Videos'].includes(section) ? mobileGallery() : ''}
     <div class="files-library-content desktop-files-library ${state.filesSettingsOpen ? 'hidden' : ''}">
     <div class="file-toolbar"><div class="breadcrumbs">${crumbs}</div><div class="file-toolbar-actions">
       <label class="file-toolbar-select select-only library-selector">
