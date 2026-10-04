@@ -10,7 +10,7 @@ const dataRoot = dirname(process.env.NAS_DATA_FILE || 'data/state.json');
 const cacheRoot = join(dataRoot, 'thumbnails');
 const images = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg', '.avif']);
 const rawImages = new Set(['.heic', '.heif', '.raw', '.dng', '.cr2', '.cr3', '.nef', '.nrw', '.arw', '.srf', '.sr2', '.raf', '.orf', '.rw2', '.pef', '.srw', '.x3f']);
-const videos = new Set(['.mp4', '.webm', '.mov', '.m4v', '.ogv', '.mkv', '.avi', '.wmv', '.flv', '.mpeg', '.mpg', '.m2v', '.mts', '.m2ts', '.ts', '.3gp', '.3g2', '.vob']);
+const videos = new Set(['.mp4', '.m4v', '.mov', '.qt', '.webm', '.ogv', '.mkv', '.avi', '.wmv', '.asf', '.flv', '.f4v', '.mpeg', '.mpg', '.mpe', '.m2v', '.mts', '.m2ts', '.m2t', '.ts', '.3gp', '.3g2', '.vob', '.mxf', '.rm', '.rmvb', '.divx', '.mod', '.tod', '.dat']);
 
 const nativeImageTypes = new Map([
   ['.jpg', 'image/jpeg'], ['.jpeg', 'image/jpeg'], ['.png', 'image/png'],
