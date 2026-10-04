@@ -3132,3 +3132,38 @@ small {
     border-color: rgba(255,107,107,.38) !important;
   }
 }
+
+
+/* Mobile viewer: full-bleed presentation and immediate drag feedback. */
+@media (max-width: 760px) {
+  .lightnas-viewer .viewer-stage::before {
+    inset: -44px;
+    filter: blur(36px) saturate(1.12) brightness(.9);
+    transform: scale(1.18);
+    opacity: 1;
+  }
+
+  .lightnas-viewer .viewer-stage::after {
+    background: rgba(0,0,0,.05);
+  }
+
+  .lightnas-viewer .viewer-stage > img {
+    position: relative;
+    z-index: 1;
+    object-fit: contain;
+    transform-origin: center center;
+    will-change: transform, opacity;
+    transition: transform .13s ease-out, opacity .13s linear;
+  }
+
+  .lightnas-viewer .viewer-stage > img.viewer-dragging {
+    transition: none;
+  }
+
+  /* The blurred image fills the whole display so portrait/landscape images
+     no longer leave dead black bands around the usable photo area. */
+  .lightnas-viewer .viewer-shell,
+  .lightnas-viewer .viewer-stage {
+    background: transparent;
+  }
+}
