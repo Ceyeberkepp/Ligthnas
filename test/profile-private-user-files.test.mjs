@@ -258,3 +258,16 @@ test('mobile viewer dialog overrides Safari dialog max width and fills right edg
   assert.match(styles, /dialog\.lightnas-viewer[\s\S]*?max-width: none !important/);
   assert.match(styles, /dialog\.lightnas-viewer[\s\S]*?inset: 0 !important/);
 });
+
+
+test('video playback supports byte ranges and mobile native playback fallback', async () => {
+  const server = await readFile(new URL('../src/server.mjs', import.meta.url), 'utf8');
+  const enhancements = await readFile(new URL('../public/enhancements.js', import.meta.url), 'utf8');
+  assert.match(server, /'Accept-Ranges': 'bytes'/);
+  assert.match(server, /res\.writeHead\(206/);
+  assert.match(server, /'Content-Range': `bytes \$\{start\}-\$\{end\}\/\$\{data\.size\}`/);
+  assert.match(server, /createReadStream\(data\.path, \{ start, end \}\)/);
+  assert.match(enhancements, /const nativeVideo = \['mp4','m4v','mov','webm'\]\.includes\(extension\)/);
+  assert.match(enhancements, /viewer\.addEventListener\('error', fallback\)/);
+  assert.match(enhancements, /\/api\/files\/video-preview\?path=/);
+});

@@ -816,13 +816,40 @@ async function openPreview(name, explicitPath = '') {
       });
     }
   } else if (kind === 'video') {
-    // Always use the server preview path. Browser codec support differs across
-    // MKV/AVI/WMV/MTS/etc.; LightNAS streams an on-demand H.264/AAC preview.
     viewer = document.createElement('video');
-    viewer.src = `/api/files/video-preview?path=${encodeURIComponent(path)}`;
     viewer.controls = true;
     viewer.autoplay = true;
     viewer.playsInline = true;
+    viewer.preload = 'metadata';
+
+    const extension = name.toLowerCase().split('.').pop();
+    const nativeVideo = ['mp4','m4v','mov','webm'].includes(extension);
+    const nativeUrl = `/api/files/download?path=${encodeURIComponent(path)}`;
+    const fallbackUrl = `/api/files/video-preview?path=${encodeURIComponent(path)}`;
+
+    viewer.src = nativeVideo ? nativeUrl : fallbackUrl;
+    let usedFallback = !nativeVideo;
+    const fallback = () => {
+      if (usedFallback) return;
+      usedFallback = true;
+      const currentTime = Number(viewer.currentTime || 0);
+      viewer.pause();
+      viewer.removeAttribute('src');
+      viewer.load();
+      viewer.src = fallbackUrl;
+      viewer.load();
+      viewer.addEventListener('loadedmetadata', () => {
+        if (currentTime > 0 && Number.isFinite(viewer.duration)) {
+          try { viewer.currentTime = Math.min(currentTime, Math.max(0, viewer.duration - .25)); } catch {}
+        }
+        viewer.play().catch(() => {});
+      }, { once:true });
+    };
+    viewer.addEventListener('error', fallback);
+    viewer.addEventListener('stalled', () => {
+      if (!usedFallback && viewer.readyState < 2) fallback();
+    });
+    viewer.play().catch(() => {});
   } else {
     const response = await fetch(`/api/files/download?path=${encodeURIComponent(path)}`);
     if (!response.ok) {
