@@ -436,6 +436,17 @@ function filterCss(edits) {
 function ensureMobilePhotoEditor() {
   let editor = document.querySelector('#mobile-photo-editor');
   if (editor) return editor;
+
+  const adjustmentTools = [
+    { key:'brightness', label:'Brightness', icon:'☀', min:40, max:160, neutral:100 },
+    { key:'contrast', label:'Contrast', icon:'◐', min:40, max:160, neutral:100 },
+    { key:'saturation', label:'Saturation', icon:'◉', min:0, max:200, neutral:100 },
+    { key:'warmth', label:'Warmth', icon:'◒', min:-100, max:100, neutral:0 },
+    { key:'highlights', label:'Highlights', icon:'◌', min:-100, max:100, neutral:0 },
+    { key:'shadows', label:'Shadows', icon:'◍', min:-100, max:100, neutral:0 },
+    { key:'vignette', label:'Vignette', icon:'◎', min:0, max:100, neutral:0 }
+  ];
+
   editor = document.createElement('dialog');
   editor.id = 'mobile-photo-editor';
   editor.className = 'lightnas-dialog mobile-photo-editor';
@@ -446,48 +457,82 @@ function ensureMobilePhotoEditor() {
         <div class="mobile-editor-title">ADJUST</div>
         <button type="button" data-editor-save>Done</button>
       </div>
+
       <div class="mobile-editor-quickbar">
         <button type="button" data-editor-undo aria-label="Undo">↶</button>
         <button type="button" data-editor-redo aria-label="Redo">↷</button>
         <button type="button" data-editor-revert>Revert</button>
       </div>
-      <div class="mobile-editor-stage"><img data-editor-image alt=""></div>
+
+      <div class="mobile-editor-stage">
+        <img data-editor-image alt="">
+      </div>
+
       <div class="mobile-editor-panel">
-        <div class="mobile-editor-tools" data-editor-adjust>
-          <label>Brightness <input type="range" min="40" max="160" value="100" data-edit-key="brightness"></label>
-          <label>Contrast <input type="range" min="40" max="160" value="100" data-edit-key="contrast"></label>
-          <label>Saturation <input type="range" min="0" max="200" value="100" data-edit-key="saturation"></label>
-          <label>Warmth <input type="range" min="-100" max="100" value="0" data-edit-key="warmth"></label>
-          <label>Highlights <input type="range" min="-100" max="100" value="0" data-edit-key="highlights"></label>
-          <label>Shadows <input type="range" min="-100" max="100" value="0" data-edit-key="shadows"></label>
-          <label>Vignette <input type="range" min="0" max="100" value="0" data-edit-key="vignette"></label>
-        </div>
-        <div class="mobile-editor-filters" data-editor-filters hidden>
-          <button data-filter="none">Original</button>
-          <button data-filter="vivid">Vivid</button>
-          <button data-filter="warm">Warm</button>
-          <button data-filter="cool">Cool</button>
-          <button data-filter="mono">Mono</button>
-          <button data-filter="dramatic">Dramatic</button>
-          <button data-filter="redeye">Red Eye</button>
-        </div>
-        <div class="mobile-editor-crop" data-editor-crop hidden>
-          <button data-transform="rotate-left">↶ Rotate</button>
-          <button data-transform="rotate-right">↷ Rotate</button>
-          <button data-transform="flip">↔ Flip</button>
-          <button data-crop="original">Original</button>
-          <button data-crop="square">Square</button>
-          <button data-crop="4:3">4:3</button>
-          <button data-crop="16:9">16:9</button>
-        </div>
-        <div class="mobile-editor-tabs">
-          <button class="active" data-editor-tab="adjust">Adjust</button>
-          <button data-editor-tab="filters">Filters</button>
-          <button data-editor-tab="crop">Crop</button>
-        </div>
+        <section class="mobile-adjust-workspace" data-editor-adjust>
+          <div class="mobile-adjust-current">
+            <strong data-adjust-name>Brightness</strong>
+            <span data-adjust-value>0</span>
+          </div>
+          <input class="mobile-adjust-slider" type="range" min="40" max="160" value="100" data-editor-slider aria-label="Brightness">
+          <div class="mobile-adjust-tools" data-adjust-tools>
+            ${adjustmentTools.map((tool, index) => `
+              <button type="button" class="${index === 0 ? 'active' : ''}" data-adjust-tool="${tool.key}" data-min="${tool.min}" data-max="${tool.max}" data-neutral="${tool.neutral}" aria-label="${tool.label}">
+                <span>${tool.icon}</span><small>${tool.label}</small>
+              </button>`).join('')}
+          </div>
+        </section>
+
+        <section class="mobile-editor-filters" data-editor-filters hidden>
+          <button data-filter="none"><span class="filter-preview filter-original"></span><small>Original</small></button>
+          <button data-filter="vivid"><span class="filter-preview filter-vivid"></span><small>Vivid</small></button>
+          <button data-filter="warm"><span class="filter-preview filter-warm"></span><small>Warm</small></button>
+          <button data-filter="cool"><span class="filter-preview filter-cool"></span><small>Cool</small></button>
+          <button data-filter="mono"><span class="filter-preview filter-mono"></span><small>Mono</small></button>
+          <button data-filter="dramatic"><span class="filter-preview filter-dramatic"></span><small>Dramatic</small></button>
+          <button data-filter="redeye"><span class="filter-preview filter-redeye"></span><small>Red Eye</small></button>
+        </section>
+
+        <section class="mobile-editor-crop" data-editor-crop hidden>
+          <div class="mobile-crop-actions">
+            <button data-transform="rotate-left"><span>↶</span><small>Rotate left</small></button>
+            <button data-transform="rotate-right"><span>↷</span><small>Rotate right</small></button>
+            <button data-transform="flip"><span>↔</span><small>Flip</small></button>
+          </div>
+          <div class="mobile-crop-ratios">
+            <button data-crop="original">Original</button>
+            <button data-crop="square">Square</button>
+            <button data-crop="4:3">4:3</button>
+            <button data-crop="16:9">16:9</button>
+          </div>
+        </section>
+
+        <nav class="mobile-editor-tabs" aria-label="Edit tools">
+          <button class="active" data-editor-tab="adjust"><span>☼</span><small>Adjust</small></button>
+          <button data-editor-tab="filters"><span>◉</span><small>Filters</small></button>
+          <button data-editor-tab="crop"><span>⌗</span><small>Crop</small></button>
+        </nav>
       </div>
     </div>`;
   document.body.append(editor);
+
+  editor._activeAdjustment = 'brightness';
+
+  const toolFor = key => adjustmentTools.find(tool => tool.key === key) || adjustmentTools[0];
+
+  const syncAdjustmentControl = () => {
+    const edits = editor._lightnasEdits || defaultMobileEdits();
+    const tool = toolFor(editor._activeAdjustment);
+    const slider = editor.querySelector('[data-editor-slider]');
+    const value = Number(edits[tool.key] ?? tool.neutral);
+    slider.min = String(tool.min);
+    slider.max = String(tool.max);
+    slider.value = String(value);
+    slider.setAttribute('aria-label', tool.label);
+    editor.querySelector('[data-adjust-name]').textContent = tool.label;
+    editor.querySelector('[data-adjust-value]').textContent = String(Math.round(value - tool.neutral));
+    editor.querySelectorAll('[data-adjust-tool]').forEach(button => button.classList.toggle('active', button.dataset.adjustTool === tool.key));
+  };
 
   const syncPreview = () => {
     const edits = editor._lightnasEdits || defaultMobileEdits();
@@ -502,6 +547,9 @@ function ensureMobilePhotoEditor() {
     image.style.transform = `rotate(${edits.rotate || 0}deg) scaleX(${edits.flipX || 1}) scaleY(${edits.flipY || 1})`;
     image.dataset.crop = edits.crop || 'original';
     editor.style.setProperty('--editor-vignette', String(Math.max(0, Math.min(100, Number(edits.vignette || 0))) / 100));
+    editor.querySelectorAll('[data-filter]').forEach(button => button.classList.toggle('active', button.dataset.filter === edits.filter));
+    editor.querySelectorAll('[data-crop]').forEach(button => button.classList.toggle('active', button.dataset.crop === edits.crop));
+    syncAdjustmentControl();
   };
 
   const pushHistory = () => {
@@ -517,44 +565,71 @@ function ensureMobilePhotoEditor() {
     if (!editor._history?.[index]) return;
     editor._historyIndex = index;
     editor._lightnasEdits = structuredClone(editor._history[index]);
-    for (const input of editor.querySelectorAll('[data-edit-key]')) input.value = editor._lightnasEdits[input.dataset.editKey];
     syncPreview();
   };
 
-  editor.addEventListener('change', event => {
-    if (event.target.matches('[data-edit-key]')) pushHistory();
-  });
-  editor.addEventListener('input', event => {
-    const key = event.target.dataset.editKey;
-    if (!key) return;
-    editor._lightnasEdits[key] = Number(event.target.value);
+  editor.querySelector('[data-editor-slider]').addEventListener('input', event => {
+    const tool = toolFor(editor._activeAdjustment);
+    editor._lightnasEdits[tool.key] = Number(event.target.value);
     syncPreview();
   });
+  editor.querySelector('[data-editor-slider]').addEventListener('change', () => pushHistory());
+
   editor.addEventListener('click', event => {
     const cancel = event.target.closest('[data-editor-cancel]');
     if (cancel) { editor.close(); return; }
-    if (event.target.closest('[data-editor-undo]')) { restoreHistory(Math.max(0, (editor._historyIndex || 0) - 1)); return; }
-    if (event.target.closest('[data-editor-redo]')) { restoreHistory(Math.min((editor._history?.length || 1) - 1, (editor._historyIndex || 0) + 1)); return; }
+
+    if (event.target.closest('[data-editor-undo]')) {
+      restoreHistory(Math.max(0, (editor._historyIndex || 0) - 1));
+      return;
+    }
+    if (event.target.closest('[data-editor-redo]')) {
+      restoreHistory(Math.min((editor._history?.length || 1) - 1, (editor._historyIndex || 0) + 1));
+      return;
+    }
     if (event.target.closest('[data-editor-revert]')) {
       editor._lightnasEdits = defaultMobileEdits();
-      for (const input of editor.querySelectorAll('[data-edit-key]')) input.value = editor._lightnasEdits[input.dataset.editKey];
       pushHistory();
       syncPreview();
       return;
     }
-    const tab = event.target.closest('[data-editor-tab]');
-    if (tab) {
-      editor.querySelectorAll('[data-editor-tab]').forEach(button => button.classList.toggle('active', button === tab));
-      editor.querySelector('[data-editor-adjust]').hidden = tab.dataset.editorTab !== 'adjust';
-      editor.querySelector('[data-editor-filters]').hidden = tab.dataset.editorTab !== 'filters';
-      editor.querySelector('[data-editor-crop]').hidden = tab.dataset.editorTab !== 'crop';
-      editor.querySelector('.mobile-editor-title').textContent = tab.dataset.editorTab.toUpperCase();
+
+    const adjustment = event.target.closest('[data-adjust-tool]');
+    if (adjustment) {
+      editor._activeAdjustment = adjustment.dataset.adjustTool;
+      syncAdjustmentControl();
+      adjustment.scrollIntoView({ inline:'center', block:'nearest', behavior:'smooth' });
       return;
     }
+
+    const tab = event.target.closest('[data-editor-tab]');
+    if (tab) {
+      const selected = tab.dataset.editorTab;
+      editor.querySelectorAll('[data-editor-tab]').forEach(button => button.classList.toggle('active', button === tab));
+      editor.querySelector('[data-editor-adjust]').hidden = selected !== 'adjust';
+      editor.querySelector('[data-editor-filters]').hidden = selected !== 'filters';
+      editor.querySelector('[data-editor-crop]').hidden = selected !== 'crop';
+      editor.querySelector('.mobile-editor-title').textContent = selected.toUpperCase();
+      return;
+    }
+
     const filter = event.target.closest('[data-filter]');
-    if (filter) { editor._lightnasEdits.filter = filter.dataset.filter; pushHistory(); syncPreview(); return; }
+    if (filter) {
+      editor._lightnasEdits.filter = filter.dataset.filter;
+      pushHistory();
+      syncPreview();
+      filter.scrollIntoView({ inline:'center', block:'nearest', behavior:'smooth' });
+      return;
+    }
+
     const crop = event.target.closest('[data-crop]');
-    if (crop) { editor._lightnasEdits.crop = crop.dataset.crop; pushHistory(); syncPreview(); return; }
+    if (crop) {
+      editor._lightnasEdits.crop = crop.dataset.crop;
+      pushHistory();
+      syncPreview();
+      return;
+    }
+
     const transform = event.target.closest('[data-transform]');
     if (transform) {
       if (transform.dataset.transform === 'rotate-left') editor._lightnasEdits.rotate -= 90;
@@ -564,8 +639,12 @@ function ensureMobilePhotoEditor() {
       syncPreview();
       return;
     }
-    if (event.target.closest('[data-editor-save]')) saveMobilePhotoEdit().catch(error => window.alert(error.message));
+
+    if (event.target.closest('[data-editor-save]')) {
+      saveMobilePhotoEdit().catch(error => window.alert(error.message));
+    }
   });
+
   editor._syncPreview = syncPreview;
   editor._pushHistory = pushHistory;
   return editor;
@@ -581,10 +660,12 @@ async function openMobilePhotoEditor(initialEdits = null) {
   editor._historyIndex = 0;
   editor._sourcePath = viewer.dataset.sourcePath || '';
   editor._sourceName = viewer.querySelector('[data-viewer-title]')?.textContent || 'photo.jpg';
-  editor.querySelector('[data-editor-image]').src = image.currentSrc || image.src;
-  for (const input of editor.querySelectorAll('[data-edit-key]')) {
-    input.value = editor._lightnasEdits[input.dataset.editKey];
-  }
+  const editorSource = image.currentSrc || image.src;
+  editor.querySelector('[data-editor-image]').src = editorSource;
+  editor.querySelectorAll('.filter-preview').forEach(preview => {
+    preview.style.backgroundImage = `url("${editorSource.replaceAll('"', '%22')}")`;
+  });
+  editor._activeAdjustment = 'brightness';
   editor._syncPreview();
   editor.showModal();
 }

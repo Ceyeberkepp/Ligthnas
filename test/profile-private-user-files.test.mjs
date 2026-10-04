@@ -296,3 +296,21 @@ test('mobile video playback normalizes source codecs for iPhone and Android', as
   assert.match(thumbnails, /'\.mxf'/);
   assert.match(thumbnails, /'\.rmvb'/);
 });
+
+
+test('mobile photo editor fills viewport and uses native-style single-control workflow', async () => {
+  const enhancements = await readFile(new URL('../public/enhancements.js', import.meta.url), 'utf8');
+  const styles = await readFile(new URL('../public/enhancements.css', import.meta.url), 'utf8');
+
+  assert.match(enhancements, /data-editor-slider/);
+  assert.match(enhancements, /data-adjust-tool="brightness"/);
+  assert.match(enhancements, /data-adjust-tool="vignette"/);
+  assert.match(enhancements, /filter-preview/);
+  assert.match(enhancements, /mobile-crop-actions/);
+
+  assert.match(styles, /dialog\.mobile-photo-editor[\s\S]*?width: 100dvw !important/);
+  assert.match(styles, /dialog\.mobile-photo-editor[\s\S]*?max-width: none !important/);
+  assert.match(styles, /dialog\.mobile-photo-editor[\s\S]*?height: 100dvh !important/);
+  assert.match(styles, /\.mobile-adjust-tools[\s\S]*?overflow-x: auto !important/);
+  assert.match(styles, /\.filter-preview[\s\S]*?width: 72px !important/);
+});
