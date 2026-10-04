@@ -3765,3 +3765,377 @@ small {
     margin: 0 !important;
   }
 }
+
+
+/* Mobile photo editor: full-viewport native-style layout for iPhone and Android. */
+@media (max-width: 760px) {
+  dialog.mobile-photo-editor {
+    position: fixed !important;
+    inset: 0 !important;
+    top: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    width: 100dvw !important;
+    min-width: 100dvw !important;
+    max-width: none !important;
+    height: 100dvh !important;
+    min-height: 100dvh !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    overflow: hidden !important;
+    box-sizing: border-box !important;
+    transform: none !important;
+    background: #000 !important;
+  }
+
+  dialog.mobile-photo-editor::backdrop {
+    background: #000 !important;
+  }
+
+  dialog.mobile-photo-editor .mobile-editor-shell {
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    min-width: 100% !important;
+    max-width: none !important;
+    min-height: 100% !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-sizing: border-box !important;
+    display: grid !important;
+    grid-template-rows: auto auto minmax(0, 1fr) auto !important;
+    background: #000 !important;
+  }
+
+  dialog.mobile-photo-editor .mobile-editor-top {
+    width: 100% !important;
+    box-sizing: border-box !important;
+    grid-template-columns: 86px minmax(0,1fr) 86px !important;
+    padding: calc(env(safe-area-inset-top) + 8px) 14px 8px !important;
+    background: rgba(18,18,18,.98) !important;
+    color: #fff !important;
+    border: 0 !important;
+  }
+
+  dialog.mobile-photo-editor .mobile-editor-top button {
+    min-height: 38px !important;
+    padding: 0 12px !important;
+    border: 0 !important;
+    border-radius: 999px !important;
+    background: rgba(255,255,255,.1) !important;
+    color: #fff !important;
+    font-size: 14px !important;
+    font-weight: 700 !important;
+  }
+
+  dialog.mobile-photo-editor .mobile-editor-top [data-editor-save] {
+    background: #0a84ff !important;
+    color: #fff !important;
+  }
+
+  dialog.mobile-photo-editor .mobile-editor-title {
+    color: rgba(255,255,255,.72) !important;
+    font-size: 12px !important;
+    letter-spacing: .1em !important;
+  }
+
+  dialog.mobile-photo-editor .mobile-editor-quickbar {
+    width: 100% !important;
+    box-sizing: border-box !important;
+    grid-template-columns: 44px 44px 1fr !important;
+    gap: 7px !important;
+    padding: 4px 14px 8px !important;
+    background: rgba(18,18,18,.98) !important;
+    border: 0 !important;
+  }
+
+  dialog.mobile-photo-editor .mobile-editor-quickbar button {
+    min-height: 36px !important;
+    border: 0 !important;
+    border-radius: 999px !important;
+    background: rgba(255,255,255,.1) !important;
+    color: #fff !important;
+  }
+
+  dialog.mobile-photo-editor .mobile-editor-quickbar [data-editor-revert] {
+    justify-self: end !important;
+    color: #ff453a !important;
+    background: transparent !important;
+  }
+
+  dialog.mobile-photo-editor .mobile-editor-stage {
+    position: relative !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    display: grid !important;
+    place-items: center !important;
+    overflow: hidden !important;
+    background: #000 !important;
+  }
+
+  dialog.mobile-photo-editor .mobile-editor-stage img {
+    display: block !important;
+    width: 100% !important;
+    height: 100% !important;
+    max-width: 100% !important;
+    max-height: 100% !important;
+    margin: 0 !important;
+    object-fit: contain !important;
+    object-position: center !important;
+  }
+
+  dialog.mobile-photo-editor .mobile-editor-panel {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    box-sizing: border-box !important;
+    padding: 10px 12px calc(env(safe-area-inset-bottom) + 8px) !important;
+    overflow: hidden !important;
+    background: rgba(18,18,18,.98) !important;
+    color: #fff !important;
+    border-top: 1px solid rgba(255,255,255,.08) !important;
+  }
+
+  dialog.mobile-photo-editor .mobile-adjust-workspace {
+    min-width: 0 !important;
+  }
+
+  dialog.mobile-photo-editor .mobile-adjust-current {
+    display: flex !important;
+    justify-content: center !important;
+    align-items: baseline !important;
+    gap: 8px !important;
+    min-height: 24px !important;
+    color: #fff !important;
+  }
+
+  dialog.mobile-photo-editor .mobile-adjust-current strong {
+    font-size: 13px !important;
+  }
+
+  dialog.mobile-photo-editor .mobile-adjust-current span {
+    min-width: 28px !important;
+    color: #0a84ff !important;
+    font-size: 12px !important;
+    text-align: right !important;
+  }
+
+  dialog.mobile-photo-editor .mobile-adjust-slider {
+    display: block !important;
+    width: calc(100% - 20px) !important;
+    margin: 8px auto 12px !important;
+    accent-color: #0a84ff !important;
+  }
+
+  dialog.mobile-photo-editor .mobile-adjust-tools {
+    display: flex !important;
+    gap: 8px !important;
+    width: 100% !important;
+    overflow-x: auto !important;
+    padding: 3px 4px 8px !important;
+    scrollbar-width: none !important;
+    scroll-snap-type: x proximity !important;
+  }
+
+  dialog.mobile-photo-editor .mobile-adjust-tools::-webkit-scrollbar,
+  dialog.mobile-photo-editor .mobile-editor-filters::-webkit-scrollbar,
+  dialog.mobile-photo-editor .mobile-crop-ratios::-webkit-scrollbar {
+    display: none !important;
+  }
+
+  dialog.mobile-photo-editor .mobile-adjust-tools button {
+    flex: 0 0 66px !important;
+    display: grid !important;
+    place-items: center !important;
+    gap: 3px !important;
+    min-height: 56px !important;
+    padding: 5px !important;
+    border: 0 !important;
+    border-radius: 14px !important;
+    background: transparent !important;
+    color: rgba(255,255,255,.62) !important;
+    scroll-snap-align: center !important;
+  }
+
+  dialog.mobile-photo-editor .mobile-adjust-tools button span {
+    display: grid !important;
+    place-items: center !important;
+    width: 34px !important;
+    height: 34px !important;
+    border-radius: 999px !important;
+    background: rgba(255,255,255,.09) !important;
+    font-size: 20px !important;
+  }
+
+  dialog.mobile-photo-editor .mobile-adjust-tools button small {
+    max-width: 64px !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    font-size: 9px !important;
+  }
+
+  dialog.mobile-photo-editor .mobile-adjust-tools button.active {
+    color: #fff !important;
+  }
+
+  dialog.mobile-photo-editor .mobile-adjust-tools button.active span {
+    background: #fff !important;
+    color: #111 !important;
+  }
+
+  dialog.mobile-photo-editor .mobile-editor-filters {
+    display: flex !important;
+    gap: 10px !important;
+    width: 100% !important;
+    overflow-x: auto !important;
+    padding: 4px 4px 12px !important;
+    scrollbar-width: none !important;
+    scroll-snap-type: x mandatory !important;
+  }
+
+  dialog.mobile-photo-editor .mobile-editor-filters[hidden],
+  dialog.mobile-photo-editor .mobile-editor-crop[hidden],
+  dialog.mobile-photo-editor .mobile-adjust-workspace[hidden] {
+    display: none !important;
+  }
+
+  dialog.mobile-photo-editor .mobile-editor-filters button {
+    flex: 0 0 78px !important;
+    display: grid !important;
+    gap: 5px !important;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    color: rgba(255,255,255,.72) !important;
+    scroll-snap-align: center !important;
+  }
+
+  dialog.mobile-photo-editor .filter-preview {
+    display: block !important;
+    width: 72px !important;
+    height: 72px !important;
+    border-radius: 10px !important;
+    background-size: cover !important;
+    background-position: center !important;
+    border: 2px solid transparent !important;
+  }
+
+  dialog.mobile-photo-editor .mobile-editor-filters button.active .filter-preview {
+    border-color: #0a84ff !important;
+  }
+
+  dialog.mobile-photo-editor .mobile-editor-filters button small {
+    font-size: 10px !important;
+  }
+
+  dialog.mobile-photo-editor .filter-vivid { filter: saturate(1.28) contrast(1.06); }
+  dialog.mobile-photo-editor .filter-warm { filter: sepia(.16) saturate(1.1); }
+  dialog.mobile-photo-editor .filter-cool { filter: hue-rotate(-10deg) saturate(1.08); }
+  dialog.mobile-photo-editor .filter-mono { filter: grayscale(1) contrast(1.08); }
+  dialog.mobile-photo-editor .filter-dramatic { filter: contrast(1.24) saturate(.9); }
+  dialog.mobile-photo-editor .filter-redeye { filter: saturate(.9) contrast(1.05); }
+
+  dialog.mobile-photo-editor .mobile-editor-crop {
+    display: grid !important;
+    gap: 10px !important;
+    padding: 2px 0 10px !important;
+  }
+
+  dialog.mobile-photo-editor .mobile-crop-actions {
+    display: grid !important;
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 8px !important;
+  }
+
+  dialog.mobile-photo-editor .mobile-crop-actions button {
+    display: grid !important;
+    place-items: center !important;
+    gap: 3px !important;
+    min-height: 52px !important;
+    border: 0 !important;
+    border-radius: 14px !important;
+    background: rgba(255,255,255,.09) !important;
+    color: #fff !important;
+  }
+
+  dialog.mobile-photo-editor .mobile-crop-actions button span {
+    font-size: 20px !important;
+  }
+
+  dialog.mobile-photo-editor .mobile-crop-actions button small {
+    font-size: 9px !important;
+  }
+
+  dialog.mobile-photo-editor .mobile-crop-ratios {
+    display: flex !important;
+    gap: 8px !important;
+    overflow-x: auto !important;
+    padding: 2px 2px 4px !important;
+    scrollbar-width: none !important;
+  }
+
+  dialog.mobile-photo-editor .mobile-crop-ratios button {
+    flex: 0 0 auto !important;
+    min-height: 38px !important;
+    padding: 0 14px !important;
+    border: 0 !important;
+    border-radius: 999px !important;
+    background: rgba(255,255,255,.09) !important;
+    color: rgba(255,255,255,.72) !important;
+    font-size: 12px !important;
+    font-weight: 700 !important;
+  }
+
+  dialog.mobile-photo-editor .mobile-crop-ratios button.active {
+    background: #fff !important;
+    color: #111 !important;
+  }
+
+  dialog.mobile-photo-editor .mobile-editor-tabs {
+    display: grid !important;
+    grid-template-columns: repeat(3,1fr) !important;
+    gap: 4px !important;
+    width: min(286px, 100%) !important;
+    margin: 6px auto 0 !important;
+    padding: 4px !important;
+    border-radius: 999px !important;
+    background: rgba(255,255,255,.08) !important;
+  }
+
+  dialog.mobile-photo-editor .mobile-editor-tabs button {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    place-items: center !important;
+    gap: 1px !important;
+    min-height: 44px !important;
+    padding: 3px 8px !important;
+    border: 0 !important;
+    border-radius: 999px !important;
+    background: transparent !important;
+    color: rgba(255,255,255,.54) !important;
+  }
+
+  dialog.mobile-photo-editor .mobile-editor-tabs button span {
+    font-size: 17px !important;
+    line-height: 1 !important;
+  }
+
+  dialog.mobile-photo-editor .mobile-editor-tabs button small {
+    font-size: 9px !important;
+  }
+
+  dialog.mobile-photo-editor .mobile-editor-tabs button.active {
+    background: #fff !important;
+    color: #111 !important;
+    box-shadow: none !important;
+  }
+}
