@@ -1697,6 +1697,7 @@ async function uploadFilesWithProgress(fileList, folderMode = false) {
     progress?.update(percent, `${completedCount} of ${targets.length} complete${activeName ? ` · ${activeName}` : ''} · ${bytes(transferred)} of ${bytes(totalBytes)}`);
   };
 
+  const failures = [];
   const worker = async () => {
     while (true) {
       const index = nextIndex++;
@@ -1704,35 +1705,52 @@ async function uploadFilesWithProgress(fileList, folderMode = false) {
       const { file } = targets[index];
       let path = targets[index].path;
       let attempt = 0;
-      while (true) {
+      let uploaded = false;
+      while (!uploaded) {
         try {
           await uploadRequest(path, file, loaded => {
             loadedByFile[index] = loaded;
             updateProgress(file.name);
           });
-          break;
+          uploaded = true;
         } catch (error) {
-          if (error.status !== 409 || attempt >= 4) throw error;
-          attempt += 1;
-          path = uniqueUploadPath(targets[index].path, attempt);
+          if (error.status === 409 && attempt < 4) {
+            attempt += 1;
+            path = uniqueUploadPath(targets[index].path, attempt);
+            continue;
+          }
+          failures.push({ name:file.name, message:error.message || 'Upload failed.' });
+          break;
         }
       }
-      loadedByFile[index] = Number(file.size || 0);
-      completedCount += 1;
+      if (uploaded) {
+        loadedByFile[index] = Number(file.size || 0);
+        completedCount += 1;
+      }
       updateProgress();
     }
   };
 
   try {
-    // Three concurrent streams noticeably improve folders with many small
-    // files without creating a large RAM/connection spike on the 2 GiB target.
-    const concurrency = Math.min(3, targets.length);
+    // Keep mobile batches conservative so large photos/videos do not overwhelm
+    // Safari or a low-memory NAS while still allowing mixed multi-select uploads.
+    const mobile = matchMedia('(max-width: 760px)').matches;
+    const concurrency = Math.min(mobile ? 2 : 3, targets.length);
     await Promise.all(Array.from({ length: concurrency }, () => worker()));
-    progress?.succeed(`${targets.length} item${targets.length === 1 ? '' : 's'} uploaded successfully.`);
-    toast(`${targets.length} item${targets.length === 1 ? '' : 's'} uploaded.`);
-  } catch (error) {
-    progress?.fail(error.message);
-    toast(error.message);
+    const failed = failures.length;
+    const succeeded = targets.length - failed;
+    if (!failed) {
+      progress?.succeed(`${targets.length} item${targets.length === 1 ? '' : 's'} uploaded successfully.`);
+      toast(`${targets.length} item${targets.length === 1 ? '' : 's'} uploaded.`);
+    } else if (succeeded) {
+      const message = `${succeeded} uploaded · ${failed} failed`;
+      progress?.fail(`${message}. ${failures.slice(0, 2).map(item => `${item.name}: ${item.message}`).join(' · ')}`);
+      toast(message);
+    } else {
+      const message = failures.slice(0, 2).map(item => `${item.name}: ${item.message}`).join(' · ') || 'Upload failed.';
+      progress?.fail(message);
+      toast(message);
+    }
   } finally {
     await loadFiles();
   }
