@@ -1411,7 +1411,7 @@ function filesView() {
         </select>
       </label>
       ${canManageOwnFiles ? `<button class="secondary" data-action="new-folder">+ Folder</button>
-      <label class="file-toolbar-select upload-select-only">
+      <label class="file-toolbar-select upload-select-only desktop-upload-select">
         <select data-file-upload-select aria-label="Upload">
           <option value="">Choose…</option>
           <option value="files">Upload files</option>
@@ -1419,8 +1419,17 @@ function filesView() {
         </select>
       </label>
       <input id="file-upload" type="file" ${section === 'Photos' ? 'accept="image/*"' : section === 'Videos' ? 'accept="video/*"' : section === 'Audio' ? 'accept="audio/*"' : ''} multiple hidden>
-      <input id="mobile-native-upload" type="file" multiple hidden>
-      <input id="folder-upload" type="file" webkitdirectory directory multiple hidden>` : ''}
+      <input id="folder-upload" type="file" webkitdirectory directory multiple hidden>
+      <div class="mobile-direct-upload">
+        <label class="secondary mobile-upload-button">
+          <span>Upload files</span>
+          <input id="mobile-native-upload" class="mobile-native-file-input" type="file" multiple>
+        </label>
+        <label class="secondary mobile-upload-button">
+          <span>Upload folder</span>
+          <input id="mobile-folder-upload" class="mobile-native-file-input" type="file" webkitdirectory directory multiple>
+        </label>
+      </div>` : ''}
       <button class="secondary desktop-files-settings-button" type="button" data-files-settings-tab>⚙ Settings</button>
       ${state.overview.appliance.role === 'administrator' && state.overview.appliance.features?.phoneSync !== false ? '<button class="secondary phone-sync-button files-sync-trigger" type="button" data-phone-sync>Phone sync</button>' : ''}
     </div></div>
@@ -3208,6 +3217,11 @@ function bindViewActions() {
     const files = [...event.target.files];
     event.target.value = '';
     await uploadFilesWithProgress(files, false);
+  });
+  $('#mobile-folder-upload', content)?.addEventListener('change', async event => {
+    const files = [...event.target.files];
+    event.target.value = '';
+    await uploadFilesWithProgress(files, true);
   });
   $('#folder-upload', content)?.addEventListener('change', async event => {
     const files = [...event.target.files];

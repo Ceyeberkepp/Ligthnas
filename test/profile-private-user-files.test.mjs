@@ -96,3 +96,13 @@ test('mobile upload uses the native browser picker directly', () => {
   assert.doesNotMatch(app, /openMobileUploadSourcePicker/);
   assert.doesNotMatch(app, /data-mobile-upload-source=/);
 });
+
+
+test('mobile file and folder uploads use direct native file inputs', async () => {
+  const styles = await readFile(new URL('../public/styles.css', import.meta.url), 'utf8');
+  assert.match(app, /id="mobile-native-upload" class="mobile-native-file-input" type="file" multiple/);
+  assert.match(app, /id="mobile-folder-upload" class="mobile-native-file-input" type="file" webkitdirectory directory multiple/);
+  assert.match(app, /\$\('#mobile-folder-upload', content\)\?\.addEventListener\('change'/);
+  assert.match(styles, /\.mobile-native-file-input[\s\S]*?position: absolute[\s\S]*?opacity: 0/);
+  assert.match(styles, /@media \(max-width: 760px\)[\s\S]*?\.desktop-upload-select[\s\S]*?display: none !important/);
+});
