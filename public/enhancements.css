@@ -3714,3 +3714,54 @@ small {
     transition:opacity .08s linear;
   }
 }
+
+
+/* Mobile viewer: force the dialog itself to occupy the full visual viewport.
+   Safari's dialog UA max-width can otherwise leave a strip on the right. */
+@media (max-width: 760px) {
+  dialog.lightnas-viewer {
+    position: fixed !important;
+    inset: 0 !important;
+    top: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    width: 100dvw !important;
+    min-width: 100dvw !important;
+    max-width: none !important;
+    height: 100dvh !important;
+    min-height: 100dvh !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+    transform: none !important;
+  }
+
+  dialog.lightnas-viewer > .dialog-body,
+  dialog.lightnas-viewer .viewer-shell,
+  dialog.lightnas-viewer .viewer-stage {
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    min-width: 100% !important;
+    max-width: none !important;
+    height: 100% !important;
+    min-height: 100% !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-sizing: border-box !important;
+  }
+
+  dialog.lightnas-viewer .viewer-stage > img,
+  dialog.lightnas-viewer .viewer-stage > video {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+  }
+}
