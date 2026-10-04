@@ -369,3 +369,12 @@ test('mobile media is prepared before the user opens it', async () => {
   assert.match(thumbnails, /const thumbnailJobs = new Map\(\)/);
   assert.match(thumbnails, /const maxWidth = preview \? 1280 : 320/);
 });
+
+
+test('thumbnail module remains syntactically clean after mobile prewarm changes', async () => {
+  const thumbnails = await readFile(new URL('../src/thumbnails.mjs', import.meta.url), 'utf8');
+  assert.match(thumbnails, /export async function thumbnailFor\(relative, options = \{\}\)/);
+  assert.doesNotMatch(thumbnails, /\}\) \{/);
+  assert.match(thumbnails, /const thumbnailJobs = new Map\(\)/);
+  assert.match(thumbnails, /const maxWidth = preview \? 1280 : 320/);
+});
