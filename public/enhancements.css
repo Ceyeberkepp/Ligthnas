@@ -3077,3 +3077,58 @@ small {
   0%, 60% { opacity: 1; }
   100% { opacity: 0; }
 }
+
+
+/* Mobile viewer refinement: faster swipe feel, filled backdrop, native-style actions. */
+@media (max-width: 760px) {
+  .lightnas-viewer .viewer-stage {
+    position: relative;
+    isolation: isolate;
+  }
+
+  .lightnas-viewer .viewer-stage::before {
+    content: '';
+    position: absolute;
+    inset: -28px;
+    z-index: -2;
+    background-image: var(--viewer-bg);
+    background-size: cover;
+    background-position: center;
+    filter: blur(28px) brightness(.44);
+    transform: scale(1.08);
+    opacity: .88;
+  }
+
+  .lightnas-viewer .viewer-stage::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background: rgba(0,0,0,.18);
+  }
+
+  .lightnas-viewer .viewer-stage > img {
+    transition: opacity .08s linear;
+  }
+
+  .lightnas-viewer .dialog-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0,1fr));
+    gap: 10px;
+  }
+
+  .lightnas-viewer .dialog-actions .viewer-desktop-close {
+    display: none !important;
+  }
+
+  .lightnas-viewer .dialog-actions button {
+    min-height: 48px;
+    font-size: 13px;
+    font-weight: 800;
+  }
+
+  .lightnas-viewer .dialog-actions .viewer-action-delete {
+    color: #ff6b6b !important;
+    border-color: rgba(255,107,107,.38) !important;
+  }
+}

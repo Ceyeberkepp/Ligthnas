@@ -136,7 +136,12 @@ function ensureViewer() {
       </div>
       <div class="viewer-meta"><span data-viewer-meta></span><span data-viewer-position></span></div>
       <div class="viewer-mobile-hint" aria-hidden="true">Swipe left or right</div>
-      <div class="dialog-actions"><button class="secondary" type="button" data-viewer-download>Download</button><button class="primary" type="button" data-close-viewer>Close</button></div>
+      <div class="dialog-actions">
+        <button class="secondary viewer-action-edit" type="button" data-viewer-edit>Edit</button>
+        <button class="secondary" type="button" data-viewer-download>Save</button>
+        <button class="danger-button viewer-action-delete" type="button" data-viewer-delete>Delete</button>
+        <button class="primary viewer-desktop-close" type="button" data-close-viewer>Close</button>
+      </div>
     </div>`;
   document.body.append(dialog);
   dialog.querySelectorAll('[data-close-viewer]').forEach(button => button.addEventListener('click', () => dialog.close()));
@@ -190,6 +195,77 @@ function previewKind(name) {
   return Object.entries(previewExtensions).find(([, list]) => list.has(extension))?.[0] || null;
 }
 
+
+async function editCurrentImage() {
+  const dialog = document.querySelector('#lightnas-viewer');
+  const image = dialog?.querySelector('[data-viewer-stage] img');
+  const path = dialog?.dataset.sourcePath || '';
+  if (!dialog?.open || !image || !path) return;
+
+  const source = new Image();
+  source.crossOrigin = 'same-origin';
+  source.src = image.currentSrc || image.src;
+  await source.decode();
+
+  const choice = window.prompt('Edit photo: enter L for rotate left, R for rotate right, or C for center square crop.', 'R');
+  if (!choice) return;
+  const action = choice.trim().toUpperCase();
+
+  let width = source.naturalWidth;
+  let height = source.naturalHeight;
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d', { alpha:false });
+  if (!ctx) throw new Error('Image editor is unavailable in this browser.');
+
+  if (action === 'L' || action === 'R') {
+    canvas.width = height;
+    canvas.height = width;
+    ctx.translate(canvas.width / 2, canvas.height / 2);
+    ctx.rotate((action === 'R' ? 1 : -1) * Math.PI / 2);
+    ctx.drawImage(source, -width / 2, -height / 2);
+  } else if (action === 'C') {
+    const side = Math.min(width, height);
+    canvas.width = side;
+    canvas.height = side;
+    ctx.drawImage(source, (width - side) / 2, (height - side) / 2, side, side, 0, 0, side, side);
+  } else {
+    return;
+  }
+
+  const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.94));
+  if (!blob) throw new Error('Unable to create the edited photo.');
+  const slash = path.lastIndexOf('/');
+  const folder = slash >= 0 ? path.slice(0, slash + 1) : '';
+  const original = slash >= 0 ? path.slice(slash + 1) : path;
+  const stem = original.replace(/\.[^.]+$/, '');
+  const editedPath = `${folder}${stem}-edited-${Date.now()}.jpg`;
+  const response = await fetch(`/api/files?path=${encodeURIComponent(editedPath)}`, {
+    method:'PUT',
+    headers:{ 'Content-Type':'image/jpeg', 'X-LightNAS-Request':'1' },
+    body:blob
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.error || 'Unable to save the edited photo.');
+  }
+  dialog.close();
+  document.querySelector('#content [data-action="refresh-files"]')?.click();
+}
+
+function preloadPreviewNeighbors(path) {
+  const items = previewItems();
+  const index = items.findIndex(item => item.path === path);
+  for (const item of [items[index - 1], items[index + 1]]) {
+    if (!item || previewKind(item.name) !== 'image') continue;
+    const extension = item.name.toLowerCase().split('.').pop();
+    const native = ['jpg','jpeg','png','gif','webp','avif','bmp','svg'].includes(extension);
+    const preload = new Image();
+    preload.src = native
+      ? `/api/files/download?path=${encodeURIComponent(item.path)}`
+      : `/api/files/thumbnail?preview=1&path=${encodeURIComponent(item.path)}`;
+  }
+}
+
 async function openPreview(name, explicitPath = '') {
   const kind = previewKind(name);
   if (!kind) return false;
@@ -205,12 +281,17 @@ async function openPreview(name, explicitPath = '') {
   dialog.querySelector('[data-viewer-meta]').textContent = `${kind.toUpperCase()} preview`;
   const stage = dialog.querySelector('[data-viewer-stage]');
   stage.replaceChildren();
+  stage.style.removeProperty('--viewer-bg');
   let viewer;
 
   if (kind === 'image') {
     viewer = document.createElement('img');
-    viewer.src = `/api/files/thumbnail?preview=1&path=${encodeURIComponent(path)}`;
+    const nativeImage = ['jpg','jpeg','png','gif','webp','avif','bmp','svg'].includes(extension);
+    viewer.src = nativeImage
+      ? `/api/files/download?path=${encodeURIComponent(path)}`
+      : `/api/files/thumbnail?preview=1&path=${encodeURIComponent(path)}`;
     viewer.alt = name;
+    stage.style.setProperty('--viewer-bg', `url("${viewer.src.replaceAll('"', '%22')}")`);
   } else if (kind === 'video') {
     // Always use the server preview path. Browser codec support differs across
     // MKV/AVI/WMV/MTS/etc.; LightNAS streams an on-demand H.264/AAC preview.
@@ -241,7 +322,25 @@ async function openPreview(name, explicitPath = '') {
     anchor.download = name;
     anchor.click();
   };
+  const editButton = dialog.querySelector('[data-viewer-edit]');
+  editButton.hidden = kind !== 'image';
+  editButton.onclick = () => editCurrentImage().catch(error => window.alert(error.message));
+  dialog.querySelector('[data-viewer-delete]').onclick = async () => {
+    if (!window.confirm(`Delete "${name}"? This cannot be undone.`)) return;
+    const response = await fetch(`/api/files?path=${encodeURIComponent(path)}`, {
+      method:'DELETE',
+      headers:{ 'X-LightNAS-Request':'1' }
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      window.alert(body.error || 'Unable to delete this file.');
+      return;
+    }
+    dialog.close();
+    document.querySelector('#content [data-action="refresh-files"]')?.click();
+  };
   updateViewerNavigation(dialog, path);
+  if (kind === 'image') preloadPreviewNeighbors(path);
   if (!dialog.open) dialog.showModal();
   return true;
 }
