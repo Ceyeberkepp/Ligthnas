@@ -1643,8 +1643,8 @@ function uploadRequest(path, file, onProgress) {
       try { message = JSON.parse(xhr.responseText || '{}').error || message; } catch {}
       reject(Object.assign(new Error(message), { status: xhr.status }));
     });
-    xhr.addEventListener('error', () => reject(new Error('The upload connection failed.')));
-    xhr.addEventListener('abort', () => reject(new Error('The upload was cancelled.')));
+    xhr.addEventListener('error', () => reject(Object.assign(new Error('The upload connection failed.'), { status:0, retryable:true })));
+    xhr.addEventListener('abort', () => reject(Object.assign(new Error('The upload was cancelled.'), { status:0 })));
     xhr.send(file);
   });
 }
@@ -1719,6 +1719,12 @@ async function uploadFilesWithProgress(fileList, folderMode = false) {
             path = uniqueUploadPath(targets[index].path, attempt);
             continue;
           }
+          const transient = error.retryable || error.status === 0 || error.status === 408 || error.status === 429 || error.status >= 500;
+          if (transient && attempt < 2) {
+            attempt += 1;
+            await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+            continue;
+          }
           failures.push({ name:file.name, message:error.message || 'Upload failed.' });
           break;
         }
@@ -1735,7 +1741,7 @@ async function uploadFilesWithProgress(fileList, folderMode = false) {
     // Keep mobile batches conservative so large photos/videos do not overwhelm
     // Safari or a low-memory NAS while still allowing mixed multi-select uploads.
     const mobile = matchMedia('(max-width: 760px)').matches;
-    const concurrency = Math.min(mobile ? 2 : 3, targets.length);
+    const concurrency = Math.min(mobile ? 1 : 3, targets.length);
     await Promise.all(Array.from({ length: concurrency }, () => worker()));
     const failed = failures.length;
     const succeeded = targets.length - failed;
