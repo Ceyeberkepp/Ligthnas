@@ -1419,6 +1419,8 @@ function filesView() {
         </select>
       </label>
       <input id="file-upload" type="file" ${section === 'Photos' ? 'accept="image/*"' : section === 'Videos' ? 'accept="video/*"' : section === 'Audio' ? 'accept="audio/*"' : ''} multiple hidden>
+      <input id="mobile-camera-upload" type="file" accept="image/*" capture="environment" hidden>
+      <input id="mobile-photo-upload" type="file" accept="image/*,video/*" multiple hidden>
       <input id="folder-upload" type="file" webkitdirectory directory multiple hidden>` : ''}
       <button class="secondary desktop-files-settings-button" type="button" data-files-settings-tab>⚙ Settings</button>
       ${state.overview.appliance.role === 'administrator' && state.overview.appliance.features?.phoneSync !== false ? '<button class="secondary phone-sync-button files-sync-trigger" type="button" data-phone-sync>Phone sync</button>' : ''}
@@ -1536,6 +1538,38 @@ async function openProtectedUserFiles() {
     form.elements.currentPassword.value = '';
     dialog.remove();
   }, { once: true });
+  dialog.showModal();
+}
+
+
+function openMobileUploadSourcePicker() {
+  let dialog = $('#mobile-upload-source-dialog');
+  if (!dialog) {
+    dialog = document.createElement('dialog');
+    dialog.id = 'mobile-upload-source-dialog';
+    dialog.className = 'lightnas-dialog mobile-upload-source-dialog';
+    dialog.innerHTML = `
+      <div class="dialog-body">
+        <div class="dialog-head">
+          <div><span class="eyebrow">UPLOAD</span><h2>Add to Files & media</h2></div>
+          <button class="dialog-close" type="button" data-mobile-upload-close aria-label="Close">×</button>
+        </div>
+        <div class="mobile-upload-source-grid">
+          <button class="secondary" type="button" data-mobile-upload-source="camera"><span>⌾</span><b>Camera</b><small>Take a new photo</small></button>
+          <button class="secondary" type="button" data-mobile-upload-source="photos"><span>▧</span><b>Photos</b><small>Choose photos or videos</small></button>
+          <button class="secondary" type="button" data-mobile-upload-source="files"><span>▤</span><b>Files</b><small>Browse files on this device</small></button>
+        </div>
+      </div>`;
+    document.body.append(dialog);
+    dialog.querySelector('[data-mobile-upload-close]')?.addEventListener('click', () => dialog.close());
+    dialog.querySelectorAll('[data-mobile-upload-source]').forEach(button => button.addEventListener('click', () => {
+      const source = button.dataset.mobileUploadSource;
+      dialog.close();
+      if (source === 'camera') $('#mobile-camera-upload', $('#content'))?.click();
+      if (source === 'photos') $('#mobile-photo-upload', $('#content'))?.click();
+      if (source === 'files') $('#file-upload', $('#content'))?.click();
+    }));
+  }
   dialog.showModal();
 }
 
@@ -3191,10 +3225,24 @@ function bindViewActions() {
   $('[data-file-upload-select]', content)?.addEventListener('change', event => {
     const action = event.target.value;
     event.target.value = '';
-    if (action === 'files') $('#file-upload', content)?.click();
+    const mobile = matchMedia('(max-width: 760px)').matches;
+    if (action === 'files') {
+      if (mobile) openMobileUploadSourcePicker();
+      else $('#file-upload', content)?.click();
+    }
     if (action === 'folder') $('#folder-upload', content)?.click();
   });
   $('#file-upload', content)?.addEventListener('change', async event => {
+    const files = [...event.target.files];
+    event.target.value = '';
+    await uploadFilesWithProgress(files, false);
+  });
+  $('#mobile-camera-upload', content)?.addEventListener('change', async event => {
+    const files = [...event.target.files];
+    event.target.value = '';
+    await uploadFilesWithProgress(files, false);
+  });
+  $('#mobile-photo-upload', content)?.addEventListener('change', async event => {
     const files = [...event.target.files];
     event.target.value = '';
     await uploadFilesWithProgress(files, false);
