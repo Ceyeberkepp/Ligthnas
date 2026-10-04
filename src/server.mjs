@@ -2495,6 +2495,13 @@ export function createServer() {
     }
   });
 
+  // Large mobile photo/video uploads can legitimately take longer than the
+  // Node default request timeout on slower Wi-Fi. Keep headers bounded while
+  // allowing the upload body to finish.
+  server.requestTimeout = 30 * 60 * 1000;
+  server.headersTimeout = 60 * 1000;
+  server.keepAliveTimeout = 65 * 1000;
+
   const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
   server.on('upgrade', async (req, socket, head) => {
     try {

@@ -166,3 +166,24 @@ test('multi-select media upload continues after individual file failures', () =>
   assert.match(app, /const concurrency = Math\.min\(mobile \? 2 : 3, targets\.length\)/);
   assert.match(app, /const succeeded = targets\.length - failed/);
 });
+
+
+test('mobile viewer loads cached previews first and upgrades to full resolution', async () => {
+  const enhancements = await readFile(new URL('../public/enhancements.js', import.meta.url), 'utf8');
+  const enhancementStyles = await readFile(new URL('../public/enhancements.css', import.meta.url), 'utf8');
+  assert.match(enhancements, /const viewerPreloadCache = new Map\(\)/);
+  assert.match(enhancements, /viewer\.src = urls\.preview/);
+  assert.match(enhancements, /warmViewerImage\(urls\.original\)\.then/);
+  assert.match(enhancements, /stage\.addEventListener\('pointermove'/);
+  assert.match(enhancements, /translate3d\(/);
+  assert.match(enhancementStyles, /viewer-dragging/);
+  assert.match(enhancementStyles, /background: transparent/);
+});
+
+test('mobile batches serialize and retry transient photo or video failures', async () => {
+  const server = await readFile(new URL('../src/server.mjs', import.meta.url), 'utf8');
+  assert.match(app, /const concurrency = Math\.min\(mobile \? 1 : 3, targets\.length\)/);
+  assert.match(app, /error\.retryable \|\| error\.status === 0/);
+  assert.match(app, /setTimeout\(resolve, 500 \* attempt\)/);
+  assert.match(server, /server\.requestTimeout = 30 \* 60 \* 1000/);
+});
