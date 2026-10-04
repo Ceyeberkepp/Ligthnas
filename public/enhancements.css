@@ -3665,3 +3665,52 @@ small {
     display:none !important;
   }
 }
+
+
+@media (max-width: 760px) {
+  .lightnas-viewer .dialog-actions .viewer-action-save {
+    display: none !important;
+  }
+
+  .mobile-editor-quickbar {
+    display:grid;
+    grid-template-columns:48px 48px 1fr;
+    gap:8px;
+    align-items:center;
+    padding:8px 14px;
+    background:#fff;
+    border-top:1px solid #ececec;
+  }
+
+  .mobile-editor-quickbar button {
+    min-height:38px;
+    border:0;
+    border-radius:999px;
+    background:#f2f2f2;
+    color:#111;
+    font-size:18px;
+    font-weight:800;
+  }
+
+  .mobile-editor-quickbar [data-editor-revert] {
+    justify-self:end;
+    min-width:82px;
+    padding:0 16px;
+    color:#d70015;
+    font-size:13px;
+  }
+
+  .mobile-editor-stage {
+    position:relative;
+  }
+
+  .mobile-editor-stage::after {
+    content:'';
+    position:absolute;
+    inset:0;
+    pointer-events:none;
+    opacity:var(--editor-vignette,0);
+    background:radial-gradient(circle at center, transparent 45%, rgba(0,0,0,.82) 100%);
+    transition:opacity .08s linear;
+  }
+}
