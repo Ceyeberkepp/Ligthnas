@@ -278,6 +278,9 @@ async function showConsole() {
     setTimeout(() => loadRuntimes(false), 250);
     setTimeout(() => { if (!state.network) loadNetwork(); }, 700);
     setTimeout(() => { if (state.spaces === null) loadSpaces(); }, 900);
+    if (matchMedia('(max-width: 760px)').matches) {
+      setTimeout(() => { if (state.files === null) loadFiles(false); }, 120);
+    }
   });
   document.querySelectorAll('#nav a[data-view], .foot-admin[data-view]').forEach(link => {
     const label = link.textContent.replace(/\s+/g, ' ').trim();
@@ -1350,7 +1353,7 @@ function filesView() {
     const visual = entry.directory
       ? '<span class="folder-glyph">▣</span>'
       : (kind === 'Photo' || kind === 'Video')
-        ? `<img class="file-thumb" loading="${state.fileView === 'gallery' ? 'eager' : 'lazy'}" decoding="async" alt="" src="/api/files/thumbnail?path=${encodeURIComponent(path)}&v=${thumbVersion}">`
+        ? `<img class="file-thumb" loading="lazy" fetchpriority="low" decoding="async" alt="" src="/api/files/thumbnail?path=${encodeURIComponent(path)}&v=${thumbVersion}">`
         : `<span class="file-glyph file-kind-${kind.toLowerCase()}">${kind === 'Audio' ? '♪' : '▤'}</span>`;
 
     if (state.fileView === 'gallery') {
@@ -1411,7 +1414,7 @@ function filesView() {
       body = `<div class="mobile-photo-years">${[...groups.entries()].sort((a,b) => Number(b[0]) - Number(a[0])).map(([year, group]) => {
         const cover = group.sort((a,b) => mobileDate(b) - mobileDate(a))[0];
         const path = fileEntryPath(cover);
-        return `<section class="mobile-year-card"><h2>${year}</h2><button class="file-name" data-open="${escapeHtml(cover.name)}" data-path="${escapeHtml(path)}" data-directory="false"><img src="/api/files/thumbnail?path=${encodeURIComponent(path)}&preview=1" alt=""></button><small>${group.length} item${group.length===1?'':'s'}</small></section>`;
+        return `<section class="mobile-year-card"><h2>${year}</h2><button class="file-name" data-open="${escapeHtml(cover.name)}" data-path="${escapeHtml(path)}" data-directory="false"><img loading="lazy" decoding="async" src="/api/files/thumbnail?path=${encodeURIComponent(path)}" alt=""></button><small>${group.length} item${group.length===1?'':'s'}</small></section>`;
       }).join('')}</div>`;
     } else if (period === 'months') {
       const groups = new Map();
@@ -1607,10 +1610,27 @@ async function openProtectedUserFiles() {
 
 async function loadFiles(forceRefresh = false) {
   state.fileError = null;
+  const mobile = matchMedia('(max-width: 760px)').matches;
   try {
     const endpoint = state.folder === ''
       ? `/api/files?all=1${forceRefresh ? '&refresh=1' : ''}`
       : `/api/files?path=${encodeURIComponent(state.folder)}`;
+
+    if (mobile) {
+      // Paint the mobile library as soon as metadata arrives. Quota calculation
+      // can walk a large private library and must not block the Files tab.
+      const result = await request(endpoint);
+      state.files = Array.isArray(result.entries) ? result.entries.filter(entry => entry.supported) : [];
+      state.fileTruncated = Boolean(result.truncated);
+      if (state.view === 'files') render('files');
+
+      request('/api/files/quota').then(quota => {
+        state.fileQuota = quota;
+        if (state.view === 'files' && !document.querySelector('.mobile-photos-experience')) render('files');
+      }).catch(() => {});
+      return;
+    }
+
     const [result, quota] = await Promise.all([
       request(endpoint),
       request('/api/files/quota').catch(() => null)
