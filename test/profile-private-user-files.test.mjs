@@ -187,3 +187,17 @@ test('mobile batches serialize and retry transient photo or video failures', asy
   assert.match(app, /setTimeout\(resolve, 500 \* attempt\)/);
   assert.match(server, /server\.requestTimeout = 30 \* 60 \* 1000/);
 });
+
+
+test('mobile viewer fills the viewport and locks swipe direction', async () => {
+  const enhancements = await readFile(new URL('../public/enhancements.js', import.meta.url), 'utf8');
+  const styles = await readFile(new URL('../public/enhancements.css', import.meta.url), 'utf8');
+  assert.match(enhancements, /axis:null/);
+  assert.match(enhancements, /gesture\.axis = Math\.abs\(dx\) > Math\.abs\(dy\) \* 1\.15 \? 'x' : 'y'/);
+  assert.match(enhancements, /Math\.abs\(velocityX\) > \.48/);
+  assert.match(enhancements, /viewer-swipe-out/);
+  assert.match(styles, /object-fit: cover !important/);
+  assert.match(styles, /width: 100vw !important/);
+  assert.match(styles, /height: 100dvh !important/);
+  assert.match(styles, /touch-action: none/);
+});
