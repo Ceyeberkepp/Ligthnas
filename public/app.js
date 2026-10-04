@@ -1430,7 +1430,7 @@ function filesView() {
       body = `<div class="mobile-photo-grid">${mobileMediaEntries.sort((a,b) => mobileDate(b)-mobileDate(a)).map(item).join('')}</div>`;
     }
     return `<section class="mobile-photos-experience">
-      <div class="mobile-photos-head"><div><span class="eyebrow">LIBRARY</span><h1>Files & media</h1></div>${canManageOwnFiles ? `<label class="mobile-photo-add" aria-label="Upload photos and files"><span>＋</span><input id="mobile-gallery-upload" type="file" multiple></label>` : ''}</div>
+      <div class="mobile-photos-head"><div><span class="eyebrow">LIBRARY</span><h1>Files & media</h1></div><div class="mobile-photos-actions"><label class="mobile-library-picker"><span>Browse</span><select data-library-select aria-label="Library section">${libraryOptions}</select></label>${canManageOwnFiles ? `<label class="mobile-photo-add" aria-label="Upload photos and files"><span>＋</span><input id="mobile-gallery-upload" type="file" multiple></label>` : ''}</div></div>
       ${body}
       ${periodTabs}
     </section>`;
@@ -1438,7 +1438,8 @@ function filesView() {
 
   const quota = state.fileQuota?.scoped ? state.fileQuota : null;
   const quotaPercent = quota?.quotaBytes ? Math.min(100, Math.round((quota.usedBytes / quota.quotaBytes) * 100)) : 0;
-  return `<section class="files-page ${state.fileView === 'gallery' ? 'photo-mode' : 'grid-mode'}">${pageHead('Files & media', 'Browse and manage the actual files stored in LightNAS.', '<button class="secondary refresh-icon-button" data-action="refresh-files" aria-label="Refresh" title="Refresh">↻</button>')}
+  const mobileMediaMode = mobileFiles && ['', 'Photos', 'Videos'].includes(section) && !state.filesSettingsOpen;
+  return `<section class="files-page ${state.fileView === 'gallery' ? 'photo-mode' : 'grid-mode'} ${mobileMediaMode ? 'mobile-media-mode' : ''}">${pageHead('Files & media', 'Browse and manage the actual files stored in LightNAS.', '<button class="secondary refresh-icon-button" data-action="refresh-files" aria-label="Refresh" title="Refresh">↻</button>')}
     ${quota ? `<section class="panel file-quota-panel"><div class="panel-head"><div><span class="eyebrow">MY STORAGE</span><h2>${bytes(quota.usedBytes)} of ${bytes(quota.quotaBytes)}</h2></div><strong>${quotaPercent}%</strong></div><div class="track"><span style="width:${quotaPercent}%"></span></div><p class="muted">${bytes(quota.remainingBytes)} remaining in your private file library.</p></section>` : ''}
     <section class="desktop-files-settings-panel ${state.filesSettingsOpen ? '' : 'hidden'}">
       <article class="panel files-settings-card">
