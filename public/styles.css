@@ -1633,3 +1633,47 @@ body:not(.product-hypervisor) .backup-status-line {
 
 
 }
+
+
+/* Mobile Files & media upload controls: direct native inputs for iOS/Safari. */
+.mobile-direct-upload {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .desktop-upload-select {
+    display: none !important;
+  }
+
+  .mobile-direct-upload {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    width: 100%;
+  }
+
+  .mobile-upload-button {
+    position: relative;
+    display: grid;
+    place-items: center;
+    min-height: 54px;
+    padding: 0 12px;
+    overflow: hidden;
+    cursor: pointer;
+  }
+
+  .mobile-upload-button > span {
+    pointer-events: none;
+    font-weight: 800;
+  }
+
+  .mobile-native-file-input {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+    font-size: 100px;
+  }
+}
