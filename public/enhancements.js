@@ -273,7 +273,340 @@ function previewKind(name) {
 }
 
 
+
+const mobilePhotoFavoritesKey = 'lightnas-mobile-photo-favorites';
+let mobileCopiedEdits = null;
+
+function mobileFavoriteSet() {
+  try { return new Set(JSON.parse(localStorage.getItem(mobilePhotoFavoritesKey) || '[]')); }
+  catch { return new Set(); }
+}
+
+function setViewerFavorite(path, enabled) {
+  const favorites = mobileFavoriteSet();
+  enabled ? favorites.add(path) : favorites.delete(path);
+  localStorage.setItem(mobilePhotoFavoritesKey, JSON.stringify([...favorites]));
+  return enabled;
+}
+
+function formatViewerDate(value) {
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) return '';
+  const today = new Date();
+  const sameDay = date.toDateString() === today.toDateString();
+  return `${sameDay ? 'Today' : date.toLocaleDateString(undefined,{month:'short',day:'numeric',year:date.getFullYear()===today.getFullYear()?undefined:'numeric'})} · ${date.toLocaleTimeString([], {hour:'numeric', minute:'2-digit'})}`;
+}
+
+async function shareCurrentViewerFile() {
+  const dialog = document.querySelector('#lightnas-viewer');
+  const path = dialog?.dataset.sourcePath || '';
+  const name = dialog?.querySelector('[data-viewer-title]')?.textContent || 'LightNAS file';
+  if (!path) return;
+  const response = await fetch(`/api/files/download?path=${encodeURIComponent(path)}`);
+  if (!response.ok) throw new Error('Unable to prepare this file for sharing.');
+  const blob = await response.blob();
+  const file = new File([blob], name, { type: blob.type || 'application/octet-stream' });
+  if (navigator.share && (!navigator.canShare || navigator.canShare({ files:[file] }))) {
+    await navigator.share({ files:[file], title:name });
+    return;
+  }
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = name;
+  anchor.click();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+function ensureViewerInfoSheet() {
+  let sheet = document.querySelector('#viewer-info-sheet');
+  if (sheet) return sheet;
+  sheet = document.createElement('dialog');
+  sheet.id = 'viewer-info-sheet';
+  sheet.className = 'lightnas-dialog viewer-mobile-sheet viewer-info-sheet';
+  sheet.innerHTML = `
+    <div class="dialog-body">
+      <div class="mobile-sheet-handle"></div>
+      <div class="dialog-head"><h2>Info</h2><button class="dialog-close" type="button" data-close-info>×</button></div>
+      <div class="viewer-info-grid" data-viewer-info-content></div>
+    </div>`;
+  document.body.append(sheet);
+  sheet.querySelector('[data-close-info]').addEventListener('click', () => sheet.close());
+  return sheet;
+}
+
+function openViewerInfo() {
+  const dialog = document.querySelector('#lightnas-viewer');
+  const image = dialog?.querySelector('[data-viewer-stage] img');
+  const video = dialog?.querySelector('[data-viewer-stage] video');
+  const item = previewItems().find(entry => entry.path === dialog?.dataset.sourcePath);
+  const sheet = ensureViewerInfoSheet();
+  const dimensions = image?.naturalWidth ? `${image.naturalWidth} × ${image.naturalHeight}` :
+    video?.videoWidth ? `${video.videoWidth} × ${video.videoHeight}` : '—';
+  sheet.querySelector('[data-viewer-info-content]').innerHTML = `
+    <div><span>Name</span><b>${escapeHtml(item?.name || dialog?.querySelector('[data-viewer-title]')?.textContent || '')}</b></div>
+    <div><span>Date</span><b>${escapeHtml(formatViewerDate(item?.modifiedAt) || 'Unknown')}</b></div>
+    <div><span>Dimensions</span><b>${escapeHtml(dimensions)}</b></div>
+    <div><span>Size</span><b>${item?.sizeBytes ? bytes(item.sizeBytes) : 'Unknown'}</b></div>
+    <div class="viewer-info-path"><span>Path</span><b>${escapeHtml(item?.path || dialog?.dataset.sourcePath || '')}</b></div>`;
+  sheet.showModal();
+}
+
+function ensureViewerMoreMenu() {
+  let sheet = document.querySelector('#viewer-more-sheet');
+  if (sheet) return sheet;
+  sheet = document.createElement('dialog');
+  sheet.id = 'viewer-more-sheet';
+  sheet.className = 'lightnas-dialog viewer-mobile-sheet viewer-more-sheet';
+  sheet.innerHTML = `
+    <div class="dialog-body">
+      <div class="mobile-sheet-handle"></div>
+      <div class="viewer-sheet-list">
+        <button type="button" data-more-action="duplicate">Save as duplicate</button>
+        <button type="button" data-more-action="copy-edits">Copy edits</button>
+        <button type="button" data-more-action="paste-edits">Paste edits</button>
+        <button type="button" data-more-action="info">Info</button>
+        <button type="button" data-more-action="download">Download</button>
+      </div>
+    </div>`;
+  document.body.append(sheet);
+  sheet.addEventListener('click', event => {
+    const button = event.target.closest('[data-more-action]');
+    if (!button) return;
+    const action = button.dataset.moreAction;
+    sheet.close();
+    if (action === 'info') openViewerInfo();
+    if (action === 'download') document.querySelector('#lightnas-viewer [data-viewer-download]')?.click();
+    if (action === 'copy-edits') {
+      const editor = document.querySelector('#mobile-photo-editor');
+      mobileCopiedEdits = editor?._lightnasEdits ? structuredClone(editor._lightnasEdits) : null;
+    }
+    if (action === 'paste-edits' && mobileCopiedEdits) openMobilePhotoEditor(mobileCopiedEdits);
+    if (action === 'duplicate') saveViewerDuplicate().catch(error => window.alert(error.message));
+  });
+  return sheet;
+}
+
+function openViewerMoreMenu() {
+  ensureViewerMoreMenu().showModal();
+}
+
+async function saveViewerDuplicate() {
+  const dialog = document.querySelector('#lightnas-viewer');
+  const path = dialog?.dataset.sourcePath || '';
+  if (!path) return;
+  const response = await fetch(`/api/files/download?path=${encodeURIComponent(path)}`);
+  if (!response.ok) throw new Error('Unable to duplicate this file.');
+  const blob = await response.blob();
+  const slash = path.lastIndexOf('/');
+  const folder = slash >= 0 ? path.slice(0, slash + 1) : '';
+  const original = slash >= 0 ? path.slice(slash + 1) : path;
+  const dot = original.lastIndexOf('.');
+  const stem = dot > 0 ? original.slice(0,dot) : original;
+  const ext = dot > 0 ? original.slice(dot) : '';
+  const duplicatePath = `${folder}${stem}-copy-${Date.now()}${ext}`;
+  const upload = await fetch(`/api/files?path=${encodeURIComponent(duplicatePath)}`, {
+    method:'PUT',
+    headers:{ 'Content-Type':blob.type || 'application/octet-stream', 'X-LightNAS-Request':'1' },
+    body:blob
+  });
+  if (!upload.ok) throw new Error('Unable to save duplicate.');
+  document.querySelector('#content [data-action="refresh-files"]')?.click();
+}
+
+function defaultMobileEdits() {
+  return {
+    brightness:100, contrast:100, saturation:100, warmth:0,
+    highlights:0, shadows:0, vignette:0,
+    rotate:0, flipX:1, flipY:1, crop:'original', filter:'none'
+  };
+}
+
+function filterCss(edits) {
+  const warmth = Number(edits.warmth || 0);
+  const sepia = Math.max(0, warmth) * .18;
+  const hue = warmth < 0 ? warmth * .35 : warmth * .12;
+  return `brightness(${edits.brightness || 100}%) contrast(${edits.contrast || 100}%) saturate(${edits.saturation || 100}%) sepia(${sepia}%) hue-rotate(${hue}deg)`;
+}
+
+function ensureMobilePhotoEditor() {
+  let editor = document.querySelector('#mobile-photo-editor');
+  if (editor) return editor;
+  editor = document.createElement('dialog');
+  editor.id = 'mobile-photo-editor';
+  editor.className = 'lightnas-dialog mobile-photo-editor';
+  editor.innerHTML = `
+    <div class="mobile-editor-shell">
+      <div class="mobile-editor-top">
+        <button type="button" data-editor-cancel>Cancel</button>
+        <div class="mobile-editor-title">ADJUST</div>
+        <button type="button" data-editor-save>Done</button>
+      </div>
+      <div class="mobile-editor-stage"><img data-editor-image alt=""></div>
+      <div class="mobile-editor-panel">
+        <div class="mobile-editor-tools" data-editor-adjust>
+          <label>Brightness <input type="range" min="40" max="160" value="100" data-edit-key="brightness"></label>
+          <label>Contrast <input type="range" min="40" max="160" value="100" data-edit-key="contrast"></label>
+          <label>Saturation <input type="range" min="0" max="200" value="100" data-edit-key="saturation"></label>
+          <label>Warmth <input type="range" min="-100" max="100" value="0" data-edit-key="warmth"></label>
+          <label>Highlights <input type="range" min="-100" max="100" value="0" data-edit-key="highlights"></label>
+          <label>Shadows <input type="range" min="-100" max="100" value="0" data-edit-key="shadows"></label>
+          <label>Vignette <input type="range" min="0" max="100" value="0" data-edit-key="vignette"></label>
+        </div>
+        <div class="mobile-editor-filters" data-editor-filters hidden>
+          <button data-filter="none">Original</button>
+          <button data-filter="vivid">Vivid</button>
+          <button data-filter="warm">Warm</button>
+          <button data-filter="cool">Cool</button>
+          <button data-filter="mono">Mono</button>
+          <button data-filter="dramatic">Dramatic</button>
+        </div>
+        <div class="mobile-editor-crop" data-editor-crop hidden>
+          <button data-transform="rotate-left">↶ Rotate</button>
+          <button data-transform="rotate-right">↷ Rotate</button>
+          <button data-transform="flip">↔ Flip</button>
+          <button data-crop="original">Original</button>
+          <button data-crop="square">Square</button>
+          <button data-crop="4:3">4:3</button>
+          <button data-crop="16:9">16:9</button>
+        </div>
+        <div class="mobile-editor-tabs">
+          <button class="active" data-editor-tab="adjust">Adjust</button>
+          <button data-editor-tab="filters">Filters</button>
+          <button data-editor-tab="crop">Crop</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.append(editor);
+
+  const syncPreview = () => {
+    const edits = editor._lightnasEdits || defaultMobileEdits();
+    const image = editor.querySelector('[data-editor-image]');
+    image.style.filter = filterCss(edits);
+    const extra = edits.filter === 'vivid' ? ' saturate(1.28) contrast(1.06)' :
+      edits.filter === 'warm' ? ' sepia(.16) saturate(1.1)' :
+      edits.filter === 'cool' ? ' hue-rotate(-10deg) saturate(1.08)' :
+      edits.filter === 'mono' ? ' grayscale(1) contrast(1.08)' :
+      edits.filter === 'dramatic' ? ' contrast(1.24) saturate(.9)' : '';
+    image.style.filter += extra;
+    image.style.transform = `rotate(${edits.rotate || 0}deg) scaleX(${edits.flipX || 1}) scaleY(${edits.flipY || 1})`;
+    image.dataset.crop = edits.crop || 'original';
+  };
+
+  editor.addEventListener('input', event => {
+    const key = event.target.dataset.editKey;
+    if (!key) return;
+    editor._lightnasEdits[key] = Number(event.target.value);
+    syncPreview();
+  });
+  editor.addEventListener('click', event => {
+    const cancel = event.target.closest('[data-editor-cancel]');
+    if (cancel) { editor.close(); return; }
+    const tab = event.target.closest('[data-editor-tab]');
+    if (tab) {
+      editor.querySelectorAll('[data-editor-tab]').forEach(button => button.classList.toggle('active', button === tab));
+      editor.querySelector('[data-editor-adjust]').hidden = tab.dataset.editorTab !== 'adjust';
+      editor.querySelector('[data-editor-filters]').hidden = tab.dataset.editorTab !== 'filters';
+      editor.querySelector('[data-editor-crop]').hidden = tab.dataset.editorTab !== 'crop';
+      editor.querySelector('.mobile-editor-title').textContent = tab.dataset.editorTab.toUpperCase();
+      return;
+    }
+    const filter = event.target.closest('[data-filter]');
+    if (filter) { editor._lightnasEdits.filter = filter.dataset.filter; syncPreview(); return; }
+    const crop = event.target.closest('[data-crop]');
+    if (crop) { editor._lightnasEdits.crop = crop.dataset.crop; syncPreview(); return; }
+    const transform = event.target.closest('[data-transform]');
+    if (transform) {
+      if (transform.dataset.transform === 'rotate-left') editor._lightnasEdits.rotate -= 90;
+      if (transform.dataset.transform === 'rotate-right') editor._lightnasEdits.rotate += 90;
+      if (transform.dataset.transform === 'flip') editor._lightnasEdits.flipX *= -1;
+      syncPreview();
+      return;
+    }
+    if (event.target.closest('[data-editor-save]')) saveMobilePhotoEdit().catch(error => window.alert(error.message));
+  });
+  editor._syncPreview = syncPreview;
+  return editor;
+}
+
+async function openMobilePhotoEditor(initialEdits = null) {
+  const viewer = document.querySelector('#lightnas-viewer');
+  const image = viewer?.querySelector('[data-viewer-stage] img');
+  if (!image) return;
+  const editor = ensureMobilePhotoEditor();
+  editor._lightnasEdits = structuredClone(initialEdits || defaultMobileEdits());
+  editor._sourcePath = viewer.dataset.sourcePath || '';
+  editor._sourceName = viewer.querySelector('[data-viewer-title]')?.textContent || 'photo.jpg';
+  editor.querySelector('[data-editor-image]').src = image.currentSrc || image.src;
+  for (const input of editor.querySelectorAll('[data-edit-key]')) {
+    input.value = editor._lightnasEdits[input.dataset.editKey];
+  }
+  editor._syncPreview();
+  editor.showModal();
+}
+
+async function saveMobilePhotoEdit() {
+  const editor = document.querySelector('#mobile-photo-editor');
+  const sourceImage = editor?.querySelector('[data-editor-image]');
+  const edits = editor?._lightnasEdits;
+  if (!editor?.open || !sourceImage || !edits) return;
+  const source = new Image();
+  source.crossOrigin = 'same-origin';
+  source.src = sourceImage.currentSrc || sourceImage.src;
+  await source.decode();
+
+  let sx = 0, sy = 0, sw = source.naturalWidth, sh = source.naturalHeight;
+  const ratio = edits.crop === 'square' ? 1 : edits.crop === '4:3' ? 4/3 : edits.crop === '16:9' ? 16/9 : null;
+  if (ratio) {
+    const current = sw / sh;
+    if (current > ratio) { const target = sh * ratio; sx = (sw-target)/2; sw = target; }
+    else { const target = sw / ratio; sy = (sh-target)/2; sh = target; }
+  }
+  const quarter = Math.abs(Math.round((edits.rotate || 0) / 90)) % 2 === 1;
+  const canvas = document.createElement('canvas');
+  canvas.width = quarter ? sh : sw;
+  canvas.height = quarter ? sw : sh;
+  const ctx = canvas.getContext('2d', { alpha:false });
+  ctx.save();
+  ctx.translate(canvas.width/2, canvas.height/2);
+  ctx.rotate((edits.rotate || 0) * Math.PI / 180);
+  ctx.scale(edits.flipX || 1, edits.flipY || 1);
+  const extra = edits.filter === 'vivid' ? ' saturate(128%) contrast(106%)' :
+    edits.filter === 'warm' ? ' sepia(16%) saturate(110%)' :
+    edits.filter === 'cool' ? ' hue-rotate(-10deg) saturate(108%)' :
+    edits.filter === 'mono' ? ' grayscale(100%) contrast(108%)' :
+    edits.filter === 'dramatic' ? ' contrast(124%) saturate(90%)' : '';
+  ctx.filter = filterCss(edits) + extra;
+  ctx.drawImage(source, sx, sy, sw, sh, -sw/2, -sh/2, sw, sh);
+  ctx.restore();
+
+  const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', .94));
+  if (!blob) throw new Error('Unable to create edited image.');
+  const path = editor._sourcePath;
+  const slash = path.lastIndexOf('/');
+  const folder = slash >= 0 ? path.slice(0, slash+1) : '';
+  const stem = (slash >= 0 ? path.slice(slash+1) : path).replace(/\.[^.]+$/, '');
+  const output = `${folder}${stem}-edited-${Date.now()}.jpg`;
+  const response = await fetch(`/api/files?path=${encodeURIComponent(output)}`, {
+    method:'PUT',
+    headers:{'Content-Type':'image/jpeg','X-LightNAS-Request':'1'},
+    body:blob
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.error || 'Unable to save edited image.');
+  }
+  mobileCopiedEdits = structuredClone(edits);
+  editor.close();
+  document.querySelector('#lightnas-viewer')?.close();
+  document.querySelector('#content [data-action="refresh-files"]')?.click();
+}
+
 async function editCurrentImage() {
+  if (matchMedia('(max-width: 760px)').matches) {
+    await openMobilePhotoEditor();
+    return;
+  }
   const dialog = document.querySelector('#lightnas-viewer');
   const image = dialog?.querySelector('[data-viewer-stage] img');
   const path = dialog?.dataset.sourcePath || '';
