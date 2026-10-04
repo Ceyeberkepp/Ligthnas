@@ -14,6 +14,7 @@ const infrastructureImageSuffixes = [
 ];
 const allFilesCache = new Map();
 const quotaReservations = new Map();
+const chunkUploads = new Map();
 
 function infrastructureFile(name) {
   const value = String(name || '').toLowerCase();
@@ -295,6 +296,105 @@ export async function uploadFile(relative, req, options = {}) {
     }
   }
   invalidateAllFilesCache();
+}
+
+export async function uploadFileChunk(relative, { uploadId, offset, totalBytes, data, quotaRoot = '', quotaBytes = 0 } = {}) {
+  const segments = parts(relative);
+  if (!segments.length || (segments.length <= 2 && segments[0] === ATTACHED_ROOT)) {
+    throw Object.assign(new Error('Enter a file name inside a writable location.'), { status: 400 });
+  }
+  if (!/^[a-zA-Z0-9._-]{8,128}$/.test(String(uploadId || ''))) {
+    throw Object.assign(new Error('Invalid upload session.'), { status: 400 });
+  }
+  if (!Buffer.isBuffer(data) || !data.length) {
+    throw Object.assign(new Error('Upload chunk is empty.'), { status: 400 });
+  }
+
+  offset = Number(offset);
+  totalBytes = Number(totalBytes);
+  quotaBytes = Number(quotaBytes || 0);
+  quotaRoot = String(quotaRoot || '');
+  if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(totalBytes) || totalBytes <= 0 || offset >= totalBytes) {
+    throw Object.assign(new Error('Invalid upload chunk range.'), { status: 400 });
+  }
+  if (offset + data.length > totalBytes) {
+    throw Object.assign(new Error('Upload chunk exceeds the declared file size.'), { status: 400 });
+  }
+  if (MAX_UPLOAD > 0 && totalBytes > MAX_UPLOAD) {
+    throw Object.assign(new Error('File exceeds the configured upload limit.'), { status: 413 });
+  }
+
+  const path = await checked(relative, false);
+  const key = `${quotaRoot}::${uploadId}`;
+  let session = chunkUploads.get(key);
+
+  if (!session) {
+    if (offset !== 0) throw Object.assign(new Error('Upload session expired. Start the file again.'), { status: 409, code: 'UPLOAD_RESTART' });
+    const usedBefore = quotaBytes > 0 && quotaRoot ? await fileUsage(quotaRoot) : 0;
+    const reservedBefore = quotaRoot ? Number(quotaReservations.get(quotaRoot) || 0) : 0;
+    if (quotaBytes > 0 && usedBefore + reservedBefore + totalBytes > quotaBytes) {
+      throw Object.assign(new Error('Upload would exceed your LightNAS file storage quota.'), { status: 413 });
+    }
+    let handle;
+    try {
+      handle = await open(path, 'wx', 0o600);
+      await handle.close();
+    } catch (error) {
+      try { await handle?.close(); } catch {}
+      if (error?.code === 'EEXIST') {
+        throw Object.assign(new Error('A file with this name already exists.'), { status: 409, code: 'FILE_EXISTS' });
+      }
+      throw error;
+    }
+    if (quotaRoot) quotaReservations.set(quotaRoot, reservedBefore + totalBytes);
+    session = { path, relative, expectedOffset: 0, totalBytes, quotaRoot, reservedBytes: totalBytes, updatedAt: Date.now() };
+    chunkUploads.set(key, session);
+  } else {
+    if (session.path !== path || session.totalBytes !== totalBytes) {
+      throw Object.assign(new Error('Upload session does not match this file.'), { status: 409, code: 'UPLOAD_RESTART' });
+    }
+  }
+
+  // Idempotent retry: if a client lost the response after a successful chunk,
+  // acknowledge the already-written range instead of corrupting the file.
+  if (offset < session.expectedOffset && offset + data.length <= session.expectedOffset) {
+    session.updatedAt = Date.now();
+    return { complete: session.expectedOffset >= session.totalBytes, receivedBytes: session.expectedOffset, totalBytes: session.totalBytes };
+  }
+  if (offset !== session.expectedOffset) {
+    throw Object.assign(new Error(`Upload chunk offset mismatch. Expected ${session.expectedOffset}.`), {
+      status: 409,
+      code: 'UPLOAD_OFFSET',
+      expectedOffset: session.expectedOffset
+    });
+  }
+
+  let handle;
+  try {
+    handle = await open(path, 'r+');
+    await handle.write(data, 0, data.length, offset);
+    await handle.close();
+    handle = null;
+  } catch (error) {
+    try { await handle?.close(); } catch {}
+    throw error;
+  }
+
+  session.expectedOffset += data.length;
+  session.updatedAt = Date.now();
+  const complete = session.expectedOffset >= session.totalBytes;
+
+  if (complete) {
+    chunkUploads.delete(key);
+    if (session.quotaRoot) {
+      const remaining = Math.max(0, Number(quotaReservations.get(session.quotaRoot) || 0) - session.reservedBytes);
+      if (remaining) quotaReservations.set(session.quotaRoot, remaining);
+      else quotaReservations.delete(session.quotaRoot);
+    }
+    invalidateAllFilesCache();
+  }
+
+  return { complete, receivedBytes: session.expectedOffset, totalBytes: session.totalBytes };
 }
 
 export async function downloadFile(relative) {

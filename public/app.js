@@ -1649,6 +1649,51 @@ function uploadRequest(path, file, onProgress) {
   });
 }
 
+function chunkUploadRequest(path, file, onProgress) {
+  const chunkSize = 2 * 1024 * 1024;
+  const uploadId = globalThis.crypto?.randomUUID?.() || `mobile-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+  const sendChunk = (blob, offset, attempt = 0) => new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const endpoint = `/api/files/chunk?path=${encodeURIComponent(path)}&uploadId=${encodeURIComponent(uploadId)}&offset=${offset}&total=${file.size}`;
+    xhr.open('PUT', endpoint);
+    xhr.withCredentials = true;
+    xhr.setRequestHeader('X-LightNAS-Request', '1');
+    xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+    xhr.upload.addEventListener('progress', event => {
+      if (event.lengthComputable) onProgress?.(Math.min(file.size, offset + event.loaded), file.size);
+    });
+    xhr.addEventListener('load', () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        onProgress?.(Math.min(file.size, offset + blob.size), file.size);
+        resolve();
+        return;
+      }
+      let message = 'Upload failed.';
+      try { message = JSON.parse(xhr.responseText || '{}').error || message; } catch {}
+      const error = Object.assign(new Error(message), { status:xhr.status });
+      if ((xhr.status === 0 || xhr.status === 408 || xhr.status === 429 || xhr.status >= 500) && attempt < 3) {
+        setTimeout(() => sendChunk(blob, offset, attempt + 1).then(resolve, reject), 500 * (attempt + 1));
+      } else reject(error);
+    });
+    xhr.addEventListener('error', () => {
+      if (attempt < 3) {
+        setTimeout(() => sendChunk(blob, offset, attempt + 1).then(resolve, reject), 500 * (attempt + 1));
+      } else reject(Object.assign(new Error('The upload connection failed.'), { status:0, retryable:true }));
+    });
+    xhr.addEventListener('abort', () => reject(Object.assign(new Error('The upload was cancelled.'), { status:0 })));
+    xhr.send(blob);
+  });
+
+  return (async () => {
+    if (!file.size) throw new Error('The selected file is empty.');
+    for (let offset = 0; offset < file.size; offset += chunkSize) {
+      const blob = file.slice(offset, Math.min(file.size, offset + chunkSize), file.type || 'application/octet-stream');
+      await sendChunk(blob, offset);
+    }
+  })();
+}
+
 async function ensureUploadDirectories(paths) {
   const folders = new Set();
   for (const path of paths) {
@@ -1698,6 +1743,7 @@ async function uploadFilesWithProgress(fileList, folderMode = false) {
   };
 
   const failures = [];
+  const mobile = matchMedia('(max-width: 760px)').matches;
   const worker = async () => {
     while (true) {
       const index = nextIndex++;
@@ -1708,7 +1754,8 @@ async function uploadFilesWithProgress(fileList, folderMode = false) {
       let uploaded = false;
       while (!uploaded) {
         try {
-          await uploadRequest(path, file, loaded => {
+          const transfer = mobile ? chunkUploadRequest : uploadRequest;
+          await transfer(path, file, loaded => {
             loadedByFile[index] = loaded;
             updateProgress(file.name);
           });
@@ -1740,7 +1787,6 @@ async function uploadFilesWithProgress(fileList, folderMode = false) {
   try {
     // Keep mobile batches conservative so large photos/videos do not overwhelm
     // Safari or a low-memory NAS while still allowing mixed multi-select uploads.
-    const mobile = matchMedia('(max-width: 760px)').matches;
     const concurrency = Math.min(mobile ? 1 : 3, targets.length);
     await Promise.all(Array.from({ length: concurrency }, () => worker()));
     const failed = failures.length;

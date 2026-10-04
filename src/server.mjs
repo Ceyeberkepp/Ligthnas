@@ -9,7 +9,7 @@ import { WebSocketServer } from 'ws';
 import { JsonStore } from './store.mjs';
 import { getFilesystems, getStorageInventory, getSystemSnapshot } from './system.mjs';
 import { hashPassword, Sessions, verifyPassword } from './auth.mjs';
-import { listFiles, listAllFiles, createFolder, uploadFile, downloadFile, downloadEntry, deleteEntry, fileUsage } from './files.mjs';
+import { listFiles, listAllFiles, createFolder, uploadFile, uploadFileChunk, downloadFile, downloadEntry, deleteEntry, fileUsage } from './files.mjs';
 import { thumbnailFor } from './thumbnails.mjs';
 import { catalog, runtimeInventory, vmEditorInventory, vmCreateInventory, installCatalogApp, manageCatalogApp, updateCatalogApp, openContainerShell, createContainer, createVm } from './runtimes-next.mjs';
 import { communityCatalog } from './community-catalog.mjs';
@@ -555,12 +555,12 @@ async function bodyJson(req) {
   }
 }
 
-async function bodyBuffer(req, maxBytes) {
+async function bodyBuffer(req, maxBytes, tooLargeMessage = 'Uploaded profile image is too large.') {
   const chunks = [];
   let size = 0;
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > maxBytes) throw Object.assign(new Error('Uploaded profile image is too large.'), { status: 413 });
+    if (size > maxBytes) throw Object.assign(new Error(tooLargeMessage), { status: 413 });
     chunks.push(chunk);
   }
   return Buffer.concat(chunks);
@@ -2206,6 +2206,33 @@ async function api(req, res, url) {
       path: relative,
       entries: await listFiles(scoped)
     });
+  }
+
+  if (req.method === 'PUT' && url.pathname === '/api/files/chunk') {
+    if (!requireAnyPermission(res, permissions, ['files.own', 'files.write'])) return;
+    const requestedPath = url.searchParams.get('path') || '';
+    const path = scopedFilePath(context, requestedPath, ['files.write']);
+    if (path === null) return send(res, 403, { error: 'File modification access is required.' });
+
+    const uploadId = String(url.searchParams.get('uploadId') || '');
+    const offset = Number(url.searchParams.get('offset'));
+    const totalBytes = Number(url.searchParams.get('total'));
+    const chunk = await bodyBuffer(req, 3 * 1024 * 1024, 'Upload chunk is too large.');
+    const scope = privateFileScope(context, ['files.write']);
+    const quotaBytes = scope ? (Number(account?.storageQuotaBytes) > 0 ? Number(account.storageQuotaBytes) : DEFAULT_USER_STORAGE_QUOTA_BYTES) : 0;
+    const result = await uploadFileChunk(path, {
+      uploadId,
+      offset,
+      totalBytes,
+      data: chunk,
+      quotaRoot: scope || '',
+      quotaBytes
+    });
+    if (result.complete) {
+      store.addActivity('file', `File ${requestedPath} was uploaded in chunks.`);
+      await store.save();
+    }
+    return send(res, result.complete ? 201 : 200, { ok: true, ...result });
   }
 
   if (url.pathname === '/api/files') {

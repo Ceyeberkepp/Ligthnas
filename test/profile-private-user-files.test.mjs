@@ -201,3 +201,18 @@ test('mobile viewer fills the viewport and locks swipe direction', async () => {
   assert.match(styles, /height: 100dvh !important/);
   assert.match(styles, /touch-action: none/);
 });
+
+
+test('mobile media uses resumable chunk uploads for photos and videos', async () => {
+  const server = await readFile(new URL('../src/server.mjs', import.meta.url), 'utf8');
+  const files = await readFile(new URL('../src/files.mjs', import.meta.url), 'utf8');
+  assert.match(app, /function chunkUploadRequest\(/);
+  assert.match(app, /const chunkSize = 2 \* 1024 \* 1024/);
+  assert.match(app, /\/api\/files\/chunk\?path=/);
+  assert.match(app, /const transfer = mobile \? chunkUploadRequest : uploadRequest/);
+  assert.match(server, /url\.pathname === '\/api\/files\/chunk'/);
+  assert.match(server, /bodyBuffer\(req, 3 \* 1024 \* 1024/);
+  assert.match(files, /export async function uploadFileChunk/);
+  assert.match(files, /UPLOAD_OFFSET/);
+  assert.match(files, /Idempotent retry/);
+});
