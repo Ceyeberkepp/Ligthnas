@@ -152,17 +152,33 @@ function ensureViewer() {
   let gesture = null;
   stage.addEventListener('pointerdown', event => {
     if (event.pointerType !== 'touch') return;
-    gesture = { id:event.pointerId, x:event.clientX, y:event.clientY, time:performance.now() };
+    const image = stage.querySelector('img');
+    gesture = { id:event.pointerId, x:event.clientX, y:event.clientY, time:performance.now(), image };
+    if (image) image.classList.add('viewer-dragging');
     try { stage.setPointerCapture(event.pointerId); } catch {}
+  });
+  stage.addEventListener('pointermove', event => {
+    if (!gesture || gesture.id !== event.pointerId || !gesture.image) return;
+    const dx = event.clientX - gesture.x;
+    const dy = event.clientY - gesture.y;
+    if (Math.abs(dx) > Math.abs(dy)) {
+      gesture.image.style.transform = `translate3d(${dx}px,0,0) scale(.985)`;
+      gesture.image.style.opacity = String(Math.max(.72, 1 - Math.abs(dx) / 900));
+    }
   });
   stage.addEventListener('pointerup', event => {
     if (!gesture || gesture.id !== event.pointerId) return;
     const dx = event.clientX - gesture.x;
     const dy = event.clientY - gesture.y;
     const elapsed = performance.now() - gesture.time;
+    if (gesture.image) {
+      gesture.image.classList.remove('viewer-dragging');
+      gesture.image.style.transform = '';
+      gesture.image.style.opacity = '';
+    }
     gesture = null;
-    if (elapsed > 800) return;
-    if (Math.abs(dx) >= 48 && Math.abs(dx) > Math.abs(dy) * 1.15) {
+    if (elapsed > 900) return;
+    if (Math.abs(dx) >= 34 && Math.abs(dx) > Math.abs(dy) * 1.08) {
       navigatePreview(dx < 0 ? 1 : -1);
       return;
     }
@@ -174,7 +190,14 @@ function ensureViewer() {
       dialog.classList.toggle('viewer-chrome-hidden');
     }
   });
-  stage.addEventListener('pointercancel', () => { gesture = null; });
+  stage.addEventListener('pointercancel', () => {
+    if (gesture?.image) {
+      gesture.image.classList.remove('viewer-dragging');
+      gesture.image.style.transform = '';
+      gesture.image.style.opacity = '';
+    }
+    gesture = null;
+  });
 
   dialog.addEventListener('keydown', event => {
     if (event.key === 'ArrowLeft') { event.preventDefault(); navigatePreview(-1); }
@@ -252,17 +275,38 @@ async function editCurrentImage() {
   document.querySelector('#content [data-action="refresh-files"]')?.click();
 }
 
+const viewerPreloadCache = new Map();
+
+function viewerUrls(item) {
+  const extension = item.name.toLowerCase().split('.').pop();
+  const native = ['jpg','jpeg','png','gif','webp','avif','bmp','svg'].includes(extension);
+  return {
+    preview: `/api/files/thumbnail?preview=1&path=${encodeURIComponent(item.path)}`,
+    original: native ? `/api/files/download?path=${encodeURIComponent(item.path)}` : ''
+  };
+}
+
+function warmViewerImage(url) {
+  if (!url || viewerPreloadCache.has(url)) return viewerPreloadCache.get(url);
+  const image = new Image();
+  const promise = new Promise(resolve => {
+    image.onload = () => resolve(image);
+    image.onerror = () => resolve(null);
+  });
+  image.src = url;
+  viewerPreloadCache.set(url, promise);
+  return promise;
+}
+
 function preloadPreviewNeighbors(path) {
   const items = previewItems();
   const index = items.findIndex(item => item.path === path);
-  for (const item of [items[index - 1], items[index + 1]]) {
-    if (!item || previewKind(item.name) !== 'image') continue;
-    const extension = item.name.toLowerCase().split('.').pop();
-    const native = ['jpg','jpeg','png','gif','webp','avif','bmp','svg'].includes(extension);
-    const preload = new Image();
-    preload.src = native
-      ? `/api/files/download?path=${encodeURIComponent(item.path)}`
-      : `/api/files/thumbnail?preview=1&path=${encodeURIComponent(item.path)}`;
+  const nearby = [items[index - 2], items[index - 1], items[index + 1], items[index + 2]].filter(Boolean);
+  for (const item of nearby) {
+    if (previewKind(item.name) !== 'image') continue;
+    const urls = viewerUrls(item);
+    warmViewerImage(urls.preview);
+    if (Math.abs(items.indexOf(item) - index) === 1) warmViewerImage(urls.original);
   }
 }
 
@@ -286,12 +330,20 @@ async function openPreview(name, explicitPath = '') {
 
   if (kind === 'image') {
     viewer = document.createElement('img');
-    const nativeImage = ['jpg','jpeg','png','gif','webp','avif','bmp','svg'].includes(extension);
-    viewer.src = nativeImage
-      ? `/api/files/download?path=${encodeURIComponent(path)}`
-      : `/api/files/thumbnail?preview=1&path=${encodeURIComponent(path)}`;
+    const urls = viewerUrls({ name, path });
+    viewer.src = urls.preview;
     viewer.alt = name;
-    stage.style.setProperty('--viewer-bg', `url("${viewer.src.replaceAll('"', '%22')}")`);
+    viewer.decoding = 'async';
+    viewer.fetchPriority = 'high';
+    stage.style.setProperty('--viewer-bg', `url("${urls.preview.replaceAll('"', '%22')}")`);
+    warmViewerImage(urls.preview);
+    if (urls.original) {
+      warmViewerImage(urls.original).then(full => {
+        if (!full || dialog.dataset.sourcePath !== path || !viewer.isConnected) return;
+        viewer.src = urls.original;
+        stage.style.setProperty('--viewer-bg', `url("${urls.original.replaceAll('"', '%22')}")`);
+      });
+    }
   } else if (kind === 'video') {
     // Always use the server preview path. Browser codec support differs across
     // MKV/AVI/WMV/MTS/etc.; LightNAS streams an on-demand H.264/AAC preview.
