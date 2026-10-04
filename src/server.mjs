@@ -186,7 +186,7 @@ function maskPhone(value) {
 }
 
 const mobilePhotoExt = new Set(['jpg','jpeg','png','gif','webp','bmp','avif','heic','heif','dng','cr2','cr3','nef','arw','raf','orf','rw2']);
-const mobileVideoExt = new Set(['mp4','mov','m4v','webm','mkv','avi','mts','m2ts','3gp']);
+const mobileVideoExt = new Set(['mp4','m4v','mov','qt','webm','ogv','mkv','avi','wmv','asf','flv','f4v','mpeg','mpg','mpe','m2v','mts','m2ts','m2t','ts','3gp','3g2','vob','mxf','rm','rmvb','divx','mod','tod','dat']);
 const mobileAudioExt = new Set(['mp3','m4a','aac','wav','flac','ogg','opus']);
 
 function mobileLibraryDestination(filename, contentType = '') {
