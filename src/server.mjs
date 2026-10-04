@@ -546,6 +546,7 @@ async function cachedVideoPreview(relative) {
             '-ac', '2',
             '-avoid_negative_ts', 'make_zero',
             '-movflags', '+faststart',
+            '-f', 'mp4',
             '-y', temp
           ], { stdio: ['ignore', 'ignore', 'pipe'] });
           ffmpeg.stderr.on('data', chunk => {
