@@ -216,3 +216,37 @@ test('mobile media uses resumable chunk uploads for photos and videos', async ()
   assert.match(files, /UPLOAD_OFFSET/);
   assert.match(files, /Idempotent retry/);
 });
+
+
+test('mobile viewer has Photos-style share favorite info edit delete controls', async () => {
+  const enhancements = await readFile(new URL('../public/enhancements.js', import.meta.url), 'utf8');
+  const styles = await readFile(new URL('../public/enhancements.css', import.meta.url), 'utf8');
+  assert.match(enhancements, /data-viewer-share/);
+  assert.match(enhancements, /data-viewer-favorite/);
+  assert.match(enhancements, /data-viewer-info/);
+  assert.match(enhancements, /data-viewer-more/);
+  assert.match(enhancements, /data-viewer-filmstrip/);
+  assert.match(enhancements, /navigator\.share/);
+  assert.match(styles, /grid-template-columns: repeat\(5, minmax\(0,1fr\)\)/);
+  assert.match(styles, /\.viewer-filmstrip/);
+});
+
+test('mobile photo editor has adjust filters crop undo redo revert and red-eye', async () => {
+  const enhancements = await readFile(new URL('../public/enhancements.js', import.meta.url), 'utf8');
+  assert.match(enhancements, /data-editor-tab="adjust"/);
+  assert.match(enhancements, /data-editor-tab="filters"/);
+  assert.match(enhancements, /data-editor-tab="crop"/);
+  assert.match(enhancements, /data-editor-undo/);
+  assert.match(enhancements, /data-editor-redo/);
+  assert.match(enhancements, /data-editor-revert/);
+  assert.match(enhancements, /data-filter="redeye"/);
+  assert.match(enhancements, /Save as duplicate/);
+  assert.match(enhancements, /Copy edits/);
+  assert.match(enhancements, /Paste edits/);
+});
+
+test('desktop viewer remains available while mobile controls are media-query scoped', async () => {
+  const styles = await readFile(new URL('../public/enhancements.css', import.meta.url), 'utf8');
+  assert.match(styles, /@media \(min-width: 761px\)[\s\S]*?\.viewer-mobile-back/);
+  assert.match(styles, /\.viewer-desktop-close/);
+});
