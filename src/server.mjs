@@ -509,7 +509,7 @@ async function cachedVideoPreview(relative) {
   const source = await downloadFile(relative);
   await mkdir(videoPreviewCacheRoot, { recursive: true, mode: 0o700 });
   const key = createHash('sha256')
-    .update(`${relative}:${source.size}:${source.mtimeMs || 0}:h264-aac-v2`)
+    .update(`${relative}:${source.size}:${source.mtimeMs || 0}:h264-aac-mobile-v3`)
     .digest('hex');
   const output = join(videoPreviewCacheRoot, `${key}.mp4`);
 
@@ -530,18 +530,18 @@ async function cachedVideoPreview(relative) {
             '-i', source.path,
             '-map', '0:v:0', '-map', '0:a:0?',
             '-sn', '-dn',
-            '-vf', 'scale=1920:1080:force_original_aspect_ratio=decrease:force_divisible_by=2,format=yuv420p',
+            '-vf', 'scale=1280:720:force_original_aspect_ratio=decrease:force_divisible_by=2,format=yuv420p',
             '-c:v', 'libx264',
             '-profile:v', 'main',
             '-level:v', '4.1',
-            '-preset', 'veryfast',
-            '-crf', '24',
+            '-preset', 'ultrafast',
+            '-crf', '28',
             '-g', '48',
             '-keyint_min', '48',
             '-sc_threshold', '0',
             '-c:a', 'aac',
             '-profile:a', 'aac_low',
-            '-b:a', '160k',
+            '-b:a', '128k',
             '-ar', '48000',
             '-ac', '2',
             '-avoid_negative_ts', 'make_zero',
