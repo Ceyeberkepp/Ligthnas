@@ -710,6 +710,24 @@ async function openPreview(name, explicitPath = '') {
   dialog.dataset.sourcePath = path;
   dialog.querySelector('[data-viewer-title]').textContent = name;
   dialog.querySelector('[data-viewer-meta]').textContent = `${kind.toUpperCase()} preview`;
+  const currentItem = previewItems().find(item => item.path === path);
+  dialog.querySelector('[data-viewer-date]').textContent = formatViewerDate(currentItem?.modifiedAt);
+  const favoriteButton = dialog.querySelector('[data-viewer-favorite]');
+  const refreshFavorite = () => {
+    const active = mobileFavoriteSet().has(path);
+    favoriteButton.classList.toggle('active', active);
+    favoriteButton.querySelector('span').textContent = active ? '♥' : '♡';
+  };
+  refreshFavorite();
+  favoriteButton.onclick = () => {
+    const active = !mobileFavoriteSet().has(path);
+    setViewerFavorite(path, active);
+    refreshFavorite();
+  };
+  dialog.querySelector('[data-viewer-share]').onclick = () => shareCurrentViewerFile().catch(error => {
+    if (error?.name !== 'AbortError') window.alert(error.message);
+  });
+  dialog.querySelector('[data-viewer-info]').onclick = () => openViewerInfo();
   const stage = dialog.querySelector('[data-viewer-stage]');
   stage.replaceChildren();
   stage.style.removeProperty('--viewer-bg');
