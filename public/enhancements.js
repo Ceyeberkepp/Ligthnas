@@ -840,11 +840,20 @@ function preloadPreviewNeighbors(path) {
   const items = previewItems();
   const index = items.findIndex(item => item.path === path);
   const nearby = [items[index - 2], items[index - 1], items[index + 1], items[index + 2]].filter(Boolean);
+
+  if (nearby.length) {
+    fetch('/api/files/prewarm', {
+      method:'POST',
+      credentials:'same-origin',
+      headers:{ 'Content-Type':'application/json', 'X-LightNAS-Request':'1' },
+      body:JSON.stringify({ paths:nearby.map(item => item.path) })
+    }).catch(() => {});
+  }
+
   for (const item of nearby) {
     if (previewKind(item.name) !== 'image') continue;
     const urls = viewerUrls(item);
     warmViewerImage(urls.preview);
-    if (Math.abs(items.indexOf(item) - index) === 1) warmViewerImage(urls.original);
   }
 }
 
@@ -903,13 +912,15 @@ async function openPreview(name, explicitPath = '') {
       stage.style.setProperty('--viewer-bg', `url("${urls.preview.replaceAll('"', '%22')}")`);
     });
 
-    if (urls.original) {
+    const mobileImageViewer = matchMedia('(max-width: 760px)').matches || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    if (urls.original && !mobileImageViewer) {
       warmViewerImage(urls.original).then(full => {
         if (!full || dialog.dataset.sourcePath !== path || !viewer.isConnected) return;
         viewer.src = urls.original;
         stage.style.setProperty('--viewer-bg', `url("${urls.original.replaceAll('"', '%22')}")`);
       });
     }
+    preloadPreviewNeighbors(path);
   } else if (kind === 'video') {
     viewer = document.createElement('video');
     viewer.controls = true;
@@ -984,7 +995,6 @@ async function openPreview(name, explicitPath = '') {
     document.querySelector('#content [data-action="refresh-files"]')?.click();
   };
   updateViewerNavigation(dialog, path);
-  if (kind === 'image') preloadPreviewNeighbors(path);
   if (!dialog.open) dialog.showModal();
   return true;
 }
