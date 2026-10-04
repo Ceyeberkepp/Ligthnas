@@ -424,9 +424,13 @@ function defaultMobileEdits() {
 
 function filterCss(edits) {
   const warmth = Number(edits.warmth || 0);
+  const highlights = Number(edits.highlights || 0);
+  const shadows = Number(edits.shadows || 0);
   const sepia = Math.max(0, warmth) * .18;
   const hue = warmth < 0 ? warmth * .35 : warmth * .12;
-  return `brightness(${edits.brightness || 100}%) contrast(${edits.contrast || 100}%) saturate(${edits.saturation || 100}%) sepia(${sepia}%) hue-rotate(${hue}deg)`;
+  const brightness = Math.max(20, Math.min(190, Number(edits.brightness || 100) + shadows * .16 + highlights * .06));
+  const contrast = Math.max(20, Math.min(190, Number(edits.contrast || 100) + highlights * .12 - shadows * .04));
+  return `brightness(${brightness}%) contrast(${contrast}%) saturate(${edits.saturation || 100}%) sepia(${sepia}%) hue-rotate(${hue}deg)`;
 }
 
 function ensureMobilePhotoEditor() {
@@ -441,6 +445,11 @@ function ensureMobilePhotoEditor() {
         <button type="button" data-editor-cancel>Cancel</button>
         <div class="mobile-editor-title">ADJUST</div>
         <button type="button" data-editor-save>Done</button>
+      </div>
+      <div class="mobile-editor-quickbar">
+        <button type="button" data-editor-undo aria-label="Undo">↶</button>
+        <button type="button" data-editor-redo aria-label="Redo">↷</button>
+        <button type="button" data-editor-revert>Revert</button>
       </div>
       <div class="mobile-editor-stage"><img data-editor-image alt=""></div>
       <div class="mobile-editor-panel">
@@ -460,6 +469,7 @@ function ensureMobilePhotoEditor() {
           <button data-filter="cool">Cool</button>
           <button data-filter="mono">Mono</button>
           <button data-filter="dramatic">Dramatic</button>
+          <button data-filter="redeye">Red Eye</button>
         </div>
         <div class="mobile-editor-crop" data-editor-crop hidden>
           <button data-transform="rotate-left">↶ Rotate</button>
@@ -491,8 +501,29 @@ function ensureMobilePhotoEditor() {
     image.style.filter += extra;
     image.style.transform = `rotate(${edits.rotate || 0}deg) scaleX(${edits.flipX || 1}) scaleY(${edits.flipY || 1})`;
     image.dataset.crop = edits.crop || 'original';
+    editor.style.setProperty('--editor-vignette', String(Math.max(0, Math.min(100, Number(edits.vignette || 0))) / 100));
   };
 
+  const pushHistory = () => {
+    editor._history ||= [];
+    editor._historyIndex ??= -1;
+    const snapshot = structuredClone(editor._lightnasEdits || defaultMobileEdits());
+    editor._history = editor._history.slice(0, editor._historyIndex + 1);
+    editor._history.push(snapshot);
+    editor._historyIndex = editor._history.length - 1;
+  };
+
+  const restoreHistory = index => {
+    if (!editor._history?.[index]) return;
+    editor._historyIndex = index;
+    editor._lightnasEdits = structuredClone(editor._history[index]);
+    for (const input of editor.querySelectorAll('[data-edit-key]')) input.value = editor._lightnasEdits[input.dataset.editKey];
+    syncPreview();
+  };
+
+  editor.addEventListener('change', event => {
+    if (event.target.matches('[data-edit-key]')) pushHistory();
+  });
   editor.addEventListener('input', event => {
     const key = event.target.dataset.editKey;
     if (!key) return;
@@ -502,6 +533,15 @@ function ensureMobilePhotoEditor() {
   editor.addEventListener('click', event => {
     const cancel = event.target.closest('[data-editor-cancel]');
     if (cancel) { editor.close(); return; }
+    if (event.target.closest('[data-editor-undo]')) { restoreHistory(Math.max(0, (editor._historyIndex || 0) - 1)); return; }
+    if (event.target.closest('[data-editor-redo]')) { restoreHistory(Math.min((editor._history?.length || 1) - 1, (editor._historyIndex || 0) + 1)); return; }
+    if (event.target.closest('[data-editor-revert]')) {
+      editor._lightnasEdits = defaultMobileEdits();
+      for (const input of editor.querySelectorAll('[data-edit-key]')) input.value = editor._lightnasEdits[input.dataset.editKey];
+      pushHistory();
+      syncPreview();
+      return;
+    }
     const tab = event.target.closest('[data-editor-tab]');
     if (tab) {
       editor.querySelectorAll('[data-editor-tab]').forEach(button => button.classList.toggle('active', button === tab));
@@ -512,20 +552,22 @@ function ensureMobilePhotoEditor() {
       return;
     }
     const filter = event.target.closest('[data-filter]');
-    if (filter) { editor._lightnasEdits.filter = filter.dataset.filter; syncPreview(); return; }
+    if (filter) { editor._lightnasEdits.filter = filter.dataset.filter; pushHistory(); syncPreview(); return; }
     const crop = event.target.closest('[data-crop]');
-    if (crop) { editor._lightnasEdits.crop = crop.dataset.crop; syncPreview(); return; }
+    if (crop) { editor._lightnasEdits.crop = crop.dataset.crop; pushHistory(); syncPreview(); return; }
     const transform = event.target.closest('[data-transform]');
     if (transform) {
       if (transform.dataset.transform === 'rotate-left') editor._lightnasEdits.rotate -= 90;
       if (transform.dataset.transform === 'rotate-right') editor._lightnasEdits.rotate += 90;
       if (transform.dataset.transform === 'flip') editor._lightnasEdits.flipX *= -1;
+      pushHistory();
       syncPreview();
       return;
     }
     if (event.target.closest('[data-editor-save]')) saveMobilePhotoEdit().catch(error => window.alert(error.message));
   });
   editor._syncPreview = syncPreview;
+  editor._pushHistory = pushHistory;
   return editor;
 }
 
@@ -535,6 +577,8 @@ async function openMobilePhotoEditor(initialEdits = null) {
   if (!image) return;
   const editor = ensureMobilePhotoEditor();
   editor._lightnasEdits = structuredClone(initialEdits || defaultMobileEdits());
+  editor._history = [structuredClone(editor._lightnasEdits)];
+  editor._historyIndex = 0;
   editor._sourcePath = viewer.dataset.sourcePath || '';
   editor._sourceName = viewer.querySelector('[data-viewer-title]')?.textContent || 'photo.jpg';
   editor.querySelector('[data-editor-image]').src = image.currentSrc || image.src;
@@ -579,6 +623,28 @@ async function saveMobilePhotoEdit() {
   ctx.filter = filterCss(edits) + extra;
   ctx.drawImage(source, sx, sy, sw, sh, -sw/2, -sh/2, sw, sh);
   ctx.restore();
+
+  if (Number(edits.vignette || 0) > 0) {
+    const strength = Math.min(.78, Number(edits.vignette || 0) / 120);
+    const gradient = ctx.createRadialGradient(canvas.width/2, canvas.height/2, Math.min(canvas.width,canvas.height)*.2, canvas.width/2, canvas.height/2, Math.max(canvas.width,canvas.height)*.68);
+    gradient.addColorStop(0, 'rgba(0,0,0,0)');
+    gradient.addColorStop(1, `rgba(0,0,0,${strength})`);
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+  }
+
+  if (edits.filter === 'redeye') {
+    const imageData = ctx.getImageData(0,0,canvas.width,canvas.height);
+    const pixels = imageData.data;
+    for (let i=0;i<pixels.length;i+=4) {
+      const r=pixels[i], g=pixels[i+1], b=pixels[i+2];
+      if (r > 95 && r > g*1.45 && r > b*1.4 && g < 130) {
+        const neutral = Math.round((g+b)/2);
+        pixels[i] = Math.max(neutral, Math.round(r*.38));
+      }
+    }
+    ctx.putImageData(imageData,0,0);
+  }
 
   const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', .94));
   if (!blob) throw new Error('Unable to create edited image.');
