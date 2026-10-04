@@ -1283,7 +1283,7 @@ const librarySections = [
 
 const libraryExtensions = {
   Photos: new Set(['jpg','jpeg','png','gif','webp','bmp','svg','avif','heic','heif','dng','cr2','cr3','nef','nrw','arw','srf','sr2','raf','orf','rw2','pef','srw','x3f']),
-  Videos: new Set(['mp4','webm','mov','m4v','ogv','mkv','avi','wmv','flv','mpeg','mpg','m2v','mts','m2ts','ts','3gp','3g2','vob']),
+  Videos: new Set(['mp4','m4v','mov','qt','webm','ogv','mkv','avi','wmv','asf','flv','f4v','mpeg','mpg','mpe','m2v','mts','m2ts','m2t','ts','3gp','3g2','vob','mxf','rm','rmvb','divx','mod','tod','dat']),
   Audio: new Set(['mp3','wav','ogg','m4a','aac','flac','opus','wma','aiff','aif']),
   Documents: new Set(['pdf','txt','md','rtf','doc','docx','odt','xls','xlsx','ods','ppt','pptx','odp','csv','json','xml','yaml','yml','ini','conf','log','zip','7z','rar','epub','mobi','html','css','js','mjs','py','sh'])
 };
@@ -1316,7 +1316,7 @@ function libraryKindForName(name) {
 
 const previewableFileExtensions = new Set([
   'jpg','jpeg','png','gif','webp','bmp','svg','avif','heic','heif','raw','dng','cr2','cr3','nef','nrw','arw','srf','sr2','raf','orf','rw2','pef','srw','x3f',
-  'mp4','webm','mov','m4v','ogv','mkv','avi','wmv','flv','mpeg','mpg','m2v','mts','m2ts','ts','3gp','3g2','vob',
+  'mp4','m4v','mov','qt','webm','ogv','mkv','avi','wmv','asf','flv','f4v','mpeg','mpg','mpe','m2v','mts','m2ts','m2t','ts','3gp','3g2','vob','mxf','rm','rmvb','divx','mod','tod','dat',
   'mp3','wav','ogg','m4a','aac','flac','pdf','txt','log','md','json','csv','xml','yaml','yml','ini','conf','sh','js','mjs','css','html'
 ]);
 function isPreviewableFileName(name) {
