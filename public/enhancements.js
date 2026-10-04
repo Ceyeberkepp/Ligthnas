@@ -93,7 +93,12 @@ function ensureFolderDialog() {
 
 function previewItems() {
   return [...document.querySelectorAll('#content .file-name[data-directory="false"]')]
-    .map(button => ({ name: button.dataset.open || '', path: button.dataset.path || joinPath(currentFolder(), button.dataset.open || '') }))
+    .map(button => ({
+      name: button.dataset.open || '',
+      path: button.dataset.path || joinPath(currentFolder(), button.dataset.open || ''),
+      modifiedAt: button.dataset.modified || '',
+      sizeBytes: Number(button.dataset.size || 0)
+    }))
     .filter(item => item.name && item.path && previewKind(item.name));
 }
 
@@ -109,6 +114,14 @@ function updateViewerNavigation(dialog, name) {
   previous.disabled = index <= 0;
   next.disabled = index < 0 || index >= items.length - 1;
   dialog.querySelector('[data-viewer-position]').textContent = index >= 0 ? `${index + 1} of ${items.length}` : '';
+  const filmstrip = dialog.querySelector('[data-viewer-filmstrip]');
+  if (filmstrip) {
+    filmstrip.innerHTML = items.map((item, itemIndex) => {
+      const url = `/api/files/thumbnail?path=${encodeURIComponent(item.path)}`;
+      return `<button type="button" class="${itemIndex === index ? 'active' : ''}" data-filmstrip-index="${itemIndex}" aria-label="Open ${escapeHtml(item.name)}"><img src="${url}" alt=""></button>`;
+    }).join('');
+    filmstrip.querySelector('.active')?.scrollIntoView({ inline:'center', block:'nearest', behavior:'instant' });
+  }
 }
 
 async function navigatePreview(offset) {
