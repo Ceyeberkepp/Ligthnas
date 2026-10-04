@@ -1,5 +1,34 @@
 if (window.LIGHTNAS_PRODUCT_MODE === 'hypervisor') document.body.classList.add('product-hypervisor');
 const state = { overview: null, view: 'home', uiMode: window.LIGHTNAS_PRODUCT_MODE === 'hypervisor' ? 'hypervisor' : 'nas', folder: '', files: null, fileError: null, filesSettingsOpen: false, mobileFilesPeriod: localStorage.getItem('lightnas-mobile-files-period') || 'all', aiMessages: [], logs: null, fileView: ['list','grid','gallery'].includes(localStorage.getItem('lightnas-file-view')) ? localStorage.getItem('lightnas-file-view') : 'grid', fileTruncated: false, fileQuota: null, overviewMetric: localStorage.getItem('lightnas-overview-metric') || 'cpu', lastNetworkSample: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, userAccess: null, smtp: undefined, media: null, network: null, software: null, license: null, builtinCatalog: null, communityCatalog: null, communityCatalogLoading: false, communityCatalogError: null, appSearch: '', appCategory: '', appVisibleLimit: 72, backupJobs: null, selectedBackupJobId: null, metricHistory: { cpu: [], load: [], memory: [], storage: [], networkIn: [], networkOut: [] } };
+function mobileFilesCacheKey(username = state.overview?.appliance?.username || '') {
+  return username ? `lightnas-mobile-files-cache:${username}` : '';
+}
+
+function restoreMobileFilesCache(username) {
+  if (!matchMedia('(max-width: 760px)').matches) return;
+  const key = mobileFilesCacheKey(username);
+  if (!key) return;
+  try {
+    const cached = JSON.parse(sessionStorage.getItem(key) || 'null');
+    if (!cached || Date.now() - Number(cached.savedAt || 0) > 120000 || !Array.isArray(cached.files)) return;
+    state.files = cached.files;
+    state.fileTruncated = Boolean(cached.truncated);
+  } catch {}
+}
+
+function saveMobileFilesCache() {
+  if (!matchMedia('(max-width: 760px)').matches || state.folder !== '' || !Array.isArray(state.files)) return;
+  const key = mobileFilesCacheKey();
+  if (!key) return;
+  try {
+    sessionStorage.setItem(key, JSON.stringify({
+      savedAt: Date.now(),
+      files: state.files,
+      truncated: state.fileTruncated
+    }));
+  } catch {}
+}
+
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => [...parent.querySelectorAll(selector)];
 const themeChoices = ['system', 'light', 'dark'];
@@ -258,6 +287,7 @@ async function showConsole() {
   window.LightNASOverview = state.overview;
   captureOverviewMetrics();
   const { appliance } = state.overview;
+  restoreMobileFilesCache(appliance.username);
   $('#mini-name').textContent = appliance.deviceNameVisible && appliance.deviceName ? appliance.deviceName : 'Online';
   $('#mini-name').classList.toggle('online-only', !appliance.deviceNameVisible);
   applyApplianceBranding(appliance);
@@ -1622,6 +1652,7 @@ async function loadFiles(forceRefresh = false) {
       const result = await request(endpoint);
       state.files = Array.isArray(result.entries) ? result.entries.filter(entry => entry.supported) : [];
       state.fileTruncated = Boolean(result.truncated);
+      saveMobileFilesCache();
       if (state.view === 'files') render('files');
 
       request('/api/files/quota').then(quota => {
@@ -3531,7 +3562,14 @@ $('#login-use-passkey')?.addEventListener('click', async () => {
 $('#node-shell-top')?.addEventListener('click', () => {
   window.open(`/node-shell.html?v=${Date.now()}`, '_blank', 'noopener,width=1200,height=800');
 });
-$('#logout').addEventListener('click', async () => { await request('/api/logout', { method: 'POST' }); setLoginMethods([]); showAuth('login'); });
+$('#logout').addEventListener('click', async () => {
+  const key = mobileFilesCacheKey();
+  if (key) sessionStorage.removeItem(key);
+  await request('/api/logout', { method: 'POST' });
+  state.files = null;
+  setLoginMethods([]);
+  showAuth('login');
+});
 function setMobileSidebar(open) {
   const sidebar = $('.sidebar');
   const backdrop = $('#sidebar-backdrop');
