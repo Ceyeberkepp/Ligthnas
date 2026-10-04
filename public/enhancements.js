@@ -141,17 +141,26 @@ function ensureViewer() {
   dialog.className = 'lightnas-dialog lightnas-viewer';
   dialog.innerHTML = `
     <div class="dialog-body">
-      <div class="dialog-head"><div><span class="eyebrow">FILE VIEWER</span><h2 data-viewer-title>Preview</h2></div><button class="dialog-close" type="button" data-close-viewer aria-label="Close">×</button></div>
+      <div class="dialog-head">
+        <button class="viewer-mobile-back" type="button" data-close-viewer aria-label="Back">‹</button>
+        <div class="viewer-title-block"><span class="eyebrow">FILE VIEWER</span><h2 data-viewer-title>Preview</h2><small data-viewer-date></small></div>
+        <button class="viewer-mobile-more" type="button" data-viewer-more aria-label="More options">•••</button>
+        <button class="dialog-close viewer-desktop-close-button" type="button" data-close-viewer aria-label="Close">×</button>
+      </div>
       <div class="viewer-shell">
         <button class="viewer-arrow viewer-previous" type="button" data-viewer-previous aria-label="Previous file">‹</button>
         <div class="viewer-stage" data-viewer-stage></div>
         <button class="viewer-arrow viewer-next" type="button" data-viewer-next aria-label="Next file">›</button>
       </div>
+      <div class="viewer-filmstrip" data-viewer-filmstrip aria-label="Media filmstrip"></div>
       <div class="viewer-meta"><span data-viewer-meta></span><span data-viewer-position></span></div>
       <div class="viewer-mobile-hint" aria-hidden="true">Swipe left or right</div>
       <div class="dialog-actions">
+        <button class="viewer-mobile-icon-action" type="button" data-viewer-share aria-label="Share"><span>⇧</span><small>Share</small></button>
+        <button class="viewer-mobile-icon-action" type="button" data-viewer-favorite aria-label="Favorite"><span>♡</span><small>Favorite</small></button>
+        <button class="viewer-mobile-icon-action" type="button" data-viewer-info aria-label="Info"><span>ⓘ</span><small>Info</small></button>
         <button class="secondary viewer-action-edit" type="button" data-viewer-edit>Edit</button>
-        <button class="secondary" type="button" data-viewer-download>Save</button>
+        <button class="secondary viewer-action-save" type="button" data-viewer-download>Save</button>
         <button class="danger-button viewer-action-delete" type="button" data-viewer-delete>Delete</button>
         <button class="primary viewer-desktop-close" type="button" data-close-viewer>Close</button>
       </div>
@@ -160,6 +169,13 @@ function ensureViewer() {
   dialog.querySelectorAll('[data-close-viewer]').forEach(button => button.addEventListener('click', () => dialog.close()));
   dialog.querySelector('[data-viewer-previous]').addEventListener('click', () => navigatePreview(-1));
   dialog.querySelector('[data-viewer-next]').addEventListener('click', () => navigatePreview(1));
+  dialog.querySelector('[data-viewer-filmstrip]').addEventListener('click', event => {
+    const button = event.target.closest('[data-filmstrip-index]');
+    if (!button) return;
+    const item = previewItems()[Number(button.dataset.filmstripIndex)];
+    if (item) openPreview(item.name, item.path);
+  });
+  dialog.querySelector('[data-viewer-more]').addEventListener('click', () => openViewerMoreMenu());
 
   const stage = dialog.querySelector('[data-viewer-stage]');
   let gesture = null;
