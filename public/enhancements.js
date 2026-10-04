@@ -1,6 +1,6 @@
 const previewExtensions = {
   image: new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'avif', 'heic', 'heif', 'raw', 'dng', 'cr2', 'cr3', 'nef', 'nrw', 'arw', 'srf', 'sr2', 'raf', 'orf', 'rw2', 'pef', 'srw', 'x3f']),
-  video: new Set(['mp4', 'webm', 'mov', 'm4v', 'ogv', 'mkv', 'avi', 'wmv', 'flv', 'mpeg', 'mpg', 'm2v', 'mts', 'm2ts', 'ts', '3gp', '3g2', 'vob']),
+  video: new Set(['mp4', 'm4v', 'mov', 'qt', 'webm', 'ogv', 'mkv', 'avi', 'wmv', 'asf', 'flv', 'f4v', 'mpeg', 'mpg', 'mpe', 'm2v', 'mts', 'm2ts', 'm2t', 'ts', '3gp', '3g2', 'vob', 'mxf', 'rm', 'rmvb', 'divx', 'mod', 'tod', 'dat']),
   audio: new Set(['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac']),
   pdf: new Set(['pdf']),
   text: new Set(['txt', 'log', 'md', 'json', 'csv', 'xml', 'yaml', 'yml', 'ini', 'conf', 'sh', 'js', 'mjs', 'css', 'html'])
@@ -820,35 +820,35 @@ async function openPreview(name, explicitPath = '') {
     viewer.controls = true;
     viewer.autoplay = true;
     viewer.playsInline = true;
-    viewer.preload = 'metadata';
+    viewer.preload = 'auto';
 
-    const extension = name.toLowerCase().split('.').pop();
-    const nativeVideo = ['mp4','m4v','mov','webm'].includes(extension);
+    const mobileDevice = matchMedia('(max-width: 760px)').matches || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
     const nativeUrl = `/api/files/download?path=${encodeURIComponent(path)}`;
-    const fallbackUrl = `/api/files/video-preview?path=${encodeURIComponent(path)}`;
+    const compatibilityUrl = `/api/files/video-preview?path=${encodeURIComponent(path)}`;
 
-    viewer.src = nativeVideo ? nativeUrl : fallbackUrl;
-    let usedFallback = !nativeVideo;
-    const fallback = () => {
-      if (usedFallback) return;
-      usedFallback = true;
-      const currentTime = Number(viewer.currentTime || 0);
-      viewer.pause();
-      viewer.removeAttribute('src');
-      viewer.load();
-      viewer.src = fallbackUrl;
-      viewer.load();
-      viewer.addEventListener('loadedmetadata', () => {
-        if (currentTime > 0 && Number.isFinite(viewer.duration)) {
-          try { viewer.currentTime = Math.min(currentTime, Math.max(0, viewer.duration - .25)); } catch {}
-        }
+    // Phones always use the server-normalized H.264/AAC stream so playback
+    // does not depend on the source codec/container supported by Safari/Chrome.
+    viewer.src = mobileDevice ? compatibilityUrl : nativeUrl;
+
+    if (!mobileDevice) {
+      let usedFallback = false;
+      const fallback = () => {
+        if (usedFallback) return;
+        usedFallback = true;
+        viewer.pause();
+        viewer.removeAttribute('src');
+        viewer.load();
+        viewer.src = compatibilityUrl;
+        viewer.load();
         viewer.play().catch(() => {});
-      }, { once:true });
-    };
-    viewer.addEventListener('error', fallback);
-    viewer.addEventListener('stalled', () => {
-      if (!usedFallback && viewer.readyState < 2) fallback();
-    });
+      };
+      viewer.addEventListener('error', fallback);
+      viewer.addEventListener('stalled', () => {
+        if (!usedFallback && viewer.readyState < 2) fallback();
+      });
+    }
+
+    viewer.addEventListener('canplay', () => viewer.play().catch(() => {}), { once:true });
     viewer.play().catch(() => {});
   } else {
     const response = await fetch(`/api/files/download?path=${encodeURIComponent(path)}`);
