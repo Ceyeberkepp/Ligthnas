@@ -82,3 +82,19 @@ test('online footer does not add a second status dot', async () => {
   const styles = await readFile(new URL('../public/styles.css', import.meta.url), 'utf8');
   assert.doesNotMatch(styles, /#mini-name\.online-only::before/);
 });
+
+
+test('mobile shell hides desktop top and task bars', async () => {
+  const styles = await readFile(new URL('../public/styles.css', import.meta.url), 'utf8');
+  assert.match(styles, /@media \(max-width: 760px\)[\s\S]*?\.topbar,[\s\S]*?\.task-dock[\s\S]*?display: none !important/);
+  assert.match(styles, /\.console,[\s\S]*?\.console\.sidebar-collapsed[\s\S]*?grid-template: 1fr \/ 1fr/);
+});
+
+test('mobile file upload offers camera photos and files sources', () => {
+  assert.match(app, /id="mobile-camera-upload"[^>]*capture="environment"/);
+  assert.match(app, /id="mobile-photo-upload"[^>]*accept="image\/\*,video\/\*"/);
+  assert.match(app, /data-mobile-upload-source="camera"/);
+  assert.match(app, /data-mobile-upload-source="photos"/);
+  assert.match(app, /data-mobile-upload-source="files"/);
+  assert.match(app, /openMobileUploadSourcePicker\(\)/);
+});
