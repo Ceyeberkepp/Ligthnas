@@ -1638,6 +1638,23 @@ async function openProtectedUserFiles() {
 }
 
 
+function queueMobileMediaPrewarm(entries = []) {
+  if (!matchMedia('(max-width: 760px)').matches || !Array.isArray(entries) || !entries.length) return;
+  const candidates = entries
+    .filter(entry => !entry.directory && ['Photo','Video'].includes(libraryKindForName(entry.name)))
+    .sort((a,b) => new Date(b.modifiedAt || 0) - new Date(a.modifiedAt || 0))
+    .slice(0, 18)
+    .map(entry => entry.path || [entry.folder, entry.name].filter(Boolean).join('/'))
+    .filter(Boolean);
+  if (!candidates.length) return;
+  fetch('/api/files/prewarm', {
+    method:'POST',
+    credentials:'same-origin',
+    headers:{ 'Content-Type':'application/json', 'X-LightNAS-Request':'1' },
+    body:JSON.stringify({ paths:candidates })
+  }).catch(() => {});
+}
+
 async function loadFiles(forceRefresh = false) {
   state.fileError = null;
   const mobile = matchMedia('(max-width: 760px)').matches;
@@ -1653,6 +1670,7 @@ async function loadFiles(forceRefresh = false) {
       state.files = Array.isArray(result.entries) ? result.entries.filter(entry => entry.supported) : [];
       state.fileTruncated = Boolean(result.truncated);
       saveMobileFilesCache();
+      queueMobileMediaPrewarm(state.files);
       if (state.view === 'files') render('files');
 
       request('/api/files/quota').then(quota => {
