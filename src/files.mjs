@@ -187,6 +187,51 @@ async function recursiveFileEntries(path, prefix = '', output = [], limits = { c
   return output;
 }
 
+async function recursiveFolderEntries(path, prefix = '', output = [], limits = { count: 0, max: 5000 }) {
+  if (limits.count >= limits.max) return output;
+  let names = [];
+  try { names = await readdir(path); } catch { return output; }
+  for (let offset = 0; offset < names.length && limits.count < limits.max; offset += 64) {
+    const batch = names.slice(offset, offset + 64);
+    const inspected = await Promise.all(batch.map(async name => {
+      const absolute = join(path, name);
+      try { return { name, absolute, info: await lstat(absolute) }; }
+      catch { return null; }
+    }));
+    for (const item of inspected) {
+      if (!item || limits.count >= limits.max || item.info.isSymbolicLink() || !item.info.isDirectory()) continue;
+      if (item.name === '.lightnas' || (!prefix && item.name === 'Users')) continue;
+      const relativePath = [prefix, item.name].filter(Boolean).join('/');
+      output.push({
+        name: item.name,
+        path: relativePath,
+        folder: prefix,
+        directory: true,
+        sizeBytes: null,
+        modifiedAt: item.info.mtime.toISOString(),
+        supported: true
+      });
+      limits.count += 1;
+      await recursiveFolderEntries(item.absolute, relativePath, output, limits);
+    }
+  }
+  return output;
+}
+
+export async function listAllFolders(scopePrefix = '') {
+  const prefixSegments = parts(scopePrefix);
+  await mkdir(root, { recursive: true, mode: 0o700 });
+  const base = prefixSegments.length ? join(root, ...prefixSegments) : root;
+  await mkdir(base, { recursive: true, mode: 0o700 });
+  const limits = { count: 0, max: 5000 };
+  const entries = await recursiveFolderEntries(base, '', [], limits);
+  return {
+    entries: entries.sort((a, b) => a.path.localeCompare(b.path)),
+    truncated: limits.count >= limits.max,
+    limit: limits.max
+  };
+}
+
 export async function listAllFiles(forceRefresh = false, scopePrefix = '') {
   const prefixSegments = parts(scopePrefix);
   const cacheKey = prefixSegments.join('/');

@@ -1,5 +1,5 @@
 if (window.LIGHTNAS_PRODUCT_MODE === 'hypervisor') document.body.classList.add('product-hypervisor');
-const state = { overview: null, view: 'home', uiMode: window.LIGHTNAS_PRODUCT_MODE === 'hypervisor' ? 'hypervisor' : 'nas', folder: '', files: null, fileError: null, filesSettingsOpen: false, mobileFilesPeriod: localStorage.getItem('lightnas-mobile-files-period') || 'all', aiMessages: [], logs: null, fileView: ['list','grid','gallery'].includes(localStorage.getItem('lightnas-file-view')) ? localStorage.getItem('lightnas-file-view') : 'grid', fileTruncated: false, fileQuota: null, overviewMetric: localStorage.getItem('lightnas-overview-metric') || 'cpu', lastNetworkSample: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, userAccess: null, smtp: undefined, media: null, network: null, software: null, license: null, builtinCatalog: null, communityCatalog: null, communityCatalogLoading: false, communityCatalogError: null, appSearch: '', appCategory: '', appVisibleLimit: 72, backupJobs: null, selectedBackupJobId: null, metricHistory: { cpu: [], load: [], memory: [], storage: [], networkIn: [], networkOut: [] } };
+const state = { overview: null, view: 'home', uiMode: window.LIGHTNAS_PRODUCT_MODE === 'hypervisor' ? 'hypervisor' : 'nas', folder: '', files: null, fileError: null, filesSettingsOpen: false, fileLibraryTab: 'all', mobileFilesPeriod: localStorage.getItem('lightnas-mobile-files-period') || 'all', aiMessages: [], logs: null, fileView: ['list','grid','gallery'].includes(localStorage.getItem('lightnas-file-view')) ? localStorage.getItem('lightnas-file-view') : 'grid', fileTruncated: false, fileQuota: null, overviewMetric: localStorage.getItem('lightnas-overview-metric') || 'cpu', lastNetworkSample: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, userAccess: null, smtp: undefined, media: null, network: null, software: null, license: null, builtinCatalog: null, communityCatalog: null, communityCatalogLoading: false, communityCatalogError: null, appSearch: '', appCategory: '', appVisibleLimit: 72, backupJobs: null, selectedBackupJobId: null, metricHistory: { cpu: [], load: [], memory: [], storage: [], networkIn: [], networkOut: [] } };
 function mobileFilesCacheKey(username = state.overview?.appliance?.username || '') {
   return username ? `lightnas-mobile-files-cache:${username}` : '';
 }
@@ -17,7 +17,7 @@ function restoreMobileFilesCache(username) {
 }
 
 function saveMobileFilesCache() {
-  if (!matchMedia('(max-width: 760px)').matches || state.folder !== '' || !Array.isArray(state.files)) return;
+  if (!matchMedia('(max-width: 760px)').matches || state.folder !== '' || state.fileLibraryTab !== 'all' || !Array.isArray(state.files)) return;
   const key = mobileFilesCacheKey();
   if (!key) return;
   try {
@@ -1371,10 +1371,26 @@ function filesView() {
   if (mobileFiles && state.fileView === 'list') state.fileView = 'grid';
   const segments = state.folder.split('/').filter(Boolean);
   const section = librarySections.some(([folder]) => folder === (segments[0] || '')) ? (segments[0] || '') : '';
-  const allFiles = state.folder === '';
+  const foldersMode = state.fileLibraryTab === 'folders';
+  const allFiles = state.folder === '' && !foldersMode;
   const crumbs = [`<button class="panel-link" data-folder="">Files & media</button>`, ...segments.map((segment, index) => `<span> / </span><button class="panel-link" data-folder="${escapeHtml(segments.slice(0, index + 1).join('/'))}">${escapeHtml(segment)}</button>`)].join('');
-  const entries = Array.isArray(state.files) ? (allFiles ? state.files.filter(entry => !entry.directory && !isSystemImageFile(entry.name)) : state.files.filter(entry => entry.directory || !isSystemImageFile(entry.name))) : state.files;
+  const entries = Array.isArray(state.files)
+    ? (allFiles
+        ? state.files.filter(entry => !entry.directory && !isSystemImageFile(entry.name))
+        : foldersMode && state.folder === ''
+          ? state.files.filter(entry => entry.directory)
+          : state.files.filter(entry => entry.directory || !isSystemImageFile(entry.name)))
+    : state.files;
   const libraryOptions = librarySections.map(([folder, label]) => `<option value="${escapeHtml(folder)}" ${!state.filesSettingsOpen && section === folder ? 'selected' : ''}>${escapeHtml(label)}</option>`).join('');
+  const activeLibraryTab = state.fileLibraryTab === 'folders' ? 'folders' : (section || 'all');
+  const libraryTabs = [
+    ['all', 'All files'],
+    ['Documents', 'Documents'],
+    ['Photos', 'Photos'],
+    ['Videos', 'Videos'],
+    ['Audio', 'Audio'],
+    ['folders', 'Folders']
+  ].map(([id, label]) => `<button type="button" class="files-library-tab ${activeLibraryTab === id ? 'active' : ''}" data-library-tab="${escapeHtml(id)}" aria-pressed="${activeLibraryTab === id}">${escapeHtml(label)}</button>`).join('');
 
   const item = entry => {
     const path = fileEntryPath(entry);
@@ -1474,7 +1490,7 @@ function filesView() {
   const quota = state.fileQuota?.scoped ? state.fileQuota : null;
   const quotaPercent = quota?.quotaBytes ? Math.min(100, Math.round((quota.usedBytes / quota.quotaBytes) * 100)) : 0;
   const mobileMediaMode = mobileFiles && ['', 'Photos', 'Videos'].includes(section) && !state.filesSettingsOpen;
-  return `<section class="files-page ${state.fileView === 'gallery' ? 'photo-mode' : 'grid-mode'} ${mobileMediaMode ? 'mobile-media-mode' : ''}">${pageHead('Files & media', 'Browse and manage the actual files stored in LightNAS.', '<button class="secondary refresh-icon-button" data-action="refresh-files" aria-label="Refresh" title="Refresh">↻</button>')}
+  return `<section class="files-page ${state.fileView === 'gallery' ? 'photo-mode' : 'grid-mode'} ${mobileMediaMode ? 'mobile-media-mode' : ''}">${pageHead('Files & media', 'Browse and manage the actual files stored in LightNAS.')}
     ${quota ? `<section class="panel file-quota-panel"><div class="panel-head"><div><span class="eyebrow">MY STORAGE</span><h2>${bytes(quota.usedBytes)} of ${bytes(quota.quotaBytes)}</h2></div><strong>${quotaPercent}%</strong></div><div class="track"><span style="width:${quotaPercent}%"></span></div><p class="muted">${bytes(quota.remainingBytes)} remaining in your private file library.</p></section>` : ''}
     <section class="desktop-files-settings-panel ${state.filesSettingsOpen ? '' : 'hidden'}">
       <article class="panel files-settings-card">
@@ -1487,12 +1503,8 @@ function filesView() {
     </section>
     ${mobileFiles && ['', 'Photos', 'Videos'].includes(section) ? mobileGallery() : ''}
     <div class="files-library-content desktop-files-library ${state.filesSettingsOpen ? 'hidden' : ''}">
+    <div class="files-library-tabs" role="tablist" aria-label="File library sections">${libraryTabs}</div>
     <div class="file-toolbar"><div class="breadcrumbs">${crumbs}</div><div class="file-toolbar-actions">
-      <label class="file-toolbar-select select-only library-selector">
-        <select data-library-select aria-label="File library section">
-          ${libraryOptions}
-        </select>
-      </label>
       <label class="file-toolbar-select">View
         <select data-file-view-select aria-label="File view">
           <option value="list" ${state.fileView === 'list' ? 'selected' : ''}>☷ List</option>
@@ -1500,7 +1512,7 @@ function filesView() {
           <option value="gallery" ${state.fileView === 'gallery' ? 'selected' : ''}>▦ Photos</option>
         </select>
       </label>
-      ${canManageOwnFiles ? `<button class="secondary" data-action="new-folder">+ Folder</button>
+      ${canManageOwnFiles ? `<button class="secondary files-icon-action" data-action="new-folder" aria-label="New folder" title="New folder">+</button>
       <label class="file-toolbar-select upload-select-only desktop-upload-select">
         <select data-file-upload-select aria-label="Upload">
           <option value="">Choose…</option>
@@ -1520,13 +1532,14 @@ function filesView() {
           <input id="mobile-folder-upload" class="mobile-native-file-input" type="file" webkitdirectory directory multiple>
         </label>
       </div>` : ''}
-      <button class="secondary desktop-files-settings-button" type="button" data-files-settings-tab>⚙ Settings</button>
+      <button class="secondary files-icon-action desktop-files-settings-button" type="button" data-files-settings-tab aria-label="Files & media settings" title="Settings">⚙</button>
+      <button class="secondary files-icon-action refresh-icon-button" type="button" data-action="refresh-files" aria-label="Refresh" title="Refresh">↻</button>
       ${state.overview.appliance.role === 'administrator' && state.overview.appliance.features?.phoneSync !== false ? '<button class="secondary phone-sync-button files-sync-trigger" type="button" data-phone-sync>Phone sync</button>' : ''}
     </div></div>
     ${canManageOwnFiles ? '<div class="file-drop-zone" data-file-drop tabindex="0"><b>Drop files here</b><span>Multiple files and ZIP archives are supported. Use “Upload folder” to preserve a whole folder tree.</span></div>' : '<div class="module-note"><b>View only.</b> You can browse and preview your private files. Upload, create, and delete actions are disabled for this account.</div>'}
-    <p class="muted">${allFiles ? 'All files shows only your Documents, Photos, Videos, and Audio libraries.' : 'Open folders normally or switch back to All files to see all four libraries together.'} ZIP and other file types are accepted, uploads have visible progress.${quota ? ` Your account can store up to ${bytes(quota.quotaBytes)}.` : ' Administrators are limited only by available storage unless a host upload limit is configured.'}</p>
+    <p class="muted">${foldersMode && state.folder === '' ? 'Folders shows your library folders in one place.' : allFiles ? 'All files shows files from Documents, Photos, Videos, and Audio.' : 'Open folders normally or use the library tabs to switch sections.'} ZIP and other file types are accepted, uploads have visible progress.${quota ? ` Your account can store up to ${bytes(quota.quotaBytes)}.` : ' Administrators are limited only by available storage unless a host upload limit is configured.'}</p>
     ${state.fileTruncated && allFiles ? '<div class="module-note">Showing the newest 10,000 files. Open a category or folder to browse beyond that safety limit.</div>' : ''}
-    <div class="${state.fileView === 'gallery' ? 'file-photo-gallery' : state.fileView === 'grid' ? 'file-browser-grid' : 'storage-list'}">${state.fileError ? `<div class="empty error-state"><p><b>Files could not be loaded.</b></p><p>${escapeHtml(state.fileError)}</p><button class="secondary refresh-icon-button" data-action="refresh-files" aria-label="Try again" title="Try again">↻</button></div>` : entries === null ? '<div class="empty"><p>Loading files…</p></div>' : entries.length ? entries.map(item).join('') : `<div class="empty"><p>${allFiles ? 'No files have been uploaded yet.' : 'This folder is empty.'}</p></div>`}</div>
+    <div class="${state.fileView === 'gallery' ? 'file-photo-gallery' : state.fileView === 'grid' ? 'file-browser-grid' : 'storage-list'}">${state.fileError ? `<div class="empty error-state"><p><b>Files could not be loaded.</b></p><p>${escapeHtml(state.fileError)}</p><button class="secondary refresh-icon-button" data-action="refresh-files" aria-label="Try again" title="Try again">↻</button></div>` : entries === null ? '<div class="empty"><p>Loading files…</p></div>' : entries.length ? entries.map(item).join('') : `<div class="empty"><p>${foldersMode && state.folder === '' ? 'No folders have been created yet.' : allFiles ? 'No files have been uploaded yet.' : 'This folder is empty.'}</p></div>`}</div>
     </div>
     <button class="secondary mobile-files-settings-button" type="button" data-mobile-files-settings aria-label="Files & media settings">⚙ Settings</button>
   </section>`;
@@ -1662,7 +1675,9 @@ async function loadFiles(forceRefresh = false) {
   const mobile = matchMedia('(max-width: 760px)').matches;
   try {
     const endpoint = state.folder === ''
-      ? `/api/files?all=1${forceRefresh ? '&refresh=1' : ''}`
+      ? (state.fileLibraryTab === 'folders'
+          ? '/api/files?folders=1'
+          : `/api/files?all=1${forceRefresh ? '&refresh=1' : ''}`)
       : `/api/files?path=${encodeURIComponent(state.folder)}`;
 
     if (mobile) {
@@ -3395,6 +3410,14 @@ function bindViewActions() {
     link.click();
     link.remove();
   }));
+  $('[data-library-tab]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+    state.filesSettingsOpen = false;
+    const target = button.dataset.libraryTab || 'all';
+    state.fileLibraryTab = target;
+    state.folder = target === 'all' || target === 'folders' ? '' : target;
+    state.files = null;
+    render('files');
+  }));
   $('[data-library-select]', $('#content'))?.addEventListener('change', async event => {
     state.filesSettingsOpen = false;
     const folder = event.target.value || '';
@@ -3405,6 +3428,7 @@ function bindViewActions() {
         catch (error) { return toast(error.message); }
       }
     }
+    state.fileLibraryTab = folder || 'all';
     state.folder = folder;
     state.files = null;
     render('files');
@@ -3417,10 +3441,21 @@ function bindViewActions() {
     state.filesSettingsOpen = false;
     render('files');
   });
-  document.querySelectorAll('#content [data-folder]').forEach(button => button.addEventListener('click', () => { state.folder = button.dataset.folder; state.files = null; render('files'); }));
+  document.querySelectorAll('#content [data-folder]').forEach(button => button.addEventListener('click', () => {
+    state.folder = button.dataset.folder;
+    if (!state.folder && state.fileLibraryTab !== 'folders') state.fileLibraryTab = 'all';
+    state.files = null;
+    render('files');
+  }));
   document.querySelectorAll('#content [data-open]').forEach(button => button.addEventListener('click', async event => {
     const path = button.dataset.path || [state.folder, button.dataset.open].filter(Boolean).join('/');
-    if (button.dataset.directory === 'true') { state.folder = path; state.files = null; render('files'); return; }
+    if (button.dataset.directory === 'true') {
+      state.folder = path;
+      if (state.fileLibraryTab !== 'folders') state.fileLibraryTab = path.split('/')[0] || 'all';
+      state.files = null;
+      render('files');
+      return;
+    }
     // On mobile Photos view, the preview layer owns the click. Do not also
     // trigger the legacy download handler, which caused the tile image to be
     // replaced/invalidated after opening it once.
