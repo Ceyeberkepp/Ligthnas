@@ -705,6 +705,7 @@ const mimeTypes = {
   '.sh': 'text/plain; charset=utf-8', '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf'
 };
 const csp = "default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: blob:; media-src 'self' data: blob:; frame-src 'self' blob:; connect-src 'self' ws: wss:; worker-src 'self' blob:; font-src 'self' data:";
+const embeddedConsoleCsp = csp.replace("frame-ancestors 'none'", "frame-ancestors 'self'");
 
 function send(res, status, body, headers = {}) {
   const payload = typeof body === 'string' ? body : JSON.stringify(body);
@@ -2657,7 +2658,10 @@ async function staticAsset(req, res, url) {
         : ['.js', '.mjs', '.css'].includes(extname(path).toLowerCase())
           ? 'private, max-age=120'
           : 'public, max-age=300',
-      'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': csp
+      'X-Content-Type-Options': 'nosniff',
+      // Keep all normal pages non-embeddable, but allow the terminal document
+      // to render inside the same-origin LightNAS management dialog.
+      'Content-Security-Policy': url.pathname === '/container-console.html' ? embeddedConsoleCsp : csp
     });
     res.end(content);
   } catch (error) {
