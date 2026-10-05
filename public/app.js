@@ -3902,7 +3902,7 @@ $('[data-files-nav-toggle]')?.addEventListener('click', event => {
   button.title = state.filesNavExpanded ? 'Collapse Files & media' : 'Expand Files & media';
   button.textContent = state.filesNavExpanded ? '⌄' : '›';
 });
-$('[data-view]').forEach(link => link.addEventListener('click', event => {
+$$('[data-view]').forEach(link => link.addEventListener('click', event => {
   if (link.dataset.view === 'files' && link.dataset.fileLibrary) {
     const target = link.dataset.fileLibrary;
     state.filesSettingsOpen = false;
