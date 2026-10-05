@@ -1684,9 +1684,6 @@ def update_container(data: dict) -> dict:
     lines = ["[Match]", f"Name={guest_interface}", "", "[Network]"]
     if mode == "dhcp":
         lines += ["DHCP=ipv4", "IPv6AcceptRA=yes"]
-        if dns_values:
-            # Explicit DNS is a valid override even when the address comes from DHCP.
-            lines.append("UseDNS=no")
     else:
         lines.append(f"Address={address}")
         if gateway:
