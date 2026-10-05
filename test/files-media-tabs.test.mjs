@@ -39,3 +39,9 @@ test('Folders tab uses folder inventory API while All files keeps recursive file
   assert.match(files, /export async function listAllFolders/);
   assert.match(files, /recursiveFolderEntries/);
 });
+
+test('sidebar file subtabs do not break global navigation startup binding', async () => {
+  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(app, /\$\$\('\[data-view\]'\)\.forEach\(link => link\.addEventListener\('click'/);
+  assert.doesNotMatch(app, /[^$]\$\('\[data-view\]'\)\.forEach/);
+});
