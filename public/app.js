@@ -1249,7 +1249,7 @@ function containersView() {
             ${running ? `<button class="primary" type="button" data-app-open="${escapeHtml(appUrl)}">Open</button><button class="secondary" type="button" data-app-terminal="${escapeHtml(item.name)}" data-app-name="${escapeHtml(app?.name || appId || item.name)}">Terminal</button>` : ''}
             <button class="primary ${running ? 'hidden' : ''}" type="button" data-app-action="start" data-app-id="${escapeHtml(appId)}">Start</button>
             <button class="secondary ${running ? '' : 'hidden'}" type="button" data-app-action="stop" data-app-id="${escapeHtml(appId)}">Stop</button>
-            <button class="secondary" type="button" data-app-edit="${escapeHtml(appId)}" data-app-container="${escapeHtml(item.name)}">Edit resources</button>
+            <button class="secondary" type="button" data-app-edit="${escapeHtml(appId)}" data-app-container="${escapeHtml(item.name)}">Settings</button>
             <button class="secondary" type="button" data-app-action="restart" data-app-id="${escapeHtml(appId)}">Restart</button>
             <button class="secondary danger-button" type="button" data-app-action="remove" data-app-id="${escapeHtml(appId)}">Remove</button>
           </div></article>`;
@@ -2917,6 +2917,12 @@ function bindViewActions() {
       if (!/^[A-Za-z0-9][A-Za-z0-9-]{0,30}$/.test(instanceName.trim())) return toast('Instance name can contain letters, numbers, and dashes.');
       setup.instanceName = instanceName.trim().toLowerCase();
       setup.hostPort = 0;
+    }
+    if (app.requiresAdminUsername) {
+      const username = prompt(`Create the ${app.name} administrator username:`, app.adminUsername || 'admin');
+      if (username === null) return;
+      if (!/^[A-Za-z0-9._-]{3,64}$/.test(username.trim())) return toast('The application administrator username must contain 3–64 letters, numbers, dots, underscores, or dashes.');
+      setup.adminUsername = username.trim();
     }
     if (app.requiresAdminPassword) {
       const password = prompt(`Create the ${app.name} administrator password (8–128 characters):`);
