@@ -75,11 +75,11 @@ async function githubText(url) {
 }
 
 function casaosMeta(compose, fallbackId) {
-  const scalar = key => (compose.match(new RegExp('^\\s*' + key + ':\\s*["\\']?([^"\\'\\n#]+)["\\']?', 'm'))?.[1] || '').trim();
+  const scalar = key => (compose.match(new RegExp(`^\\s*${key}:\\s*["']?([^"'\\n#]+)["']?`, 'm'))?.[1] || '').trim();
   const localized = key => {
     const direct = scalar(key);
     if (direct && !/^(?:[a-z]{2}[_-][A-Z]{2}|[a-z]{2}):\s*$/i.test(direct)) return stripLocalePrefix(direct);
-    const block = compose.match(new RegExp('^\\s*' + key + ':\\s*\\n((?:\\s{2,}[^\\n]+\\n?)+)', 'm'))?.[1] || '';
+    const block = compose.match(new RegExp(`^\\s*${key}:\\s*\\n((?:\\s{2,}[^\\n]+\\n?)+)`, 'm'))?.[1] || '';
     const preferred = block.match(/^\s*(?:en_US|en_GB|en):\s*["']?([^"'\n#]+)["']?/mi)?.[1];
     const any = block.match(/^\s*[a-z]{2}(?:[_-][A-Z]{2})?:\s*["']?([^"'\n#]+)["']?/mi)?.[1];
     return stripLocalePrefix(preferred || any || direct);
