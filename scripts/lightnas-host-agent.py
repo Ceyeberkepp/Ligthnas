@@ -1724,11 +1724,33 @@ def repair_container_network(name: str) -> dict:
         dns_values = [item.strip() for item in str(settings.get("dns") or "").split(",") if item.strip()]
         if not address:
             raise RuntimeError("container is marked static but has no IPv4 address configured")
-        lines.append(f"Address={address}")
-        if gateway:
-            lines.append(f"Gateway={gateway}")
-        for item in dns_values:
-            lines.append(f"DNS={item}")
+        routed_next_hop = _nested_routed_guest_next_hop(address, gateway)
+        if routed_next_hop:
+            append_unique(config, "lxc.net.0.type = veth")
+            append_unique(config, "lxc.net.0.link = lightnas0")
+            routed_address = f"{ipaddress.ip_interface(address).ip}/32"
+            lines.append(f"Address={routed_address}")
+            for item in dns_values:
+                lines.append(f"DNS={item}")
+            lines += [
+                "",
+                "[Route]",
+                f"Destination={routed_next_hop}/32",
+                "Scope=link",
+                "",
+                "[Route]",
+                "Destination=0.0.0.0/0",
+                f"Gateway={routed_next_hop}",
+                "GatewayOnLink=yes",
+            ]
+            metadata["routedLanNextHop"] = routed_next_hop
+            ensure_nested_routed_lan(address, gateway)
+        else:
+            lines.append(f"Address={address}")
+            if gateway:
+                lines.append(f"Gateway={gateway}")
+            for item in dns_values:
+                lines.append(f"DNS={item}")
     else:
         append_unique(config, f"lxc.net.0.hwaddr = {unique_container_mac()}")
         machine_id = os.urandom(16).hex()
@@ -1738,10 +1760,11 @@ def repair_container_network(name: str) -> dict:
             dbus_machine_id.write_text(machine_id + "\n", encoding="utf-8")
         lines += ["DHCP=ipv4", "IPv6AcceptRA=yes", "", "[DHCPv4]", "ClientIdentifier=mac"]
         metadata["ipv4Mode"] = "dhcp"
-        try:
-            metadata_path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
-        except OSError:
-            pass
+
+    try:
+        metadata_path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+    except OSError:
+        pass
 
     (network_dir / "10-lightnas-eth0.network").write_text("\n".join(lines) + "\n", encoding="utf-8")
     subprocess.run(
@@ -2080,7 +2103,7 @@ def update_container(data: dict) -> dict:
                 run(["lxc-attach", "-n", current, "--", "resolvectl", "dns", guest_interface, *dns_values], timeout=10)
                 run(["lxc-attach", "-n", current, "--", "resolvectl", "domain", guest_interface, "~."], timeout=10, check=False)
             else:
-                resolver_body = "".join(f"nameserver {value}\\n" for value in dns_values)
+                resolver_body = "".join(f"nameserver {value}\n" for value in dns_values)
                 escaped = resolver_body.replace("'", "'\\''")
                 run([
                     "lxc-attach", "-n", current, "--", "sh", "-lc",
@@ -2165,10 +2188,11 @@ def _derive_nested_lan_state(uplink: str, mode: str) -> dict:
 
 
 def _upgrade_nested_lan_state(state: dict, path: Path) -> dict:
-    """Replace a stale private-NAT state when the nested host can do direct L2."""
+    """Use direct nested L2 only when explicitly requested."""
     if not in_container() or str(state.get("LIGHTNAS_NETWORK_MODE") or "") != "lxc-nat":
         return state
-    if os.environ.get("LIGHTNAS_NESTED_LAN_MODE", "auto") == "nat":
+    requested_mode = os.environ.get("LIGHTNAS_NESTED_LAN_MODE", "nat").strip().lower()
+    if requested_mode not in {"macvlan", "ipvlan"}:
         return state
 
     uplink = str(state.get("LIGHTNAS_UPLINK") or "").strip()
@@ -2181,10 +2205,11 @@ def _upgrade_nested_lan_state(state: dict, path: Path) -> dict:
     if not uplink or not IFACE_RE.fullmatch(uplink) or not Path("/sys/class/net", uplink).exists():
         return state
 
-    probes = [
-        ("nested-macvlan", ["ip", "link", "add", "link", uplink, "name", f"lnmv{os.getpid() % 10000}", "type", "macvlan", "mode", "bridge"]),
-        ("nested-ipvlan", ["ip", "link", "add", "link", uplink, "name", f"lniv{os.getpid() % 10000}", "type", "ipvlan", "mode", "l2"]),
-    ]
+    all_probes = {
+        "macvlan": ("nested-macvlan", ["ip", "link", "add", "link", uplink, "name", f"lnmv{os.getpid() % 10000}", "type", "macvlan", "mode", "bridge"]),
+        "ipvlan": ("nested-ipvlan", ["ip", "link", "add", "link", uplink, "name", f"lniv{os.getpid() % 10000}", "type", "ipvlan", "mode", "l2"]),
+    }
+    probes = [all_probes[requested_mode]]
     for mode, command_args in probes:
         probe_name = command_args[command_args.index("name") + 1]
         probe = subprocess.run(command_args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -2213,6 +2238,17 @@ def lightnas_network_state() -> dict:
                 state[key.strip()] = value.strip().strip('"').strip("'")
     except OSError:
         pass
+    requested_mode = os.environ.get("LIGHTNAS_NESTED_LAN_MODE", "nat").strip().lower()
+    current_mode = str(state.get("LIGHTNAS_NETWORK_MODE") or "")
+    if in_container() and current_mode in {"nested-macvlan", "nested-ipvlan"} and requested_mode not in {"macvlan", "ipvlan"}:
+        state["LIGHTNAS_NETWORK_MODE"] = "lxc-nat"
+        state["LIGHTNAS_CONTAINER_BRIDGE"] = str(state.get("LIGHTNAS_CONTAINER_BRIDGE") or "lightnas0")
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("\n".join(f"{key}={value}" for key, value in state.items()) + "\n", encoding="utf-8")
+        except OSError:
+            pass
+
     state = _upgrade_nested_lan_state(state, path)
     return state
 
