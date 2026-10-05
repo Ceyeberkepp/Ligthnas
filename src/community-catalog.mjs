@@ -150,23 +150,63 @@ async function readCache() {
 }
 
 async function refreshCommunityCatalog(cached = null) {
+  const cachedApps = Array.isArray(cached?.apps) ? cached.apps : [];
+  const cachedBySource = new Map(DEFAULT_SOURCES.map(source => [
+    source.id,
+    cachedApps.filter(app => app.sourceId === source.id)
+  ]));
+
   const sourceResults = await Promise.all(DEFAULT_SOURCES.map(async source => {
     try {
       const data = source.type === 'casaos-repo' ? await casaosRepoItems(source) : await fetchJson(source.index);
       const items = source.type === 'casaos-repo' ? data : itemsFromIndex(data, source);
       const apps = items.map(item => normalize(item, source)).filter(Boolean);
+
+      if (!apps.length && (cachedBySource.get(source.id) || []).length) {
+        return {
+          apps: cachedBySource.get(source.id),
+          status:{ id:source.id, name:source.name, ok:false, stale:true, count:cachedBySource.get(source.id).length, error:'Refresh returned no applications; keeping cached catalog.' }
+        };
+      }
+
       return { apps, status:{ id:source.id, name:source.name, ok:true, count:apps.length } };
     } catch (error) {
-      return { apps:[], status:{ id:source.id, name:source.name, ok:false, count:0, error:error.message } };
+      const fallback = cachedBySource.get(source.id) || [];
+      return {
+        apps:fallback,
+        status:{ id:source.id, name:source.name, ok:false, stale:Boolean(fallback.length), count:fallback.length, error:error.message }
+      };
     }
   }));
-  const apps = sourceResults.flatMap(item => item.apps);
+
+  const refreshedSourceIds = new Set(DEFAULT_SOURCES.map(source => source.id));
+  const unknownCachedApps = cachedApps.filter(app => !refreshedSourceIds.has(app.sourceId));
+  const apps = [...unknownCachedApps, ...sourceResults.flatMap(item => item.apps)];
   const sources = sourceResults.map(item => item.status);
-  const deduped = [...new Map(apps.map(app => [app.upstreamId + '|' + app.name.toLowerCase(), app])).values()]
-    .sort((a,b) => a.name.localeCompare(b.name));
-  const result = { schemaVersion:CATALOG_SCHEMA_VERSION, updatedAt:new Date().toISOString(), apps:deduped, sources, count:deduped.length };
-  try { await mkdir(CACHE_DIR,{recursive:true}); await writeFile(CACHE_FILE, JSON.stringify(result,null,2)); } catch {}
-  if (!deduped.length && cached?.apps?.length) return { ...cached, stale:true, sources };
+  const deduped = [...new Map(apps.map(app => [app.id || (app.upstreamId + '|' + String(app.name || '').toLowerCase()), app])).values()]
+    .sort((a,b) => String(a.name || '').localeCompare(String(b.name || '')));
+
+  const successfulSources = sources.filter(source => source.ok).length;
+  const result = {
+    schemaVersion:CATALOG_SCHEMA_VERSION,
+    updatedAt:new Date().toISOString(),
+    apps:deduped,
+    sources,
+    count:deduped.length,
+    stale:successfulSources !== DEFAULT_SOURCES.length
+  };
+
+  const shouldWrite = deduped.length > 0 || !cachedApps.length;
+  if (shouldWrite) {
+    try {
+      await mkdir(CACHE_DIR,{recursive:true});
+      await writeFile(CACHE_FILE, JSON.stringify(result,null,2));
+    } catch {}
+  }
+
+  if (!deduped.length && cachedApps.length) {
+    return { ...cached, stale:true, refreshing:false, sources };
+  }
   return result;
 }
 
