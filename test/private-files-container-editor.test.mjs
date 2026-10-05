@@ -46,4 +46,11 @@ test('container DNS is part of Network and live settings are refreshed from the 
   assert.match(agent, /ip", "addr", "add", address/);
   assert.match(agent, /liveGateway/);
   assert.match(agent, /liveDns/);
+  assert.match(agent, /_nested_routed_guest_next_hop/);
+  assert.match(agent, /GatewayOnLink=yes/);
+  assert.match(agent, /routedLanNextHop/);
+  assert.match(agent, /MASQUERADE/);
+  assert.match(agent, /POSTROUTING/);
+  assert.match(agent, /resolvectl[\\s\\S]*systemd-resolved/);
+  assert.match(dialog, /LightNAS next hop/);
 });

@@ -829,6 +829,7 @@ async function showContainerManager(id) {
               <div><span>Current live IPv4</span><b>${dialogEsc(item.liveIpv4Address || item.ipv4 || (String(item.status || '').toLowerCase() === 'running' ? 'Not detected' : 'Container stopped'))}</b></div>
               <div><span>Current live gateway</span><b>${dialogEsc(item.liveGateway || (String(item.status || '').toLowerCase() === 'running' ? 'Not detected' : 'Container stopped'))}</b></div>
               <div><span>Current live DNS</span><b>${dialogEsc(item.liveDns || (String(item.status || '').toLowerCase() === 'running' ? 'Not detected' : 'Container stopped'))}</b></div>
+              ${item.liveNextHop ? `<div><span>LightNAS next hop</span><b>${dialogEsc(item.liveNextHop)}</b></div>` : ''}
               <div><span>Configuration source</span><b>${dialogEsc(item.networkSettingsSource || 'Detected configuration')}</b></div>
             </div>
 
