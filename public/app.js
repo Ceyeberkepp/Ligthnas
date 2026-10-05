@@ -1265,34 +1265,6 @@ function containersView() {
     <div class="compute-section-head app-managed-heading"><div><span class="eyebrow">APP STORE CONTAINERS</span><h2>Managed applications</h2><p class="muted">Applications installed from App Store run as Docker/OCI containers and are managed separately from native LXC containers.</p></div><small>${appContainers.length} total</small></div>
     <div class="compute-table-wrap">${appContainerList}</div>`;
 }
-function openManagedAppTerminal(id, name) {
-  const existing = document.querySelector('#managed-app-terminal-dialog');
-  if (existing) existing.remove();
-
-  const dialog = document.createElement('dialog');
-  dialog.id = 'managed-app-terminal-dialog';
-  dialog.className = 'lightnas-dialog embedded-terminal-dialog';
-  const src = `/container-console.html?id=${encodeURIComponent(id)}&name=${encodeURIComponent(name || id)}&type=app&embedded=1`;
-  dialog.innerHTML = `
-    <div class="embedded-terminal-shell">
-      <div class="dialog-head embedded-terminal-head">
-        <div><span class="eyebrow">MANAGED APPLICATION</span><h2>${escapeHtml(name || id)} terminal</h2></div>
-        <button class="dialog-close" type="button" data-terminal-close aria-label="Close">×</button>
-      </div>
-      <iframe class="embedded-terminal-frame" title="${escapeHtml(name || id)} terminal" src="${src}"></iframe>
-    </div>`;
-  document.body.append(dialog);
-
-  const close = () => dialog.close();
-  dialog.querySelector('[data-terminal-close]')?.addEventListener('click', close);
-  dialog.addEventListener('close', () => {
-    const frame = dialog.querySelector('iframe');
-    if (frame) frame.src = 'about:blank';
-    dialog.remove();
-  }, { once:true });
-  dialog.showModal();
-}
-
 function vmsView() {
   const runtime = state.runtimes?.virtualization;
   const machines = runtime?.machineDetails || [];
@@ -2967,10 +2939,11 @@ function bindViewActions() {
     const url = button.dataset.appOpen;
     if (url) window.open(url, '_blank', 'noopener');
   }));
-  $$('[data-app-terminal]', $('#content')).forEach(button => button.addEventListener('click', () => {
+  $('[data-app-terminal]', $('#content')).forEach(button => button.addEventListener('click', () => {
     const id = button.dataset.appTerminal;
     const name = button.dataset.appName || id;
-    openManagedAppTerminal(id, name);
+    const url = `/container-console.html?id=${encodeURIComponent(id)}&name=${encodeURIComponent(name)}&type=app`;
+    window.open(url, '_blank', 'noopener');
   }));
   $$('[data-app-action]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     const { appId, appAction, appInstance, appHostPort } = button.dataset;
