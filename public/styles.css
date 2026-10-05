@@ -2037,3 +2037,53 @@ body:not(.product-hypervisor) .backup-status-line {
     padding-left: 41px;
   }
 }
+
+/* Files & media sidebar: matching typography and collapsible children. */
+.nav-files-parent-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 2px;
+}
+.sidebar nav .nav-files-parent-row > .nav-files-parent {
+  min-width: 0;
+}
+.nav-files-toggle {
+  width: 28px;
+  height: 32px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 15px;
+  cursor: pointer;
+}
+.nav-files-toggle:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+.nav-files-subtabs[hidden] {
+  display: none !important;
+}
+.sidebar nav .nav-files-subtabs {
+  padding: 2px 0 6px 33px;
+}
+.sidebar nav .nav-files-subtabs a {
+  min-height: 32px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+.console.sidebar-collapsed .nav-files-toggle,
+.console.sidebar-collapsed .nav-files-subtabs {
+  display: none !important;
+}
+.console.sidebar-collapsed .nav-files-parent-row {
+  display: block;
+}
