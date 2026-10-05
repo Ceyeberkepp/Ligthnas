@@ -29,3 +29,21 @@ test('container edit opens from cached summary and does not block on app probing
   assert.match(dialogs, /queueMicrotask\(\(\) =>/);
   assert.doesNotMatch(dialogs, /const detected = await dialogApi\('\/api\/containers'/);
 });
+
+
+test('container DNS is part of Network and live settings are refreshed from the guest', async () => {
+  const [dialog, agent] = await Promise.all([
+    readFile(new URL('../public/dialog-controls.js', import.meta.url), 'utf8'),
+    readFile(new URL('../scripts/lightnas-host-agent.py', import.meta.url), 'utf8')
+  ]);
+  assert.doesNotMatch(dialog, /\['dns','DNS'\]/);
+  assert.match(dialog, /Configured gateway[\s\S]*?DNS servers[\s\S]*?MAC address/);
+  assert.match(dialog, /const runtimePromise = dialogApi\('\/api\/containers\/inventory\?summary=1'\)/);
+  assert.match(dialog, /DNS is allowed as an override for either DHCP or static IPv4/);
+  assert.match(agent, /ip", "-4", "route", "show", "default"/);
+  assert.match(agent, /resolvectl", "dns", live_device/);
+  assert.match(agent, /ip", "-4", "addr", "flush"/);
+  assert.match(agent, /ip", "addr", "add", address/);
+  assert.match(agent, /liveGateway/);
+  assert.match(agent, /liveDns/);
+});
