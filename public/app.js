@@ -1,5 +1,5 @@
 if (window.LIGHTNAS_PRODUCT_MODE === 'hypervisor') document.body.classList.add('product-hypervisor');
-const state = { overview: null, view: 'home', uiMode: window.LIGHTNAS_PRODUCT_MODE === 'hypervisor' ? 'hypervisor' : 'nas', folder: '', files: null, fileError: null, filesSettingsOpen: false, fileLibraryTab: 'all', mobileFilesPeriod: localStorage.getItem('lightnas-mobile-files-period') || 'all', aiMessages: [], logs: null, fileView: ['list','grid','gallery'].includes(localStorage.getItem('lightnas-file-view')) ? localStorage.getItem('lightnas-file-view') : 'grid', fileTruncated: false, fileQuota: null, overviewMetric: localStorage.getItem('lightnas-overview-metric') || 'cpu', lastNetworkSample: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, userAccess: null, smtp: undefined, media: null, network: null, software: null, license: null, builtinCatalog: null, communityCatalog: null, communityCatalogLoading: false, communityCatalogError: null, appSearch: '', appCategory: '', appVisibleLimit: 72, backupJobs: null, selectedBackupJobId: null, metricHistory: { cpu: [], load: [], memory: [], storage: [], networkIn: [], networkOut: [] } };
+const state = { overview: null, view: 'home', uiMode: window.LIGHTNAS_PRODUCT_MODE === 'hypervisor' ? 'hypervisor' : 'nas', folder: '', files: null, fileError: null, filesSettingsOpen: false, fileLibraryTab: 'all', filesNavExpanded: localStorage.getItem('lightnas-files-nav-expanded') !== '0', mobileFilesPeriod: localStorage.getItem('lightnas-mobile-files-period') || 'all', aiMessages: [], logs: null, fileView: ['list','grid','gallery'].includes(localStorage.getItem('lightnas-file-view')) ? localStorage.getItem('lightnas-file-view') : 'grid', fileTruncated: false, fileQuota: null, overviewMetric: localStorage.getItem('lightnas-overview-metric') || 'cpu', lastNetworkSample: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, userAccess: null, smtp: undefined, media: null, network: null, software: null, license: null, builtinCatalog: null, communityCatalog: null, communityCatalogLoading: false, communityCatalogError: null, appSearch: '', appCategory: '', appVisibleLimit: 72, backupJobs: null, selectedBackupJobId: null, metricHistory: { cpu: [], load: [], memory: [], storage: [], networkIn: [], networkOut: [] } };
 function mobileFilesCacheKey(username = state.overview?.appliance?.username || '') {
   return username ? `lightnas-mobile-files-cache:${username}` : '';
 }
@@ -291,6 +291,15 @@ async function showConsole() {
   $('#mini-name').textContent = appliance.deviceNameVisible && appliance.deviceName ? appliance.deviceName : 'Online';
   $('#mini-name').classList.toggle('online-only', !appliance.deviceNameVisible);
   applyApplianceBranding(appliance);
+  const filesSubtabs = $('[data-files-nav-subtabs]', $('#nav'));
+  const filesToggle = $('[data-files-nav-toggle]', $('#nav'));
+  if (filesSubtabs) filesSubtabs.hidden = !state.filesNavExpanded;
+  if (filesToggle) {
+    filesToggle.setAttribute('aria-expanded', state.filesNavExpanded ? 'true' : 'false');
+    filesToggle.setAttribute('aria-label', state.filesNavExpanded ? 'Collapse Files & media' : 'Expand Files & media');
+    filesToggle.title = state.filesNavExpanded ? 'Collapse Files & media' : 'Expand Files & media';
+    filesToggle.textContent = state.filesNavExpanded ? '⌄' : '›';
+  }
   const avatar = $('#avatar');
   avatar.textContent = appliance.avatar ? '' : appliance.username[0].toUpperCase();
   avatar.style.backgroundImage = appliance.avatar ? `url("/api/profile/avatar?v=${Date.now()}")` : '';
@@ -1372,6 +1381,7 @@ function filesView() {
   const segments = state.folder.split('/').filter(Boolean);
   const section = librarySections.some(([folder]) => folder === (segments[0] || '')) ? (segments[0] || '') : '';
   const foldersMode = state.fileLibraryTab === 'folders';
+  const effectiveFileView = foldersMode ? 'grid' : state.fileView;
   const allFiles = state.folder === '' && !foldersMode;
   const crumbs = [`<button class="panel-link" data-folder="">Files & media</button>`, ...segments.map((segment, index) => `<span> / </span><button class="panel-link" data-folder="${escapeHtml(segments.slice(0, index + 1).join('/'))}">${escapeHtml(segment)}</button>`)].join('');
   const entries = Array.isArray(state.files)
@@ -1394,7 +1404,7 @@ function filesView() {
         ? `<img class="file-thumb" loading="lazy" fetchpriority="low" decoding="async" alt="" src="/api/files/thumbnail?path=${encodeURIComponent(path)}&v=${thumbVersion}">`
         : `<span class="file-glyph file-kind-${kind.toLowerCase()}">${kind === 'Audio' ? '♪' : '▤'}</span>`;
 
-    if (state.fileView === 'gallery') {
+    if (effectiveFileView === 'gallery') {
       return `<article class="file-gallery-item ${kind.toLowerCase()}">
         <button class="file-name file-gallery-open" data-open="${escapeHtml(entry.name)}" data-path="${escapeHtml(path)}" data-directory="${entry.directory}" data-modified="${escapeHtml(entry.modifiedAt || '')}" data-size="${Number(entry.sizeBytes || 0)}" aria-label="Open ${escapeHtml(entry.name)}">
           <span class="file-card-visual">${visual}</span>
@@ -1402,7 +1412,7 @@ function filesView() {
       </article>`;
     }
 
-    return state.fileView === 'grid'
+    return effectiveFileView === 'grid'
       ? `<article class="file-card">
           <button class="file-name file-card-open" data-open="${escapeHtml(entry.name)}" data-path="${escapeHtml(path)}" data-directory="${entry.directory}" data-modified="${escapeHtml(entry.modifiedAt || '')}" data-size="${Number(entry.sizeBytes || 0)}">
             <span class="file-card-visual">${visual}</span>
@@ -1480,7 +1490,7 @@ function filesView() {
   const quota = state.fileQuota?.scoped ? state.fileQuota : null;
   const quotaPercent = quota?.quotaBytes ? Math.min(100, Math.round((quota.usedBytes / quota.quotaBytes) * 100)) : 0;
   const mobileMediaMode = mobileFiles && ['', 'Photos', 'Videos'].includes(section) && !state.filesSettingsOpen;
-  return `<section class="files-page ${state.fileView === 'gallery' ? 'photo-mode' : 'grid-mode'} ${mobileMediaMode ? 'mobile-media-mode' : ''}">${pageHead('Files & media', 'Browse and manage the actual files stored in LightNAS.')}
+  return `<section class="files-page ${effectiveFileView === 'gallery' ? 'photo-mode' : 'grid-mode'} ${mobileMediaMode ? 'mobile-media-mode' : ''}">${pageHead('Files & media', 'Browse and manage the actual files stored in LightNAS.')}
     ${quota ? `<section class="panel file-quota-panel"><div class="panel-head"><div><span class="eyebrow">MY STORAGE</span><h2>${bytes(quota.usedBytes)} of ${bytes(quota.quotaBytes)}</h2></div><strong>${quotaPercent}%</strong></div><div class="track"><span style="width:${quotaPercent}%"></span></div><p class="muted">${bytes(quota.remainingBytes)} remaining in your private file library.</p></section>` : ''}
     <section class="desktop-files-settings-panel ${state.filesSettingsOpen ? '' : 'hidden'}">
       <article class="panel files-settings-card">
@@ -1494,13 +1504,13 @@ function filesView() {
     ${mobileFiles && ['', 'Photos', 'Videos'].includes(section) ? mobileGallery() : ''}
     <div class="files-library-content desktop-files-library ${state.filesSettingsOpen ? 'hidden' : ''}">
     <div class="file-toolbar"><div class="breadcrumbs">${crumbs}</div><div class="file-toolbar-actions">
-      <label class="file-toolbar-select">View
+      ${foldersMode && state.folder === '' ? '' : `<label class="file-toolbar-select">View
         <select data-file-view-select aria-label="File view">
           <option value="list" ${state.fileView === 'list' ? 'selected' : ''}>☷ List</option>
           <option value="grid" ${state.fileView === 'grid' ? 'selected' : ''}>▦ Grid</option>
           <option value="gallery" ${state.fileView === 'gallery' ? 'selected' : ''}>▦ Photos</option>
         </select>
-      </label>
+      </label>`}
       ${canManageOwnFiles ? `<button class="secondary files-icon-action" data-action="new-folder" aria-label="New folder" title="New folder">+</button>
       <label class="file-toolbar-select upload-select-only desktop-upload-select">
         <select data-file-upload-select aria-label="Upload">
@@ -1528,7 +1538,7 @@ function filesView() {
     ${canManageOwnFiles ? '<div class="file-drop-zone" data-file-drop tabindex="0"><b>Drop files here</b><span>Multiple files and ZIP archives are supported. Use “Upload folder” to preserve a whole folder tree.</span></div>' : '<div class="module-note"><b>View only.</b> You can browse and preview your private files. Upload, create, and delete actions are disabled for this account.</div>'}
     <p class="muted">${foldersMode && state.folder === '' ? 'Folders shows your library folders in one place.' : allFiles ? 'All files shows files from Documents, Photos, Videos, and Audio.' : 'Open folders normally or use the library tabs to switch sections.'} ZIP and other file types are accepted, uploads have visible progress.${quota ? ` Your account can store up to ${bytes(quota.quotaBytes)}.` : ' Administrators are limited only by available storage unless a host upload limit is configured.'}</p>
     ${state.fileTruncated && allFiles ? '<div class="module-note">Showing the newest 10,000 files. Open a category or folder to browse beyond that safety limit.</div>' : ''}
-    <div class="${state.fileView === 'gallery' ? 'file-photo-gallery' : state.fileView === 'grid' ? 'file-browser-grid' : 'storage-list'}">${state.fileError ? `<div class="empty error-state"><p><b>Files could not be loaded.</b></p><p>${escapeHtml(state.fileError)}</p><button class="secondary refresh-icon-button" data-action="refresh-files" aria-label="Try again" title="Try again">↻</button></div>` : entries === null ? '<div class="empty"><p>Loading files…</p></div>' : entries.length ? entries.map(item).join('') : `<div class="empty"><p>${foldersMode && state.folder === '' ? 'No folders have been created yet.' : allFiles ? 'No files have been uploaded yet.' : 'This folder is empty.'}</p></div>`}</div>
+    <div class="${effectiveFileView === 'gallery' ? 'file-photo-gallery' : effectiveFileView === 'grid' ? 'file-browser-grid' : 'storage-list'}">${state.fileError ? `<div class="empty error-state"><p><b>Files could not be loaded.</b></p><p>${escapeHtml(state.fileError)}</p><button class="secondary refresh-icon-button" data-action="refresh-files" aria-label="Try again" title="Try again">↻</button></div>` : entries === null ? '<div class="empty"><p>Loading files…</p></div>' : entries.length ? entries.map(item).join('') : `<div class="empty"><p>${foldersMode && state.folder === '' ? 'No folders have been created yet.' : allFiles ? 'No files have been uploaded yet.' : 'This folder is empty.'}</p></div>`}</div>
     </div>
     <button class="secondary mobile-files-settings-button" type="button" data-mobile-files-settings aria-label="Files & media settings">⚙ Settings</button>
   </section>`;
@@ -3879,6 +3889,19 @@ $('#avatar').addEventListener('click', () => {
   openProfileDialog().catch(error => toast(error.message));
 });
 $('#mobile-more').addEventListener('click', () => setMobileSidebar(true));
+$('[data-files-nav-toggle]')?.addEventListener('click', event => {
+  event.preventDefault();
+  event.stopPropagation();
+  state.filesNavExpanded = !state.filesNavExpanded;
+  localStorage.setItem('lightnas-files-nav-expanded', state.filesNavExpanded ? '1' : '0');
+  const subtabs = $('[data-files-nav-subtabs]', $('#nav'));
+  const button = event.currentTarget;
+  if (subtabs) subtabs.hidden = !state.filesNavExpanded;
+  button.setAttribute('aria-expanded', state.filesNavExpanded ? 'true' : 'false');
+  button.setAttribute('aria-label', state.filesNavExpanded ? 'Collapse Files & media' : 'Expand Files & media');
+  button.title = state.filesNavExpanded ? 'Collapse Files & media' : 'Expand Files & media';
+  button.textContent = state.filesNavExpanded ? '⌄' : '›';
+});
 $$('[data-view]').forEach(link => link.addEventListener('click', event => {
   if (link.dataset.view === 'files' && link.dataset.fileLibrary) {
     const target = link.dataset.fileLibrary;
