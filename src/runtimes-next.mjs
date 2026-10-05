@@ -1171,7 +1171,8 @@ async function updateManagedAppCredentials(app, name, instanceName, input) {
 
   const requestedUsername = input.appUsername === undefined ? result.appUsername : String(input.appUsername || '').trim();
   const requestedPassword = String(input.appPassword || '');
-  if (input.appUsername !== undefined || requestedPassword) {
+  const usernameChanged = input.appUsername !== undefined && requestedUsername !== result.appUsername;
+  if (usernameChanged || requestedPassword) {
     if (!app.credentialManager) {
       throw Object.assign(new Error(`${app.name} does not expose credential changes through LightNAS yet.`), { status: 409 });
     }
@@ -1190,7 +1191,8 @@ async function updateManagedAppCredentials(app, name, instanceName, input) {
         args.push('change-by-login', '--login', result.appUsername || requestedUsername);
       }
       if (requestedPassword) args.push('--password', requestedPassword);
-      args.push('--config', '/etc/semaphore/config.json');
+      const configExists = await command('docker', ['exec', name, 'test', '-f', '/etc/semaphore/config.json'], 5000);
+      if (configExists.ok) args.push('--config', '/etc/semaphore/config.json');
       await runDocker(args, 30000);
     }
 
