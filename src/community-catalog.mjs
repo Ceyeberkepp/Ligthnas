@@ -7,7 +7,7 @@ import { arch } from 'node:os';
 const CACHE_DIR = process.env.LIGHTNAS_CATALOG_CACHE_DIR || '/var/lib/lightnas/catalogs';
 const CACHE_FILE = join(CACHE_DIR, 'community-index.json');
 const CACHE_MS = 6 * 60 * 60 * 1000;
-const CATALOG_SCHEMA_VERSION = 2;
+const CATALOG_SCHEMA_VERSION = 3;
 const REMOTE_TIMEOUT_MS = 8000;
 const execute = promisify(execFile);
 const dataRoot = dirname(process.env.NAS_DATA_FILE || 'data/state.json');
@@ -28,6 +28,9 @@ const stripLocalePrefix = value => String(value || '')
   .trim();
 const text = value => stripLocalePrefix(typeof value === 'string' ? value : (value?.en_US || value?.en_GB || Object.values(value || {})[0] || ''));
 const safeId = value => String(value || '').toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
+const humanizeId = value => stripLocalePrefix(String(value || '')
+  .replace(/[_-]+/g, ' ')
+  .replace(/\b\w/g, letter => letter.toUpperCase()));
 
 function normalize(item, source) {
   const id = safeId(item.id || item.app_id || item.name || item.title);
@@ -109,11 +112,15 @@ async function mapWithConcurrency(items, limit, mapper) {
 async function casaosRepoItems(source) {
   const tree = await githubTree(source.github, source.branch);
   const manifests = tree.filter(item => /^Apps\/[^/]+\/(?:docker-compose|compose)\.ya?ml$/i.test(item.path || ''));
-  return mapWithConcurrency(manifests, MANIFEST_CONCURRENCY, async manifest => {
+  return manifests.map(manifest => {
     const name = manifest.path.split('/')[1];
-    const composeUrl = 'https://raw.githubusercontent.com/' + source.github + '/' + source.branch + '/' + manifest.path;
-    const raw = await githubText(composeUrl);
-    return { ...casaosMeta(raw, name), composeUrl };
+    return {
+      id:name,
+      title:humanizeId(name),
+      description:'Community application.',
+      category:'Community',
+      composeUrl:'https://raw.githubusercontent.com/' + source.github + '/' + source.branch + '/' + manifest.path
+    };
   });
 }
 
