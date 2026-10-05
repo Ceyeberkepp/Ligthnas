@@ -123,3 +123,10 @@ test('managed application terminal stays inside LightNAS and uses an interactive
   assert.match(styles, /\.embedded-terminal-dialog/);
   assert.match(styles, /\.embedded-terminal-frame/);
 });
+
+
+test('managed app terminal bindings use the multi-element selector helper', async () => {
+  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(app, /\$\$\('\[data-app-terminal\]', \$\('#content'\)\)\.forEach/);
+  assert.doesNotMatch(app, /(^|[^$])\$\('\[data-app-terminal\]', \$\('#content'\)\)\.forEach/m);
+});
