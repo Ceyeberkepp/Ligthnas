@@ -1250,16 +1250,17 @@ export async function openContainerShell(name) {
   const state = await assertManagedContainer(name);
   if (!state.running) throw Object.assign(new Error('Start the app container before opening its shell.'), { status: 409 });
 
-  // Docker app terminals need an actual PTY and an interactive shell. A plain
+  // Docker app terminals need an explicitly interactive shell. A plain
   // "docker exec -i ... sh" accepts input but often displays no prompt and
-  // behaves like a dead terminal in xterm.
+  // behaves like a dead terminal in xterm. Avoid docker -t here because the
+  // Node child process stdin is a pipe rather than a host TTY.
   const shell = [
     'export HOME=/root USER=root LOGNAME=root TERM=xterm-256color;',
     'cd /root 2>/dev/null || cd /;',
     'if [ -x /bin/bash ]; then export PS1="root@$(hostname):\\w# "; exec /bin/bash --noprofile --norc -i;',
     'else export PS1="root@$(hostname):# "; exec /bin/sh -i; fi'
   ].join(' ');
-  return spawn('docker', ['exec', '-i', '-t', '-e', 'TERM=xterm-256color', name, '/bin/sh', '-c', shell], {
+  return spawn('docker', ['exec', '-i', '-e', 'TERM=xterm-256color', name, '/bin/sh', '-c', shell], {
     stdio: ['pipe', 'pipe', 'pipe']
   });
 }
