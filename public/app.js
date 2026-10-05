@@ -2889,7 +2889,7 @@ function bindViewActions() {
       if (live) { live.disabled = false; live.textContent = '↻'; live.title = 'Refresh'; live.setAttribute('aria-label', 'Refresh'); }
     }
   }));
-  $('[data-community-install]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+  $$('[data-community-install]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     const docker = state.runtimes?.docker;
     if (!docker?.available || !docker?.enabled) return toast(docker?.reason || 'Docker needs to be installed and enabled on this host before app installation.');
     const app = state.communityCatalog?.apps?.find(item => item.id === button.dataset.communityInstall);
