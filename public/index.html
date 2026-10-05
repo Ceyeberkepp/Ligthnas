@@ -89,8 +89,11 @@
           <a href="#storage" data-view="storage"><span>▱</span>Storage</a>
           <a href="#pools" data-view="pools"><span>◫</span>Pools & datasets</a>
           <div class="nav-files-group" data-nas-only>
-            <a href="#files" data-view="files" data-file-library="all" class="nav-files-parent"><span>▤</span>Files & media</a>
-            <div class="nav-files-subtabs" aria-label="Files & media sections">
+            <div class="nav-files-parent-row">
+              <a href="#files" data-view="files" data-file-library="all" class="nav-files-parent"><span>▤</span>Files & media</a>
+              <button type="button" class="nav-files-toggle" data-files-nav-toggle aria-expanded="true" aria-label="Collapse Files & media" title="Collapse Files & media">⌄</button>
+            </div>
+            <div class="nav-files-subtabs" data-files-nav-subtabs aria-label="Files & media sections">
               <a href="#files" data-view="files" data-file-library="all">All files</a>
               <a href="#files" data-view="files" data-file-library="Documents">Documents</a>
               <a href="#files" data-view="files" data-file-library="Photos">Photos</a>
