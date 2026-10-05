@@ -1075,14 +1075,21 @@ document.addEventListener('click', async event => {
       if (!item || !app) throw new Error('Managed application is no longer available.');
 
       const memoryMiB = Math.max(128, Math.round(Number(item.memory || 0) / 1048576) || parseInt(String(app.memory || '512'), 10) || 512);
+      const credentialFields = app.requiresAdminUsername || app.credentialManager ? [
+        { name:'appUsername', label:'Application administrator username', value:item.appUsername || app.adminUsername || 'admin', autocomplete:'username' },
+        { name:'appPassword', label:'New application administrator password', type:'password', value:'', placeholder:'Leave blank to keep the current password', autocomplete:'new-password' }
+      ] : [];
       showEditor({
         eyebrow: 'MANAGED APPLICATION',
-        title: `Edit ${app.name} · ${instanceName}`,
-        description: 'Change Docker CPU, memory, and restart limits without reinstalling the application. CPU 0 means no CPU cap.',
+        title: `Settings · ${app.name} · ${instanceName}`,
+        description: 'Manage application credentials, container root access, CPU, memory, and restart behavior. Password fields are never read back from the container.',
         fields: [
           { name:'container', label:'Container', value:item.name, readonly:true },
           { name:'image', label:'Image', value:item.image || app.image, readonly:true },
           { name:'currentUsage', label:'Current usage', value:item.liveStats ? `${Number(item.cpuPercent || 0).toFixed(1)}% CPU · ${item.memoryUsage || '—'} RAM` : 'Live usage unavailable', readonly:true },
+          ...credentialFields,
+          { name:'rootPassword', label:'New container root password', type:'password', value:'', placeholder:item.rootPasswordConfigured ? 'Leave blank to keep the configured root password' : 'Optional · 4–128 characters', autocomplete:'new-password' },
+          { name:'terminalAccess', label:'Terminal access', value:'Privileged root · UID 0', readonly:true },
           { name:'memoryMiB', label:'Memory limit (MiB)', type:'number', value:memoryMiB, min:128, max:262144, step:1, required:true },
           { name:'cpus', label:'CPU limit', type:'number', value:item.cpuUnlimited ? 0 : Number(item.cpus || 0), min:0, max:128, step:.25, required:true },
           { name:'restartPolicy', label:'Restart policy', type:'select', value:item.restartPolicy || 'unless-stopped', options:[
@@ -1099,17 +1106,29 @@ document.addEventListener('click', async event => {
           const cpuValue = Number(values.cpus);
           if (!Number.isInteger(memoryMiBValue)) throw new Error('Memory must be a whole number of MiB.');
           if (!Number.isFinite(cpuValue)) throw new Error('CPU limit must be a number.');
+          if (values.appUsername !== undefined && !/^[A-Za-z0-9._-]{3,64}$/.test(String(values.appUsername || '').trim())) {
+            throw new Error('Application username must contain 3–64 letters, numbers, dots, underscores, or dashes.');
+          }
+          if (values.appPassword && (values.appPassword.length < 8 || values.appPassword.length > 128)) {
+            throw new Error('Application password must contain 8–128 characters.');
+          }
+          if (values.rootPassword && (values.rootPassword.length < 4 || values.rootPassword.length > 128 || /[\r\n:]/.test(values.rootPassword))) {
+            throw new Error('Root password must contain 4–128 characters without colons or line breaks.');
+          }
           await dialogApi(`/api/catalog/${encodeURIComponent(id)}/update`, {
             method:'POST',
             body:JSON.stringify({
               memoryMiB: memoryMiBValue,
               cpus: cpuValue,
               restartPolicy: values.restartPolicy,
-              instanceName
+              instanceName,
+              ...(values.appUsername !== undefined ? { appUsername: String(values.appUsername || '').trim() } : {}),
+              ...(values.appPassword ? { appPassword: values.appPassword } : {}),
+              ...(values.rootPassword ? { rootPassword: values.rootPassword } : {})
             })
           });
           refreshRuntime();
-          window.LightNASToast?.show?.(`${app.name} resource settings saved.`);
+          window.LightNASToast?.show?.(`${app.name} settings saved.`);
         }
       });
     } catch (problem) {
