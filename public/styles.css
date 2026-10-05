@@ -1927,3 +1927,74 @@ body:not(.product-hypervisor) .backup-status-line {
     border-radius: 0;
   }
 }
+
+/* Files & media desktop library tabs and compact utility actions. */
+.files-library-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 12px;
+  padding: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.files-library-tabs::-webkit-scrollbar {
+  display: none;
+}
+.files-library-tab {
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 7px 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 750;
+  cursor: pointer;
+}
+.files-library-tab:hover {
+  border-color: var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+}
+.files-library-tab.active {
+  border-color: var(--line-strong);
+  background: var(--panel);
+  color: var(--text);
+}
+.files-page .file-toolbar {
+  margin-top: 0;
+}
+.files-page .file-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.files-page .files-icon-action {
+  width: 38px;
+  min-width: 38px;
+  height: 38px;
+  min-height: 38px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  font-size: 18px;
+  line-height: 1;
+}
+.files-page .desktop-files-settings-button {
+  font-size: 16px;
+}
+.files-page .file-toolbar-select {
+  min-height: 38px;
+}
+.files-page .file-toolbar-select select {
+  min-height: 38px;
+}
+@media (max-width: 760px) {
+  .desktop-files-library > .files-library-tabs {
+    display: none;
+  }
+}
