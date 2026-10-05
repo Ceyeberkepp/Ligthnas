@@ -319,6 +319,14 @@ def container_settings(name: str) -> dict:
     if not dns:
         dns = [item.strip() for item in str(metadata.get("dns") or "").split(",") if item.strip()]
 
+    routed_next_hop = str(metadata.get("routedLanNextHop") or "").strip()
+    if routed_next_hop:
+        address = str(metadata.get("ipv4Address") or address)
+        gateway = str(metadata.get("gateway") or gateway)
+        saved_dns = [item.strip() for item in str(metadata.get("dns") or "").split(",") if item.strip()]
+        if saved_dns:
+            dns = saved_dns
+
     configured_address = address
     configured_gateway = gateway
     configured_dns = list(dns)
@@ -378,6 +386,7 @@ def container_settings(name: str) -> dict:
         for resolver_text in resolver_texts:
             candidates = re.findall(r"^nameserver\\s+([^\\s#]+)", resolver_text, re.MULTILINE)
             candidates += re.findall(r"\\b(?:DNS Servers?|Current DNS Server):\\s*(.+)$", resolver_text, re.MULTILINE)
+            candidates += re.findall(r"^Link\\s+\\d+\\s+\\([^)]+\\):\\s*(.+)$", resolver_text, re.MULTILINE)
             for candidate in candidates:
                 for item in str(candidate).split():
                     value = item.strip()
@@ -437,7 +446,8 @@ def container_settings(name: str) -> dict:
         "dns": ", ".join(configured_dns),
         "networkSettingsSource": settings_source,
         "liveIpv4Address": live_address,
-        "liveGateway": live_gateway,
+        "liveGateway": configured_gateway if routed_next_hop and live_gateway == routed_next_hop else live_gateway,
+        "liveNextHop": live_gateway if routed_next_hop and live_gateway == routed_next_hop else "",
         "liveDns": ", ".join(live_dns),
         "storageId": str(metadata.get("storageId") or ""),
         "diskGiB": int(metadata.get("diskGiB") or 0),
@@ -1057,9 +1067,26 @@ def configure_container_guest(config: Path, data: dict) -> None:
             dbus_machine_id.write_text(machine_id + "\n", encoding="utf-8")
 
         network_lines = ["[Match]", "Name=eth0", "", "[Network]"]
+        routed_next_hop = _nested_routed_guest_next_hop(address, gateway) if mode == "manual" else ""
         if mode == "dhcp":
             client_id = "duid" if lightnas_network_state().get("LIGHTNAS_NETWORK_MODE") == "nested-ipvlan" else "mac"
             network_lines += ["DHCP=ipv4", "IPv6AcceptRA=yes", "", "[DHCPv4]", f"ClientIdentifier={client_id}"]
+        elif routed_next_hop:
+            routed_address = f"{ipaddress.ip_interface(address).ip}/32"
+            network_lines.append(f"Address={routed_address}")
+            for item in dns_values:
+                network_lines.append(f"DNS={item}")
+            network_lines += [
+                "",
+                "[Route]",
+                f"Destination={routed_next_hop}/32",
+                "Scope=link",
+                "",
+                "[Route]",
+                "Destination=0.0.0.0/0",
+                f"Gateway={routed_next_hop}",
+                "GatewayOnLink=yes",
+            ]
         else:
             network_lines.append(f"Address={address}")
             if gateway:
@@ -1075,6 +1102,10 @@ def configure_container_guest(config: Path, data: dict) -> None:
         "imageId": str(data.get("image") or ""),
         "templateFile": Path(str(data.get("templatePath") or "")).name,
         "ipv4Mode": mode,
+        "ipv4Address": address,
+        "gateway": gateway,
+        "dns": ", ".join(dns_values),
+        "routedLanNextHop": routed_next_hop if mode == "manual" else "",
         "createdBy": "LightNAS",
     }
     (config.parent / "lightnas.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
@@ -1248,6 +1279,27 @@ def _nested_routed_lan_context(address: str, gateway: str) -> dict | None:
         "uplink": uplink,
         "bridge": bridge,
     }
+
+
+def _nested_routed_guest_next_hop(address: str, gateway: str) -> str:
+    """Return the LightNAS bridge IPv4 used as the inner container's next hop."""
+    context = _nested_routed_lan_context(address, gateway)
+    if not context:
+        return ""
+    bridge = context["bridge"]
+    try:
+        rows = json.loads(run(["ip", "-j", "-4", "addr", "show", "dev", bridge], timeout=5, check=False) or "[]")
+        for row in rows:
+            for info in row.get("addr_info") or []:
+                value = str(info.get("local") or "").strip()
+                if info.get("family") == "inet" and value:
+                    parsed = ipaddress.ip_address(value)
+                    if isinstance(parsed, ipaddress.IPv4Address):
+                        return value
+    except Exception:
+        pass
+    # Standard LightNAS private bridge fallback.
+    return "10.77.0.1"
 
 
 def ensure_nested_routed_lan(address: str, gateway: str) -> bool:
@@ -1858,14 +1910,31 @@ def update_container(data: dict) -> dict:
         pass
 
     lines = ["[Match]", f"Name={guest_interface}", "", "[Network]"]
+    routed_next_hop = _nested_routed_guest_next_hop(address, gateway) if mode == "manual" else ""
     if mode == "dhcp":
         lines += ["DHCP=ipv4", "IPv6AcceptRA=yes"]
+    elif routed_next_hop:
+        routed_address = f"{ipaddress.ip_interface(address).ip}/32"
+        lines.append(f"Address={routed_address}")
+        for item in dns_values:
+            lines.append(f"DNS={item}")
+        lines += [
+            "",
+            "[Route]",
+            f"Destination={routed_next_hop}/32",
+            "Scope=link",
+            "",
+            "[Route]",
+            "Destination=0.0.0.0/0",
+            f"Gateway={routed_next_hop}",
+            "GatewayOnLink=yes",
+        ]
     else:
         lines.append(f"Address={address}")
         if gateway:
             lines.append(f"Gateway={gateway}")
-    for item in dns_values:
-        lines.append(f"DNS={item}")
+        for item in dns_values:
+            lines.append(f"DNS={item}")
     (network_dir / "10-lightnas-eth0.network").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     metadata_path = config.parent / "lightnas.json"
@@ -1879,6 +1948,7 @@ def update_container(data: dict) -> dict:
     metadata["ipv4Address"] = address
     metadata["gateway"] = gateway
     metadata["dns"] = ", ".join(dns_values)
+    metadata["routedLanNextHop"] = routed_next_hop
     metadata_path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
 
     routed_lan = False
@@ -1968,21 +2038,34 @@ def update_container(data: dict) -> dict:
             # This avoids showing a stale DHCP lease until the next reboot.
             run(["lxc-attach", "-n", current, "--", "ip", "link", "set", guest_interface, "up"], timeout=10, check=False)
             run(["lxc-attach", "-n", current, "--", "ip", "-4", "addr", "flush", "dev", guest_interface, "scope", "global"], timeout=10, check=False)
-            run(["lxc-attach", "-n", current, "--", "ip", "addr", "add", address, "dev", guest_interface], timeout=10, check=False)
-            if gateway:
-                run(["lxc-attach", "-n", current, "--", "ip", "route", "replace", "default", "via", gateway, "dev", guest_interface], timeout=10, check=False)
+            if routed_next_hop:
+                routed_address = f"{ipaddress.ip_interface(address).ip}/32"
+                run(["lxc-attach", "-n", current, "--", "ip", "addr", "add", routed_address, "dev", guest_interface], timeout=10)
+                run(["lxc-attach", "-n", current, "--", "ip", "route", "replace", f"{routed_next_hop}/32", "dev", guest_interface, "scope", "link"], timeout=10)
+                run(["lxc-attach", "-n", current, "--", "ip", "route", "replace", "default", "via", routed_next_hop, "dev", guest_interface, "onlink"], timeout=10)
+            else:
+                run(["lxc-attach", "-n", current, "--", "ip", "addr", "add", address, "dev", guest_interface], timeout=10)
+                if gateway:
+                    run(["lxc-attach", "-n", current, "--", "ip", "route", "replace", "default", "via", gateway, "dev", guest_interface], timeout=10)
 
         # Apply an explicit resolver override when requested. resolvectl is
         # preferred because /etc/resolv.conf is often the 127.0.0.53 stub.
         if dns_values:
             resolvectl = run(["lxc-attach", "-n", current, "--", "sh", "-lc", "command -v resolvectl || true"], timeout=5, check=False).strip()
-            if resolvectl:
-                run(["lxc-attach", "-n", current, "--", "resolvectl", "dns", guest_interface, *dns_values], timeout=10, check=False)
+            resolved_active = run(
+                ["lxc-attach", "-n", current, "--", "sh", "-lc", "systemctl is-active systemd-resolved.service 2>/dev/null || true"],
+                timeout=5, check=False,
+            ).strip() == "active"
+            if resolvectl and resolved_active:
+                run(["lxc-attach", "-n", current, "--", "resolvectl", "dns", guest_interface, *dns_values], timeout=10)
                 run(["lxc-attach", "-n", current, "--", "resolvectl", "domain", guest_interface, "~."], timeout=10, check=False)
             else:
                 resolver_body = "".join(f"nameserver {value}\\n" for value in dns_values)
                 escaped = resolver_body.replace("'", "'\\''")
-                run(["lxc-attach", "-n", current, "--", "sh", "-lc", f"printf '%s' '{escaped}' > /etc/resolv.conf"], timeout=10, check=False)
+                run([
+                    "lxc-attach", "-n", current, "--", "sh", "-lc",
+                    f"rm -f /etc/resolv.conf && printf '%s' '{escaped}' > /etc/resolv.conf",
+                ], timeout=10)
 
     live_ipv4 = next((value for value in container_addresses(current) if ":" not in value), "")
     automatic_fallback = False
@@ -2005,6 +2088,7 @@ def update_container(data: dict) -> dict:
         "ipv4": live_ipv4 or str(updated_settings.get("liveIpv4Address") or "").split("/", 1)[0],
         "liveIpv4Address": updated_settings.get("liveIpv4Address") or "",
         "liveGateway": updated_settings.get("liveGateway") or "",
+        "liveNextHop": updated_settings.get("liveNextHop") or "",
         "liveDns": updated_settings.get("liveDns") or "",
         "automaticFallback": automatic_fallback,
     }
