@@ -70,7 +70,7 @@ export const catalog = Object.freeze([
 
   { id: 'gitea', name: 'Gitea', category: 'Development', image: 'gitea/gitea:latest', port: 3002, containerPort: 3000, memory: '1g', description: 'Lightweight self-hosted Git service with issues, pull requests and packages.', source: 'Gitea', volumes: [['data', '/data']] },
   { id: 'code-server', name: 'code-server', category: 'Development', image: 'lscr.io/linuxserver/code-server:latest', port: 8443, containerPort: 8443, memory: '2g', description: 'VS Code in the browser for development and administration.', source: 'LinuxServer.io', volumes: [['config', '/config'], ['@files', '/data']] },
-  { id: 'ansible-semaphore', name: 'Ansible Semaphore', category: 'Automation', image: 'semaphoreui/semaphore:latest', port: 3000, containerPort: 3000, memory: '1g', description: 'Browser-based Ansible automation, playbooks, inventories and schedules.', source: 'Semaphore UI', volumes: [['data', '/etc/semaphore']], namedVolumes: true, requiresAdminPassword: true, requiresAccessKeyEncryption: true, adminUsername: 'admin', environment: [['SEMAPHORE_DB_DIALECT', 'sqlite'], ['SEMAPHORE_DB', '/etc/semaphore/semaphore.sqlite'], ['SEMAPHORE_ADMIN', 'admin'], ['SEMAPHORE_ADMIN_NAME', 'LightNAS Administrator'], ['SEMAPHORE_ADMIN_EMAIL', 'admin@localhost']] },
+  { id: 'ansible-semaphore', name: 'Ansible Semaphore', category: 'Automation', image: 'semaphoreui/semaphore:latest', port: 3000, containerPort: 3000, memory: '1g', description: 'Browser-based Ansible automation, playbooks, inventories and schedules.', source: 'Semaphore UI', volumes: [['data', '/etc/semaphore']], namedVolumes: true, requiresAdminUsername: true, requiresAdminPassword: true, requiresAccessKeyEncryption: true, adminUsername: 'admin', adminEmail: 'admin@localhost', credentialManager: 'semaphore-cli', environment: [['SEMAPHORE_DB_DIALECT', 'sqlite'], ['SEMAPHORE_DB', '/etc/semaphore/semaphore.sqlite'], ['SEMAPHORE_ADMIN_NAME', 'LightNAS Administrator'], ['SEMAPHORE_ADMIN_EMAIL', 'admin@localhost']] },
 
   { id: 'vaultwarden', name: 'Vaultwarden', category: 'Security', image: 'vaultwarden/server:latest', port: 8085, containerPort: 80, memory: '768m', description: 'Lightweight Bitwarden-compatible password vault server.', source: 'Vaultwarden', volumes: [['data', '/data']] },
   { id: 'gotify', name: 'Gotify', category: 'Notifications', image: 'gotify/server:latest', port: 8087, containerPort: 80, memory: '512m', description: 'Simple self-hosted push notification server.', source: 'Gotify', volumes: [['data', '/app/data']] },
@@ -1027,7 +1027,19 @@ export async function runtimeInventory() {
               }]];
             } catch { return []; }
           }));
-          runtime.docker.containers = runtime.docker.containers.map(item => ({ ...item, ...(details.get(item.name) || {}) }));
+          runtime.docker.containers = await Promise.all(runtime.docker.containers.map(async item => {
+            const detail = details.get(item.name) || {};
+            const catalogId = String(detail.catalogId || '');
+            const instanceName = String(detail.instanceName || 'default');
+            const app = catalog.find(entry => entry.id === catalogId);
+            const settings = catalogId ? await readManagedAppSettings(catalogId, instanceName) : {};
+            return {
+              ...item,
+              ...detail,
+              appUsername: String(settings.appUsername || app?.adminUsername || ''),
+              rootPasswordConfigured: Boolean(settings.rootPasswordConfigured)
+            };
+          }));
         }
         if (stats.ok) {
           const live = new Map(stats.output.split('\n').filter(Boolean).flatMap(line => {
@@ -1100,6 +1112,110 @@ async function waitForAppPort(port, timeoutMs = 90000) {
   return false;
 }
 
+function managedAppSettingsPath(id, instanceName = 'default') {
+  const instance = normalizeInstanceName(instanceName, 'default');
+  const directory = instance === 'default' ? join(dataRoot, 'apps', id) : join(dataRoot, 'apps', id, instance);
+  return join(directory, '.lightnas-settings.json');
+}
+
+async function readManagedAppSettings(id, instanceName = 'default') {
+  try {
+    const value = JSON.parse(await readFile(managedAppSettingsPath(id, instanceName), 'utf8'));
+    return value && typeof value === 'object' ? value : {};
+  } catch {
+    return {};
+  }
+}
+
+async function writeManagedAppSettings(id, instanceName, values) {
+  const path = managedAppSettingsPath(id, instanceName);
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  const current = await readManagedAppSettings(id, instanceName);
+  const next = { ...current, ...values, updatedAt: new Date().toISOString() };
+  await writeFile(path, JSON.stringify(next, null, 2) + '\n', { mode: 0o600 });
+  return next;
+}
+
+async function dockerExecWithInput(args, input, timeoutMs = 30000) {
+  if (process.env.LIGHTNAS_DOCKER_ENABLED !== '1') throw Object.assign(new Error('Docker actions are disabled on this host.'), { status: 409 });
+  return await exclusive(() => new Promise((resolve, reject) => {
+    const child = spawn('docker', args, { stdio: ['pipe', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      reject(Object.assign(new Error('Docker command timed out.'), { status: 409 }));
+    }, timeoutMs);
+    child.stdout.on('data', chunk => { stdout += chunk.toString(); });
+    child.stderr.on('data', chunk => { stderr += chunk.toString(); });
+    child.once('error', error => {
+      clearTimeout(timer);
+      reject(Object.assign(new Error(`Docker: ${error.message}`), { status: 409 }));
+    });
+    child.once('close', code => {
+      clearTimeout(timer);
+      if (code === 0) resolve(stdout.trim());
+      else reject(Object.assign(new Error(`Docker: ${(stderr || stdout || `exit ${code}`).trim()}`), { status: 409 }));
+    });
+    child.stdin.end(input);
+  }));
+}
+
+async function updateManagedAppCredentials(app, name, instanceName, input) {
+  const existing = await readManagedAppSettings(app.id, instanceName);
+  const result = {
+    appUsername: String(existing.appUsername || app.adminUsername || ''),
+    appCredentialsChanged: false,
+    rootPasswordChanged: false
+  };
+
+  const requestedUsername = input.appUsername === undefined ? result.appUsername : String(input.appUsername || '').trim();
+  const requestedPassword = String(input.appPassword || '');
+  if (input.appUsername !== undefined || requestedPassword) {
+    if (!app.credentialManager) {
+      throw Object.assign(new Error(`${app.name} does not expose credential changes through LightNAS yet.`), { status: 409 });
+    }
+    if (!/^[A-Za-z0-9._-]{3,64}$/.test(requestedUsername)) {
+      throw Object.assign(new Error('Application username must contain 3–64 letters, numbers, dots, underscores, or dashes.'), { status: 400 });
+    }
+    if (requestedPassword && (requestedPassword.length < 8 || requestedPassword.length > 128)) {
+      throw Object.assign(new Error('Application password must contain 8–128 characters.'), { status: 400 });
+    }
+
+    if (app.credentialManager === 'semaphore-cli') {
+      const args = ['exec', '--privileged', '--user', '0:0', name, 'semaphore', 'user'];
+      if (requestedUsername !== result.appUsername) {
+        args.push('change-by-email', '--email', String(app.adminEmail || 'admin@localhost'), '--login', requestedUsername);
+      } else {
+        args.push('change-by-login', '--login', result.appUsername || requestedUsername);
+      }
+      if (requestedPassword) args.push('--password', requestedPassword);
+      args.push('--config', '/etc/semaphore/config.json');
+      await runDocker(args, 30000);
+    }
+
+    result.appUsername = requestedUsername;
+    result.appCredentialsChanged = true;
+    await writeManagedAppSettings(app.id, instanceName, { appUsername: requestedUsername });
+  }
+
+  const rootPassword = String(input.rootPassword || '');
+  if (rootPassword) {
+    if (rootPassword.length < 4 || rootPassword.length > 128 || /[\r\n:]/.test(rootPassword)) {
+      throw Object.assign(new Error('Container root password must contain 4–128 characters without colons or line breaks.'), { status: 400 });
+    }
+    await dockerExecWithInput(
+      ['exec', '-i', '--privileged', '--user', '0:0', name, '/bin/sh', '-c',
+        'if command -v chpasswd >/dev/null 2>&1; then exec chpasswd; elif command -v busybox >/dev/null 2>&1; then exec busybox chpasswd; else echo "This app image does not provide chpasswd." >&2; exit 127; fi'],
+      `root:${rootPassword}\n`
+    );
+    result.rootPasswordChanged = true;
+    await writeManagedAppSettings(app.id, instanceName, { rootPasswordConfigured: true });
+  }
+
+  return result;
+}
+
 async function catalogInstances(id) {
   const listed = await command('docker', ['ps', '-a', '--filter', `label=lightnas.catalog=${id}`, '--format', '{{.Names}}']);
   return listed.ok ? listed.output.split('\n').filter(Boolean) : [];
@@ -1155,6 +1271,11 @@ export async function installCatalogApp(id, input = {}) {
     if (instanceName === 'default') args.push('-p', `0.0.0.0:${hostPort}:${containerPort}/${protocol}`);
   }
   const environment = [...(app.environment || [])];
+  let adminUsername = String(input.adminUsername || app.adminUsername || 'admin').trim();
+  if (app.requiresAdminUsername && !/^[A-Za-z0-9._-]{3,64}$/.test(adminUsername)) {
+    throw Object.assign(new Error('Application administrator username must contain 3–64 letters, numbers, dots, underscores, or dashes.'), { status: 400 });
+  }
+  if (app.requiresAdminUsername) environment.push(['SEMAPHORE_ADMIN', adminUsername]);
   if (app.requiresAdminPassword) {
     const adminPassword = String(input.adminPassword || '');
     if (adminPassword.length < 8 || adminPassword.length > 128) {
@@ -1185,6 +1306,9 @@ export async function installCatalogApp(id, input = {}) {
   args.push(app.image);
   for (const argument of app.command || []) args.push(String(argument));
   const containerId = await runDocker(args);
+  if (app.requiresAdminUsername) {
+    await writeManagedAppSettings(app.id, instanceName, { appUsername: adminUsername });
+  }
   const hostPort = await containerPublishedPort(name, app.containerPort);
   const ready = hostPort > 0 ? await waitForAppPort(hostPort) : false;
   return {
@@ -1224,7 +1348,8 @@ export async function updateCatalogApp(id, input = {}) {
   args.push('--cpus', cpus === 0 ? '0' : String(cpus));
   args.push(name);
   await runDocker(args, 60000);
-  return { id, memoryMiB, cpus, restartPolicy };
+  const credentials = await updateManagedAppCredentials(app, name, instanceName, input);
+  return { id, instanceName, memoryMiB, cpus, restartPolicy, ...credentials };
 }
 
 export async function manageCatalogApp(id, action, instanceName = 'default') {
@@ -1260,7 +1385,7 @@ export async function openContainerShell(name) {
     'if [ -x /bin/bash ]; then export PS1="root@$(hostname):\\w# "; exec /bin/bash --noprofile --norc -i;',
     'else export PS1="root@$(hostname):# "; exec /bin/sh -i; fi'
   ].join(' ');
-  return spawn('docker', ['exec', '-i', '-e', 'TERM=xterm-256color', name, '/bin/sh', '-c', shell], {
+  return spawn('docker', ['exec', '--privileged', '--user', '0:0', '-i', '-e', 'TERM=xterm-256color', name, '/bin/sh', '-c', shell], {
     stdio: ['pipe', 'pipe', 'pipe']
   });
 }
