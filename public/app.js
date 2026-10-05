@@ -1382,16 +1382,6 @@ function filesView() {
           : state.files.filter(entry => entry.directory || !isSystemImageFile(entry.name)))
     : state.files;
   const libraryOptions = librarySections.map(([folder, label]) => `<option value="${escapeHtml(folder)}" ${!state.filesSettingsOpen && section === folder ? 'selected' : ''}>${escapeHtml(label)}</option>`).join('');
-  const activeLibraryTab = state.fileLibraryTab === 'folders' ? 'folders' : (section || 'all');
-  const libraryTabs = [
-    ['all', 'All files'],
-    ['Documents', 'Documents'],
-    ['Photos', 'Photos'],
-    ['Videos', 'Videos'],
-    ['Audio', 'Audio'],
-    ['folders', 'Folders']
-  ].map(([id, label]) => `<button type="button" class="files-library-tab ${activeLibraryTab === id ? 'active' : ''}" data-library-tab="${escapeHtml(id)}" aria-pressed="${activeLibraryTab === id}">${escapeHtml(label)}</button>`).join('');
-
   const item = entry => {
     const path = fileEntryPath(entry);
     const location = !entry.directory && (entry.folder || path.includes('/')) ? (entry.folder || path.split('/').slice(0, -1).join('/') || 'Root') : '';
@@ -1503,7 +1493,6 @@ function filesView() {
     </section>
     ${mobileFiles && ['', 'Photos', 'Videos'].includes(section) ? mobileGallery() : ''}
     <div class="files-library-content desktop-files-library ${state.filesSettingsOpen ? 'hidden' : ''}">
-    <div class="files-library-tabs" role="tablist" aria-label="File library sections">${libraryTabs}</div>
     <div class="file-toolbar"><div class="breadcrumbs">${crumbs}</div><div class="file-toolbar-actions">
       <label class="file-toolbar-select">View
         <select data-file-view-select aria-label="File view">
@@ -2569,8 +2558,15 @@ function render(view) {
     rendered = hypervisorSubViewShell(rendered, state.view);
   }
   content.innerHTML = rendered;
-  $$('[data-view]').forEach(link => link.classList.toggle('active', link.dataset.view === state.view));
-  $(`[data-view="${state.view}"]`, $('#nav'))?.closest('details')?.setAttribute('open', '');
+  $$('[data-view]').forEach(link => {
+    const library = link.dataset.fileLibrary;
+    const filesChild = link.dataset.view === 'files' && library && !link.classList.contains('nav-files-parent');
+    const regular = link.dataset.view === state.view && !library;
+    const selectedFilesChild = state.view === 'files' && filesChild && library === state.fileLibraryTab;
+    link.classList.toggle('active', regular || selectedFilesChild);
+  });
+  $('.nav-files-parent', $('#nav'))?.classList.toggle('active', state.view === 'files');
+  $("[data-view=\"" + state.view + "\"]", $('#nav'))?.closest('details')?.setAttribute('open', '');
   content.focus({ preventScroll: true });
   applyWorkspaceMode();
   bindViewActions();
@@ -3883,7 +3879,20 @@ $('#avatar').addEventListener('click', () => {
   openProfileDialog().catch(error => toast(error.message));
 });
 $('#mobile-more').addEventListener('click', () => setMobileSidebar(true));
-$$('[data-view]').forEach(link => link.addEventListener('click', () => setMobileSidebar(false)));
+$('[data-view]').forEach(link => link.addEventListener('click', event => {
+  if (link.dataset.view === 'files' && link.dataset.fileLibrary) {
+    const target = link.dataset.fileLibrary;
+    state.filesSettingsOpen = false;
+    state.fileLibraryTab = target;
+    state.folder = target === 'all' || target === 'folders' ? '' : target;
+    state.files = null;
+    if (location.hash === '#files') {
+      event.preventDefault();
+      render('files');
+    }
+  }
+  setMobileSidebar(false);
+}));
 $$('.close-dialog').forEach(button => button.addEventListener('click', () => $('#share-dialog').close()));
 $('#share-form').addEventListener('submit', async event => {
   event.preventDefault();

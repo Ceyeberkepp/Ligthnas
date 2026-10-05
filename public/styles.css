@@ -1998,3 +1998,42 @@ body:not(.product-hypervisor) .backup-status-line {
     display: none;
   }
 }
+
+/* Files & media child navigation lives in the left sidebar. */
+.nav-files-group {
+  display: grid;
+  gap: 2px;
+}
+.nav-files-subtabs {
+  display: grid;
+  gap: 1px;
+  padding: 2px 0 6px 41px;
+}
+.sidebar nav .nav-files-subtabs a {
+  min-height: 28px;
+  padding: 5px 9px;
+  border-radius: 7px;
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--muted);
+}
+.sidebar nav .nav-files-subtabs a:hover {
+  color: var(--text);
+  background: var(--panel-2);
+}
+.sidebar nav .nav-files-subtabs a.active {
+  color: var(--text);
+  background: var(--panel-2);
+  box-shadow: inset 2px 0 var(--accent);
+}
+.sidebar nav .nav-files-parent.active {
+  color: var(--text);
+}
+.console.sidebar-collapsed .nav-files-subtabs {
+  display: none;
+}
+@media (max-width: 760px) {
+  .nav-files-subtabs {
+    padding-left: 41px;
+  }
+}

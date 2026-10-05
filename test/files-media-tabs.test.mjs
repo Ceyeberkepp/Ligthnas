@@ -2,23 +2,26 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-test('Files and media uses desktop library tabs and compact icon actions', async () => {
-  const [app, styles] = await Promise.all([
+test('Files and media library sections live in the sidebar and keep compact icon actions', async () => {
+  const [app, index, styles] = await Promise.all([
     readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
+    readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
     readFile(new URL('../public/styles.css', import.meta.url), 'utf8')
   ]);
 
   for (const label of ['All files', 'Documents', 'Photos', 'Videos', 'Audio', 'Folders']) {
-    assert.match(app, new RegExp(label));
+    assert.match(index, new RegExp(label));
   }
-  assert.match(app, /data-library-tab/);
+  assert.match(index, /nav-files-subtabs/);
+  assert.match(index, /data-file-library="folders"/);
   assert.match(app, /fileLibraryTab/);
+  assert.match(app, /link\.dataset\.fileLibrary/);
+  assert.doesNotMatch(app, /files-library-tabs" role="tablist"/);
   assert.match(app, /data-action="new-folder"[^>]*aria-label="New folder"/);
   assert.match(app, /data-files-settings-tab[^>]*aria-label="Files & media settings"/);
   assert.match(app, /data-action="refresh-files"[^>]*aria-label="Refresh"/);
-  assert.doesNotMatch(app, /data-files-settings-tab>⚙ Settings<\/button>/);
-  assert.match(styles, /\.files-library-tabs/);
-  assert.match(styles, /\.files-icon-action/);
+  assert.match(styles, /\.nav-files-subtabs/);
+  assert.match(styles, /sidebar-collapsed \.nav-files-subtabs/);
 });
 
 test('Folders tab uses folder inventory API while All files keeps recursive file inventory', async () => {

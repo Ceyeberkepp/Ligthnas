@@ -88,7 +88,17 @@
         <details class="nav-group" open><summary>Storage</summary>
           <a href="#storage" data-view="storage"><span>▱</span>Storage</a>
           <a href="#pools" data-view="pools"><span>◫</span>Pools & datasets</a>
-          <a href="#files" data-view="files" data-nas-only><span>▤</span>Files & media</a>
+          <div class="nav-files-group" data-nas-only>
+            <a href="#files" data-view="files" data-file-library="all" class="nav-files-parent"><span>▤</span>Files & media</a>
+            <div class="nav-files-subtabs" aria-label="Files & media sections">
+              <a href="#files" data-view="files" data-file-library="all">All files</a>
+              <a href="#files" data-view="files" data-file-library="Documents">Documents</a>
+              <a href="#files" data-view="files" data-file-library="Photos">Photos</a>
+              <a href="#files" data-view="files" data-file-library="Videos">Videos</a>
+              <a href="#files" data-view="files" data-file-library="Audio">Audio</a>
+              <a href="#files" data-view="files" data-file-library="folders">Folders</a>
+            </div>
+          </div>
           <a href="#shares" data-view="shares" data-nas-only><span>▥</span>Shares</a>
           <a href="#backups" data-view="backups"><span>↶</span>Backups</a>
         </details>
