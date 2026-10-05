@@ -523,6 +523,7 @@ def container_records(fast: bool = False) -> list[dict]:
 
 
 def container_summary() -> dict:
+    restore_nested_routed_lan_routes()
     networks = local_networks()
     tools = all(available(name) for name in ["lxc-create", "lxc-start", "lxc-stop", "lxc-attach", "lxc-ls"])
     nested = in_container()
@@ -563,6 +564,7 @@ def container_summary() -> dict:
 
 
 def container_inventory() -> dict:
+    restore_nested_routed_lan_routes()
     ok, reason, diagnostics = container_capability()
     networks = local_networks()
     return {
@@ -1203,6 +1205,147 @@ def sanitize_nested_lxc_network(config: Path) -> bool:
     return True
 
 
+
+def _nested_routed_lan_context(address: str, gateway: str) -> dict | None:
+    """Return routed-LAN details when a nested LightNAS LXC is using the NAT bridge."""
+    state = lightnas_network_state()
+    if not in_container() or str(state.get("LIGHTNAS_NETWORK_MODE") or "") != "lxc-nat":
+        return None
+    try:
+        interface = ipaddress.ip_interface(str(address or "").strip())
+        gateway_ip = ipaddress.ip_address(str(gateway or "").strip())
+    except ValueError:
+        return None
+    if not isinstance(interface, ipaddress.IPv4Interface) or not isinstance(gateway_ip, ipaddress.IPv4Address):
+        return None
+    if gateway_ip not in interface.network:
+        return None
+
+    uplink = str(state.get("LIGHTNAS_UPLINK") or "").strip()
+    bridge = str(state.get("LIGHTNAS_CONTAINER_BRIDGE") or "lightnas0").strip()
+    if not IFACE_RE.fullmatch(uplink) or not IFACE_RE.fullmatch(bridge):
+        return None
+    if not Path("/sys/class/net", uplink).exists() or not Path("/sys/class/net", bridge).exists():
+        return None
+
+    try:
+        addresses = json.loads(run(["ip", "-j", "-4", "addr", "show", "dev", uplink], timeout=5, check=False) or "[]")
+        host_ips = []
+        for item in addresses:
+            for info in item.get("addr_info") or []:
+                if info.get("family") == "inet" and info.get("local"):
+                    host_ips.append(ipaddress.ip_address(str(info["local"])))
+        if not any(host_ip in interface.network for host_ip in host_ips):
+            return None
+    except Exception:
+        return None
+
+    return {
+        "address": interface,
+        "host": str(interface.ip),
+        "network": interface.network,
+        "gateway": str(gateway_ip),
+        "uplink": uplink,
+        "bridge": bridge,
+    }
+
+
+def ensure_nested_routed_lan(address: str, gateway: str) -> bool:
+    """
+    Keep a nested system container on the appliance's real LAN even when the
+    outer Proxmox LXC cannot create macvlan/ipvlan interfaces.
+
+    The inner LXC remains connected to the LightNAS-owned bridge, while
+    LightNAS routes the requested /32 through that bridge and answers ARP on
+    both sides. Upstream Ethernet therefore continues to use the appliance's
+    permitted outer-LXC MAC address instead of requiring another MAC behind it.
+    """
+    context = _nested_routed_lan_context(address, gateway)
+    if not context:
+        return False
+
+    host = context["host"]
+    gateway_ip = context["gateway"]
+    uplink = context["uplink"]
+    bridge = context["bridge"]
+
+    # Enable routed forwarding and proxy ARP now.
+    for path, value in (
+        (Path("/proc/sys/net/ipv4/ip_forward"), "1"),
+        (Path(f"/proc/sys/net/ipv4/conf/{uplink}/proxy_arp"), "1"),
+        (Path(f"/proc/sys/net/ipv4/conf/{bridge}/proxy_arp"), "1"),
+        (Path(f"/proc/sys/net/ipv4/conf/{uplink}/rp_filter"), "0"),
+        (Path(f"/proc/sys/net/ipv4/conf/{bridge}/rp_filter"), "0"),
+    ):
+        try:
+            path.write_text(value + "\n", encoding="utf-8")
+        except OSError:
+            pass
+
+    # Persist the forwarding behavior across LightNAS restarts/reboots.
+    sysctl_path = Path("/etc/sysctl.d/99-lightnas-routed-containers.conf")
+    try:
+        sysctl_path.write_text(
+            "\n".join([
+                "# LightNAS nested-LXC routed LAN compatibility",
+                "net.ipv4.ip_forward = 1",
+                f"net.ipv4.conf.{uplink}.proxy_arp = 1",
+                f"net.ipv4.conf.{bridge}.proxy_arp = 1",
+                f"net.ipv4.conf.{uplink}.rp_filter = 0",
+                f"net.ipv4.conf.{bridge}.rp_filter = 0",
+                "",
+            ]),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
+
+    # Route this exact LAN IP toward the inner LXC bridge. Explicit proxy-neigh
+    # entries make ARP deterministic even though both sides use the same /24.
+    run(["ip", "route", "replace", f"{host}/32", "dev", bridge, "scope", "link"], timeout=10, check=False)
+    run(["ip", "neigh", "replace", "proxy", host, "dev", uplink], timeout=10, check=False)
+    run(["ip", "neigh", "replace", "proxy", gateway_ip, "dev", bridge], timeout=10, check=False)
+
+    # Preserve existing firewall policy, but add narrowly scoped forwarding
+    # rules when iptables is available. These rules allow only this container IP.
+    if available("iptables"):
+        rules = [
+            ["FORWARD", "-i", bridge, "-o", uplink, "-s", f"{host}/32", "-j", "ACCEPT"],
+            ["FORWARD", "-i", uplink, "-o", bridge, "-d", f"{host}/32", "-j", "ACCEPT"],
+        ]
+        for rule in rules:
+            check = subprocess.run(["iptables", "-C", *rule], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+            if check.returncode != 0:
+                subprocess.run(["iptables", "-I", *rule], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+
+    return True
+
+
+def restore_nested_routed_lan_routes() -> None:
+    """Reapply /32 and proxy-ARP state for saved static LAN containers."""
+    state = lightnas_network_state()
+    if str(state.get("LIGHTNAS_NETWORK_MODE") or "") != "lxc-nat":
+        return
+    try:
+        container_dirs = list(Path("/var/lib/lxc").iterdir())
+    except OSError:
+        return
+    for container_dir in container_dirs:
+        if not container_dir.is_dir() or not NAME_RE.fullmatch(container_dir.name):
+            continue
+        try:
+            settings = container_settings(container_dir.name)
+            if str(settings.get("ipv4Mode") or "") != "manual":
+                continue
+            address = str(settings.get("ipv4Address") or "").strip()
+            gateway = str(settings.get("gateway") or "").strip()
+            if address and gateway:
+                ensure_nested_routed_lan(address, gateway)
+        except Exception:
+            continue
+
+
+
 def create_container(data: dict) -> dict:
     ok, reason, _diagnostics = container_capability()
     if not ok:
@@ -1216,6 +1359,7 @@ def create_container(data: dict) -> dict:
     network_state = lightnas_network_state()
     nested_mode = str(network_state.get("LIGHTNAS_NETWORK_MODE") or "")
     nested_direct = nested_mode in {"nested-macvlan", "nested-ipvlan"}
+    nested_nat = nested_mode == "lxc-nat"
     if nested_direct:
         # In a nested Proxmox LightNAS appliance, container networking is not
         # a per-app choice. Every new system container uses the already-working
@@ -1231,6 +1375,17 @@ def create_container(data: dict) -> dict:
             "dns": "",
             "vlanTag": None,
         }
+    elif nested_nat:
+        # The UI intentionally exposes the appliance LAN uplink (for example
+        # eth0). The nested LXC itself must still attach to LightNAS's internal
+        # bridge; routed/proxy-ARP mode makes a user-selected LAN address
+        # reachable without moving the appliance management address.
+        uplink = str(network_state.get("LIGHTNAS_UPLINK") or "eth0")
+        internal_bridge = str(network_state.get("LIGHTNAS_CONTAINER_BRIDGE") or "lightnas0")
+        if requested_network and requested_network not in {uplink, internal_bridge}:
+            raise ValueError("selected container network is not available")
+        network = internal_bridge
+        data = {**data, "network": uplink}
     else:
         network = requested_network if requested_network in networks else (networks[0] if networks else "")
     try:
@@ -1244,7 +1399,8 @@ def create_container(data: dict) -> dict:
     image = IMAGE_BY_ID.get(image_id)
     if not template_path and (not image or (in_container() and not image.get("nested", True))):
         raise ValueError("select a Linux system-container image or imported LightNAS template")
-    if not network or not IFACE_RE.fullmatch(network) or network not in networks:
+    valid_nested_nat_bridge = nested_nat and network == str(network_state.get("LIGHTNAS_CONTAINER_BRIDGE") or "lightnas0")
+    if not network or not IFACE_RE.fullmatch(network) or (network not in networks and not valid_nested_nat_bridge):
         raise ValueError("no active local container bridge is available")
     host_cpus = max(1, os.cpu_count() or 1)
     if not (256 <= memory <= 65536 and 1 <= cpus <= min(32, host_cpus) and 2 <= disk_gib <= 2048):
@@ -1321,6 +1477,13 @@ def create_container(data: dict) -> dict:
 
     clear_managed_automatic_address(config)
     sanitize_nested_lxc_network(config)
+
+    routed_lan = False
+    if str(data.get("ipv4Mode") or "dhcp") == "manual":
+        routed_lan = ensure_nested_routed_lan(
+            str(data.get("ipv4Address") or ""),
+            str(data.get("gateway") or ""),
+        )
 
     try:
         run(["lxc-start", "-n", name, "-d"], timeout=60)
@@ -1430,7 +1593,7 @@ def create_container(data: dict) -> dict:
         "network": network,
         "ipv4": ipv4 or (container_addresses(name)[0] if container_addresses(name) else ""),
         "defaultRoute": default_route,
-        "networkMode": "direct-lan" if direct_lan else "managed",
+        "networkMode": "direct-lan" if direct_lan else ("routed-lan" if routed_lan else "managed"),
         "automaticFallback": automatic_fallback,
         "managedLanPool": managed_pool_assignment,
     }
@@ -1589,10 +1752,16 @@ def container_action(data: dict) -> dict:
         raise ValueError("unknown local LXC container")
     if action == "start":
         sanitize_nested_lxc_network(config)
+        settings = container_settings(name)
+        if str(settings.get("ipv4Mode") or "") == "manual":
+            ensure_nested_routed_lan(str(settings.get("ipv4Address") or ""), str(settings.get("gateway") or ""))
         run(["lxc-start", "-n", name, "-d"], timeout=60)
     elif action in {"stop", "shutdown"}:
         run(["lxc-stop", "-n", name, "-t", "30"], timeout=45)
     elif action == "reboot":
+        settings = container_settings(name)
+        if str(settings.get("ipv4Mode") or "") == "manual":
+            ensure_nested_routed_lan(str(settings.get("ipv4Address") or ""), str(settings.get("gateway") or ""))
         run(["lxc-stop", "-n", name, "-r", "-t", "30"], timeout=60)
     elif action == "repair-network":
         return repair_container_network(name)
@@ -1631,17 +1800,24 @@ def update_container(data: dict) -> dict:
     requested_network = str(data.get("network") or "").strip()
     if requested_network:
         networks = local_networks()
-        if requested_network not in networks:
-            raise ValueError("selected container network is not available")
         network_state = lightnas_network_state()
         nested_mode = str(network_state.get("LIGHTNAS_NETWORK_MODE") or "")
+        actual_network = requested_network
+        if nested_mode == "lxc-nat":
+            uplink = str(network_state.get("LIGHTNAS_UPLINK") or "eth0")
+            internal_bridge = str(network_state.get("LIGHTNAS_CONTAINER_BRIDGE") or "lightnas0")
+            if requested_network not in {uplink, internal_bridge}:
+                raise ValueError("selected container network is not available")
+            actual_network = internal_bridge
+        elif requested_network not in networks:
+            raise ValueError("selected container network is not available")
         direct_lan = (
             nested_mode in {"nested-macvlan", "nested-ipvlan"}
-            and requested_network == str(network_state.get("LIGHTNAS_CONTAINER_PARENT") or network_state.get("LIGHTNAS_UPLINK") or "eth0")
+            and actual_network == str(network_state.get("LIGHTNAS_CONTAINER_PARENT") or network_state.get("LIGHTNAS_UPLINK") or "eth0")
         )
         direct_type = "macvlan" if nested_mode == "nested-macvlan" else ("ipvlan" if nested_mode == "nested-ipvlan" else "veth")
         append_unique(config, f"lxc.net.0.type = {direct_type if direct_lan else 'veth'}")
-        append_unique(config, f"lxc.net.0.link = {requested_network}")
+        append_unique(config, f"lxc.net.0.link = {actual_network}")
         if direct_lan and direct_type == "macvlan":
             append_unique(config, "lxc.net.0.macvlan.mode = bridge")
         if direct_lan and direct_type == "ipvlan":
@@ -1704,6 +1880,10 @@ def update_container(data: dict) -> dict:
     metadata["gateway"] = gateway
     metadata["dns"] = ", ".join(dns_values)
     metadata_path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+
+    routed_lan = False
+    if mode == "manual":
+        routed_lan = ensure_nested_routed_lan(address, gateway)
 
     # Additional NICs are managed as lxc.net.1+ while lxc.net.0 remains the
     # primary LightNAS interface.
@@ -3510,6 +3690,12 @@ if __name__ == "__main__":
         gid = 0
     os.chown(SOCKET_PATH, 0, gid)
     os.chmod(SOCKET_PATH, 0o660)
+    # Rehydrate routed-LAN /32 routes and proxy-ARP entries immediately after
+    # the privileged host agent starts, before the web UI is opened.
+    try:
+        restore_nested_routed_lan_routes()
+    except Exception:
+        pass
     try:
         server.serve_forever()
     finally:
