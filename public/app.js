@@ -3879,7 +3879,7 @@ $('#avatar').addEventListener('click', () => {
   openProfileDialog().catch(error => toast(error.message));
 });
 $('#mobile-more').addEventListener('click', () => setMobileSidebar(true));
-$('[data-view]').forEach(link => link.addEventListener('click', event => {
+$$('[data-view]').forEach(link => link.addEventListener('click', event => {
   if (link.dataset.view === 'files' && link.dataset.fileLibrary) {
     const target = link.dataset.fileLibrary;
     state.filesSettingsOpen = false;
