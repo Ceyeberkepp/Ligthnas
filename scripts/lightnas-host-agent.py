@@ -1203,6 +1203,147 @@ def sanitize_nested_lxc_network(config: Path) -> bool:
     return True
 
 
+
+def _nested_routed_lan_context(address: str, gateway: str) -> dict | None:
+    """Return routed-LAN details when a nested LightNAS LXC is using the NAT bridge."""
+    state = lightnas_network_state()
+    if not in_container() or str(state.get("LIGHTNAS_NETWORK_MODE") or "") != "lxc-nat":
+        return None
+    try:
+        interface = ipaddress.ip_interface(str(address or "").strip())
+        gateway_ip = ipaddress.ip_address(str(gateway or "").strip())
+    except ValueError:
+        return None
+    if not isinstance(interface, ipaddress.IPv4Interface) or not isinstance(gateway_ip, ipaddress.IPv4Address):
+        return None
+    if gateway_ip not in interface.network:
+        return None
+
+    uplink = str(state.get("LIGHTNAS_UPLINK") or "").strip()
+    bridge = str(state.get("LIGHTNAS_CONTAINER_BRIDGE") or "lightnas0").strip()
+    if not IFACE_RE.fullmatch(uplink) or not IFACE_RE.fullmatch(bridge):
+        return None
+    if not Path("/sys/class/net", uplink).exists() or not Path("/sys/class/net", bridge).exists():
+        return None
+
+    try:
+        addresses = json.loads(run(["ip", "-j", "-4", "addr", "show", "dev", uplink], timeout=5, check=False) or "[]")
+        host_ips = []
+        for item in addresses:
+            for info in item.get("addr_info") or []:
+                if info.get("family") == "inet" and info.get("local"):
+                    host_ips.append(ipaddress.ip_address(str(info["local"])))
+        if not any(host_ip in interface.network for host_ip in host_ips):
+            return None
+    except Exception:
+        return None
+
+    return {
+        "address": interface,
+        "host": str(interface.ip),
+        "network": interface.network,
+        "gateway": str(gateway_ip),
+        "uplink": uplink,
+        "bridge": bridge,
+    }
+
+
+def ensure_nested_routed_lan(address: str, gateway: str) -> bool:
+    """
+    Keep a nested system container on the appliance's real LAN even when the
+    outer Proxmox LXC cannot create macvlan/ipvlan interfaces.
+
+    The inner LXC remains connected to the LightNAS-owned bridge, while
+    LightNAS routes the requested /32 through that bridge and answers ARP on
+    both sides. Upstream Ethernet therefore continues to use the appliance's
+    permitted outer-LXC MAC address instead of requiring another MAC behind it.
+    """
+    context = _nested_routed_lan_context(address, gateway)
+    if not context:
+        return False
+
+    host = context["host"]
+    gateway_ip = context["gateway"]
+    uplink = context["uplink"]
+    bridge = context["bridge"]
+
+    # Enable routed forwarding and proxy ARP now.
+    for path, value in (
+        (Path("/proc/sys/net/ipv4/ip_forward"), "1"),
+        (Path(f"/proc/sys/net/ipv4/conf/{uplink}/proxy_arp"), "1"),
+        (Path(f"/proc/sys/net/ipv4/conf/{bridge}/proxy_arp"), "1"),
+        (Path(f"/proc/sys/net/ipv4/conf/{uplink}/rp_filter"), "0"),
+        (Path(f"/proc/sys/net/ipv4/conf/{bridge}/rp_filter"), "0"),
+    ):
+        try:
+            path.write_text(value + "\n", encoding="utf-8")
+        except OSError:
+            pass
+
+    # Persist the forwarding behavior across LightNAS restarts/reboots.
+    sysctl_path = Path("/etc/sysctl.d/99-lightnas-routed-containers.conf")
+    try:
+        sysctl_path.write_text(
+            "\n".join([
+                "# LightNAS nested-LXC routed LAN compatibility",
+                "net.ipv4.ip_forward = 1",
+                f"net.ipv4.conf.{uplink}.proxy_arp = 1",
+                f"net.ipv4.conf.{bridge}.proxy_arp = 1",
+                f"net.ipv4.conf.{uplink}.rp_filter = 0",
+                f"net.ipv4.conf.{bridge}.rp_filter = 0",
+                "",
+            ]),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
+
+    # Route this exact LAN IP toward the inner LXC bridge. Explicit proxy-neigh
+    # entries make ARP deterministic even though both sides use the same /24.
+    run(["ip", "route", "replace", f"{host}/32", "dev", bridge, "scope", "link"], timeout=10, check=False)
+    run(["ip", "neigh", "replace", "proxy", host, "dev", uplink], timeout=10, check=False)
+    run(["ip", "neigh", "replace", "proxy", gateway_ip, "dev", bridge], timeout=10, check=False)
+
+    # Preserve existing firewall policy, but add narrowly scoped forwarding
+    # rules when iptables is available. These rules allow only this container IP.
+    if available("iptables"):
+        rules = [
+            ["FORWARD", "-i", bridge, "-o", uplink, "-s", f"{host}/32", "-j", "ACCEPT"],
+            ["FORWARD", "-i", uplink, "-o", bridge, "-d", f"{host}/32", "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"],
+        ]
+        for rule in rules:
+            check = subprocess.run(["iptables", "-C", *rule], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+            if check.returncode != 0:
+                subprocess.run(["iptables", "-I", *rule], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+
+    return True
+
+
+def restore_nested_routed_lan_routes() -> None:
+    """Reapply /32 and proxy-ARP state for saved static LAN containers."""
+    state = lightnas_network_state()
+    if str(state.get("LIGHTNAS_NETWORK_MODE") or "") != "lxc-nat":
+        return
+    try:
+        container_dirs = list(Path("/var/lib/lxc").iterdir())
+    except OSError:
+        return
+    for container_dir in container_dirs:
+        if not container_dir.is_dir() or not NAME_RE.fullmatch(container_dir.name):
+            continue
+        try:
+            settings = container_settings(container_dir.name)
+            if str(settings.get("ipv4Mode") or "") != "manual":
+                continue
+            address = str(settings.get("ipv4Address") or "").strip()
+            gateway = str(settings.get("gateway") or "").strip()
+            if address and gateway:
+                ensure_nested_routed_lan(address, gateway)
+        except Exception:
+            continue
+
+
+
 def create_container(data: dict) -> dict:
     ok, reason, _diagnostics = container_capability()
     if not ok:
