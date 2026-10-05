@@ -523,6 +523,7 @@ def container_records(fast: bool = False) -> list[dict]:
 
 
 def container_summary() -> dict:
+    restore_nested_routed_lan_routes()
     networks = local_networks()
     tools = all(available(name) for name in ["lxc-create", "lxc-start", "lxc-stop", "lxc-attach", "lxc-ls"])
     nested = in_container()
@@ -563,6 +564,7 @@ def container_summary() -> dict:
 
 
 def container_inventory() -> dict:
+    restore_nested_routed_lan_routes()
     ok, reason, diagnostics = container_capability()
     networks = local_networks()
     return {
@@ -1463,6 +1465,13 @@ def create_container(data: dict) -> dict:
     clear_managed_automatic_address(config)
     sanitize_nested_lxc_network(config)
 
+    routed_lan = False
+    if str(data.get("ipv4Mode") or "dhcp") == "manual":
+        routed_lan = ensure_nested_routed_lan(
+            str(data.get("ipv4Address") or ""),
+            str(data.get("gateway") or ""),
+        )
+
     try:
         run(["lxc-start", "-n", name, "-d"], timeout=60)
     except Exception as start_error:
@@ -1571,7 +1580,7 @@ def create_container(data: dict) -> dict:
         "network": network,
         "ipv4": ipv4 or (container_addresses(name)[0] if container_addresses(name) else ""),
         "defaultRoute": default_route,
-        "networkMode": "direct-lan" if direct_lan else "managed",
+        "networkMode": "direct-lan" if direct_lan else ("routed-lan" if routed_lan else "managed"),
         "automaticFallback": automatic_fallback,
         "managedLanPool": managed_pool_assignment,
     }
@@ -1730,10 +1739,16 @@ def container_action(data: dict) -> dict:
         raise ValueError("unknown local LXC container")
     if action == "start":
         sanitize_nested_lxc_network(config)
+        settings = container_settings(name)
+        if str(settings.get("ipv4Mode") or "") == "manual":
+            ensure_nested_routed_lan(str(settings.get("ipv4Address") or ""), str(settings.get("gateway") or ""))
         run(["lxc-start", "-n", name, "-d"], timeout=60)
     elif action in {"stop", "shutdown"}:
         run(["lxc-stop", "-n", name, "-t", "30"], timeout=45)
     elif action == "reboot":
+        settings = container_settings(name)
+        if str(settings.get("ipv4Mode") or "") == "manual":
+            ensure_nested_routed_lan(str(settings.get("ipv4Address") or ""), str(settings.get("gateway") or ""))
         run(["lxc-stop", "-n", name, "-r", "-t", "30"], timeout=60)
     elif action == "repair-network":
         return repair_container_network(name)
@@ -1845,6 +1860,10 @@ def update_container(data: dict) -> dict:
     metadata["gateway"] = gateway
     metadata["dns"] = ", ".join(dns_values)
     metadata_path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+
+    routed_lan = False
+    if mode == "manual":
+        routed_lan = ensure_nested_routed_lan(address, gateway)
 
     # Additional NICs are managed as lxc.net.1+ while lxc.net.0 remains the
     # primary LightNAS interface.
