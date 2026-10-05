@@ -2939,7 +2939,7 @@ function bindViewActions() {
     const url = button.dataset.appOpen;
     if (url) window.open(url, '_blank', 'noopener');
   }));
-  $('[data-app-terminal]', $('#content')).forEach(button => button.addEventListener('click', () => {
+  $$('[data-app-terminal]', $('#content')).forEach(button => button.addEventListener('click', () => {
     const id = button.dataset.appTerminal;
     const name = button.dataset.appName || id;
     const url = `/container-console.html?id=${encodeURIComponent(id)}&name=${encodeURIComponent(name)}&type=app`;
