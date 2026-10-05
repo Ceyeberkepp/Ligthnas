@@ -115,7 +115,7 @@ test('managed application terminal stays inside LightNAS and uses an interactive
   assert.match(app, /function openManagedAppTerminal/);
   assert.match(app, /managed-app-terminal-dialog/);
   assert.match(app, /embedded=1/);
-  assert.match(runtime, /docker[\s\S]*exec[\s\S]*'-i'[\s\S]*'-t'/);
+  assert.match(runtime, /docker[\s\S]*exec[\s\S]*'-i'[\s\S]*TERM=xterm-256color/);
   assert.match(runtime, /exec \/bin\/bash --noprofile --norc -i/);
   assert.match(runtime, /exec \/bin\/sh -i/);
   assert.match(script, /embedded-console/);
