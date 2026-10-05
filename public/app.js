@@ -2236,7 +2236,9 @@ function moduleView(view) {
         }).filter(Boolean);
         const instanceList = namedInstances.length ? `<div class="app-instance-list">${namedInstances.join('')}</div>` : '';
         const installControl = app.community
-          ? `<button class="secondary" type="button" disabled title="Compose installer integration is required before this community app can be deployed safely.">Community package</button>`
+          ? (app.installable
+              ? `<button class="primary" data-community-install="${app.id}">Install</button>`
+              : `<button class="secondary" type="button" disabled title="${escapeHtml(app.installReason || 'This community app is not deployable on this host.')}">Unavailable</button>`)
           : `<button class="primary" data-install="${app.id}" data-instance-count="${instances.length}">Install</button>`;
         return `<article class="panel app-card" data-app-card data-category="${escapeHtml(app.category)}" data-search="${escapeHtml(searchText)}"><span class="eyebrow">${escapeHtml(app.category)}</span><h2>${escapeHtml(app.name)}</h2><p class="muted">${escapeHtml(app.description)}</p><p class="muted app-source">${escapeHtml(app.source || 'Open source')}${app.image ? ` · ${escapeHtml(app.image)}` : ''}${app.port ? ` · Default port ${app.port}` : ''}</p>${instances.length ? `<p class="muted"><b>${instances.length}</b> installed instance${instances.length === 1 ? '' : 's'}</p>` : ''}${instanceList}<div class="head-actions app-install-actions">${installControl}</div></article>`;
       }).join('') || (state.builtinCatalog === null ? '<div class="empty"><p>Loading built-in catalog…</p></div>' : '<div class="empty"><p>No apps match this filter.</p></div>')}</div>
@@ -2887,22 +2889,23 @@ function bindViewActions() {
       if (live) { live.disabled = false; live.textContent = '↻'; live.title = 'Refresh'; live.setAttribute('aria-label', 'Refresh'); }
     }
   }));
-  $$('[data-community-install]', $('#content')).forEach(button => button.addEventListener('click', async () => {
+  $('[data-community-install]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     const docker = state.runtimes?.docker;
     if (!docker?.available || !docker?.enabled) return toast(docker?.reason || 'Docker needs to be installed and enabled on this host before app installation.');
     const app = state.communityCatalog?.apps?.find(item => item.id === button.dataset.communityInstall);
     if (!app) return toast('The selected community application is no longer in the catalog.');
-    if (!confirm(`Install ${app.name} from ${app.source}? LightNAS will download its Compose package, pull the required images, create its services and persistent storage, and start it.`)) return;
+    if (!app.installable) return toast(app.installReason || 'This community application cannot be installed on this host.');
+    if (!confirm(`Install ${app.name} from ${app.source}? LightNAS will use the upstream Docker Compose package, pull its images, create persistent data, and start the application.`)) return;
     button.disabled = true;
     button.textContent = 'Installing…';
-    const progress = window.LightNASProgress?.open(`Installing ${app.name}`, 'Downloading the Compose package and starting application services…', { modal:false });
+    const progress = window.LightNASProgress?.open(`Installing ${app.name}`, 'Downloading the upstream Compose package, pulling images, and starting services…', { modal:false });
     try {
-      await request(`/api/catalog/community/${app.id}/install`, { method:'POST', body:'{}' });
-      await loadRuntimes(true);
+      await request(`/api/catalog/community/${encodeURIComponent(app.id)}/install`, { method:'POST', body:'{}' });
+      await Promise.all([loadRuntimes(true), loadCommunityCatalog(false)]);
       progress?.succeed(`${app.name} installed and started successfully.`);
       toast(`${app.name} installed.`);
     } catch (error) {
-      progress?.fail(error.message); toast(error.message); button.disabled = false; button.textContent = 'Install app';
+      progress?.fail(error.message); toast(error.message); button.disabled = false; button.textContent = 'Install';
     }
   }));
   $$('[data-install]', $('#content')).forEach(button => button.addEventListener('click', async () => {

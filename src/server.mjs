@@ -12,7 +12,7 @@ import { hashPassword, Sessions, verifyPassword } from './auth.mjs';
 import { listFiles, listAllFiles, createFolder, uploadFile, uploadFileChunk, downloadFile, downloadEntry, deleteEntry, fileUsage } from './files.mjs';
 import { thumbnailFor } from './thumbnails.mjs';
 import { catalog, runtimeInventory, vmEditorInventory, vmCreateInventory, installCatalogApp, manageCatalogApp, updateCatalogApp, openContainerShell, createContainer, createVm } from './runtimes-next.mjs';
-import { communityCatalog } from './community-catalog.mjs';
+import { communityCatalog, installCommunityApp } from './community-catalog.mjs';
 import { proxmoxConsoleSocket, proxmoxUpdateStorage, proxmoxCleanDisk } from './proxmox.mjs';
 import { localContainerSummary, localContainerInventory, localManageContainer, localContainerConsoleSocket, localContainerCommand, localVmConsoleSocket, localNodeConsoleSocket, localNetworkInventory, localNetworkAction, localApplianceHealth, localApplianceRepair, localSoftwareStatus, localSoftwareUpdate, localRepairNetworkShares, localSyncShareAdministrator } from './local-host.mjs';
 import { validateSmtp, sendSmtpTest } from './mailer.mjs';
@@ -1887,6 +1887,15 @@ async function api(req, res, url) {
     const refresh = url.searchParams.get('refresh') === '1';
     const community = await communityCatalog({ refresh });
     return send(res, 200, community);
+  }
+  if (req.method === 'POST' && /^\/api\/catalog\/community\/[a-z0-9._-]+\/install$/.test(url.pathname)) {
+    if (!requirePermission(res, permissions, 'apps.manage')) return;
+    const id = decodeURIComponent(url.pathname.split('/')[4] || '');
+    const installed = await installCommunityApp(id);
+    invalidateRuntimeInventory();
+    store.addActivity('app', `Community app ${installed.name || id} was installed from ${installed.source || 'community catalog'}.`);
+    await store.save();
+    return send(res, 201, installed);
   }
   if (req.method === 'GET' && url.pathname === '/api/vms/create-options') {
     if (!requirePermission(res, permissions, 'vms.manage')) return;
