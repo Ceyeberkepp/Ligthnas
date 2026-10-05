@@ -35,3 +35,12 @@ test('community installer preserves unsupported entries as unavailable instead o
   assert.match(catalog, /does not provide a Docker Compose manifest/);
   assert.match(catalog, /does not support this CPU architecture/);
 });
+
+test('community catalog refresh never wipes a healthy cached catalog when a source fails', async () => {
+  const catalog = await readFile(new URL('../src/community-catalog.mjs', import.meta.url), 'utf8');
+  assert.match(catalog, /cachedBySource/);
+  assert.match(catalog, /keeping cached catalog/);
+  assert.match(catalog, /unknownCachedApps/);
+  assert.match(catalog, /shouldWrite = deduped\.length > 0 \|\| !cachedApps\.length/);
+  assert.doesNotMatch(catalog, /writeFile\(CACHE_FILE,[\s\S]*if \(!deduped\.length && cached\?\.apps\?\.length\)/);
+});
