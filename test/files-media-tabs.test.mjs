@@ -45,3 +45,19 @@ test('sidebar file subtabs do not break global navigation startup binding', asyn
   assert.match(app, /\$\$\('\[data-view\]'\)\.forEach\(link => link\.addEventListener\('click'/);
   assert.doesNotMatch(app, /[^$]\$\('\[data-view\]'\)\.forEach/);
 });
+
+test('Files sidebar children can collapse and Folders never renders as photo gallery', async () => {
+  const [app, index, styles] = await Promise.all([
+    readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
+    readFile(new URL('../public/index.html', import.meta.url), 'utf8'),
+    readFile(new URL('../public/styles.css', import.meta.url), 'utf8')
+  ]);
+  assert.match(index, /data-files-nav-toggle/);
+  assert.match(index, /data-files-nav-subtabs/);
+  assert.match(app, /filesNavExpanded/);
+  assert.match(app, /lightnas-files-nav-expanded/);
+  assert.match(app, /effectiveFileView = foldersMode \? 'grid' : state\.fileView/);
+  assert.match(styles, /\.nav-files-subtabs\[hidden\]/);
+  assert.match(styles, /font-size: 13px/);
+  assert.match(styles, /font-weight: 600/);
+});
