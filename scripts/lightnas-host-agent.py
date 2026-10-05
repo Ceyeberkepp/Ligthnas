@@ -1359,6 +1359,7 @@ def create_container(data: dict) -> dict:
     network_state = lightnas_network_state()
     nested_mode = str(network_state.get("LIGHTNAS_NETWORK_MODE") or "")
     nested_direct = nested_mode in {"nested-macvlan", "nested-ipvlan"}
+    nested_nat = nested_mode == "lxc-nat"
     if nested_direct:
         # In a nested Proxmox LightNAS appliance, container networking is not
         # a per-app choice. Every new system container uses the already-working
@@ -1374,6 +1375,17 @@ def create_container(data: dict) -> dict:
             "dns": "",
             "vlanTag": None,
         }
+    elif nested_nat:
+        # The UI intentionally exposes the appliance LAN uplink (for example
+        # eth0). The nested LXC itself must still attach to LightNAS's internal
+        # bridge; routed/proxy-ARP mode makes a user-selected LAN address
+        # reachable without moving the appliance management address.
+        uplink = str(network_state.get("LIGHTNAS_UPLINK") or "eth0")
+        internal_bridge = str(network_state.get("LIGHTNAS_CONTAINER_BRIDGE") or "lightnas0")
+        if requested_network and requested_network not in {uplink, internal_bridge}:
+            raise ValueError("selected container network is not available")
+        network = internal_bridge
+        data = {**data, "network": uplink}
     else:
         network = requested_network if requested_network in networks else (networks[0] if networks else "")
     try:
@@ -1387,7 +1399,8 @@ def create_container(data: dict) -> dict:
     image = IMAGE_BY_ID.get(image_id)
     if not template_path and (not image or (in_container() and not image.get("nested", True))):
         raise ValueError("select a Linux system-container image or imported LightNAS template")
-    if not network or not IFACE_RE.fullmatch(network) or network not in networks:
+    valid_nested_nat_bridge = nested_nat and network == str(network_state.get("LIGHTNAS_CONTAINER_BRIDGE") or "lightnas0")
+    if not network or not IFACE_RE.fullmatch(network) or (network not in networks and not valid_nested_nat_bridge):
         raise ValueError("no active local container bridge is available")
     host_cpus = max(1, os.cpu_count() or 1)
     if not (256 <= memory <= 65536 and 1 <= cpus <= min(32, host_cpus) and 2 <= disk_gib <= 2048):
@@ -1787,17 +1800,24 @@ def update_container(data: dict) -> dict:
     requested_network = str(data.get("network") or "").strip()
     if requested_network:
         networks = local_networks()
-        if requested_network not in networks:
-            raise ValueError("selected container network is not available")
         network_state = lightnas_network_state()
         nested_mode = str(network_state.get("LIGHTNAS_NETWORK_MODE") or "")
+        actual_network = requested_network
+        if nested_mode == "lxc-nat":
+            uplink = str(network_state.get("LIGHTNAS_UPLINK") or "eth0")
+            internal_bridge = str(network_state.get("LIGHTNAS_CONTAINER_BRIDGE") or "lightnas0")
+            if requested_network not in {uplink, internal_bridge}:
+                raise ValueError("selected container network is not available")
+            actual_network = internal_bridge
+        elif requested_network not in networks:
+            raise ValueError("selected container network is not available")
         direct_lan = (
             nested_mode in {"nested-macvlan", "nested-ipvlan"}
-            and requested_network == str(network_state.get("LIGHTNAS_CONTAINER_PARENT") or network_state.get("LIGHTNAS_UPLINK") or "eth0")
+            and actual_network == str(network_state.get("LIGHTNAS_CONTAINER_PARENT") or network_state.get("LIGHTNAS_UPLINK") or "eth0")
         )
         direct_type = "macvlan" if nested_mode == "nested-macvlan" else ("ipvlan" if nested_mode == "nested-ipvlan" else "veth")
         append_unique(config, f"lxc.net.0.type = {direct_type if direct_lan else 'veth'}")
-        append_unique(config, f"lxc.net.0.link = {requested_network}")
+        append_unique(config, f"lxc.net.0.link = {actual_network}")
         if direct_lan and direct_type == "macvlan":
             append_unique(config, "lxc.net.0.macvlan.mode = bridge")
         if direct_lan and direct_type == "ipvlan":
