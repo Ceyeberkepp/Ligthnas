@@ -10,7 +10,7 @@ test('container console uses Xterm, keepalives and automatic reconnect', async (
     readFile(new URL('../public/vm-console.html', import.meta.url), 'utf8'),
     readFile(new URL('../public/vm-console.js', import.meta.url), 'utf8')
   ]);
-  assert.match(page, /src="\/container-console\.js\?v=20260922-5"/);
+  assert.match(page, /src="\/container-console\.js\?v=20261005-1"/);
   assert.match(page, /href="\/xterm\/css\/xterm\.css"/);
   assert.match(page, /src="\/xterm\/lib\/xterm\.js"/);
   assert.match(page, /src="\/xterm-addon-fit\/lib\/addon-fit\.js"/);
@@ -21,6 +21,7 @@ test('container console uses Xterm, keepalives and automatic reconnect', async (
   assert.match(script, /terminal\.onData/);
   assert.match(script, /terminal\.onBinary/);
   assert.match(script, /Connected · interactive terminal/);
+  assert.match(script, /convertEol: true/);
   assert.match(script, /ResizeObserver/);
   assert.match(script, /scheduleReconnect/);
   assert.match(script, /Reconnecting in/);
@@ -111,7 +112,9 @@ test('managed application terminal opens in a separate browser window and keeps 
   ]);
   assert.match(app, /container-console\\.html\\?id=/);
   assert.match(app, /type=app/);
-  assert.match(app, /window\\.open\\(url, '_blank', 'noopener'\\)/);
+  assert.match(app, /popup=yes/);
+  assert.match(app, /lightnas-terminal-/);
+  assert.match(app, /terminalWindow\\.focus\\(\\)/);
   assert.doesNotMatch(app, /function openManagedAppTerminal/);
   assert.doesNotMatch(app, /managed-app-terminal-dialog/);
   assert.match(runtime, /docker[\\s\\S]*exec[\\s\\S]*'-i'[\\s\\S]*TERM=xterm-256color/);

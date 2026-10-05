@@ -21,7 +21,7 @@ if (!window.Terminal || !window.FitAddon?.FitAddon) {
 
 const terminal = new window.Terminal({
   cursorBlink: true,
-  convertEol: false,
+  convertEol: true,
   scrollback: 10000,
   fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace',
   fontSize: 14,

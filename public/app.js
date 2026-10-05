@@ -2943,7 +2943,17 @@ function bindViewActions() {
     const id = button.dataset.appTerminal;
     const name = button.dataset.appName || id;
     const url = `/container-console.html?id=${encodeURIComponent(id)}&name=${encodeURIComponent(name)}&type=app`;
-    window.open(url, '_blank', 'noopener');
+    const width = Math.min(1200, Math.max(760, screen.availWidth - 120));
+    const height = Math.min(850, Math.max(560, screen.availHeight - 120));
+    const left = Math.max(0, Math.round((screen.availWidth - width) / 2));
+    const top = Math.max(0, Math.round((screen.availHeight - height) / 2));
+    const terminalWindow = window.open(
+      url,
+      `lightnas-terminal-${id}`,
+      `popup=yes,width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`
+    );
+    if (terminalWindow) terminalWindow.focus();
+    else toast('The browser blocked the terminal window. Allow pop-ups for this LightNAS site.');
   }));
   $$('[data-app-action]', $('#content')).forEach(button => button.addEventListener('click', async () => {
     const { appId, appAction, appInstance, appHostPort } = button.dataset;
