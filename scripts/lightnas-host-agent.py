@@ -330,36 +330,63 @@ def container_settings(name: str) -> dict:
     live_gateway = ""
     live_dns: list[str] = []
     if lxc_state(name) == "running":
+        # Detect the actual default interface instead of assuming eth0. Imported
+        # or rebuilt containers may use a different guest interface name.
+        live_device = ""
         try:
-            live_ip = run(
-                ["lxc-attach", "-n", name, "--", "ip", "-4", "-o", "addr", "show", "dev", "eth0", "scope", "global"],
+            live_route = run(
+                ["lxc-attach", "-n", name, "--", "ip", "-4", "route", "show", "default"],
                 timeout=5, check=False,
             )
+            gateway_match = re.search(r"\\bvia\\s+([0-9.]+)", live_route)
+            device_match = re.search(r"\\bdev\\s+([^\\s]+)", live_route)
+            live_gateway = gateway_match.group(1).strip() if gateway_match else ""
+            live_device = device_match.group(1).strip() if device_match else ""
+        except Exception:
+            pass
+
+        try:
+            address_args = ["lxc-attach", "-n", name, "--", "ip", "-4", "-o", "addr", "show"]
+            if live_device:
+                address_args += ["dev", live_device]
+            address_args += ["scope", "global"]
+            live_ip = run(address_args, timeout=5, check=False)
             match = re.search(r"\\binet\\s+([^\\s]+)", live_ip)
             live_address = match.group(1).strip() if match else ""
         except Exception:
             pass
-        try:
-            live_route = run(
-                ["lxc-attach", "-n", name, "--", "ip", "-4", "route", "show", "default", "dev", "eth0"],
-                timeout=5, check=False,
-            )
-            match = re.search(r"\\bvia\\s+([0-9.]+)", live_route)
-            live_gateway = match.group(1).strip() if match else ""
-        except Exception:
-            pass
-        try:
-            resolv = run(["lxc-attach", "-n", name, "--", "cat", "/etc/resolv.conf"], timeout=5, check=False)
-            for item in re.findall(r"^nameserver\\s+([^\\s#]+)", resolv, re.MULTILINE):
-                value = item.strip()
-                try:
-                    parsed = ipaddress.ip_address(value)
-                    if not parsed.is_loopback:
-                        live_dns.append(value)
-                except ValueError:
-                    continue
-        except Exception:
-            pass
+
+        # systemd-resolved commonly leaves /etc/resolv.conf pointing at
+        # 127.0.0.53. Ask resolvectl first, then inspect the real resolver file.
+        resolver_texts: list[str] = []
+        if live_device:
+            try:
+                resolver_texts.append(run(
+                    ["lxc-attach", "-n", name, "--", "resolvectl", "dns", live_device],
+                    timeout=5, check=False,
+                ))
+            except Exception:
+                pass
+        for resolver_path in ("/run/systemd/resolve/resolv.conf", "/etc/resolv.conf"):
+            try:
+                resolver_texts.append(run(
+                    ["lxc-attach", "-n", name, "--", "cat", resolver_path],
+                    timeout=5, check=False,
+                ))
+            except Exception:
+                pass
+        for resolver_text in resolver_texts:
+            candidates = re.findall(r"^nameserver\\s+([^\\s#]+)", resolver_text, re.MULTILINE)
+            candidates += re.findall(r"\\b(?:DNS Servers?|Current DNS Server):\\s*(.+)$", resolver_text, re.MULTILINE)
+            for candidate in candidates:
+                for item in str(candidate).split():
+                    value = item.strip()
+                    try:
+                        parsed = ipaddress.ip_address(value)
+                        if not parsed.is_loopback and value not in live_dns:
+                            live_dns.append(value)
+                    except ValueError:
+                        continue
 
     extra_nics = []
     nic_indexes = sorted({
@@ -1645,15 +1672,24 @@ def update_container(data: dict) -> dict:
     for existing in network_dir.glob("*.network"):
         if existing.is_file() or existing.is_symlink():
             existing.unlink()
-    lines = ["[Match]", "Name=eth0", "", "[Network]"]
+    guest_interface = "eth0"
+    try:
+        config_text = config.read_text(encoding="utf-8")
+        name_match = re.search(r"^lxc\.net\.0\.name\s*=\s*(\S+)\s*$", config_text, re.MULTILINE)
+        if name_match and IFACE_RE.fullmatch(name_match.group(1)):
+            guest_interface = name_match.group(1)
+    except OSError:
+        pass
+
+    lines = ["[Match]", f"Name={guest_interface}", "", "[Network]"]
     if mode == "dhcp":
         lines += ["DHCP=ipv4", "IPv6AcceptRA=yes"]
     else:
         lines.append(f"Address={address}")
         if gateway:
             lines.append(f"Gateway={gateway}")
-        for item in dns_values:
-            lines.append(f"DNS={item}")
+    for item in dns_values:
+        lines.append(f"DNS={item}")
     (network_dir / "10-lightnas-eth0.network").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     metadata_path = config.parent / "lightnas.json"
@@ -1738,12 +1774,36 @@ def update_container(data: dict) -> dict:
     if lxc_state(current) == "running":
         subprocess.run(["lxc-cgroup", "-n", current, "memory.max", str(memory * 1024 * 1024)], check=False, capture_output=True)
         subprocess.run(["lxc-cgroup", "-n", current, "cpu.max", f"{cpus * 100000} 100000"], check=False, capture_output=True)
+
+        # Restart the persistent guest network manager first.
         subprocess.run(
             ["lxc-attach", "-n", current, "--", "systemctl", "restart", "systemd-networkd.service"],
             check=False, capture_output=True, timeout=30,
         )
+
         if mode == "dhcp":
             kick_container_dhcp(current)
+        else:
+            # Apply the saved static settings to the running guest immediately.
+            # This avoids showing a stale DHCP lease until the next reboot.
+            run(["lxc-attach", "-n", current, "--", "ip", "link", "set", guest_interface, "up"], timeout=10, check=False)
+            run(["lxc-attach", "-n", current, "--", "ip", "-4", "addr", "flush", "dev", guest_interface, "scope", "global"], timeout=10, check=False)
+            run(["lxc-attach", "-n", current, "--", "ip", "addr", "add", address, "dev", guest_interface], timeout=10, check=False)
+            if gateway:
+                run(["lxc-attach", "-n", current, "--", "ip", "route", "replace", "default", "via", gateway, "dev", guest_interface], timeout=10, check=False)
+
+        # Apply an explicit resolver override when requested. resolvectl is
+        # preferred because /etc/resolv.conf is often the 127.0.0.53 stub.
+        if dns_values:
+            resolvectl = run(["lxc-attach", "-n", current, "--", "sh", "-lc", "command -v resolvectl || true"], timeout=5, check=False).strip()
+            if resolvectl:
+                run(["lxc-attach", "-n", current, "--", "resolvectl", "dns", guest_interface, *dns_values], timeout=10, check=False)
+                run(["lxc-attach", "-n", current, "--", "resolvectl", "domain", guest_interface, "~."], timeout=10, check=False)
+            else:
+                resolver_body = "".join(f"nameserver {value}\\n" for value in dns_values)
+                escaped = resolver_body.replace("'", "'\\''")
+                run(["lxc-attach", "-n", current, "--", "sh", "-lc", f"printf '%s' '{escaped}' > /etc/resolv.conf"], timeout=10, check=False)
+
     live_ipv4 = next((value for value in container_addresses(current) if ":" not in value), "")
     automatic_fallback = False
     if mode == "dhcp" and lxc_state(current) == "running" and not live_ipv4:
@@ -1756,12 +1816,17 @@ def update_container(data: dict) -> dict:
             live_ipv4 = apply_managed_automatic_address(current, config)
             automatic_fallback = True
 
+    updated_settings = container_settings(current)
     return {
         "id": current, "name": current, "memoryMiB": memory, "cpus": cpus,
         "network": requested_network, "ipv4Mode": mode, "ipv4Address": address,
         "gateway": gateway, "dns": ", ".join(dns_values),
         "startOnBoot": bool(data.get("startOnBoot", True)), "status": "updated",
-        "ipv4": live_ipv4, "automaticFallback": automatic_fallback,
+        "ipv4": live_ipv4 or str(updated_settings.get("liveIpv4Address") or "").split("/", 1)[0],
+        "liveIpv4Address": updated_settings.get("liveIpv4Address") or "",
+        "liveGateway": updated_settings.get("liveGateway") or "",
+        "liveDns": updated_settings.get("liveDns") or "",
+        "automaticFallback": automatic_fallback,
     }
 
 

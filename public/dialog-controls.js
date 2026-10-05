@@ -704,9 +704,10 @@ function showRuntimeDeleteDialog(kind, id) {
 
 // Register before enhancements/admin-security so these native LightNAS dialogs
 async function showContainerManager(id) {
-  const cachedRuntime = window.LightNASContainerInventory;
   const cachedOverview = window.LightNASOverview;
-  const runtimePromise = cachedRuntime ? Promise.resolve(cachedRuntime) : dialogApi('/api/containers/inventory?summary=1');
+  // Container settings must reflect the current guest/LXC state, especially
+  // after a network change. Do not reopen the manager from a stale inventory.
+  const runtimePromise = dialogApi('/api/containers/inventory?summary=1');
   const overviewPromise = cachedOverview ? Promise.resolve(cachedOverview) : dialogApi('/api/overview').catch(() => ({ activity: [], appliance: {} }));
   const [runtime, overview] = await Promise.all([runtimePromise, overviewPromise]);
   window.LightNASContainerInventory = runtime;
@@ -775,7 +776,7 @@ async function showContainerManager(id) {
       <div class="container-manager-layout">
         <nav class="container-manager-tabs" aria-label="Container settings">
           ${[
-            ['resources','Resources'],['storageDevices','Storage & devices'],['network','Network'],['dns','DNS'],['application','Application access'],['options','Options'],
+            ['resources','Resources'],['storageDevices','Storage & devices'],['network','Network'],['application','Application access'],['options','Options'],
             ['tasks','Task history'],['backups','Backups'],['replication','Replication'],
             ['snapshots','Snapshots'],['firewall','Firewall'],['permissions','Permissions']
           ].map(([key,label], index) => `<button type="button" class="${index ? '' : 'active'}" data-container-tab="${key}">${label}</button>`).join('')}
@@ -821,6 +822,7 @@ async function showContainerManager(id) {
               <label>IPv4 configuration<select name="ipv4Mode"><option value="dhcp" ${item.ipv4Mode !== 'manual' ? 'selected' : ''}>DHCP</option><option value="manual" ${item.ipv4Mode === 'manual' ? 'selected' : ''}>Static</option></select></label>
               <label>Configured IPv4 address / prefix<input name="ipv4Address" value="${dialogEsc(item.ipv4Address || '')}" placeholder="192.168.1.50/24"></label>
               <label>Configured gateway<input name="gateway" value="${dialogEsc(item.gateway || '')}" placeholder="192.168.1.1"></label>
+              <label>DNS servers<input name="dns" value="${dialogEsc(item.dns || '')}" placeholder="1.1.1.1, 8.8.8.8"><small>Comma-separated. Leave blank to use DHCP-provided DNS.</small></label>
               <label>MAC address<input value="${dialogEsc(item.macAddress || 'Automatically assigned')}" readonly></label>
             </div>
             <div class="manager-summary live-network-summary">
@@ -835,11 +837,6 @@ async function showContainerManager(id) {
               <div class="hardware-list" data-extra-nics>${extraNicRows || '<p class="muted" data-no-extra-nics>No additional NICs configured.</p>'}</div>
             </div>
 <p class="module-note">Changing a running container’s address may temporarily interrupt its application connections. The LightNAS terminal uses the local host channel and remains available.</p>
-          </section>
-          <section data-container-panel="dns" hidden>
-            <h3>DNS</h3>
-            <label>DNS servers<input name="dns" value="${dialogEsc(item.dns || '')}" placeholder="1.1.1.1, 8.8.8.8"></label>
-            <p class="muted">Enter comma-separated IPv4 or IPv6 DNS server addresses. DHCP may also supply DNS when this field is empty.</p>
           </section>
           <section data-container-panel="application" hidden>
             <h3>Application access</h3>
@@ -932,11 +929,12 @@ async function showContainerManager(id) {
     const manual = mode.value === 'manual';
     const addressField = dialog.querySelector('[name="ipv4Address"]');
     const gatewayField = dialog.querySelector('[name="gateway"]');
-    const dnsField = dialog.querySelector('[name="dns"]');
     addressField.required = manual;
     addressField.disabled = !manual;
     gatewayField.disabled = !manual;
-    dnsField.disabled = !manual;
+    // DNS is allowed as an override for either DHCP or static IPv4.
+    const dnsField = dialog.querySelector('[name="dns"]');
+    if (dnsField) dnsField.disabled = false;
   };
   mode.addEventListener('change', updateNetworkFields);
   updateNetworkFields();
@@ -1002,6 +1000,7 @@ async function showContainerManager(id) {
         publishWarning = problem.message || 'Application access is not ready yet.';
       }
 
+      window.LightNASContainerInventory = null;
       dialog.close();
       refreshRuntime();
       const detectedUrl = access?.accessUrl || (access?.mode === 'direct'

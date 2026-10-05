@@ -1,4 +1,5 @@
 const params = new URLSearchParams(location.search);
+if (params.get('embedded') === '1') document.documentElement.classList.add('embedded-console');
 const id = params.get('id') || '';
 const name = params.get('name') || id;
 const type = params.get('type') === 'app' ? 'app' : 'container';
