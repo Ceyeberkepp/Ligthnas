@@ -1311,7 +1311,7 @@ def ensure_nested_routed_lan(address: str, gateway: str) -> bool:
     if available("iptables"):
         rules = [
             ["FORWARD", "-i", bridge, "-o", uplink, "-s", f"{host}/32", "-j", "ACCEPT"],
-            ["FORWARD", "-i", uplink, "-o", bridge, "-d", f"{host}/32", "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"],
+            ["FORWARD", "-i", uplink, "-o", bridge, "-d", f"{host}/32", "-j", "ACCEPT"],
         ]
         for rule in rules:
             check = subprocess.run(["iptables", "-C", *rule], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
@@ -3690,6 +3690,12 @@ if __name__ == "__main__":
         gid = 0
     os.chown(SOCKET_PATH, 0, gid)
     os.chmod(SOCKET_PATH, 0o660)
+    # Rehydrate routed-LAN /32 routes and proxy-ARP entries immediately after
+    # the privileged host agent starts, before the web UI is opened.
+    try:
+        restore_nested_routed_lan_routes()
+    except Exception:
+        pass
     try:
         server.serve_forever()
     finally:
