@@ -330,36 +330,63 @@ def container_settings(name: str) -> dict:
     live_gateway = ""
     live_dns: list[str] = []
     if lxc_state(name) == "running":
+        # Detect the actual default interface instead of assuming eth0. Imported
+        # or rebuilt containers may use a different guest interface name.
+        live_device = ""
         try:
-            live_ip = run(
-                ["lxc-attach", "-n", name, "--", "ip", "-4", "-o", "addr", "show", "dev", "eth0", "scope", "global"],
+            live_route = run(
+                ["lxc-attach", "-n", name, "--", "ip", "-4", "route", "show", "default"],
                 timeout=5, check=False,
             )
+            gateway_match = re.search(r"\\bvia\\s+([0-9.]+)", live_route)
+            device_match = re.search(r"\\bdev\\s+([^\\s]+)", live_route)
+            live_gateway = gateway_match.group(1).strip() if gateway_match else ""
+            live_device = device_match.group(1).strip() if device_match else ""
+        except Exception:
+            pass
+
+        try:
+            address_args = ["lxc-attach", "-n", name, "--", "ip", "-4", "-o", "addr", "show"]
+            if live_device:
+                address_args += ["dev", live_device]
+            address_args += ["scope", "global"]
+            live_ip = run(address_args, timeout=5, check=False)
             match = re.search(r"\\binet\\s+([^\\s]+)", live_ip)
             live_address = match.group(1).strip() if match else ""
         except Exception:
             pass
-        try:
-            live_route = run(
-                ["lxc-attach", "-n", name, "--", "ip", "-4", "route", "show", "default", "dev", "eth0"],
-                timeout=5, check=False,
-            )
-            match = re.search(r"\\bvia\\s+([0-9.]+)", live_route)
-            live_gateway = match.group(1).strip() if match else ""
-        except Exception:
-            pass
-        try:
-            resolv = run(["lxc-attach", "-n", name, "--", "cat", "/etc/resolv.conf"], timeout=5, check=False)
-            for item in re.findall(r"^nameserver\\s+([^\\s#]+)", resolv, re.MULTILINE):
-                value = item.strip()
-                try:
-                    parsed = ipaddress.ip_address(value)
-                    if not parsed.is_loopback:
-                        live_dns.append(value)
-                except ValueError:
-                    continue
-        except Exception:
-            pass
+
+        # systemd-resolved commonly leaves /etc/resolv.conf pointing at
+        # 127.0.0.53. Ask resolvectl first, then inspect the real resolver file.
+        resolver_texts: list[str] = []
+        if live_device:
+            try:
+                resolver_texts.append(run(
+                    ["lxc-attach", "-n", name, "--", "resolvectl", "dns", live_device],
+                    timeout=5, check=False,
+                ))
+            except Exception:
+                pass
+        for resolver_path in ("/run/systemd/resolve/resolv.conf", "/etc/resolv.conf"):
+            try:
+                resolver_texts.append(run(
+                    ["lxc-attach", "-n", name, "--", "cat", resolver_path],
+                    timeout=5, check=False,
+                ))
+            except Exception:
+                pass
+        for resolver_text in resolver_texts:
+            candidates = re.findall(r"^nameserver\\s+([^\\s#]+)", resolver_text, re.MULTILINE)
+            candidates += re.findall(r"\\b(?:DNS Servers?|Current DNS Server):\\s*(.+)$", resolver_text, re.MULTILINE)
+            for candidate in candidates:
+                for item in str(candidate).split():
+                    value = item.strip()
+                    try:
+                        parsed = ipaddress.ip_address(value)
+                        if not parsed.is_loopback and value not in live_dns:
+                            live_dns.append(value)
+                    except ValueError:
+                        continue
 
     extra_nics = []
     nic_indexes = sorted({
