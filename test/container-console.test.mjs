@@ -130,3 +130,10 @@ test('managed app terminal bindings use the multi-element selector helper', asyn
   assert.match(app, /\$\$\('\[data-app-terminal\]', \$\('#content'\)\)\.forEach/);
   assert.doesNotMatch(app, /(^|[^$])\$\('\[data-app-terminal\]', \$\('#content'\)\)\.forEach/m);
 });
+
+test('embedded terminal page may be framed only by the same LightNAS origin', async () => {
+  const server = await readFile(new URL('../src/server.mjs', import.meta.url), 'utf8');
+  assert.match(server, /const embeddedConsoleCsp = csp\.replace\("frame-ancestors 'none'", "frame-ancestors 'self'"\)/);
+  assert.match(server, /url\.pathname === '\/container-console\.html' \? embeddedConsoleCsp : csp/);
+  assert.match(server, /frame-ancestors 'none'/);
+});
