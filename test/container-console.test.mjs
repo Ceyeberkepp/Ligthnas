@@ -104,24 +104,19 @@ test('VM console connects before accepting the browser and remains open while id
 });
 
 
-test('managed application terminal stays inside LightNAS and uses an interactive Docker PTY', async () => {
-  const [app, runtime, page, script, styles] = await Promise.all([
+test('managed application terminal opens in a separate browser window and keeps an interactive Docker shell', async () => {
+  const [app, runtime] = await Promise.all([
     readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
-    readFile(new URL('../src/runtimes-next.mjs', import.meta.url), 'utf8'),
-    readFile(new URL('../public/container-console.html', import.meta.url), 'utf8'),
-    readFile(new URL('../public/container-console.js', import.meta.url), 'utf8'),
-    readFile(new URL('../public/styles.css', import.meta.url), 'utf8')
+    readFile(new URL('../src/runtimes-next.mjs', import.meta.url), 'utf8')
   ]);
-  assert.match(app, /function openManagedAppTerminal/);
-  assert.match(app, /managed-app-terminal-dialog/);
-  assert.match(app, /embedded=1/);
-  assert.match(runtime, /docker[\s\S]*exec[\s\S]*'-i'[\s\S]*TERM=xterm-256color/);
-  assert.match(runtime, /exec \/bin\/bash --noprofile --norc -i/);
-  assert.match(runtime, /exec \/bin\/sh -i/);
-  assert.match(script, /embedded-console/);
-  assert.match(page, /html\.embedded-console header/);
-  assert.match(styles, /\.embedded-terminal-dialog/);
-  assert.match(styles, /\.embedded-terminal-frame/);
+  assert.match(app, /container-console\\.html\\?id=/);
+  assert.match(app, /type=app/);
+  assert.match(app, /window\\.open\\(url, '_blank', 'noopener'\\)/);
+  assert.doesNotMatch(app, /function openManagedAppTerminal/);
+  assert.doesNotMatch(app, /managed-app-terminal-dialog/);
+  assert.match(runtime, /docker[\\s\\S]*exec[\\s\\S]*'-i'[\\s\\S]*TERM=xterm-256color/);
+  assert.match(runtime, /exec \\/bin\\/bash --noprofile --norc -i/);
+  assert.match(runtime, /exec \\/bin\\/sh -i/);
 });
 
 
