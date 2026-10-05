@@ -1006,6 +1006,7 @@ def configure_container_guest(config: Path, data: dict) -> None:
         except ValueError as exc:
             raise ValueError("invalid static IPv4 address, gateway, or DNS server") from exc
 
+    routed_next_hop = ""
     systemd_present = (rootfs / "usr" / "lib" / "systemd").exists() or (rootfs / "lib" / "systemd").exists()
     if mode == "manual" and not systemd_present:
         raise ValueError("static networking currently requires a systemd-based container image")
@@ -1369,6 +1370,25 @@ def ensure_nested_routed_lan(address: str, gateway: str) -> bool:
             check = subprocess.run(["iptables", "-C", *rule], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
             if check.returncode != 0:
                 subprocess.run(["iptables", "-I", *rule], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+
+        # The outer Proxmox LXC may enforce source-IP anti-spoofing and reject
+        # Internet traffic sourced directly from the inner container's LAN IP.
+        # Masquerade only traffic leaving the configured LAN; local LAN traffic
+        # keeps the container's 192.168.x.x identity and proxy-ARP route.
+        lan_cidr = str(context["network"])
+        nat_rule = [
+            "POSTROUTING", "-s", f"{host}/32", "!", "-d", lan_cidr,
+            "-o", uplink, "-j", "MASQUERADE",
+        ]
+        check = subprocess.run(
+            ["iptables", "-t", "nat", "-C", *nat_rule],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+        )
+        if check.returncode != 0:
+            subprocess.run(
+                ["iptables", "-t", "nat", "-I", *nat_rule],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+            )
 
     return True
 
