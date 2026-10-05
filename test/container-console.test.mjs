@@ -117,7 +117,7 @@ test('managed application terminal opens in a separate browser window and keeps 
   assert.match(app, /terminalWindow\\.focus\\(\\)/);
   assert.doesNotMatch(app, /function openManagedAppTerminal/);
   assert.doesNotMatch(app, /managed-app-terminal-dialog/);
-  assert.match(runtime, /docker[\\s\\S]*exec[\\s\\S]*'-i'[\\s\\S]*TERM=xterm-256color/);
+  assert.match(runtime, /docker[\\s\\S]*exec[\\s\\S]*--privileged[\\s\\S]*--user[\\s\\S]*0:0[\\s\\S]*'-i'[\\s\\S]*TERM=xterm-256color/);
   assert.match(runtime, /exec \\/bin\\/bash --noprofile --norc -i/);
   assert.match(runtime, /exec \\/bin\\/sh -i/);
 });
@@ -134,4 +134,24 @@ test('embedded terminal page may be framed only by the same LightNAS origin', as
   assert.match(server, /const embeddedConsoleCsp = csp\.replace\("frame-ancestors 'none'", "frame-ancestors 'self'"\)/);
   assert.match(server, /url\.pathname === '\/container-console\.html' \? embeddedConsoleCsp : csp/);
   assert.match(server, /frame-ancestors 'none'/);
+});
+
+test('managed application settings support app credentials and container root password', async () => {
+  const [app, dialog, runtime] = await Promise.all([
+    readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
+    readFile(new URL('../public/dialog-controls.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/runtimes-next.mjs', import.meta.url), 'utf8')
+  ]);
+  assert.match(app, /requiresAdminUsername/);
+  assert.match(app, /setup\.adminUsername/);
+  assert.match(app, /data-app-instance/);
+  assert.match(dialog, /Application administrator username/);
+  assert.match(dialog, /New application administrator password/);
+  assert.match(dialog, /New container root password/);
+  assert.match(dialog, /Privileged root · UID 0/);
+  assert.match(runtime, /credentialManager: 'semaphore-cli'/);
+  assert.match(runtime, /semaphore'[\s\S]*user[\s\S]*change-by-/);
+  assert.match(runtime, /dockerExecWithInput/);
+  assert.match(runtime, /rootPasswordConfigured/);
+  assert.doesNotMatch(runtime, /appPasswordConfigured/);
 });

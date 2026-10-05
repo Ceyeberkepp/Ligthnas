@@ -1236,22 +1236,24 @@ function containersView() {
     ? '<div class="empty compact-empty"><p>Loading App Store containers…</p></div>'
     : appContainers.length
       ? `<div class="compute-table app-container-table"><div class="compute-table-head"><span>Status</span><span>App / Container</span><span>Access</span><span>Resources</span><span>Image</span><span></span></div>${appContainers.map(item => {
-          const appId = String(item.name || '').replace(/^lightnas-app-/, '');
+          const appId = String(item.catalogId || String(item.name || '').replace(/^lightnas-app-/, ''));
+          const instanceName = String(item.instanceName || 'default');
           const app = state.runtimes?.catalog?.find(entry => entry.id === appId);
           const running = /running|up/i.test(String(item.state || item.status || ''));
           const hostAddress = state.overview?.system?.network?.primaryIpv4 || location.hostname;
-          const appUrl = app?.port ? `http://${hostAddress}:${app.port}/` : '';
+          const appPort = Number(item.webPort || (instanceName === 'default' ? app?.port : 0) || 0);
+          const appUrl = appPort ? `http://${hostAddress}:${appPort}/` : '';
           const cpuText = item.cpuUnlimited ? `Unlimited · host ${state.overview?.system?.cpu?.cores || '—'} CPUs` : `${item.cpus || 0} CPU`;
           const memoryText = item.memory ? bytes(item.memory) : 'No memory cap';
           const liveCpu = item.liveStats ? `${Number(item.cpuPercent || 0).toFixed(1)}% CPU now` : 'CPU usage unavailable';
           const liveMemory = item.liveStats ? `${item.memoryUsage || '—'} RAM now${item.memoryPercent ? ` · ${Number(item.memoryPercent).toFixed(1)}%` : ''}` : 'RAM usage unavailable';
-          return `<article class="compute-row app-container-row"><span class="compute-status"><i class="${running ? 'online' : 'offline'}"></i>${escapeHtml(item.status || item.state || 'unknown')}</span><div><h3>${escapeHtml(app?.name || appId || item.name)}</h3><small>${escapeHtml(item.name)} · App Store managed · Docker / OCI</small></div><div class="app-access-cell">${appUrl ? `<a href="${escapeHtml(appUrl)}" target="_blank" rel="noopener">Open: ${escapeHtml(hostAddress)}:${escapeHtml(app.port)}</a>` : '<span>No web port</span>'}<small>Container IP: ${escapeHtml(item.ip || 'not assigned')} ${item.ports ? `· ${escapeHtml(item.ports)}` : ''}</small></div><div class="app-resource-cell"><b>${escapeHtml(liveCpu)} · ${escapeHtml(liveMemory)}</b><small>Limit: ${escapeHtml(cpuText)} · ${escapeHtml(memoryText)} · restart ${escapeHtml(item.restartPolicy || 'no')}</small></div><span class="compute-truncate" title="${escapeHtml(item.image || '')}">${escapeHtml(item.image || '—')}</span><div class="runtime-actions compute-actions">
+          return `<article class="compute-row app-container-row"><span class="compute-status"><i class="${running ? 'online' : 'offline'}"></i>${escapeHtml(item.status || item.state || 'unknown')}</span><div><h3>${escapeHtml(app?.name || appId || item.name)}</h3><small>${escapeHtml(item.name)} · App Store managed · Docker / OCI</small></div><div class="app-access-cell">${appUrl ? `<a href="${escapeHtml(appUrl)}" target="_blank" rel="noopener">Open: ${escapeHtml(hostAddress)}:${escapeHtml(appPort)}</a>` : '<span>No web port</span>'}<small>Container IP: ${escapeHtml(item.ip || 'not assigned')} ${item.ports ? `· ${escapeHtml(item.ports)}` : ''}</small></div><div class="app-resource-cell"><b>${escapeHtml(liveCpu)} · ${escapeHtml(liveMemory)}</b><small>Limit: ${escapeHtml(cpuText)} · ${escapeHtml(memoryText)} · restart ${escapeHtml(item.restartPolicy || 'no')}</small></div><span class="compute-truncate" title="${escapeHtml(item.image || '')}">${escapeHtml(item.image || '—')}</span><div class="runtime-actions compute-actions">
             ${running ? `<button class="primary" type="button" data-app-open="${escapeHtml(appUrl)}">Open</button><button class="secondary" type="button" data-app-terminal="${escapeHtml(item.name)}" data-app-name="${escapeHtml(app?.name || appId || item.name)}">Terminal</button>` : ''}
-            <button class="primary ${running ? 'hidden' : ''}" type="button" data-app-action="start" data-app-id="${escapeHtml(appId)}">Start</button>
-            <button class="secondary ${running ? '' : 'hidden'}" type="button" data-app-action="stop" data-app-id="${escapeHtml(appId)}">Stop</button>
-            <button class="secondary" type="button" data-app-edit="${escapeHtml(appId)}" data-app-container="${escapeHtml(item.name)}">Edit resources</button>
-            <button class="secondary" type="button" data-app-action="restart" data-app-id="${escapeHtml(appId)}">Restart</button>
-            <button class="secondary danger-button" type="button" data-app-action="remove" data-app-id="${escapeHtml(appId)}">Remove</button>
+            <button class="primary ${running ? 'hidden' : ''}" type="button" data-app-action="start" data-app-id="${escapeHtml(appId)}" data-app-instance="${escapeHtml(instanceName)}">Start</button>
+            <button class="secondary ${running ? '' : 'hidden'}" type="button" data-app-action="stop" data-app-id="${escapeHtml(appId)}" data-app-instance="${escapeHtml(instanceName)}">Stop</button>
+            <button class="secondary" type="button" data-app-edit="${escapeHtml(appId)}" data-app-container="${escapeHtml(item.name)}" data-app-instance="${escapeHtml(instanceName)}">Settings</button>
+            <button class="secondary" type="button" data-app-action="restart" data-app-id="${escapeHtml(appId)}" data-app-instance="${escapeHtml(instanceName)}">Restart</button>
+            <button class="secondary danger-button" type="button" data-app-action="remove" data-app-id="${escapeHtml(appId)}" data-app-instance="${escapeHtml(instanceName)}" data-app-host-port="${escapeHtml(String(appPort || 0))}">Remove</button>
           </div></article>`;
         }).join('')}</div>`
       : '<div class="empty compact-empty"><p>No App Store containers are installed.</p></div>';
@@ -2917,6 +2919,12 @@ function bindViewActions() {
       if (!/^[A-Za-z0-9][A-Za-z0-9-]{0,30}$/.test(instanceName.trim())) return toast('Instance name can contain letters, numbers, and dashes.');
       setup.instanceName = instanceName.trim().toLowerCase();
       setup.hostPort = 0;
+    }
+    if (app.requiresAdminUsername) {
+      const username = prompt(`Create the ${app.name} administrator username:`, app.adminUsername || 'admin');
+      if (username === null) return;
+      if (!/^[A-Za-z0-9._-]{3,64}$/.test(username.trim())) return toast('The application administrator username must contain 3–64 letters, numbers, dots, underscores, or dashes.');
+      setup.adminUsername = username.trim();
     }
     if (app.requiresAdminPassword) {
       const password = prompt(`Create the ${app.name} administrator password (8–128 characters):`);
