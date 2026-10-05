@@ -9,7 +9,7 @@ import { WebSocketServer } from 'ws';
 import { JsonStore } from './store.mjs';
 import { getFilesystems, getStorageInventory, getSystemSnapshot } from './system.mjs';
 import { hashPassword, Sessions, verifyPassword } from './auth.mjs';
-import { listFiles, listAllFiles, createFolder, uploadFile, uploadFileChunk, downloadFile, downloadEntry, deleteEntry, fileUsage } from './files.mjs';
+import { listFiles, listAllFiles, listAllFolders, createFolder, uploadFile, uploadFileChunk, downloadFile, downloadEntry, deleteEntry, fileUsage } from './files.mjs';
 import { thumbnailFor } from './thumbnails.mjs';
 import { catalog, runtimeInventory, vmEditorInventory, vmCreateInventory, installCatalogApp, manageCatalogApp, updateCatalogApp, openContainerShell, createContainer, createVm } from './runtimes-next.mjs';
 import { communityCatalog, installCommunityApp } from './community-catalog.mjs';
@@ -2434,6 +2434,10 @@ async function api(req, res, url) {
       if (!requireAnyPermission(res, permissions, ['files.view.own', 'files.own', 'files.read'])) return;
       const scope = privateFileScope(context, ['files.read']);
       if (scope === null) return send(res, 403, { error: 'File access is required.' });
+      if (!requestedPath && url.searchParams.get('folders') === '1') {
+        const folders = await listAllFolders(scope);
+        return send(res, 200, { path: '', ...folders });
+      }
       if (!requestedPath && url.searchParams.get('all') === '1') {
         const all = await listAllFiles(url.searchParams.get('refresh') === '1', scope);
         return send(res, 200, { path: '', ...all });
