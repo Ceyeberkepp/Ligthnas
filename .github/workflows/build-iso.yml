@@ -101,6 +101,29 @@ jobs:
           fi
           echo "ISO remained bootable with a standard VGA adapter."
 
+      - name: Minimum appliance qualification boot
+        run: |
+          set -Eeuo pipefail
+          qemu-img create -f qcow2 /tmp/lightnas-minimum.qcow2 35G
+          set +e
+          timeout 35s qemu-system-x86_64 \
+            -m 2048 \
+            -smp 2 \
+            -drive file=/tmp/lightnas-minimum.qcow2,if=virtio,format=qcow2 \
+            -cdrom dist/LightNAS-amd64.iso \
+            -boot d \
+            -display none \
+            -serial stdio \
+            -no-reboot
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ]; then
+            echo "2 GiB RAM / 35 GiB disk qualification boot failed with exit code $rc"
+            exit "$rc"
+          fi
+          test "$(qemu-img info --output=json /tmp/lightnas-minimum.qcow2 | python3 -c 'import json,sys; print(json.load(sys.stdin)["virtual-size"])')" -eq 37580963840
+          echo "Minimum appliance envelope confirmed: 2 GiB RAM / 35 GiB disk."
+
       - name: Installer compatibility menu check
         run: |
           set -Eeuo pipefail
