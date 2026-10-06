@@ -115,15 +115,28 @@ export async function listContainerTemplates() {
           const file = join(target.path, filename);
           const info = await stat(file);
           if (!info.isFile()) continue;
+          const inferredArchitecture = /(?:amd64|x86_64)/i.test(filename) ? 'amd64'
+            : /(?:arm64|aarch64)/i.test(filename) ? 'arm64'
+            : /(?:riscv64)/i.test(filename) ? 'riscv64'
+            : /(?:i386|i686|x86-32)/i.test(filename) ? 'i386'
+            : /(?:armhf|armv7)/i.test(filename) ? 'armhf'
+            : '';
           templates.push({
             id: templateId(target.id, filename),
             filename,
             name: filename.replace(/[-_](?:\d{8}|\d+(?:\.\d+)*)[-_].*$/, '').replaceAll('-', ' '),
+            version: filename.match(/(?:^|[-_])(\d+(?:\.\d+){0,3})(?=[-_.])/i)?.[1] || '',
+            architecture: inferredArchitecture,
+            compatible: architectureCompatible(inferredArchitecture, HOST_ARCH, EMULATION_AVAILABLE),
+            hostArchitecture: HOST_ARCH,
             sizeBytes: info.size,
+            minimumRamBytes: 256 * 1024 ** 2,
+            minimumStorageBytes: 1024 ** 3,
             storageId: target.id,
             storageLabel: target.label,
             path: file,
-            source: 'local-template'
+            source: 'local-template',
+            cached: true
           });
         } catch {}
       }
