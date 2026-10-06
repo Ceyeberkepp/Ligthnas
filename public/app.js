@@ -1,11 +1,56 @@
 if (window.LIGHTNAS_PRODUCT_MODE === 'hypervisor') document.body.classList.add('product-hypervisor');
-const state = { overview: null, view: 'home', uiMode: window.LIGHTNAS_PRODUCT_MODE === 'hypervisor' ? 'hypervisor' : 'nas', folder: '', files: null, fileError: null, filesSettingsOpen: false, fileLibraryTab: 'all', filesNavExpanded: localStorage.getItem('lightnas-files-nav-expanded') !== '0', mobileFilesPeriod: localStorage.getItem('lightnas-mobile-files-period') || 'all', aiMessages: [], logs: null, fileView: ['list','grid','gallery'].includes(localStorage.getItem('lightnas-file-view')) ? localStorage.getItem('lightnas-file-view') : 'grid', fileTruncated: false, fileQuota: null, overviewMetric: localStorage.getItem('lightnas-overview-metric') || 'cpu', lastNetworkSample: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, userAccess: null, smtp: undefined, media: null, network: null, software: null, license: null, builtinCatalog: null, communityCatalog: null, communityCatalogLoading: false, communityCatalogError: null, appSearch: '', appCategory: '', appVisibleLimit: 72, backupJobs: null, selectedBackupJobId: null, metricHistory: { cpu: [], load: [], memory: [], storage: [], networkIn: [], networkOut: [] } };
+const state = { overview: null, view: 'home', uiMode: window.LIGHTNAS_PRODUCT_MODE === 'hypervisor' ? 'hypervisor' : 'nas', folder: '', files: null, fileError: null, filesSettingsOpen: false, fileLibraryTab: 'all', filesNavExpanded: localStorage.getItem('lightnas-files-nav-expanded') !== '0', mobileFilesPeriod: localStorage.getItem('lightnas-mobile-files-period') || 'all', aiMessages: [], logs: null, fileView: ['list','grid','gallery'].includes(localStorage.getItem('lightnas-file-view')) ? localStorage.getItem('lightnas-file-view') : 'grid', fileTruncated: false, fileQuota: null, fileSectionCache: new Map(), overviewMetric: localStorage.getItem('lightnas-overview-metric') || 'cpu', lastNetworkSample: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, userAccess: null, smtp: undefined, media: null, network: null, software: null, license: null, builtinCatalog: null, communityCatalog: null, communityCatalogLoading: false, communityCatalogError: null, appSearch: '', appCategory: '', appVisibleLimit: 72, backupJobs: null, selectedBackupJobId: null, metricHistory: { cpu: [], load: [], memory: [], storage: [], networkIn: [], networkOut: [] } };
+function filesSectionCacheKey(tab = state.fileLibraryTab, folder = state.folder) {
+  if (folder) return 'path:' + folder;
+  return tab === 'folders' ? 'folders' : tab || 'all';
+}
+
+function rememberFilesSection(entries, truncated = false, key = filesSectionCacheKey()) {
+  state.fileSectionCache.set(key, {
+    entries: Array.isArray(entries) ? entries : [],
+    truncated:Boolean(truncated),
+    savedAt:Date.now()
+  });
+}
+
+function restoreFilesSection(key = filesSectionCacheKey()) {
+  const cached = state.fileSectionCache.get(key);
+  if (!cached || !Array.isArray(cached.entries)) return false;
+  state.files = cached.entries;
+  state.fileTruncated = Boolean(cached.truncated);
+  return true;
+}
+
+function communityCatalogStorageKey(username = state.overview?.appliance?.username || '') {
+  return username ? 'lightnas-community-catalog:' + username : 'lightnas-community-catalog';
+}
+
+function restoreCommunityCatalogCache(username) {
+  try {
+    const cached = JSON.parse(localStorage.getItem(communityCatalogStorageKey(username)) || 'null');
+    if (!cached || !Array.isArray(cached.apps) || !cached.apps.length) return false;
+    state.communityCatalog = cached;
+    return true;
+  } catch { return false; }
+}
+
+function saveCommunityCatalogCache() {
+  if (!state.communityCatalog || !Array.isArray(state.communityCatalog.apps) || !state.communityCatalog.apps.length) return;
+  try {
+    localStorage.setItem(communityCatalogStorageKey(), JSON.stringify({
+      ...state.communityCatalog,
+      refreshing:false,
+      stale:true,
+      savedAt:Date.now()
+    }));
+  } catch {}
+}
+
 function mobileFilesCacheKey(username = state.overview?.appliance?.username || '') {
   return username ? `lightnas-mobile-files-cache:${username}` : '';
 }
 
 function restoreMobileFilesCache(username) {
-  if (!matchMedia('(max-width: 760px)').matches) return;
   const key = mobileFilesCacheKey(username);
   if (!key) return;
   try {
@@ -13,11 +58,16 @@ function restoreMobileFilesCache(username) {
     if (!cached || Date.now() - Number(cached.savedAt || 0) > 120000 || !Array.isArray(cached.files)) return;
     state.files = cached.files;
     state.fileTruncated = Boolean(cached.truncated);
+    state.fileSectionCache.set('all', {
+      entries: cached.files,
+      truncated:Boolean(cached.truncated),
+      savedAt:Number(cached.savedAt || Date.now())
+    });
   } catch {}
 }
 
 function saveMobileFilesCache() {
-  if (!matchMedia('(max-width: 760px)').matches || state.folder !== '' || state.fileLibraryTab !== 'all' || !Array.isArray(state.files)) return;
+  if (state.folder !== '' || state.fileLibraryTab !== 'all' || !Array.isArray(state.files)) return;
   const key = mobileFilesCacheKey();
   if (!key) return;
   try {
@@ -288,6 +338,7 @@ async function showConsole() {
   captureOverviewMetrics();
   const { appliance } = state.overview;
   restoreMobileFilesCache(appliance.username);
+  restoreCommunityCatalogCache(appliance.username);
   $('#mini-name').textContent = appliance.deviceNameVisible && appliance.deviceName ? appliance.deviceName : 'Online';
   $('#mini-name').classList.toggle('online-only', !appliance.deviceNameVisible);
   applyApplianceBranding(appliance);
@@ -317,9 +368,9 @@ async function showConsole() {
     setTimeout(() => loadRuntimes(false), 250);
     setTimeout(() => { if (!state.network) loadNetwork(); }, 700);
     setTimeout(() => { if (state.spaces === null) loadSpaces(); }, 900);
-    if (matchMedia('(max-width: 760px)').matches) {
-      setTimeout(() => { if (state.files === null) loadFiles(false); }, 120);
-    }
+    setTimeout(() => {
+      if (!state.fileSectionCache.has('all')) loadFiles(false, { tab:'all', folder:'' }).catch(() => null);
+    }, 120);
   });
   document.querySelectorAll('#nav a[data-view], .foot-admin[data-view]').forEach(link => {
     const label = link.textContent.replace(/\s+/g, ' ').trim();
@@ -1130,6 +1181,7 @@ async function loadCommunityCatalog(forceRefresh = false) {
   try {
     const result = await request(`/api/catalog/community${forceRefresh ? '?refresh=1' : ''}`);
     state.communityCatalog = result;
+    saveCommunityCatalogCache();
 
     clearTimeout(communityCatalogPollTimer);
     communityCatalogPollTimer = null;
@@ -1687,48 +1739,65 @@ function queueMobileMediaPrewarm(entries = []) {
   }).catch(() => {});
 }
 
-async function loadFiles(forceRefresh = false) {
+async function loadFiles(forceRefresh = false, target = null) {
   state.fileError = null;
   const mobile = matchMedia('(max-width: 760px)').matches;
+  const requestTab = target?.tab || state.fileLibraryTab;
+  const requestFolder = target?.folder ?? state.folder;
+  const requestKey = filesSectionCacheKey(requestTab, requestFolder);
+  const isCurrentRequest = () => filesSectionCacheKey() === requestKey;
+
+  if (!forceRefresh && restoreFilesSection(requestKey) && isCurrentRequest() && state.view === 'files') {
+    render('files');
+  }
+
   try {
-    const endpoint = state.folder === ''
-      ? (state.fileLibraryTab === 'folders'
+    const endpoint = requestFolder === ''
+      ? (requestTab === 'folders'
           ? '/api/files?folders=1'
           : `/api/files?all=1${forceRefresh ? '&refresh=1' : ''}`)
-      : `/api/files?path=${encodeURIComponent(state.folder)}`;
-
-    if (mobile) {
-      // Paint the mobile library as soon as metadata arrives. Quota calculation
-      // can walk a large private library and must not block the Files tab.
-      const result = await request(endpoint);
-      state.files = Array.isArray(result.entries) ? result.entries.filter(entry => entry.supported) : [];
-      state.fileTruncated = Boolean(result.truncated);
-      saveMobileFilesCache();
-      queueMobileMediaPrewarm(state.files);
-      if (state.view === 'files') render('files');
-
-      request('/api/files/quota').then(quota => {
-        state.fileQuota = quota;
-        if (state.view === 'files' && !document.querySelector('.mobile-photos-experience')) render('files');
-      }).catch(() => {});
-      return;
-    }
+      : `/api/files?path=${encodeURIComponent(requestFolder)}`;
 
     const result = await request(endpoint);
-    state.files = Array.isArray(result.entries) ? result.entries.filter(entry => entry.supported) : [];
-    state.fileTruncated = Boolean(result.truncated);
-    if (state.view === 'files') render('files');
+    const entries = Array.isArray(result.entries) ? result.entries.filter(entry => entry.supported) : [];
+    const truncated = Boolean(result.truncated);
+    rememberFilesSection(entries, truncated, requestKey);
 
-    request('/api/files/quota').then(quota => {
-      state.fileQuota = quota;
-    }).catch(() => {});
+    if (requestKey === 'all') {
+      const previousFiles = state.files;
+      const previousTruncated = state.fileTruncated;
+      state.files = entries;
+      state.fileTruncated = truncated;
+      saveMobileFilesCache();
+      if (!isCurrentRequest()) {
+        state.files = previousFiles;
+        state.fileTruncated = previousTruncated;
+      }
+    }
+
+    if (isCurrentRequest()) {
+      state.files = entries;
+      state.fileTruncated = truncated;
+      if (mobile) queueMobileMediaPrewarm(entries);
+      if (state.view === 'files') render('files');
+    }
+
+    if (isCurrentRequest()) {
+      request('/api/files/quota').then(quota => {
+        state.fileQuota = quota;
+      }).catch(() => {});
+    }
+    return entries;
   } catch (error) {
-    state.files = [];
-    state.fileTruncated = false;
-    state.fileError = error.message || 'The file service did not return a valid response.';
-    toast(state.fileError);
+    if (isCurrentRequest()) {
+      state.files = [];
+      state.fileTruncated = false;
+      state.fileError = error.message || 'The file service did not return a valid response.';
+      toast(state.fileError);
+      if (state.view === 'files') render('files');
+    }
+    return [];
   }
-  if (state.view === 'files' && mobile) render('files');
 }
 
 function uploadRequest(path, file, onProgress) {
@@ -2274,7 +2343,7 @@ function moduleView(view) {
               ? `<button class="primary" data-community-install="${app.id}">Install</button>`
               : `<button class="secondary" type="button" disabled title="${escapeHtml(app.installReason || 'This community app is not deployable on this host.')}">Unavailable</button>`)
           : `<button class="primary" data-install="${app.id}" data-instance-count="${instances.length}">Install</button>`;
-        return `<article class="panel app-card" data-app-card data-category="${escapeHtml(app.category)}" data-search="${escapeHtml(searchText)}"><span class="eyebrow">${escapeHtml(app.category)}</span><h2>${escapeHtml(app.name)}</h2><p class="muted">${escapeHtml(app.description)}</p><p class="muted app-source">${escapeHtml(app.source || 'Open source')}${app.image ? ` · ${escapeHtml(app.image)}` : ''}${app.port ? ` · Default port ${app.port}` : ''}</p>${instances.length ? `<p class="muted"><b>${instances.length}</b> installed instance${instances.length === 1 ? '' : 's'}</p>` : ''}${instanceList}<div class="head-actions app-install-actions">${installControl}</div></article>`;
+        return `<article class="panel app-card" data-app-card data-category="${escapeHtml(app.category)}" data-search="${escapeHtml(searchText)}"><span class="eyebrow">${escapeHtml(app.category)}</span><h2>${escapeHtml(app.name)}</h2><p class="muted">${escapeHtml(app.description)}</p>${app.trueNasCatalog && !app.image && !app.port ? '' : `<p class="muted app-source">${app.trueNasCatalog ? '' : escapeHtml(app.source || 'Open source')}${app.image ? `${app.trueNasCatalog ? '' : ' · '}${escapeHtml(app.image)}` : ''}${app.port ? ` · Default port ${app.port}` : ''}</p>`}${instances.length ? `<p class="muted"><b>${instances.length}</b> installed instance${instances.length === 1 ? '' : 's'}</p>` : ''}${instanceList}<div class="head-actions app-install-actions">${installControl}</div></article>`;
       }).join('') || (state.builtinCatalog === null ? '<div class="empty"><p>Loading built-in catalog…</p></div>' : '<div class="empty"><p>No apps match this filter.</p></div>')}</div>
       ${more ? `<div class="app-catalog-more"><button class="secondary" type="button" data-app-more>Show ${Math.min(72, more)} more</button><span class="muted">Showing ${visibleApps.length} of ${filteredApps.length} matching apps</span></div>` : filteredApps.length ? `<p class="muted app-catalog-count">Showing ${filteredApps.length} matching app${filteredApps.length === 1 ? '' : 's'}.</p>` : ''}
       <section class="module-hero"><h2>Managed app hosting</h2><p>LightNAS downloads each app, creates its persistent storage, publishes its web service on the LightNAS LAN address, starts it after reboot, and verifies that the service is reachable. No external hypervisor configuration or manual port forwarding is required for managed catalog apps. ${docker?.available && docker?.enabled ? 'The integrated App Store engine is ready.' : 'The catalog stays available while the App Store engine finishes starting.'}</p></section>`;
@@ -3929,10 +3998,11 @@ $$('[data-view]').forEach(link => link.addEventListener('click', event => {
     state.filesSettingsOpen = false;
     state.fileLibraryTab = target;
     state.folder = target === 'all' || target === 'folders' ? '' : target;
-    state.files = null;
+    if (!restoreFilesSection()) state.files = null;
     if (location.hash === '#files') {
       event.preventDefault();
       render('files');
+      loadFiles(false).catch(() => null);
     }
   }
   setMobileSidebar(false);

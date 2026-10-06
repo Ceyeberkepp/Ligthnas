@@ -61,3 +61,14 @@ test('Files sidebar children can collapse and Folders never renders as photo gal
   assert.match(styles, /font-size: 13px/);
   assert.match(styles, /font-weight: 600/);
 });
+
+test('Files and media restores desktop cache instantly and background refresh cannot overwrite another active tab', async () => {
+  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(app, /fileSectionCache: new Map\(\)/);
+  assert.match(app, /restoreMobileFilesCache\(appliance\.username\)/);
+  assert.match(app, /state\.fileSectionCache\.set\('all'/);
+  assert.match(app, /loadFiles\(false, \{ tab:'all', folder:'' \}\)/);
+  assert.match(app, /const requestKey = filesSectionCacheKey\(requestTab, requestFolder\)/);
+  assert.match(app, /const isCurrentRequest = \(\) => filesSectionCacheKey\(\) === requestKey/);
+  assert.match(app, /if \(isCurrentRequest\(\)\) \{/);
+});
