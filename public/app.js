@@ -2937,10 +2937,10 @@ function bindViewActions() {
     const app = state.communityCatalog?.apps?.find(item => item.id === button.dataset.communityInstall);
     if (!app) return toast('The selected community application is no longer in the catalog.');
     if (!app.installable) return toast(app.installReason || 'This community application cannot be installed on this host.');
-    if (!confirm(`Install ${app.name} from ${app.source}? LightNAS will use the upstream Docker Compose package, pull its images, create persistent data, and start the application.`)) return;
+    if (!confirm(`Install ${app.name} from ${app.source}? LightNAS will prepare the upstream application package, pull its images, create persistent data, and start the application.`)) return;
     button.disabled = true;
     button.textContent = 'Installing…';
-    const progress = window.LightNASProgress?.open(`Installing ${app.name}`, 'Downloading the upstream Compose package, pulling images, and starting services…', { modal:false });
+    const progress = window.LightNASProgress?.open(`Installing ${app.name}`, 'Preparing the application package, pulling images, and starting services…', { modal:false });
     try {
       await request(`/api/catalog/community/${encodeURIComponent(app.id)}/install`, { method:'POST', body:'{}' });
       await Promise.all([loadRuntimes(true), loadCommunityCatalog(false)]);
