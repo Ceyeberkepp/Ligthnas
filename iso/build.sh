@@ -550,50 +550,124 @@ if ! id lightnas-ui >/dev/null 2>&1; then
   useradd --create-home --home-dir /var/lib/lightnas-ui --shell /bin/bash lightnas-ui
 fi
 install -d -o lightnas-ui -g lightnas-ui -m 0700 /var/lib/lightnas-ui/.config/openbox
+install -d -m 0755 /usr/share/lightnas
+cat >/usr/share/lightnas/kiosk-start.html <<'KIOSK_HTML'
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LightNAS</title>
+<style>
+  html,body{margin:0;width:100%;height:100%;background:#08111f;color:#f4fbff;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+  body{display:grid;place-items:center}
+  main{text-align:center;max-width:680px;padding:32px}
+  h1{font-size:52px;margin:0 0 10px}
+  p{color:#9db2c3;font-size:18px;margin:8px 0}
+  .dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:#5ce1c3;margin-right:8px;animation:pulse 1.1s infinite alternate}
+  @keyframes pulse{from{opacity:.35}to{opacity:1}}
+  small{display:block;color:#6f8799;margin-top:20px}
+</style>
+</head>
+<body>
+<main>
+  <h1>LightNAS</h1>
+  <p><span class="dot"></span>Starting the local control center…</p>
+  <p id="status">Waiting for LightNAS services.</p>
+  <small>Web access will remain available at http://&lt;this-system-IP&gt;:3080</small>
+</main>
+<script>
+(async function poll(){
+  try{
+    const response=await fetch('http://127.0.0.1:3080/api/status',{cache:'no-store'});
+    if(response.ok){ location.replace('http://127.0.0.1:3080/'); return; }
+  }catch{}
+  document.getElementById('status').textContent='Services are still starting. This screen will update automatically.';
+  setTimeout(poll,1000);
+})();
+</script>
+</body>
+</html>
+KIOSK_HTML
+
 cat >/usr/local/bin/lightnas-kiosk <<'KIOSK'
 #!/bin/bash
-set -u
+set -Eeuo pipefail
+
 xset -dpms >/dev/null 2>&1 || true
 xset s off >/dev/null 2>&1 || true
 xset s noblank >/dev/null 2>&1 || true
-for _ in $(seq 1 90); do
-  curl -fsS http://127.0.0.1:3080/api/status >/dev/null 2>&1 && break
-  sleep 1
-done
-exec chromium \
-  --ozone-platform=x11 \
-  --kiosk \
-  --no-first-run \
-  --no-default-browser-check \
-  --disable-session-crashed-bubble \
-  --disable-features=TranslateUI \
-  http://127.0.0.1:3080/
-KIOSK
-chmod 0755 /usr/local/bin/lightnas-kiosk
+
+flags=(
+  --ozone-platform=x11
+  --kiosk
+  --no-first-run
+  --no-default-browser-check
+  --disable-session-crashed-bubble
+  --disable-features=TranslateUI
+  --disable-dev-shm-usage
+  --disable-pinch
+)
+
+virt="$(systemd-detect-virt 2>/dev/null || true)"
+case "$virt" in
+  oracle|virtualbox)
+    # VirtualBox can expose an X display while Chromium GPU compositing renders
+    # only a black surface. Force software rendering in that environment.
+    flags+=(--disable-gpu --disable-gpu-compositing)
+    ;;
+esac
+
+exec chromium "${flags[@]}" file:///usr/share/lightnas/kiosk-start.html
+KIOSKchmod 0755 /usr/local/bin/lightnas-kiosk
 
 cat >/usr/local/bin/lightnas-xsession <<'XSESSION'
 #!/bin/bash
 set -Eeuo pipefail
+
+export DISPLAY="${DISPLAY:-:0}"
 xsetroot -solid '#08111f' >/dev/null 2>&1 || true
+xset -dpms >/dev/null 2>&1 || true
+xset s off >/dev/null 2>&1 || true
+xset s noblank >/dev/null 2>&1 || true
 xhost +SI:localuser:lightnas-ui >/dev/null 2>&1 || true
+
+runuser -u lightnas-ui -- env \
+  HOME=/var/lib/lightnas-ui \
+  USER=lightnas-ui \
+  LOGNAME=lightnas-ui \
+  DISPLAY="${DISPLAY}" \
+  XDG_SESSION_TYPE=x11 \
+  openbox >/var/log/lightnas-openbox.log 2>&1 &
+
+# Launch Chromium directly so the appliance never depends on Openbox autostart.
+# If the browser exits, this script exits and systemd restarts the entire
+# display session.
 exec runuser -u lightnas-ui -- env \
   HOME=/var/lib/lightnas-ui \
   USER=lightnas-ui \
   LOGNAME=lightnas-ui \
-  DISPLAY="${DISPLAY:-:0}" \
+  DISPLAY="${DISPLAY}" \
   XDG_SESSION_TYPE=x11 \
-  openbox-session
-XSESSION
-chmod 0755 /usr/local/bin/lightnas-xsession
+  /usr/local/bin/lightnas-kiosk
+XSESSIONchmod 0755 /usr/local/bin/lightnas-xsession
 
 # LightNAS is an appliance, not a Debian desktop. Start the local control center
 # directly on VT7 so boot can never fall through to a Debian/LightDM login screen.
 cat >/usr/local/sbin/lightnas-display-console <<'DISPLAY_CONSOLE'
 #!/bin/bash
 set -Eeuo pipefail
-exec /usr/bin/xinit /usr/local/bin/lightnas-xsession -- :0 vt7 -keeptty -nolisten tcp
-DISPLAY_CONSOLE
-chmod 0755 /usr/local/sbin/lightnas-display-console
+
+mkdir -p /var/log
+printf '%s LightNAS display console starting\n' "$(date -Is)" >>/var/log/lightnas-display.log
+
+# Give udev/DRM a short moment to settle on VMs and older physical GPUs.
+udevadm settle --timeout=8 >/dev/null 2>&1 || true
+sleep 1
+
+exec /usr/bin/xinit /usr/local/bin/lightnas-xsession -- :0 vt7 -keeptty -nolisten tcp \
+  >>/var/log/lightnas-display.log 2>&1
+DISPLAY_CONSOLEchmod 0755 /usr/local/sbin/lightnas-display-console
 
 cat >/etc/systemd/system/lightnas-display-console.service <<'DISPLAY_UNIT'
 [Unit]
@@ -610,15 +684,32 @@ TTYReset=yes
 TTYVHangup=yes
 TTYVTDisallocate=yes
 ExecStart=/usr/local/sbin/lightnas-display-console
-Restart=on-failure
-RestartSec=3
+Restart=always
+RestartSec=2
+StartLimitIntervalSec=0
 
 [Install]
 WantedBy=graphical.target
 DISPLAY_UNIT
 
+cat >/etc/systemd/system/lightnas-console-status.service <<'CONSOLE_STATUS'
+[Unit]
+Description=LightNAS console fallback status
+After=lightnas.service
+Wants=lightnas.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'printf "\nLightNAS control center\nWeb: http://<this-system-IP>:3080\nIf the graphical console is unavailable, press Ctrl+Alt+F1 and inspect: journalctl -u lightnas-display-console -b\n\n" >/dev/tty1'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+CONSOLE_STATUS
+systemctl enable lightnas-console-status.service >/dev/null 2>&1 || true
+
 cat >/var/lib/lightnas-ui/.config/openbox/autostart <<'AUTOSTART'
-/usr/local/bin/lightnas-kiosk &
+# LightNAS launches Chromium directly from lightnas-xsession.
 AUTOSTART
 chown lightnas-ui:lightnas-ui /var/lib/lightnas-ui/.config/openbox/autostart
 
