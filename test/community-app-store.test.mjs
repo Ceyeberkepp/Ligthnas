@@ -58,3 +58,22 @@ test('CasaOS catalog rebuild uses the GitHub tree and defers Compose downloads u
   assert.match(catalog, /humanizeId/);
   assert.match(catalog, /composeUrl:'https:\/\/raw\.githubusercontent\.com/);
 });
+
+test('community catalog UI polls automatically until the local index is ready', async () => {
+  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(app, /communityCatalogPollTimer/);
+  assert.match(app, /result\?\.refreshing/);
+  assert.match(app, /loadCommunityCatalog\(false\)\.catch/);
+  assert.match(app, /Apps will appear automatically as soon as the local index is ready/);
+  assert.match(app, /App catalog refresh started in the background/);
+});
+
+test('TrueNAS catalog entries stay visible without pretending every TrueNAS template is standalone Compose', async () => {
+  const [catalog, app] = await Promise.all([
+    readFile(new URL('../src/community-catalog.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../public/app.js', import.meta.url), 'utf8')
+  ]);
+  assert.match(catalog, /id:'truenas'/);
+  assert.match(catalog, /trueNasCatalog/);
+  assert.match(app, /TrueNAS catalog entry/);
+});

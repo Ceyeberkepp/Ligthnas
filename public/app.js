@@ -1121,16 +1121,34 @@ async function loadBuiltinCatalog() {
   }
 }
 
+let communityCatalogPollTimer = null;
+
 async function loadCommunityCatalog(forceRefresh = false) {
-  if (state.communityCatalogLoading && !forceRefresh) return;
+  if (state.communityCatalogLoading && !forceRefresh) return state.communityCatalog;
   state.communityCatalogLoading = true;
   state.communityCatalogError = null;
-  if (state.view === 'apps') render('apps');
   try {
-    state.communityCatalog = await request(`/api/catalog/community${forceRefresh ? '?refresh=1' : ''}`);
+    const result = await request(`/api/catalog/community${forceRefresh ? '?refresh=1' : ''}`);
+    state.communityCatalog = result;
+
+    clearTimeout(communityCatalogPollTimer);
+    communityCatalogPollTimer = null;
+    if (result?.refreshing) {
+      communityCatalogPollTimer = setTimeout(() => {
+        communityCatalogPollTimer = null;
+        loadCommunityCatalog(false).catch(() => null);
+      }, result?.apps?.length ? 1500 : 600);
+    }
+    return result;
   } catch (error) {
     state.communityCatalogError = error.message;
-    if (!state.communityCatalog) state.communityCatalog = { apps: [], sources: [], count: 0 };
+    if (!state.communityCatalog) state.communityCatalog = { apps: [], sources: [], count: 0, refreshing:true };
+    clearTimeout(communityCatalogPollTimer);
+    communityCatalogPollTimer = setTimeout(() => {
+      communityCatalogPollTimer = null;
+      loadCommunityCatalog(false).catch(() => null);
+    }, 2500);
+    return state.communityCatalog;
   } finally {
     state.communityCatalogLoading = false;
     if (state.view === 'apps') render('apps');
@@ -2224,10 +2242,11 @@ function moduleView(view) {
     const limit = Math.max(24, Number(state.appVisibleLimit) || 72);
     const visibleApps = filteredApps.slice(0, limit);
     const more = Math.max(0, filteredApps.length - visibleApps.length);
-    const catalogStatus = state.communityCatalogLoading
-      ? '<p class="muted app-catalog-status">Community catalog is updating automatically in the background…</p>'
-      : state.communityCatalogError
-        ? `<p class="muted app-catalog-status">Community catalog retrying automatically: ${escapeHtml(state.communityCatalogError)}</p>`
+    const catalogRefreshing = Boolean(state.communityCatalogLoading || state.communityCatalog?.refreshing);
+    const catalogStatus = state.communityCatalogError
+      ? `<p class="muted app-catalog-status">Community catalog retrying automatically: ${escapeHtml(state.communityCatalogError)}</p>`
+      : catalogRefreshing
+        ? `<p class="muted app-catalog-status">Updating app sources in the background… ${communityApps.length ? `Keeping ${communityApps.length} cached community apps available.` : 'Apps will appear automatically as soon as the local index is ready.'}</p>`
         : '';
 
     return `${pageHead('App Store', 'Install curated open-source applications directly from LightNAS.', '<button class="secondary refresh-icon-button" data-action="refresh-runtime" aria-label="Refresh" title="Refresh">↻</button>')}
@@ -2252,7 +2271,9 @@ function moduleView(view) {
         const installControl = app.community
           ? (app.installable
               ? `<button class="primary" data-community-install="${app.id}">Install</button>`
-              : `<button class="secondary" type="button" disabled title="${escapeHtml(app.installReason || 'This community app is not deployable on this host.')}">Unavailable</button>`)
+              : app.trueNasCatalog
+                ? `<button class="secondary" type="button" disabled title="TrueNAS catalog entry. LightNAS lists it for catalog parity, but the upstream package uses TrueNAS template rendering rather than a standalone Compose file.">TrueNAS catalog</button>`
+                : `<button class="secondary" type="button" disabled title="${escapeHtml(app.installReason || 'This community app is not deployable on this host.')}">Unavailable</button>`)
           : `<button class="primary" data-install="${app.id}" data-instance-count="${instances.length}">Install</button>`;
         return `<article class="panel app-card" data-app-card data-category="${escapeHtml(app.category)}" data-search="${escapeHtml(searchText)}"><span class="eyebrow">${escapeHtml(app.category)}</span><h2>${escapeHtml(app.name)}</h2><p class="muted">${escapeHtml(app.description)}</p><p class="muted app-source">${escapeHtml(app.source || 'Open source')}${app.image ? ` · ${escapeHtml(app.image)}` : ''}${app.port ? ` · Default port ${app.port}` : ''}</p>${instances.length ? `<p class="muted"><b>${instances.length}</b> installed instance${instances.length === 1 ? '' : 's'}</p>` : ''}${instanceList}<div class="head-actions app-install-actions">${installControl}</div></article>`;
       }).join('') || (state.builtinCatalog === null ? '<div class="empty"><p>Loading built-in catalog…</p></div>' : '<div class="empty"><p>No apps match this filter.</p></div>')}</div>
@@ -2897,12 +2918,13 @@ function bindViewActions() {
     button.textContent = '↻'; button.title = 'Refreshing…'; button.setAttribute('aria-label', 'Refreshing');
     try {
       if (state.view === 'apps') {
-        await Promise.all([loadRuntimes(true), loadCommunityCatalog(true)]);
+        await loadCommunityCatalog(true);
+        loadRuntimes(true).catch(() => null);
       } else {
         await loadRuntimes(true);
       }
       render(state.view);
-      toast(state.view === 'apps' ? 'App catalog refreshed.' : 'Runtime inventory refreshed.');
+      toast(state.view === 'apps' ? 'App catalog refresh started in the background.' : 'Runtime inventory refreshed.');
     } catch (error) {
       toast(error.message);
     } finally {
