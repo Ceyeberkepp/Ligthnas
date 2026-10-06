@@ -8,6 +8,7 @@ import { isIP } from 'node:net';
 import { createHash } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { listStoragePools } from './storage-pools.mjs';
+import { architectureCompatible, hostArchitecture, normalizeArchitecture } from './platform.mjs';
 
 const PROXMOX_IMAGES_BASE = 'https://download.proxmox.com/images/';
 const SYSTEM_IMAGES_URL = `${PROXMOX_IMAGES_BASE}system/`;
@@ -22,6 +23,9 @@ const CATALOG_TIMEOUT_MS = Number(process.env.LIGHTNAS_TEMPLATE_CATALOG_TIMEOUT_
 const DOWNLOAD_TIMEOUT_MS = Number(process.env.LIGHTNAS_TEMPLATE_DOWNLOAD_TIMEOUT_MS || 2 * 60 * 60_000);
 const SPACE_RESERVE_BYTES = Number(process.env.LIGHTNAS_TEMPLATE_SPACE_RESERVE_BYTES || 128 * 1024 ** 2);
 const templateName = /^[A-Za-z0-9][A-Za-z0-9._+-]{1,180}\.(?:tar\.zst|tar\.xz|tar\.gz|tgz)$/i;
+const HOST_ARCH = hostArchitecture();
+const SHOW_INCOMPATIBLE = process.env.LIGHTNAS_SHOW_INCOMPATIBLE_TEMPLATES === '1';
+const EMULATION_AVAILABLE = process.env.LIGHTNAS_CONTAINER_EMULATION === '1';
 
 function safeFilename(value) {
   const name = String(value || '').trim().split('/').pop();
@@ -158,13 +162,18 @@ function parseAplInfo(text, baseUrl, sourceName) {
       section: record.section || 'system',
       package: record.package,
       version: record.version || '',
-      architecture: record.architecture || '',
+      architecture: normalizeArchitecture(record.architecture || ''),
+      compatible: architectureCompatible(record.architecture || '', HOST_ARCH, EMULATION_AVAILABLE),
+      hostArchitecture: HOST_ARCH,
       name: record.package,
       description: record.description || record.package,
       os: record.os || null,
       url: new URL(record.location, baseUrl).toString(),
       source: sourceName,
-      sha512: record.sha512sum || null
+      sha512: record.sha512sum || null,
+      minimumRamBytes: 256 * 1024 ** 2,
+      minimumStorageBytes: 1024 ** 3,
+      cached: false
     });
   }
   return records;
@@ -206,13 +215,32 @@ async function fetchSystemDirectoryCatalog() {
       section: 'system',
       package: base,
       version: filename.match(/(?:^|[-_])(\d+(?:\.\d+){0,3})(?=[-_.])/i)?.[1] || '',
-      architecture: /(?:amd64|x86_64)/i.test(filename) ? 'amd64' : /(?:arm64|aarch64)/i.test(filename) ? 'arm64' : '',
+      architecture: /(?:amd64|x86_64)/i.test(filename) ? 'amd64'
+        : /(?:arm64|aarch64)/i.test(filename) ? 'arm64'
+        : /(?:riscv64)/i.test(filename) ? 'riscv64'
+        : /(?:i386|i686|x86-32)/i.test(filename) ? 'i386'
+        : /(?:armhf|armv7)/i.test(filename) ? 'armhf'
+        : '',
+      compatible: architectureCompatible(
+        /(?:amd64|x86_64)/i.test(filename) ? 'amd64'
+          : /(?:arm64|aarch64)/i.test(filename) ? 'arm64'
+          : /(?:riscv64)/i.test(filename) ? 'riscv64'
+          : /(?:i386|i686|x86-32)/i.test(filename) ? 'i386'
+          : /(?:armhf|armv7)/i.test(filename) ? 'armhf'
+          : '',
+        HOST_ARCH,
+        EMULATION_AVAILABLE
+      ),
+      hostArchitecture: HOST_ARCH,
       name: base,
       description: `${base} system container image`,
       os: osMatch?.[1]?.toLowerCase() || null,
       url: new URL(href, SYSTEM_IMAGES_URL).toString(),
       source: 'System catalog',
-      sha512: null
+      sha512: null,
+      minimumRamBytes: 256 * 1024 ** 2,
+      minimumStorageBytes: 1024 ** 3,
+      cached: false
     });
   }
   return records;
@@ -241,8 +269,9 @@ export async function proxmoxTemplateCatalog() {
     if (!existing || (!existing.sha512 && item.sha512)) byFilename.set(item.filename, { ...existing, ...item });
   }
   const combined = [...byFilename.values()];
-  if (!combined.length) throw Object.assign(new Error('The system container image catalogs are currently unavailable.'), { status: 502 });
-  return combined.sort((a, b) =>
+  const visible = SHOW_INCOMPATIBLE ? combined : combined.filter(item => item.compatible !== false);
+  if (!visible.length) throw Object.assign(new Error(`No compatible system container images are currently available for ${HOST_ARCH}.`), { status: 502 });
+  return visible.sort((a, b) =>
     a.section.localeCompare(b.section) ||
     a.package.localeCompare(b.package, undefined, { numeric: true }) ||
     b.version.localeCompare(a.version, undefined, { numeric: true })
@@ -325,6 +354,9 @@ export async function importContainerTemplate({ storageId, url, proxmoxTemplate 
     const catalog = await proxmoxTemplateCatalog();
     const item = catalog.find(entry => entry.id === proxmoxTemplate || entry.filename === proxmoxTemplate);
     if (!item) throw Object.assign(new Error('Choose a template from the current upstream catalog.'), { status: 400 });
+    if (item.compatible === false && !EMULATION_AVAILABLE) {
+      throw Object.assign(new Error(`The selected container image is for ${item.architecture || 'another architecture'}; this host is ${HOST_ARCH} and emulation is not enabled.`), { status: 409 });
+    }
     source = item.url;
     expectedSha512 = item.sha512 || null;
   }
