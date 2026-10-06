@@ -58,3 +58,29 @@ test('CasaOS catalog rebuild uses the GitHub tree and defers Compose downloads u
   assert.match(catalog, /humanizeId/);
   assert.match(catalog, /composeUrl:'https:\/\/raw\.githubusercontent\.com/);
 });
+
+test('community catalog API is nonblocking and the browser polls until the local index is ready', async () => {
+  const [catalog, app] = await Promise.all([
+    readFile(new URL('../src/community-catalog.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../public/app.js', import.meta.url), 'utf8')
+  ]);
+
+  assert.match(catalog, /Never block the App Store on WAN\/GitHub/);
+  assert.match(catalog, /beginRefresh\(validCache \? cached : null\)\.catch/);
+  assert.match(catalog, /refreshing: true/);
+  assert.match(app, /communityCatalogPollTimer/);
+  assert.match(app, /result\?\.refreshing/);
+  assert.match(app, /setTimeout\(\(\) => \{/);
+  assert.match(app, /loadCommunityCatalog\(false\)\.catch/);
+  assert.match(app, /App catalog refresh started in the background/);
+});
+
+test('TrueNAS catalog metadata remains in the merged App Store index', async () => {
+  const catalog = await readFile(new URL('../src/community-catalog.mjs', import.meta.url), 'utf8');
+  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+
+  assert.match(catalog, /id:'truenas'/);
+  assert.match(catalog, /truenasTrain/);
+  assert.match(catalog, /trueNasCatalog/);
+  assert.match(app, /TrueNAS catalog entry/);
+});
