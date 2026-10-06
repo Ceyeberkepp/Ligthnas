@@ -418,6 +418,9 @@ Environment=LIGHTNAS_HOST_SOCKET=/run/lightnas/host-agent.sock
 ExecStart=/usr/bin/python3 /opt/lightnas/scripts/lightnas-host-agent.py
 Restart=on-failure
 RestartSec=3
+MemoryHigh=100M
+MemoryMax=128M
+TasksMax=512
 NoNewPrivileges=false
 ProtectHome=false
 PrivateTmp=true
@@ -442,12 +445,16 @@ WorkingDirectory=/opt/lightnas
 EnvironmentFile=-/etc/lightnas/runtime.env
 Environment=LIGHTNAS_HOST_SOCKET=/run/lightnas/host-agent.sock
 Environment=NODE_ENV=production
+Environment=NODE_OPTIONS=--max-old-space-size=256
 Environment=NAS_HOST=0.0.0.0
 Environment=NAS_PORT=3080
 Environment=NAS_DATA_FILE=/var/lib/lightnas/state.json
 ExecStart=/usr/bin/node /opt/lightnas/src/server.mjs
 Restart=on-failure
 RestartSec=5
+MemoryHigh=300M
+MemoryMax=384M
+TasksMax=1024
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=false
@@ -484,7 +491,15 @@ export DEBIAN_FRONTEND=noninteractive
 install -d -m 0755 \
   /etc/apt/keyrings \
   /etc/lightnas \
-  /run/lightnas
+  /run/lightnas \
+  /etc/systemd/journald.conf.d
+
+cat >/etc/systemd/journald.conf.d/lightnas-limits.conf <<'JOURNAL'
+[Journal]
+SystemMaxUse=128M
+RuntimeMaxUse=64M
+MaxRetentionSec=7day
+JOURNAL
 
 #
 # Node.js 22
