@@ -54,6 +54,8 @@ function normalize(item, source) {
     version: String(item.version || ''),
     composeUrl: item.compose_url || item.composeUrl || '',
     metaUrl: item.meta_url || item.metaUrl || '',
+    truenasTrain: item.truenasTrain || '',
+    trueNasCatalog: Boolean(item.trueNasCatalog),
     installable: Boolean((item.compose_url || item.composeUrl) && compatible),
     installReason: compatible ? ((item.compose_url || item.composeUrl) ? '' : 'This catalog entry does not provide a Docker Compose manifest.') : 'This app does not support this CPU architecture.',
     community: true
@@ -142,7 +144,8 @@ function itemsFromIndex(data, source = {}) {
           icon: app.icon_url || app.icon || '',
           version: app.latest_version || app.version || '',
           architectures: app.architectures || [],
-          truenasTrain: train
+          truenasTrain: train,
+          trueNasCatalog: true
         });
       }
     }
@@ -226,13 +229,30 @@ function beginRefresh(cached) {
 
 export async function communityCatalog({ refresh=false } = {}) {
   const cached = await readCache();
-  const fresh = cached?.schemaVersion === CATALOG_SCHEMA_VERSION && cached?.updatedAt && Date.now() - Date.parse(cached.updatedAt) < CACHE_MS && Array.isArray(cached.apps);
-  if (!refresh && fresh) return cached;
-  if (!refresh && cached?.apps?.length) {
-    beginRefresh(cached).catch(() => null);
-    return { ...cached, stale:true, refreshing:true };
+  const validCache = cached?.schemaVersion === CATALOG_SCHEMA_VERSION && Array.isArray(cached.apps);
+  const fresh = validCache && cached?.updatedAt && Date.now() - Date.parse(cached.updatedAt) < CACHE_MS;
+
+  if (refresh || !fresh) beginRefresh(validCache ? cached : null).catch(() => null);
+
+  if (validCache) {
+    return {
+      ...cached,
+      stale: !fresh || Boolean(refresh),
+      refreshing: Boolean(refresh || !fresh)
+    };
   }
-  return beginRefresh(cached);
+
+  // Never block the App Store on WAN/GitHub. A cold start returns immediately
+  // and the browser polls this endpoint until the background index is ready.
+  return {
+    schemaVersion: CATALOG_SCHEMA_VERSION,
+    updatedAt: null,
+    apps: [],
+    sources: DEFAULT_SOURCES.map(source => ({ id:source.id, name:source.name, ok:false, pending:true, count:0 })),
+    count: 0,
+    stale: true,
+    refreshing: true
+  };
 }
 
 export async function communityApp(id, { refresh=false } = {}) {
