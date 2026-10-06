@@ -579,8 +579,8 @@ cat >/usr/share/lightnas/kiosk-start.html <<'KIOSK_HTML'
 <script>
 (async function poll(){
   try{
-    const response=await fetch('http://127.0.0.1:3080/api/status',{cache:'no-store'});
-    if(response.ok){ location.replace('http://127.0.0.1:3080/'); return; }
+    await fetch('http://127.0.0.1:3080/api/status',{cache:'no-store',mode:'no-cors'});
+    location.replace('http://127.0.0.1:3080/'); return;
   }catch{}
   document.getElementById('status').textContent='Services are still starting. This screen will update automatically.';
   setTimeout(poll,1000);
@@ -606,6 +606,7 @@ flags=(
   --disable-session-crashed-bubble
   --disable-features=TranslateUI
   --disable-dev-shm-usage
+  --password-store=basic
   --disable-pinch
 )
 
@@ -619,7 +620,8 @@ case "$virt" in
 esac
 
 exec chromium "${flags[@]}" file:///usr/share/lightnas/kiosk-start.html
-KIOSKchmod 0755 /usr/local/bin/lightnas-kiosk
+KIOSK
+chmod 0755 /usr/local/bin/lightnas-kiosk
 
 cat >/usr/local/bin/lightnas-xsession <<'XSESSION'
 #!/bin/bash
@@ -650,7 +652,8 @@ exec runuser -u lightnas-ui -- env \
   DISPLAY="${DISPLAY}" \
   XDG_SESSION_TYPE=x11 \
   /usr/local/bin/lightnas-kiosk
-XSESSIONchmod 0755 /usr/local/bin/lightnas-xsession
+XSESSION
+chmod 0755 /usr/local/bin/lightnas-xsession
 
 # LightNAS is an appliance, not a Debian desktop. Start the local control center
 # directly on VT7 so boot can never fall through to a Debian/LightDM login screen.
@@ -667,7 +670,8 @@ sleep 1
 
 exec /usr/bin/xinit /usr/local/bin/lightnas-xsession -- :0 vt7 -keeptty -nolisten tcp \
   >>/var/log/lightnas-display.log 2>&1
-DISPLAY_CONSOLEchmod 0755 /usr/local/sbin/lightnas-display-console
+DISPLAY_CONSOLE
+chmod 0755 /usr/local/sbin/lightnas-display-console
 
 cat >/etc/systemd/system/lightnas-display-console.service <<'DISPLAY_UNIT'
 [Unit]
@@ -675,6 +679,7 @@ Description=LightNAS local graphical control center
 After=systemd-user-sessions.service lightnas.service
 Wants=lightnas.service
 Conflicts=display-manager.service lightdm.service getty@tty7.service
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -686,7 +691,6 @@ TTYVTDisallocate=yes
 ExecStart=/usr/local/sbin/lightnas-display-console
 Restart=always
 RestartSec=2
-StartLimitIntervalSec=0
 
 [Install]
 WantedBy=graphical.target
