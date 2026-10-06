@@ -112,6 +112,16 @@ test('App Store restores a persistent local catalog and hides TrueNAS source bra
   assert.match(app, /restoreCommunityCatalogCache\(appliance\.username\)/);
   assert.match(app, /saveCommunityCatalogCache\(\)/);
   assert.match(app, /lightnas-community-catalog/);
-  assert.match(app, /app\.trueNasCatalog \? '' : escapeHtml\(app\.source/);
+  assert.match(app, /app\.community \? '' :/);
   assert.doesNotMatch(app, />TrueNAS Apps</);
+  assert.doesNotMatch(app, />Big Bear Community</);
+  assert.doesNotMatch(app, />ZimaOS \/ CasaOS Official</);
+});
+
+test('App Store refreshes stale cached data automatically when the page opens', async () => {
+  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(app, /communityCatalogCheckedAt/);
+  assert.match(app, /catalogStale/);
+  assert.match(app, /Date\.now\(\) - Number\(state\.communityCatalogCheckedAt \|\| 0\) > 15000/);
+  assert.match(app, /queueMicrotask\(\(\) => loadCommunityCatalog\(false\)\.catch/);
 });
