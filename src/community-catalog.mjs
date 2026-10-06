@@ -7,7 +7,7 @@ import { arch } from 'node:os';
 const CACHE_DIR = process.env.LIGHTNAS_CATALOG_CACHE_DIR || '/var/lib/lightnas/catalogs';
 const CACHE_FILE = join(CACHE_DIR, 'community-index.json');
 const CACHE_MS = 6 * 60 * 60 * 1000;
-const CATALOG_SCHEMA_VERSION = 3;
+const CATALOG_SCHEMA_VERSION = 4;
 const REMOTE_TIMEOUT_MS = 8000;
 const execute = promisify(execFile);
 const dataRoot = dirname(process.env.NAS_DATA_FILE || 'data/state.json');
