@@ -1222,7 +1222,7 @@ async function loadRuntimes(forceRefresh = false) {
   if (!forceRefresh) runtimeLoadPromise = work.finally(() => { runtimeLoadPromise = null; });
   await work;
   if (state.view === 'apps' && state.builtinCatalog === null) loadBuiltinCatalog();
-  if (state.view === 'apps' && !state.communityCatalog && !state.communityCatalogLoading) loadCommunityCatalog(false);
+  if (state.view === 'apps' && !state.communityCatalogLoading) loadCommunityCatalog(false).catch(() => null);
 }
 
 async function loadBackupJobs() {
@@ -2332,7 +2332,7 @@ function moduleView(view) {
         const instances = (docker?.containers || []).filter(container =>
           container.catalogId === app.id || container.name === `lightnas-app-${app.id}`
         );
-        const searchText = `${app.name} ${app.category} ${app.description} ${app.image} ${app.source || ''}`.toLowerCase();
+        const searchText = `${app.name} ${app.category} ${app.description} ${app.image}`.toLowerCase();
         const namedInstances = instances.map(instance => {
           const instanceName = instance.instanceName || (instance.name === `lightnas-app-${app.id}` ? 'default' : instance.name.replace(`lightnas-app-${app.id}-`, ''));
           return instanceName === 'default' ? '' : `<section class="app-instance-row"><div class="app-instance-summary"><b>${escapeHtml(instanceName)}</b></div></section>`;
@@ -2343,7 +2343,7 @@ function moduleView(view) {
               ? `<button class="primary" data-community-install="${app.id}">Install</button>`
               : `<button class="secondary" type="button" disabled title="${escapeHtml(app.installReason || 'This community app is not deployable on this host.')}">Unavailable</button>`)
           : `<button class="primary" data-install="${app.id}" data-instance-count="${instances.length}">Install</button>`;
-        return `<article class="panel app-card" data-app-card data-category="${escapeHtml(app.category)}" data-search="${escapeHtml(searchText)}"><span class="eyebrow">${escapeHtml(app.category)}</span><h2>${escapeHtml(app.name)}</h2><p class="muted">${escapeHtml(app.description)}</p>${app.trueNasCatalog && !app.image && !app.port ? '' : `<p class="muted app-source">${app.trueNasCatalog ? '' : escapeHtml(app.source || 'Open source')}${app.image ? `${app.trueNasCatalog ? '' : ' · '}${escapeHtml(app.image)}` : ''}${app.port ? ` · Default port ${app.port}` : ''}</p>`}${instances.length ? `<p class="muted"><b>${instances.length}</b> installed instance${instances.length === 1 ? '' : 's'}</p>` : ''}${instanceList}<div class="head-actions app-install-actions">${installControl}</div></article>`;
+        return `<article class="panel app-card" data-app-card data-category="${escapeHtml(app.category)}" data-search="${escapeHtml(searchText)}"><span class="eyebrow">${escapeHtml(app.category)}</span><h2>${escapeHtml(app.name)}</h2><p class="muted">${escapeHtml(app.description)}</p>${app.community ? '' : `<p class="muted app-source">${escapeHtml(app.source || 'Open source')}${app.image ? ` · ${escapeHtml(app.image)}` : ''}${app.port ? ` · Default port ${app.port}` : ''}</p>`}${instances.length ? `<p class="muted"><b>${instances.length}</b> installed instance${instances.length === 1 ? '' : 's'}</p>` : ''}${instanceList}<div class="head-actions app-install-actions">${installControl}</div></article>`;
       }).join('') || (state.builtinCatalog === null ? '<div class="empty"><p>Loading built-in catalog…</p></div>' : '<div class="empty"><p>No apps match this filter.</p></div>')}</div>
       ${more ? `<div class="app-catalog-more"><button class="secondary" type="button" data-app-more>Show ${Math.min(72, more)} more</button><span class="muted">Showing ${visibleApps.length} of ${filteredApps.length} matching apps</span></div>` : filteredApps.length ? `<p class="muted app-catalog-count">Showing ${filteredApps.length} matching app${filteredApps.length === 1 ? '' : 's'}.</p>` : ''}
       <section class="module-hero"><h2>Managed app hosting</h2><p>LightNAS downloads each app, creates its persistent storage, publishes its web service on the LightNAS LAN address, starts it after reboot, and verifies that the service is reachable. No external hypervisor configuration or manual port forwarding is required for managed catalog apps. ${docker?.available && docker?.enabled ? 'The integrated App Store engine is ready.' : 'The catalog stays available while the App Store engine finishes starting.'}</p></section>`;
@@ -2669,7 +2669,7 @@ function render(view) {
   content.focus({ preventScroll: true });
   applyWorkspaceMode();
   bindViewActions();
-  if (state.view === 'files' && state.files === null) loadFiles();
+  if (state.view === 'files' && (state.files === null || state.fileError)) loadFiles(false).catch(() => null);
   if (['pools', 'storage'].includes(state.view) && state.spaces === null) loadSpaces();
   if (['users', 'permissions'].includes(state.view) && state.users === null) loadUsers();
   if (['smtp','integrations'].includes(state.view) && state.smtp === undefined) loadSmtp();
@@ -3505,14 +3505,6 @@ function bindViewActions() {
     document.body.append(link);
     link.click();
     link.remove();
-  }));
-  $('[data-library-tab]', $('#content')).forEach(button => button.addEventListener('click', async () => {
-    state.filesSettingsOpen = false;
-    const target = button.dataset.libraryTab || 'all';
-    state.fileLibraryTab = target;
-    state.folder = target === 'all' || target === 'folders' ? '' : target;
-    state.files = null;
-    render('files');
   }));
   $('[data-library-select]', $('#content'))?.addEventListener('change', async event => {
     state.filesSettingsOpen = false;
