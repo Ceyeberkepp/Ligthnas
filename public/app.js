@@ -2701,7 +2701,12 @@ function render(view) {
   if (['network', 'firewall'].includes(state.view) && !state.network) loadNetwork();
   if (['logs','backups','analytics'].includes(state.view) && state.logs === null) loadLogs();
   if (state.view === 'backups' && state.backupJobs === null && window.LIGHTNAS_PRODUCT_MODE !== 'hypervisor') loadBackupJobs();
-  if (state.view === 'apps' && !state.communityCatalog && !state.communityCatalogLoading) loadCommunityCatalog(false);
+  if (state.view === 'apps') {
+    const catalogStale = !state.communityCatalog || Date.now() - Number(state.communityCatalogCheckedAt || 0) > 15000;
+    if (catalogStale && !state.communityCatalogLoading) {
+      queueMicrotask(() => loadCommunityCatalog(false).catch(() => null));
+    }
+  }
   if (state.view === 'settings' && (!state.software || !state.license)) loadSoftwareAndLicense();
 
   if (state.view === 'containers') {
