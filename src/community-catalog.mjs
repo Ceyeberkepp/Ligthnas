@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, readdir, rm } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { dirname, join } from 'node:path';
@@ -56,8 +56,10 @@ function normalize(item, source) {
     metaUrl: item.meta_url || item.metaUrl || '',
     truenasTrain: item.truenasTrain || '',
     trueNasCatalog: Boolean(item.trueNasCatalog),
-    installable: Boolean((item.compose_url || item.composeUrl) && compatible),
-    installReason: compatible ? ((item.compose_url || item.composeUrl) ? '' : 'This catalog entry does not provide a Docker Compose manifest.') : 'This app does not support this CPU architecture.',
+    installable: Boolean(compatible && ((item.compose_url || item.composeUrl) || item.trueNasCatalog)),
+    installReason: compatible
+      ? (((item.compose_url || item.composeUrl) || item.trueNasCatalog) ? '' : 'This catalog entry does not provide a deployable package.')
+      : 'This app does not support this CPU architecture.',
     community: true
   };
 }
@@ -260,6 +262,86 @@ export async function communityApp(id, { refresh=false } = {}) {
   return catalog.apps.find(app => app.id === id) || null;
 }
 
+async function installTrueNasCatalogApp(app) {
+  const train = safeId(app.truenasTrain || 'community');
+  const upstreamId = safeId(app.upstreamId);
+  if (!train || !upstreamId) throw Object.assign(new Error('TrueNAS catalog metadata is incomplete.'), { status:409 });
+
+  const appDir = join(COMMUNITY_APP_ROOT, safeId(app.id));
+  const sourceDir = join(appDir, 'truenas-source');
+  const upstreamPath = `ix-dev/${train}/${upstreamId}`;
+  const valuesDir = join(sourceDir, upstreamPath, 'templates', 'test_values');
+
+  await mkdir(appDir, { recursive:true, mode:0o700 });
+  await rm(sourceDir, { recursive:true, force:true });
+
+  try {
+    await execute('git', [
+      'clone', '--depth', '1', '--filter=blob:none', '--sparse', '--branch', 'master',
+      'https://github.com/truenas/apps.git', sourceDir
+    ], { timeout:120000, maxBuffer:8 * 1024 * 1024 });
+    await execute('git', ['-C', sourceDir, 'sparse-checkout', 'set', upstreamPath], {
+      timeout:60000, maxBuffer:8 * 1024 * 1024
+    });
+  } catch (error) {
+    throw Object.assign(new Error('Unable to download the TrueNAS application definition: ' + String(error?.stderr || error?.message || '').trim()), { status:409 });
+  }
+
+  let valueFiles = [];
+  try { valueFiles = (await readdir(valuesDir)).filter(name => /\.ya?ml$/i.test(name)).sort(); }
+  catch {}
+  const valuesFile = valueFiles.find(name => /^basic-values\.ya?ml$/i.test(name)) || valueFiles[0];
+  if (!valuesFile) throw Object.assign(new Error('This TrueNAS app does not provide a default installation profile.'), { status:409 });
+
+  const platform = machineArch() === 'arm64' ? 'linux/arm64' : 'linux/amd64';
+  const workspacePath = '/workspace/' + upstreamPath;
+  try {
+    await execute('docker', [
+      'run', '--platform', platform, '--rm',
+      '-e', 'FAKE_ENV=1',
+      '-v', sourceDir + ':/workspace',
+      '-v', '/var/run/docker.sock:/var/run/docker.sock:ro',
+      'ghcr.io/truenas/apps_validation:latest',
+      'apps_render_app', 'render',
+      '--path', workspacePath,
+      '--values', workspacePath + '/templates/test_values/' + valuesFile
+    ], { timeout:10 * 60 * 1000, maxBuffer:32 * 1024 * 1024 });
+  } catch (error) {
+    throw Object.assign(new Error('TrueNAS app rendering failed: ' + String(error?.stderr || error?.stdout || error?.message || '').trim()), { status:409 });
+  }
+
+  const renderedPath = join(sourceDir, upstreamPath, 'templates', 'rendered', 'docker-compose.yaml');
+  let compose;
+  try { compose = await readFile(renderedPath, 'utf8'); }
+  catch { throw Object.assign(new Error('TrueNAS renderer did not produce Docker Compose output.'), { status:409 }); }
+
+  const dataDir = join(appDir, 'data');
+  await mkdir(dataDir, { recursive:true, mode:0o700 });
+  compose = compose
+    .replaceAll('/opt/tests/mnt/', dataDir.replaceAll('\\', '/') + '/')
+    .replaceAll('/mnt/.ix-apps/app_mounts/', dataDir.replaceAll('\\', '/') + '/');
+
+  const composePath = join(appDir, 'compose.yml');
+  await writeFile(composePath, compose, { mode:0o600 });
+  const project = safeId(('lightnas-' + app.id).slice(0, 55));
+
+  try {
+    const { stdout, stderr } = await execute(
+      'docker',
+      ['compose', '--project-name', project, '-f', composePath, 'up', '-d', '--pull', 'always'],
+      { cwd:appDir, env:{ ...process.env, TZ:process.env.TZ || 'Etc/UTC' }, timeout:15 * 60 * 1000, maxBuffer:32 * 1024 * 1024 }
+    );
+    return {
+      id:app.id, upstreamId:app.upstreamId, name:app.name, source:app.source,
+      project, composePath, installed:true, truenasTrain:train,
+      output:String(stdout || stderr || '').trim()
+    };
+  } catch (error) {
+    const detail = String(error?.stderr || error?.stdout || error?.message || 'Docker Compose failed.').trim();
+    throw Object.assign(new Error('Unable to install TrueNAS application: ' + detail), { status:409 });
+  }
+}
+
 function validateCommunityComposeUrl(url) {
   let parsed;
   try { parsed = new URL(String(url || '')); }
@@ -274,7 +356,9 @@ export async function installCommunityApp(id) {
   const app = await communityApp(id, { refresh:false });
   if (!app) throw Object.assign(new Error('Community application was not found.'), { status: 404 });
   if (!app.compatible) throw Object.assign(new Error('This community application does not support this CPU architecture.'), { status: 409 });
-  if (!app.installable || !app.composeUrl) throw Object.assign(new Error(app.installReason || 'This community application has no deployable Compose manifest.'), { status: 409 });
+  if (!app.installable) throw Object.assign(new Error(app.installReason || 'This community application has no deployable package.'), { status: 409 });
+  if (app.trueNasCatalog) return installTrueNasCatalogApp(app);
+  if (!app.composeUrl) throw Object.assign(new Error('This community application has no deployable Compose manifest.'), { status:409 });
 
   const composeUrl = validateCommunityComposeUrl(app.composeUrl);
   const response = await fetch(composeUrl, {
