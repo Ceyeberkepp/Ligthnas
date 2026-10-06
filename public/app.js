@@ -1,20 +1,20 @@
 if (window.LIGHTNAS_PRODUCT_MODE === 'hypervisor') document.body.classList.add('product-hypervisor');
 const state = { overview: null, view: 'home', uiMode: window.LIGHTNAS_PRODUCT_MODE === 'hypervisor' ? 'hypervisor' : 'nas', folder: '', files: null, fileError: null, filesSettingsOpen: false, fileLibraryTab: 'all', filesNavExpanded: localStorage.getItem('lightnas-files-nav-expanded') !== '0', mobileFilesPeriod: localStorage.getItem('lightnas-mobile-files-period') || 'all', aiMessages: [], logs: null, fileView: ['list','grid','gallery'].includes(localStorage.getItem('lightnas-file-view')) ? localStorage.getItem('lightnas-file-view') : 'grid', fileTruncated: false, fileQuota: null, fileSectionCache: new Map(), overviewMetric: localStorage.getItem('lightnas-overview-metric') || 'cpu', lastNetworkSample: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, userAccess: null, smtp: undefined, media: null, network: null, software: null, license: null, builtinCatalog: null, communityCatalog: null, communityCatalogLoading: false, communityCatalogError: null, appSearch: '', appCategory: '', appVisibleLimit: 72, backupJobs: null, selectedBackupJobId: null, metricHistory: { cpu: [], load: [], memory: [], storage: [], networkIn: [], networkOut: [] } };
-function filesSectionCacheKey() {
-  if (state.folder) return 'path:' + state.folder;
-  return state.fileLibraryTab === 'folders' ? 'folders' : state.fileLibraryTab || 'all';
+function filesSectionCacheKey(tab = state.fileLibraryTab, folder = state.folder) {
+  if (folder) return 'path:' + folder;
+  return tab === 'folders' ? 'folders' : tab || 'all';
 }
 
-function rememberFilesSection(entries, truncated = false) {
-  state.fileSectionCache.set(filesSectionCacheKey(), {
+function rememberFilesSection(entries, truncated = false, key = filesSectionCacheKey()) {
+  state.fileSectionCache.set(key, {
     entries: Array.isArray(entries) ? entries : [],
     truncated:Boolean(truncated),
     savedAt:Date.now()
   });
 }
 
-function restoreFilesSection() {
-  const cached = state.fileSectionCache.get(filesSectionCacheKey());
+function restoreFilesSection(key = filesSectionCacheKey()) {
+  const cached = state.fileSectionCache.get(key);
   if (!cached || !Array.isArray(cached.entries)) return false;
   state.files = cached.entries;
   state.fileTruncated = Boolean(cached.truncated);
@@ -51,7 +51,6 @@ function mobileFilesCacheKey(username = state.overview?.appliance?.username || '
 }
 
 function restoreMobileFilesCache(username) {
-  if (!matchMedia('(max-width: 760px)').matches) return;
   const key = mobileFilesCacheKey(username);
   if (!key) return;
   try {
@@ -59,11 +58,16 @@ function restoreMobileFilesCache(username) {
     if (!cached || Date.now() - Number(cached.savedAt || 0) > 120000 || !Array.isArray(cached.files)) return;
     state.files = cached.files;
     state.fileTruncated = Boolean(cached.truncated);
+    state.fileSectionCache.set('all', {
+      entries: cached.files,
+      truncated:Boolean(cached.truncated),
+      savedAt:Number(cached.savedAt || Date.now())
+    });
   } catch {}
 }
 
 function saveMobileFilesCache() {
-  if (!matchMedia('(max-width: 760px)').matches || state.folder !== '' || state.fileLibraryTab !== 'all' || !Array.isArray(state.files)) return;
+  if (state.folder !== '' || state.fileLibraryTab !== 'all' || !Array.isArray(state.files)) return;
   const key = mobileFilesCacheKey();
   if (!key) return;
   try {
@@ -365,16 +369,7 @@ async function showConsole() {
     setTimeout(() => { if (!state.network) loadNetwork(); }, 700);
     setTimeout(() => { if (state.spaces === null) loadSpaces(); }, 900);
     setTimeout(() => {
-      if (state.files === null) {
-        const previousTab = state.fileLibraryTab;
-        const previousFolder = state.folder;
-        state.fileLibraryTab = 'all';
-        state.folder = '';
-        loadFiles(false).finally(() => {
-          state.fileLibraryTab = previousTab;
-          state.folder = previousFolder;
-        });
-      }
+      if (!state.fileSectionCache.has('all')) loadFiles(false, { tab:'all', folder:'' }).catch(() => null);
     }, 120);
   });
   document.querySelectorAll('#nav a[data-view], .foot-admin[data-view]').forEach(link => {
@@ -1744,51 +1739,65 @@ function queueMobileMediaPrewarm(entries = []) {
   }).catch(() => {});
 }
 
-async function loadFiles(forceRefresh = false) {
+async function loadFiles(forceRefresh = false, target = null) {
   state.fileError = null;
   const mobile = matchMedia('(max-width: 760px)').matches;
-  if (!forceRefresh && restoreFilesSection() && state.view === 'files') render('files');
+  const requestTab = target?.tab || state.fileLibraryTab;
+  const requestFolder = target?.folder ?? state.folder;
+  const requestKey = filesSectionCacheKey(requestTab, requestFolder);
+  const isCurrentRequest = () => filesSectionCacheKey() === requestKey;
+
+  if (!forceRefresh && restoreFilesSection(requestKey) && isCurrentRequest() && state.view === 'files') {
+    render('files');
+  }
+
   try {
-    const endpoint = state.folder === ''
-      ? (state.fileLibraryTab === 'folders'
+    const endpoint = requestFolder === ''
+      ? (requestTab === 'folders'
           ? '/api/files?folders=1'
           : `/api/files?all=1${forceRefresh ? '&refresh=1' : ''}`)
-      : `/api/files?path=${encodeURIComponent(state.folder)}`;
-
-    if (mobile) {
-      // Paint the mobile library as soon as metadata arrives. Quota calculation
-      // can walk a large private library and must not block the Files tab.
-      const result = await request(endpoint);
-      state.files = Array.isArray(result.entries) ? result.entries.filter(entry => entry.supported) : [];
-      state.fileTruncated = Boolean(result.truncated);
-      rememberFilesSection(state.files, state.fileTruncated);
-      saveMobileFilesCache();
-      queueMobileMediaPrewarm(state.files);
-      if (state.view === 'files') render('files');
-
-      request('/api/files/quota').then(quota => {
-        state.fileQuota = quota;
-        if (state.view === 'files' && !document.querySelector('.mobile-photos-experience')) render('files');
-      }).catch(() => {});
-      return;
-    }
+      : `/api/files?path=${encodeURIComponent(requestFolder)}`;
 
     const result = await request(endpoint);
-    state.files = Array.isArray(result.entries) ? result.entries.filter(entry => entry.supported) : [];
-    state.fileTruncated = Boolean(result.truncated);
-    rememberFilesSection(state.files, state.fileTruncated);
-    if (state.view === 'files') render('files');
+    const entries = Array.isArray(result.entries) ? result.entries.filter(entry => entry.supported) : [];
+    const truncated = Boolean(result.truncated);
+    rememberFilesSection(entries, truncated, requestKey);
 
-    request('/api/files/quota').then(quota => {
-      state.fileQuota = quota;
-    }).catch(() => {});
+    if (requestKey === 'all') {
+      const previousFiles = state.files;
+      const previousTruncated = state.fileTruncated;
+      state.files = entries;
+      state.fileTruncated = truncated;
+      saveMobileFilesCache();
+      if (!isCurrentRequest()) {
+        state.files = previousFiles;
+        state.fileTruncated = previousTruncated;
+      }
+    }
+
+    if (isCurrentRequest()) {
+      state.files = entries;
+      state.fileTruncated = truncated;
+      if (mobile) queueMobileMediaPrewarm(entries);
+      if (state.view === 'files') render('files');
+    }
+
+    if (isCurrentRequest()) {
+      request('/api/files/quota').then(quota => {
+        state.fileQuota = quota;
+      }).catch(() => {});
+    }
+    return entries;
   } catch (error) {
-    state.files = [];
-    state.fileTruncated = false;
-    state.fileError = error.message || 'The file service did not return a valid response.';
-    toast(state.fileError);
+    if (isCurrentRequest()) {
+      state.files = [];
+      state.fileTruncated = false;
+      state.fileError = error.message || 'The file service did not return a valid response.';
+      toast(state.fileError);
+      if (state.view === 'files') render('files');
+    }
+    return [];
   }
-  if (state.view === 'files' && mobile) render('files');
 }
 
 function uploadRequest(path, file, onProgress) {
@@ -3993,6 +4002,7 @@ $$('[data-view]').forEach(link => link.addEventListener('click', event => {
     if (location.hash === '#files') {
       event.preventDefault();
       render('files');
+      loadFiles(false).catch(() => null);
     }
   }
   setMobileSidebar(false);
