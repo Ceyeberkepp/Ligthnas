@@ -72,3 +72,13 @@ test('Files and media restores desktop cache instantly and background refresh ca
   assert.match(app, /const isCurrentRequest = \(\) => filesSectionCacheKey\(\) === requestKey/);
   assert.match(app, /if \(isCurrentRequest\(\)\) \{/);
 });
+
+test('Files view has no obsolete in-content library tab binding and retries stale/error data automatically', async () => {
+  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(app, /\$\('\[data-library-tab\]'/);
+  assert.match(app, /fileSectionCheckedAt/);
+  assert.match(app, /filesLoadingKeys/);
+  assert.match(app, /Date\.now\(\) - checkedAt > 15000/);
+  assert.match(app, /setTimeout\(\(\) => \{/);
+  assert.match(app, /loadFiles\(false\)\.catch/);
+});
