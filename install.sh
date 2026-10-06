@@ -45,6 +45,20 @@ fi
 
 export DEBIAN_FRONTEND=noninteractive
 
+LIGHTNAS_ARCH="$(dpkg --print-architecture 2>/dev/null || uname -m)"
+case "${LIGHTNAS_ARCH}" in
+  x86_64) LIGHTNAS_ARCH=amd64 ;;
+  aarch64) LIGHTNAS_ARCH=arm64 ;;
+  i386|i486|i586|i686) LIGHTNAS_ARCH=i386 ;;
+  armv7l|armv6l) LIGHTNAS_ARCH=armhf ;;
+esac
+if [[ "${LIGHTNAS_ARCH}" != "amd64" && "${LIGHTNAS_ALLOW_UNVALIDATED_ARCH:-0}" != "1" ]]; then
+  echo "LightNAS detected architecture ${LIGHTNAS_ARCH}. This architecture is an engineering target but is not release-qualified yet." >&2
+  echo "Validated installer architecture: amd64. Set LIGHTNAS_ALLOW_UNVALIDATED_ARCH=1 only for development testing." >&2
+  exit 1
+fi
+echo "Detected LightNAS architecture: ${LIGHTNAS_ARCH}"
+
 echo "[1/6] Checking system requirements..."
 install_missing_packages \
   ca-certificates curl git gnupg python3 ffmpeg imagemagick qrencode acl novnc iproute2 nftables ufw samba openssh-server ovmf \
@@ -161,6 +175,12 @@ install -d -o lightnas -g lightnas -m 0700 "${DATA_DIRECTORY}"
 install -d -o lightnas -g lightnas -m 0700 "${DATA_DIRECTORY}/files"
 install -d -o lightnas -g lightnas -m 0770 "${DATA_DIRECTORY}/storage" "${DATA_DIRECTORY}/storage/local"
 install -d -o root -g lightnas -m 0750 /etc/lightnas
+cat >/etc/lightnas/platform.env <<EOF
+LIGHTNAS_ARCH=${LIGHTNAS_ARCH}
+LIGHTNAS_PLATFORM_VALIDATED=$([[ "${LIGHTNAS_ARCH}" == "amd64" ]] && echo 1 || echo 0)
+EOF
+chown root:lightnas /etc/lightnas/platform.env
+chmod 0640 /etc/lightnas/platform.env
 
 # On a fresh interactive install, enumerate real physical Ethernet and Wi-Fi
 # adapters and let the administrator choose the management uplink. Existing
@@ -331,6 +351,9 @@ Environment=LIGHTNAS_HOST_SOCKET=/run/lightnas/host-agent.sock
 ExecStart=/usr/bin/python3 ${INSTALL_DIRECTORY}/scripts/lightnas-host-agent.py
 Restart=on-failure
 RestartSec=3
+MemoryHigh=100M
+MemoryMax=128M
+TasksMax=512
 NoNewPrivileges=false
 ProtectHome=false
 PrivateTmp=true
@@ -354,12 +377,16 @@ EnvironmentFile=-/etc/lightnas/runtime.env
 EnvironmentFile=-/etc/lightnas/license.env
 Environment=LIGHTNAS_HOST_SOCKET=/run/lightnas/host-agent.sock
 Environment=NODE_ENV=production
+Environment=NODE_OPTIONS=--max-old-space-size=256
 Environment=NAS_HOST=0.0.0.0
 Environment=NAS_PORT=3080
 Environment=NAS_DATA_FILE=${DATA_DIRECTORY}/state.json
 ExecStart=/usr/bin/node ${INSTALL_DIRECTORY}/src/server.mjs
 Restart=on-failure
 RestartSec=5
+MemoryHigh=300M
+MemoryMax=384M
+TasksMax=1024
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=false
@@ -371,7 +398,16 @@ ReadWritePaths=${DATA_DIRECTORY}
 WantedBy=multi-user.target
 EOF
 
+install -d -m 0755 /etc/systemd/journald.conf.d
+cat >/etc/systemd/journald.conf.d/lightnas-limits.conf <<'EOF'
+[Journal]
+SystemMaxUse=128M
+RuntimeMaxUse=64M
+MaxRetentionSec=7day
+EOF
+
 systemctl daemon-reload
+systemctl try-restart systemd-journald.service >/dev/null 2>&1 || true
 systemctl enable lightnas-network-bootstrap.service
 if [[ "${EXISTING_INSTALL}" == "0" || "${LIGHTNAS_REPAIR_NETWORK:-0}" == "1" ]]; then
   echo "      Applying LightNAS network bootstrap..."
