@@ -77,3 +77,32 @@ test('TrueNAS catalog entries stay visible without pretending every TrueNAS temp
   assert.match(catalog, /trueNasCatalog/);
   assert.match(app, /TrueNAS catalog entry/);
 });
+
+test('TrueNAS catalog apps use the official renderer and expose a real Install action', async () => {
+  const [catalog, app] = await Promise.all([
+    readFile(new URL('../src/community-catalog.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../public/app.js', import.meta.url), 'utf8')
+  ]);
+
+  assert.match(catalog, /ghcr\.io\/truenas\/apps_validation:latest/);
+  assert.match(catalog, /apps_render_app/);
+  assert.match(catalog, /sparse-checkout/);
+  assert.match(catalog, /installTrueNasCatalogApp/);
+  assert.match(catalog, /app\.trueNasCatalog\) return installTrueNasCatalogApp/);
+  assert.match(catalog, /CATALOG_SCHEMA_VERSION = 4/);
+  assert.match(app, /app\.installable \|\| app\.trueNasCatalog/);
+  assert.doesNotMatch(app, />TrueNAS catalog<\/button>/);
+});
+
+test('Files and photos paint before quota work and visible thumbnails are not deliberately deprioritized', async () => {
+  const [app, files] = await Promise.all([
+    readFile(new URL('../public/app.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/files.mjs', import.meta.url), 'utf8')
+  ]);
+
+  assert.match(app, /const result = await request\(endpoint\);/);
+  assert.match(app, /request\('\/api\/files\/quota'\)\.then/);
+  assert.match(app, /loading="eager"/);
+  assert.doesNotMatch(app, /class="file-thumb" loading="lazy" fetchpriority="low"/);
+  assert.match(files, /expiresAt: now \+ 60000/);
+});

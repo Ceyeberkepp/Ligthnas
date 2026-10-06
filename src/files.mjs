@@ -263,7 +263,7 @@ export async function listAllFiles(forceRefresh = false, scopePrefix = '') {
     truncated: limits.count >= limits.max,
     limit: limits.max
   };
-  allFilesCache.set(cacheKey, { expiresAt: now + 5000, value });
+  allFilesCache.set(cacheKey, { expiresAt: now + 60000, value });
   return value;
 }
 

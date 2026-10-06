@@ -1419,7 +1419,7 @@ function filesView() {
     const visual = entry.directory
       ? '<span class="folder-glyph">▣</span>'
       : (kind === 'Photo' || kind === 'Video')
-        ? `<img class="file-thumb" loading="lazy" fetchpriority="low" decoding="async" alt="" src="/api/files/thumbnail?path=${encodeURIComponent(path)}&v=${thumbVersion}">`
+        ? `<img class="file-thumb" loading="eager" decoding="async" alt="" src="/api/files/thumbnail?path=${encodeURIComponent(path)}&v=${thumbVersion}">`
         : `<span class="file-glyph file-kind-${kind.toLowerCase()}">${kind === 'Audio' ? '♪' : '▤'}</span>`;
 
     if (effectiveFileView === 'gallery') {
@@ -1714,20 +1714,21 @@ async function loadFiles(forceRefresh = false) {
       return;
     }
 
-    const [result, quota] = await Promise.all([
-      request(endpoint),
-      request('/api/files/quota').catch(() => null)
-    ]);
+    const result = await request(endpoint);
     state.files = Array.isArray(result.entries) ? result.entries.filter(entry => entry.supported) : [];
     state.fileTruncated = Boolean(result.truncated);
-    state.fileQuota = quota;
+    if (state.view === 'files') render('files');
+
+    request('/api/files/quota').then(quota => {
+      state.fileQuota = quota;
+    }).catch(() => {});
   } catch (error) {
     state.files = [];
     state.fileTruncated = false;
     state.fileError = error.message || 'The file service did not return a valid response.';
     toast(state.fileError);
   }
-  if (state.view === 'files') render('files');
+  if (state.view === 'files' && mobile) render('files');
 }
 
 function uploadRequest(path, file, onProgress) {
@@ -2269,11 +2270,9 @@ function moduleView(view) {
         }).filter(Boolean);
         const instanceList = namedInstances.length ? `<div class="app-instance-list">${namedInstances.join('')}</div>` : '';
         const installControl = app.community
-          ? (app.installable
+          ? ((app.installable || app.trueNasCatalog)
               ? `<button class="primary" data-community-install="${app.id}">Install</button>`
-              : app.trueNasCatalog
-                ? `<button class="secondary" type="button" disabled title="TrueNAS catalog entry. LightNAS lists it for catalog parity, but the upstream package uses TrueNAS template rendering rather than a standalone Compose file.">TrueNAS catalog</button>`
-                : `<button class="secondary" type="button" disabled title="${escapeHtml(app.installReason || 'This community app is not deployable on this host.')}">Unavailable</button>`)
+              : `<button class="secondary" type="button" disabled title="${escapeHtml(app.installReason || 'This community app is not deployable on this host.')}">Unavailable</button>`)
           : `<button class="primary" data-install="${app.id}" data-instance-count="${instances.length}">Install</button>`;
         return `<article class="panel app-card" data-app-card data-category="${escapeHtml(app.category)}" data-search="${escapeHtml(searchText)}"><span class="eyebrow">${escapeHtml(app.category)}</span><h2>${escapeHtml(app.name)}</h2><p class="muted">${escapeHtml(app.description)}</p><p class="muted app-source">${escapeHtml(app.source || 'Open source')}${app.image ? ` · ${escapeHtml(app.image)}` : ''}${app.port ? ` · Default port ${app.port}` : ''}</p>${instances.length ? `<p class="muted"><b>${instances.length}</b> installed instance${instances.length === 1 ? '' : 's'}</p>` : ''}${instanceList}<div class="head-actions app-install-actions">${installControl}</div></article>`;
       }).join('') || (state.builtinCatalog === null ? '<div class="empty"><p>Loading built-in catalog…</p></div>' : '<div class="empty"><p>No apps match this filter.</p></div>')}</div>
@@ -2938,10 +2937,10 @@ function bindViewActions() {
     const app = state.communityCatalog?.apps?.find(item => item.id === button.dataset.communityInstall);
     if (!app) return toast('The selected community application is no longer in the catalog.');
     if (!app.installable) return toast(app.installReason || 'This community application cannot be installed on this host.');
-    if (!confirm(`Install ${app.name} from ${app.source}? LightNAS will use the upstream Docker Compose package, pull its images, create persistent data, and start the application.`)) return;
+    if (!confirm(`Install ${app.name} from ${app.source}? LightNAS will prepare the upstream application package, pull its images, create persistent data, and start the application.`)) return;
     button.disabled = true;
     button.textContent = 'Installing…';
-    const progress = window.LightNASProgress?.open(`Installing ${app.name}`, 'Downloading the upstream Compose package, pulling images, and starting services…', { modal:false });
+    const progress = window.LightNASProgress?.open(`Installing ${app.name}`, 'Preparing the application package, pulling images, and starting services…', { modal:false });
     try {
       await request(`/api/catalog/community/${encodeURIComponent(app.id)}/install`, { method:'POST', body:'{}' });
       await Promise.all([loadRuntimes(true), loadCommunityCatalog(false)]);
