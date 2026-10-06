@@ -106,3 +106,12 @@ test('Files and photos paint before quota work and visible thumbnails are not de
   assert.doesNotMatch(app, /class="file-thumb" loading="lazy" fetchpriority="low"/);
   assert.match(files, /expiresAt: now \+ 60000/);
 });
+
+test('App Store restores a persistent local catalog and hides TrueNAS source branding', async () => {
+  const app = await readFile(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(app, /restoreCommunityCatalogCache\(appliance\.username\)/);
+  assert.match(app, /saveCommunityCatalogCache\(\)/);
+  assert.match(app, /lightnas-community-catalog/);
+  assert.match(app, /app\.trueNasCatalog \? '' : escapeHtml\(app\.source/);
+  assert.doesNotMatch(app, />TrueNAS Apps</);
+});
