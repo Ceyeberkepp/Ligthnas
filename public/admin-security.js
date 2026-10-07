@@ -187,7 +187,7 @@ async function renderTotp() {
     </div>
     <div class="mfa-method-grid">
       <article class="panel mfa-method ${totp.enabled ? 'active' : ''}"><span class="mfa-icon">TOTP</span><div><h3>Authenticator</h3><p>Time-based 6-digit codes from Microsoft Authenticator, Google Authenticator, 1Password, Authy, and compatible apps.</p></div><span class="volume-state ${totp.enabled ? 'writable' : 'readonly'}">${totp.enabled ? 'ENABLED' : 'DISABLED'}</span></article>
-      <article class="panel mfa-method ${sms.enabled ? 'active' : ''}"><span class="mfa-icon">SMS</span><div><h3>SMS code</h3><p>Send verification codes directly from this LightNAS appliance through a locally attached GSM/LTE modem. No cloud SMS provider is required.</p></div><span class="volume-state ${sms.enabled ? 'writable' : 'readonly'}">${sms.enabled ? 'ENABLED' : (sms.gateway?.available ? 'READY' : 'MODEM NEEDED')}</span></article>
+      <article class="panel mfa-method ${sms.enabled ? 'active' : ''}"><span class="mfa-icon">SMS</span><div><h3>SMS code</h3><p>Send verification codes through the centralized LightNAS SMS service. The appliance does not need a cellular modem or SMS-provider account.</p></div><span class="volume-state ${sms.enabled ? 'writable' : 'readonly'}">${sms.enabled ? 'ENABLED' : (sms.gateway?.available ? 'READY' : 'SERVICE NEEDED')}</span></article>
       <article class="panel mfa-method ${keys.length ? 'active' : ''}"><span class="mfa-icon">FIDO</span><div><h3>Passkeys & security keys</h3><p>Use WebAuthn/FIDO2 passkeys, Windows Hello, Touch ID, phone passkeys, or hardware security keys.</p></div><span class="volume-state ${keys.length ? 'writable' : 'readonly'}">${keys.length ? `${keys.length} REGISTERED` : 'DISABLED'}</span></article>
     </div>
 
