@@ -34,6 +34,26 @@ function serializePasskeyRegistration(credential) {
 }
 
 const permissionNames = {
+  'nav.home':'Sidebar — Overview',
+  'nav.storage':'Sidebar — Storage',
+  'nav.pools':'Sidebar — Pools & datasets',
+  'nav.files':'Sidebar — Files & media',
+  'nav.shares':'Sidebar — Shares',
+  'nav.backups':'Sidebar — Backups',
+  'nav.apps':'Sidebar — App Store',
+  'nav.ai':'Sidebar — AI',
+  'nav.containers':'Sidebar — Containers',
+  'nav.vms':'Sidebar — Virtual machines',
+  'nav.network':'Sidebar — Networking',
+  'nav.firewall':'Sidebar — Firewall',
+  'nav.integrations':'Sidebar — Integrations',
+  'nav.users':'Sidebar — Users',
+  'nav.permissions':'Sidebar — Permissions',
+  'nav.smtp':'Sidebar — Email / SMTP',
+  'nav.settings':'Sidebar — Settings & security',
+  'nav.analytics':'Sidebar — Analytics',
+  'nav.capabilities':'Sidebar — Capabilities',
+  'nav.admin':'Sidebar — Admin Center',
   'overview.view':'View overview',
   'files.own':'Manage only my own files',
   'files.read':'Read / preview all files',
@@ -167,7 +187,7 @@ async function renderTotp() {
     </div>
     <div class="mfa-method-grid">
       <article class="panel mfa-method ${totp.enabled ? 'active' : ''}"><span class="mfa-icon">TOTP</span><div><h3>Authenticator</h3><p>Time-based 6-digit codes from Microsoft Authenticator, Google Authenticator, 1Password, Authy, and compatible apps.</p></div><span class="volume-state ${totp.enabled ? 'writable' : 'readonly'}">${totp.enabled ? 'ENABLED' : 'DISABLED'}</span></article>
-      <article class="panel mfa-method ${sms.enabled ? 'active' : ''}"><span class="mfa-icon">SMS</span><div><h3>SMS code</h3><p>Send a one-time verification code through your Twilio account to the configured phone.</p></div><span class="volume-state ${sms.enabled ? 'writable' : 'readonly'}">${sms.enabled ? 'ENABLED' : 'DISABLED'}</span></article>
+      <article class="panel mfa-method ${sms.enabled ? 'active' : ''}"><span class="mfa-icon">SMS</span><div><h3>SMS code</h3><p>Send verification codes directly from this LightNAS appliance through a locally attached GSM/LTE modem. No cloud SMS provider is required.</p></div><span class="volume-state ${sms.enabled ? 'writable' : 'readonly'}">${sms.enabled ? 'ENABLED' : (sms.gateway?.available ? 'READY' : 'MODEM NEEDED')}</span></article>
       <article class="panel mfa-method ${keys.length ? 'active' : ''}"><span class="mfa-icon">FIDO</span><div><h3>Passkeys & security keys</h3><p>Use WebAuthn/FIDO2 passkeys, Windows Hello, Touch ID, phone passkeys, or hardware security keys.</p></div><span class="volume-state ${keys.length ? 'writable' : 'readonly'}">${keys.length ? `${keys.length} REGISTERED` : 'DISABLED'}</span></article>
     </div>
 
@@ -182,8 +202,8 @@ async function renderTotp() {
       <section class="mfa-config panel">
         <h3>SMS verification</h3>
         ${sms.enabled
-          ? `<p class="muted">Twilio · destination ${escapeText(sms.phone || 'configured')}</p><form data-sms-disable class="security-stack-form"><label>Current password<input name="currentPassword" type="password" required autocomplete="current-password"></label><button class="secondary danger-button" type="submit">Disable SMS verification</button><div class="form-error"></div></form>`
-          : `<form data-sms-setup class="security-stack-form"><label>Twilio Account SID<input name="accountSid" required autocomplete="off" placeholder="AC…"></label><label>Twilio Auth Token<input name="authToken" type="password" required autocomplete="new-password"></label><label>Twilio From number<input name="fromNumber" required placeholder="+15551234567"></label><label>Your verification phone<input name="phone" required placeholder="+15557654321"></label><label>Current LightNAS password<input name="currentPassword" type="password" required autocomplete="current-password"></label><button class="primary" type="submit">Send setup code</button><div class="form-error"></div></form><div data-sms-enrollment></div>`}
+          ? `<p class="muted">LightNAS local modem · destination ${escapeText(sms.phone || 'configured')}</p><form data-sms-disable class="security-stack-form"><label>Current password<input name="currentPassword" type="password" required autocomplete="current-password"></label><button class="secondary danger-button" type="submit">Disable SMS verification</button><div class="form-error"></div></form>`
+          : `<div class="module-note"><b>Self-hosted SMS.</b> Connect a SIM-capable USB/PCIe GSM or LTE modem supported by ModemManager. LightNAS sends codes directly from the appliance; no Twilio or external SMS API credentials are stored.</div><form data-sms-setup class="security-stack-form">${sms.gateway?.modems?.length ? `<label>Local cellular modem<select name="modem">${sms.gateway.modems.map(modem => `<option value="${escapeText(modem.id)}">${escapeText(modem.manufacturer || 'Cellular')} ${escapeText(modem.model || 'modem')} · modem ${escapeText(modem.id)}</option>`).join('')}</select></label>` : ''}<label>Your verification phone<input name="phone" required placeholder="+15557654321"></label><label>Current LightNAS password<input name="currentPassword" type="password" required autocomplete="current-password"></label><button class="primary" type="submit" ${sms.gateway?.available ? '' : 'disabled'}>Send setup code</button><div class="form-error">${sms.gateway?.available ? '' : escapeText(sms.gateway?.reason || 'No local cellular modem detected.')}</div></form><div data-sms-enrollment></div>`}
       </section>
 
       <section class="mfa-config panel">

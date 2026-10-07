@@ -229,6 +229,7 @@ function canView(view, appliance = state.overview?.appliance) {
   if (!appliance || !featureEnabled(view, appliance)) return false;
   if (appliance.role === 'administrator') return true;
   const allowed = new Set(appliance.permissions || []);
+  if (allowed.has(`nav.${view}`)) return true;
   const required = {
     home: ['overview.view'], hypervisor: ['overview.view', 'vms.view', 'containers.view'], files: ['files.view.own', 'files.own', 'files.read'], media: ['files.view.own', 'files.own', 'files.read'], storage: ['storage.view'], pools: ['pools.view', 'storage.manage'], shares: ['shares.view', 'shares.manage'], backups: ['backup.manage', 'storage.view'],
     apps: ['apps.view', 'apps.manage'], ai: ['apps.view', 'apps.manage', 'system.view'], containers: ['containers.view', 'containers.manage', 'containers.console'], vms: ['vms.view', 'vms.manage', 'vms.console'],
@@ -2061,7 +2062,6 @@ function capabilitiesView() {
     ['monitoringAnalytics', 'Analytics & audit', 'Operational analytics, audit logs, activity history and task tracking.', 'analytics'],
     ['integrations', 'Infrastructure integrations', 'External runtimes, storage providers, identity and service connections.', 'integrations'],
     ['identity', 'Identity & security', 'Local users, groups, permissions, MFA, passkeys, SSO foundations and audit controls.', 'permissions'],
-    ['hypervisorWorkspace', 'Hypervisor workspace', 'Datacenter-style inventory for nodes, VMs, containers, storage and networks.', 'hypervisor']
   ];
   return `${pageHead('Capabilities', 'Review hardware support and control optional LightNAS features.')}
     <section class="capability-overview-grid">
@@ -2176,7 +2176,11 @@ function settingsCollapseButton(id, label) {
 
 function settingsView() {
   const { appliance } = state.overview;
-  const zones = [['America/New_York', 'Eastern Time'], ['America/Chicago', 'Central Time'], ['America/Denver', 'Mountain Time'], ['America/Los_Angeles', 'Pacific Time'], ['UTC', 'UTC']];
+  const zoneValues = (() => {
+    try { return ['UTC', ...Intl.supportedValuesOf('timeZone')]; }
+    catch { return ['UTC', 'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles']; }
+  })();
+  const zones = [...new Set([appliance.timezone || 'UTC', ...zoneValues])].map(value => [value, value.replaceAll('_', ' ')]);
   return `${pageHead('Settings & security', 'Brand the appliance, manage general settings, and control account security.')}
     <section class="settings-dashboard">
       <form id="settings-form" class="panel settings-general-card settings-collapsible ${settingsSectionCollapsed('general') ? 'collapsed' : ''}" data-settings-section="general">
@@ -2481,11 +2485,22 @@ function networkView() {
 }
 
 function firewallView() {
-  const firewall = state.network?.firewall;
-  return `${pageHead('Firewall', 'Manage the firewall on this LightNAS host.', '<div class="head-actions"><button class="secondary refresh-icon-button" data-action="refresh-network" aria-label="Refresh" title="Refresh">↻</button><button class="primary" data-firewall-add>+ Rule</button></div>')}
-    <div class="module-hero"><h2>${escapeHtml(firewall?.status || 'Loading…')}</h2><p>Backend: ${escapeHtml(firewall?.backend || 'detecting')}. Rules here protect LightNAS itself and are applied locally.</p><div class="head-actions"><button class="secondary" data-firewall-toggle="enable">Enable</button><button class="secondary danger-button" data-firewall-toggle="disable">Disable</button></div></div>
-    <h2>Rules</h2><div class="storage-list">${firewall?.rules?.map(item => `<article class="storage-row"><div><h3>${escapeHtml(item.action)} ${escapeHtml(item.target)}</h3><p>Source: ${escapeHtml(item.source)}</p></div><button class="secondary danger-button" data-firewall-delete="${item.number}">Delete</button></article>`).join('') || '<div class="empty">No numbered UFW rules visible.</div>'}</div>
-    <h2>Visible nftables tables</h2><div class="storage-list">${firewall?.tables?.map(item => `<article class="storage-row">${escapeHtml(item)}</article>`).join('') || '<div class="empty">No nftables tables visible.</div>'}</div>`;
+  const firewall = state.network?.firewall || {};
+  const active = /active|enabled/i.test(String(firewall.status || ''));
+  return `${pageHead('Firewall', 'Host firewall policy, defaults, and service access in one place.', '<div class="head-actions"><button class="secondary refresh-icon-button" data-action="refresh-network" aria-label="Refresh" title="Refresh">↻</button><button class="primary" data-firewall-add>+ Add rule</button></div>')}
+    <section class="metric-grid firewall-summary-grid">
+      ${metric('Firewall', active ? 'Enabled' : 'Disabled', active ? 100 : 0, `Backend: ${escapeHtml(firewall.backend || 'detecting')}`)}
+      ${metric('Rules', String(firewall.rules?.length || 0), Math.min(100, (firewall.rules?.length || 0) * 8), 'Numbered host rules')}
+      ${metric('Incoming default', escapeHtml(firewall.defaultIncoming || 'deny'), 0, 'Traffic with no matching rule')}
+      ${metric('Outgoing default', escapeHtml(firewall.defaultOutgoing || 'allow'), 0, 'Traffic initiated by LightNAS')}
+    </section>
+    <section class="panel firewall-policy-panel">
+      <div class="panel-head"><div><span class="eyebrow">HOST POLICY</span><h2>Firewall controls</h2><p class="muted">Safe default is deny incoming / allow outgoing. Existing management access is not silently rewritten.</p></div><div class="head-actions"><button class="secondary" data-firewall-defaults>Default policy</button><button class="secondary" data-firewall-toggle="enable" ${active ? 'disabled' : ''}>Enable</button><button class="secondary danger-button" data-firewall-toggle="disable" ${active ? '' : 'disabled'}>Disable</button><button class="secondary danger-button" data-firewall-reset>Reset rules</button></div></div>
+    </section>
+    <section class="panel"><div class="panel-head"><div><span class="eyebrow">RULES</span><h2>Host access rules</h2></div><small>Processed in UFW order</small></div>
+      <div class="storage-list">${firewall.rules?.length ? firewall.rules.map(item => `<article class="storage-row firewall-rule-row"><div><h3>#${item.number} · ${escapeHtml(item.action)} ${escapeHtml(item.target)}</h3><p>Source: ${escapeHtml(item.source || 'Anywhere')}</p></div><button class="secondary danger-button" data-firewall-delete="${item.number}">Delete</button></article>`).join('') : '<div class="empty compact-empty"><h3>No custom rules</h3><p>Add only the ports and sources this appliance actually needs.</p></div>'}</div>
+    </section>
+    ${firewall.tables?.length ? `<details class="panel firewall-advanced"><summary>Advanced nftables visibility</summary><div class="storage-list">${firewall.tables.map(item => `<article class="storage-row">${escapeHtml(item)}</article>`).join('')}</div></details>` : ''}`;
 }
 
 function integrationsView() {

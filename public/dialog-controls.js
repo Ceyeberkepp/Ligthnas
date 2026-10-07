@@ -1542,6 +1542,39 @@ document.addEventListener('click', async event => {
     return;
   }
 
+  const firewallDefaults = event.target.closest('[data-firewall-defaults]');
+  if (firewallDefaults) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    showEditor({
+      eyebrow: 'FIREWALL POLICY',
+      title: 'Default firewall policy',
+      description: 'Choose what happens when traffic does not match a specific rule. Recommended: deny incoming and allow outgoing.',
+      fields: [
+        { name:'incoming', label:'Incoming default', type:'select', value:'deny', options:['deny','reject','allow'] },
+        { name:'outgoing', label:'Outgoing default', type:'select', value:'allow', options:['allow','deny','reject'] }
+      ],
+      submitLabel: 'Save policy',
+      onSubmit: async values => {
+        await dialogApi('/api/network', { method:'POST', body:JSON.stringify({ action:'firewall-defaults', incoming:values.incoming, outgoing:values.outgoing }) });
+        location.reload();
+      }
+    });
+    return;
+  }
+
+  const firewallReset = event.target.closest('[data-firewall-reset]');
+  if (firewallReset) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (!confirm('Reset all LightNAS host firewall rules and restore deny-incoming / allow-outgoing defaults? This can remove custom access rules.')) return;
+    try {
+      await dialogApi('/api/network', { method:'POST', body:JSON.stringify({ action:'firewall-reset' }) });
+      location.reload();
+    } catch (problem) { alert(problem.message); }
+    return;
+  }
+
   const firewallToggle = event.target.closest('[data-firewall-toggle]');
   if (firewallToggle) {
     event.preventDefault();
