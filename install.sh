@@ -61,7 +61,7 @@ echo "Detected LightNAS architecture: ${LIGHTNAS_ARCH}"
 
 echo "[1/6] Checking system requirements..."
 install_missing_packages \
-  ca-certificates curl git gnupg python3 ffmpeg imagemagick qrencode acl novnc iproute2 nftables ufw samba openssh-server ovmf \
+  ca-certificates curl git gnupg python3 ffmpeg imagemagick qrencode acl novnc iproute2 nftables ufw modemmanager samba openssh-server ovmf \
   tar gzip xz-utils zstd
 
 if ! command -v node >/dev/null 2>&1 || \
