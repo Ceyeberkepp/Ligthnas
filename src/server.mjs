@@ -490,6 +490,9 @@ publicationReconcileTimer.unref?.();
 queueMicrotask(() => reconcilePrivateNatPublications().catch(() => null));
 
 export const PERMISSIONS = Object.freeze([
+  'nav.home', 'nav.storage', 'nav.pools', 'nav.files', 'nav.shares', 'nav.backups',
+  'nav.apps', 'nav.ai', 'nav.containers', 'nav.vms', 'nav.network', 'nav.firewall', 'nav.integrations',
+  'nav.users', 'nav.permissions', 'nav.smtp', 'nav.settings', 'nav.analytics', 'nav.capabilities', 'nav.admin',
   'overview.view',
   'files.view.own', 'files.own', 'files.read', 'files.write', 'files.download', 'files.delete', 'media.convert',
   'storage.view', 'storage.manage', 'pools.view', 'shares.view', 'shares.manage',
@@ -809,8 +812,25 @@ function requireSession(req, res) {
   return context;
 }
 
+const SIDEBAR_PERMISSION_EQUIVALENTS = Object.freeze({
+  'overview.view':'nav.home',
+  'files.view.own':'nav.files',
+  'storage.view':'nav.storage',
+  'pools.view':'nav.pools',
+  'shares.view':'nav.shares',
+  'apps.view':'nav.apps',
+  'containers.view':'nav.containers',
+  'vms.view':'nav.vms',
+  'network.view':'nav.network',
+  'firewall.view':'nav.firewall',
+  'integrations.view':'nav.integrations',
+  'monitoring.view':'nav.analytics',
+  'capabilities.view':'nav.capabilities',
+  'admin.view':'nav.admin'
+});
+
 function hasPermission(permissionSet, permission) {
-  return permissionSet.includes(permission);
+  return permissionSet.includes(permission) || permissionSet.includes(SIDEBAR_PERMISSION_EQUIVALENTS[permission]);
 }
 
 function requirePermission(res, permissionSet, permission) {
@@ -1405,13 +1425,14 @@ async function api(req, res, url) {
     return send(res, 200, { ok: true, remaining: account.passkeys.length });
   }
 
-  const ownerOnly = url.pathname === '/api/settings' || url.pathname === '/api/capabilities/config' ||
-    url.pathname === '/api/smtp' || url.pathname === '/api/smtp/test' ||
+  const ownerOnly = (url.pathname === '/api/settings' && req.method !== 'GET') || url.pathname === '/api/capabilities/config' ||
+    (url.pathname === '/api/smtp' && req.method !== 'GET') || url.pathname === '/api/smtp/test' ||
     url.pathname.startsWith('/api/security/api-tokens') || url.pathname.startsWith('/api/security/webhooks') ||
     url.pathname.startsWith('/api/security/identity-providers');
   if (ownerOnly && !requireOwner(res, context)) return;
 
   if (req.method === 'GET' && url.pathname === '/api/smtp') {
+    if (!isAdmin && !hasPermission(permissions, 'smtp.manage') && !permissions.includes('nav.smtp')) return send(res, 403, { error: 'Email / SMTP sidebar access is required.' });
     const { password, ...publicConfig } = store.state.smtp || {};
     return send(res, 200, { config: store.state.smtp ? { ...publicConfig, hasPassword: Boolean(password) } : null });
   }
@@ -1434,8 +1455,13 @@ async function api(req, res, url) {
     return send(res, 200, { ok: true });
   }
 
-  if ((url.pathname === '/api/users' || url.pathname.startsWith('/api/users/') || url.pathname === '/api/groups' || url.pathname.startsWith('/api/groups/')) &&
-      !requirePermission(res, permissions, 'users.manage')) return;
+  if ((url.pathname === '/api/users' || url.pathname.startsWith('/api/users/') || url.pathname === '/api/groups' || url.pathname.startsWith('/api/groups/'))) {
+    const sidebarRead = req.method === 'GET' && (
+      (url.pathname === '/api/users' && (permissions.includes('nav.users') || permissions.includes('nav.permissions'))) ||
+      (url.pathname === '/api/groups' && permissions.includes('nav.permissions'))
+    );
+    if (!sidebarRead && !requirePermission(res, permissions, 'users.manage')) return;
+  }
 
   if (req.method === 'GET' && url.pathname === '/api/users') {
     return send(res, 200, { permissionOptions: PERMISSIONS, users: store.state.users.map(userPublic), groups: store.state.groups.map(groupPublic) });
@@ -1759,6 +1785,7 @@ async function api(req, res, url) {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/settings') {
+    if (!isAdmin && !hasPermission(permissions, 'settings.manage') && !permissions.includes('nav.settings')) return send(res, 403, { error: 'Settings sidebar access is required.' });
     const { username: owner, deviceName, timezone, logoExt, brandName, logoMode, accentColor, sidebarColor, contentColor, sidebarTextColor, contentTextColor, primaryButtonColor, loginButtonColor, topbarColor, panelColor, inputColor, performanceTabsColor, performanceTabsActiveColor, performanceTabsTextColor } = store.state.config;
     return send(res, 200, {
       username: owner,
