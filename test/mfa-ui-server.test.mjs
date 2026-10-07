@@ -18,15 +18,15 @@ test('SMS MFA is configurable and usable from the login screen', async () => {
     '/api/security/sms/disable',
     '/api/login/sms/send'
   ]) assert.ok(server.includes(endpoint), `missing endpoint ${endpoint}`);
-  assert.match(server, /localSendSms/);
-  assert.match(server, /localSmsInventory/);
-  assert.doesNotMatch(server, /sendTwilioSms/);
+  assert.match(server, /sendLightNasSms/);
+  assert.match(server, /smsGatewayStatus/);
+  assert.doesNotMatch(server, /localSendSms|localSmsInventory|sendTwilioSms/);
   assert.match(server, /verifyPendingSms\(pendingSmsLogins/);
   assert.match(app, /\/api\/login\/sms\/send/);
   assert.match(app, /mfaMethod/);
   assert.match(admin, /data-sms-setup/);
-  assert.match(admin, /LightNAS local modem/);
-  assert.doesNotMatch(admin, /Twilio Account SID|Twilio Auth Token/);
+  assert.match(admin, /LightNAS SMS service/);
+  assert.doesNotMatch(admin, /Twilio Account SID|Twilio Auth Token|Local cellular modem|ModemManager/);
   assert.match(admin, /data-sms-verify/);
   assert.match(html, /id="login-sms-status"/);
 });
@@ -52,4 +52,20 @@ test('WebAuthn passkeys can be registered, removed, and used to sign in', async 
   assert.match(admin, /navigator\.credentials\.create/);
   assert.match(admin, /serializePasskeyRegistration/);
   assert.match(admin, /window\.isSecureContext/);
+});
+
+
+test('LightNAS appliances use centralized SMS service configuration without ModemManager', async () => {
+  const [server, admin, installer, smsService] = await Promise.all([
+    read('src/server.mjs'),
+    read('public/admin-security.js'),
+    read('install.sh'),
+    read('src/sms-service.mjs')
+  ]);
+  assert.match(server, /sendLightNasSms/);
+  assert.match(smsService, /LIGHTNAS_SMS_GATEWAY_URL/);
+  assert.match(smsService, /LIGHTNAS_SMS_GATEWAY_TOKEN/);
+  assert.match(installer, /\/etc\/lightnas\/sms\.env/);
+  assert.doesNotMatch(installer, /\bmodemmanager\b/i);
+  assert.doesNotMatch(admin, /MODEM NEEDED|GSM\/LTE modem|Local cellular modem|ModemManager/);
 });
