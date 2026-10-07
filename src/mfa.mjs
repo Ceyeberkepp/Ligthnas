@@ -68,25 +68,6 @@ export function verifyAssertion({ response, credential, expectedChallenge, rpId 
   return true;
 }
 
-export async function sendTwilioSms(settings, message) {
-  const accountSid = String(settings?.accountSid || '');
-  const authToken = String(settings?.authToken || '');
-  const from = String(settings?.fromNumber || '');
-  const to = String(settings?.phone || '');
-  if (!/^AC[a-zA-Z0-9]{30,40}$/.test(accountSid) || !authToken || !/^\+[1-9]\d{7,14}$/.test(from) || !/^\+[1-9]\d{7,14}$/.test(to)) {
-    throw Object.assign(new Error('Enter valid Twilio credentials and E.164 phone numbers.'), { status: 400 });
-  }
-  const body = new URLSearchParams({ To: to, From: from, Body: message });
-  const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(accountSid)}/Messages.json`, {
-    method: 'POST', headers: { Authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString('base64')}`, 'Content-Type': 'application/x-www-form-urlencoded' }, body, signal: AbortSignal.timeout(15000)
-  });
-  if (!response.ok) {
-    const result = await response.json().catch(() => ({}));
-    throw Object.assign(new Error(`SMS provider rejected the message${result.message ? `: ${result.message}` : ` (HTTP ${response.status})`}.`), { status: 409 });
-  }
-  return true;
-}
-
 export function smsCode() {
   return String(randomInt(100000, 1000000));
 }
