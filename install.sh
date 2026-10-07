@@ -61,7 +61,7 @@ echo "Detected LightNAS architecture: ${LIGHTNAS_ARCH}"
 
 echo "[1/6] Checking system requirements..."
 install_missing_packages \
-  ca-certificates curl git gnupg python3 ffmpeg imagemagick qrencode acl novnc iproute2 nftables ufw modemmanager samba openssh-server ovmf \
+  ca-certificates curl git gnupg python3 ffmpeg imagemagick qrencode acl novnc iproute2 nftables ufw samba openssh-server ovmf \
   tar gzip xz-utils zstd
 
 if ! command -v node >/dev/null 2>&1 || \
@@ -290,6 +290,17 @@ EOF
   chown root:lightnas /etc/lightnas/license.env
   chmod 0640 /etc/lightnas/license.env
 fi
+if [[ ! -e /etc/lightnas/sms.env ]]; then
+  cat >/etc/lightnas/sms.env <<'EOF'
+# Central LightNAS SMS verification service.
+# These values are provisioned for the appliance by the LightNAS service operator.
+# End users do not need Twilio, carrier, or modem credentials.
+LIGHTNAS_SMS_GATEWAY_URL=
+LIGHTNAS_SMS_GATEWAY_TOKEN=
+EOF
+  chown root:lightnas /etc/lightnas/sms.env
+  chmod 0640 /etc/lightnas/sms.env
+fi
 for vm_user in libvirt-qemu qemu; do
   if id "$vm_user" >/dev/null 2>&1; then
     # QEMU must be able to traverse the private LightNAS data root before it
@@ -375,6 +386,7 @@ Group=lightnas
 WorkingDirectory=${INSTALL_DIRECTORY}
 EnvironmentFile=-/etc/lightnas/runtime.env
 EnvironmentFile=-/etc/lightnas/license.env
+EnvironmentFile=-/etc/lightnas/sms.env
 Environment=LIGHTNAS_HOST_SOCKET=/run/lightnas/host-agent.sock
 Environment=NODE_ENV=production
 Environment=NODE_OPTIONS=--max-old-space-size=256
