@@ -14,7 +14,8 @@ import { thumbnailFor } from './thumbnails.mjs';
 import { catalog, runtimeInventory, vmEditorInventory, vmCreateInventory, installCatalogApp, manageCatalogApp, updateCatalogApp, openContainerShell, createContainer, createVm } from './runtimes-next.mjs';
 import { communityCatalog, installCommunityApp } from './community-catalog.mjs';
 import { proxmoxConsoleSocket, proxmoxUpdateStorage, proxmoxCleanDisk } from './proxmox.mjs';
-import { localContainerSummary, localContainerInventory, localManageContainer, localContainerConsoleSocket, localContainerCommand, localVmConsoleSocket, localNodeConsoleSocket, localNetworkInventory, localNetworkAction, localSmsInventory, localSendSms, localSetTimezone, localTimeStatus, localApplianceHealth, localApplianceRepair, localSoftwareStatus, localSoftwareUpdate, localRepairNetworkShares, localSyncShareAdministrator } from './local-host.mjs';
+import { localContainerSummary, localContainerInventory, localManageContainer, localContainerConsoleSocket, localContainerCommand, localVmConsoleSocket, localNodeConsoleSocket, localNetworkInventory, localNetworkAction, localSetTimezone, localTimeStatus, localApplianceHealth, localApplianceRepair, localSoftwareStatus, localSoftwareUpdate, localRepairNetworkShares, localSyncShareAdministrator } from './local-host.mjs';
+import { smsGatewayStatus, sendLightNasSms } from './sms-service.mjs';
 import { validateSmtp, sendSmtpTest } from './mailer.mjs';
 import { mediaAvailable, convertMedia } from './media.mjs';
 import { createDataset, updateDataset } from './zfs.mjs';
@@ -1004,7 +1005,7 @@ async function api(req, res, url) {
     if (Date.now() - lastSent < 30000) return send(res, 429, { error: 'Wait 30 seconds before requesting another SMS code.' });
     const code = issueSmsChallenge(pendingSmsLogins, username, null);
     try {
-      await localSendSms({ phone: account.smsMfa.phone, modem: account.smsMfa.modem || '', message: `Your LightNAS verification code is ${code}. It expires in 5 minutes.` });
+      await sendLightNasSms({ phone: account.smsMfa.phone, message: `Your LightNAS verification code is ${code}. It expires in 5 minutes.`, purpose: 'login' });
     } catch (error) {
       pendingSmsLogins.delete(username);
       throw error;
@@ -1294,11 +1295,11 @@ async function api(req, res, url) {
 
   if (req.method === 'GET' && url.pathname === '/api/security/sms') {
     if (context.apiToken) return send(res, 403, { error: 'SMS settings require an interactive local account session.' });
-    const gateway = await localSmsInventory().catch(error => ({ available:false, backend:'unavailable', modems:[], reason:error.message }));
+    const gateway = smsGatewayStatus();
     return send(res, 200, {
       enabled: Boolean(account.smsMfa?.enabled),
       phone: account.smsMfa?.enabled ? maskPhone(account.smsMfa.phone) : null,
-      provider: 'LightNAS local modem',
+      provider: 'LightNAS SMS service',
       gateway
     });
   }
@@ -1308,16 +1309,14 @@ async function api(req, res, url) {
     const input = await bodyJson(req);
     if (!(await verifyPassword(input.currentPassword, account.passwordHash))) return send(res, 403, { error: 'Current account password is incorrect.' });
     const settings = {
-      phone: String(input.phone || '').trim(),
-      modem: String(input.modem || '').trim()
+      phone: String(input.phone || '').trim()
     };
     if (!/^\+[1-9]\d{7,14}$/.test(settings.phone)) return send(res, 400, { error: 'Use an E.164 phone number such as +15551234567.' });
-    const gateway = await localSmsInventory();
-    if (!gateway.available) return send(res, 409, { error: gateway.reason || 'No local SMS modem is available.' });
-    if (settings.modem && !gateway.modems?.some(item => String(item.id) === settings.modem)) return send(res, 400, { error: 'Choose an available local cellular modem.' });
+    const gateway = smsGatewayStatus();
+    if (!gateway.available) return send(res, 503, { error: gateway.reason || 'LightNAS SMS service is unavailable.' });
     const code = issueSmsChallenge(pendingSmsEnrollments, username, settings);
     try {
-      await localSendSms({ ...settings, message: `Your LightNAS SMS verification setup code is ${code}. It expires in 5 minutes.` });
+      await sendLightNasSms({ phone: settings.phone, message: `Your LightNAS SMS verification setup code is ${code}. It expires in 5 minutes.`, purpose: 'enrollment' });
     } catch (error) {
       pendingSmsEnrollments.delete(username);
       throw error;
