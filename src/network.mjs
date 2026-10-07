@@ -53,7 +53,7 @@ export async function networkInventory() {
     command('ip', ['-j', 'address', 'show']),
     command('ip', ['-j', 'route', 'show']),
     readFile('/etc/resolv.conf', 'utf8').catch(() => ''),
-    command('ufw', ['status']),
+    command('ufw', ['status', 'verbose']),
     command('ufw', ['status', 'numbered']),
     command('nft', ['list', 'tables']),
     wifiInventory()
@@ -70,6 +70,8 @@ export async function networkInventory() {
       backend: ufwStatus.ok ? 'ufw' : nft.ok ? 'nftables' : 'not accessible',
       editable: ufwStatus.ok,
       status: ufwStatus.stdout.match(/^Status:\s*(.+)/m)?.[1] || (nft.ok ? 'ruleset readable' : 'unknown'),
+      defaultIncoming: ufwStatus.stdout.match(/^Default:\s*(allow|deny|reject) \(incoming\)/mi)?.[1]?.toLowerCase() || 'deny',
+      defaultOutgoing: ufwStatus.stdout.match(/^Default:.*?,\s*(allow|deny|reject) \(outgoing\)/mi)?.[1]?.toLowerCase() || 'allow',
       rules: ufwNumbered.ok ? parseUfwRules(ufwNumbered.stdout) : [],
       tables: nft.ok ? nft.stdout.split('\n').filter(line => /^table\s/.test(line)).slice(0, 30) : []
     }
@@ -109,6 +111,29 @@ export async function networkAction(input) {
     const result = await command('ufw', ['--force', 'delete', String(number)], 15000);
     if (!result.ok) throw Object.assign(new Error(`UFW: ${result.stderr}`), { status: 409 });
     return { action, number };
+  }
+  if (action === 'firewall-enable' || action === 'firewall-disable') {
+    const args = action === 'firewall-enable' ? ['--force', 'enable'] : ['disable'];
+    const result = await command('ufw', args, 15000);
+    if (!result.ok) throw Object.assign(new Error(`UFW: ${result.stderr}`), { status: 409 });
+    return { action, status: action === 'firewall-enable' ? 'enabled' : 'disabled' };
+  }
+  if (action === 'firewall-defaults') {
+    const incoming = String(input.incoming || 'deny').toLowerCase();
+    const outgoing = String(input.outgoing || 'allow').toLowerCase();
+    if (!['allow','deny','reject'].includes(incoming) || !['allow','deny','reject'].includes(outgoing)) throw Object.assign(new Error('Choose valid default firewall policies.'), { status:400 });
+    for (const [policy, direction] of [[incoming,'incoming'],[outgoing,'outgoing']]) {
+      const result = await command('ufw', ['default', policy, direction], 15000);
+      if (!result.ok) throw Object.assign(new Error(`UFW: ${result.stderr}`), { status:409 });
+    }
+    return { action, incoming, outgoing };
+  }
+  if (action === 'firewall-reset') {
+    let result = await command('ufw', ['--force', 'reset'], 15000);
+    if (!result.ok) throw Object.assign(new Error(`UFW: ${result.stderr}`), { status:409 });
+    await command('ufw', ['default','deny','incoming'], 15000);
+    await command('ufw', ['default','allow','outgoing'], 15000);
+    return { action, status:'reset' };
   }
   if (action === 'wifi-connect') {
     const device = String(input.device || '');
