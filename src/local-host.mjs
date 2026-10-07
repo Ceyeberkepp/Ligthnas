@@ -65,6 +65,22 @@ export async function localNetworkAction(input) {
   return await request('network-action', input, 60000);
 }
 
+export async function localSmsInventory() {
+  return await request('sms-inventory', undefined, 15000);
+}
+
+export async function localSendSms(input) {
+  return await request('sms-send', input, 30000);
+}
+
+export async function localSetTimezone(timezone) {
+  return await request('time-set', { timezone }, 30000);
+}
+
+export async function localTimeStatus() {
+  return await request('time-status', undefined, 15000);
+}
+
 
 export async function localProvisionNetworkShare(input) {
   return await request('share-provision', input, 60000);
