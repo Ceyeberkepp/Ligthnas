@@ -33,10 +33,103 @@ Useful contributions include:
 - noVNC and guest-console improvements;
 - App Store and OCI application improvements;
 - installer and ISO improvements;
-- security hardening; and
+- dedicated Hypervisor edition features and fixes;
+- virtualization management improvements for QEMU/KVM, libvirt, LXC, storage, networking, snapshots, backups, console access, and host management;
+- iOS applications and mobile-client integrations;
+- Android applications and mobile-client integrations;
+- security hardening;
+- low-memory and low-resource optimizations; and
 - hardware and architecture compatibility fixes.
 
 Large changes should begin with an issue or design discussion before substantial implementation work.
+
+## NAS and Hypervisor editions
+
+LightNAS is developed as two appliance editions in the same project:
+
+- **LightNAS NAS edition** for storage, files, media, applications, networking, containers, and NAS administration.
+- **LightNAS Hypervisor edition** for dedicated VM, system-container, host, storage, network, console, snapshot, backup, and virtualization management.
+
+Contributions to either edition are welcome.
+
+Shared code should remain reusable across both editions where appropriate, while edition-specific interfaces and workflows should remain separated when their purposes differ.
+
+Hypervisor contributions are especially welcome for:
+
+- VM creation, editing, cloning, import, export, and lifecycle management;
+- LXC/system-container creation and management;
+- QEMU/KVM and libvirt integration;
+- noVNC and guest-console access;
+- storage and ISO/image selection;
+- virtual networking, bridges, VLANs, and guest networking;
+- snapshots, backups, replication, and restore workflows;
+- task/progress tracking;
+- host resource management;
+- hardware passthrough;
+- permissions and role-based management; and
+- performance and reliability.
+
+Infrastructure features must operate on the actual backend. A Hypervisor UI must not claim that a VM, container, disk, network, snapshot, or other resource exists unless the corresponding backend operation actually succeeded.
+
+## Hardware, architecture, and resource requirements
+
+LightNAS is intended to remain lightweight and useful on a very broad range of hardware.
+
+Contributions must preserve and improve these platform goals:
+
+- support legacy hardware dating back approximately to the year **2000** where the relevant architecture and required operating-system support make that technically possible;
+- support **x86 (32-bit)** hardware where the supported software stack permits it;
+- support **x86_64 / AMD64**;
+- support **ARM** architectures;
+- support **RISC-V** architectures;
+- avoid unnecessarily requiring modern CPU instruction sets when an implementation can remain compatible with older processors; and
+- keep the base LightNAS operating environment and control plane capable of running within **2 GB of RAM**.
+
+The 2 GB target applies to the LightNAS base system and management/control-plane functionality. Memory assigned to user-created virtual machines, containers, applications, filesystem caches, media-processing jobs, or other optional workloads is additional workload memory and is not counted as part of that base-system target.
+
+Contributors should avoid introducing dependencies or background services that cause the base appliance to require more than 2 GB of RAM.
+
+Where a feature cannot reasonably operate within the normal low-resource target, it should:
+
+- remain optional;
+- clearly advertise its additional resource requirement;
+- not prevent the core LightNAS system from operating on a 2 GB machine; and
+- degrade gracefully when the required hardware capability is unavailable.
+
+Architecture-specific code should be isolated whenever practical. Do not unnecessarily make the entire project dependent on one CPU architecture.
+
+Pull requests affecting platform support should state which of these were tested:
+
+- x86;
+- x86_64;
+- ARM;
+- RISC-V;
+- legacy/older hardware;
+- 2 GB RAM environments; and
+- modern hardware.
+
+Not every contributor is expected to own every architecture. However, contributions must avoid knowingly breaking another supported architecture without a documented technical reason and maintainer review.
+
+## iOS and Android applications
+
+Contributions for official or companion **iOS** and **Android** applications are welcome.
+
+Mobile applications should aim to provide secure access to useful LightNAS functionality such as:
+
+- server discovery and connection;
+- dashboard and health information;
+- files and media;
+- uploads and downloads;
+- storage status;
+- application management;
+- VM and container status and controls;
+- tasks and notifications;
+- administrative functions appropriate for mobile use; and
+- secure authentication.
+
+Mobile contributions must follow the same open-source contribution requirement as every other LightNAS contribution. All contributor-written iOS and Android application code must be open source with no exceptions.
+
+Mobile clients should use documented LightNAS APIs rather than relying on fragile UI scraping or undocumented internal behavior whenever an API is available.
 
 ## Do not submit
 
@@ -102,8 +195,11 @@ A good pull request should explain:
 - how it was tested;
 - any security implications;
 - any migration or compatibility impact;
-- whether NAS edition, Hypervisor edition, or shared code is affected; and
-- screenshots or recordings for meaningful UI changes.
+- whether NAS edition, Hypervisor edition, mobile application, or shared code is affected;
+- CPU architecture impact, including x86, x86_64, ARM, or RISC-V when relevant;
+- memory impact and whether the base system remains usable within the 2 GB RAM target;
+- any effect on legacy-hardware compatibility; and
+- screenshots or recordings for meaningful UI or mobile-app changes.
 
 Keep unrelated cleanup out of feature or bug-fix pull requests unless it is required for the change.
 
