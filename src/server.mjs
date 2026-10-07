@@ -14,7 +14,7 @@ import { thumbnailFor } from './thumbnails.mjs';
 import { catalog, runtimeInventory, vmEditorInventory, vmCreateInventory, installCatalogApp, manageCatalogApp, updateCatalogApp, openContainerShell, createContainer, createVm } from './runtimes-next.mjs';
 import { communityCatalog, installCommunityApp } from './community-catalog.mjs';
 import { proxmoxConsoleSocket, proxmoxUpdateStorage, proxmoxCleanDisk } from './proxmox.mjs';
-import { localContainerSummary, localContainerInventory, localManageContainer, localContainerConsoleSocket, localContainerCommand, localVmConsoleSocket, localNodeConsoleSocket, localNetworkInventory, localNetworkAction, localApplianceHealth, localApplianceRepair, localSoftwareStatus, localSoftwareUpdate, localRepairNetworkShares, localSyncShareAdministrator } from './local-host.mjs';
+import { localContainerSummary, localContainerInventory, localManageContainer, localContainerConsoleSocket, localContainerCommand, localVmConsoleSocket, localNodeConsoleSocket, localNetworkInventory, localNetworkAction, localSmsInventory, localSendSms, localSetTimezone, localTimeStatus, localApplianceHealth, localApplianceRepair, localSoftwareStatus, localSoftwareUpdate, localRepairNetworkShares, localSyncShareAdministrator } from './local-host.mjs';
 import { validateSmtp, sendSmtpTest } from './mailer.mjs';
 import { mediaAvailable, convertMedia } from './media.mjs';
 import { createDataset, updateDataset } from './zfs.mjs';
@@ -33,7 +33,7 @@ import { featureGateState } from './feature-gates.mjs';
 import { licenseStatus, verifyLicense } from './license.mjs';
 import {
   qrCodeDataUrl, challenge as mfaChallenge, relyingParty,
-  verifyRegistration, verifyAssertion, sendTwilioSms,
+  verifyRegistration, verifyAssertion,
   smsCode, smsCodeDigest, verifySmsCode
 } from './mfa.mjs';
 import {
@@ -937,6 +937,12 @@ async function api(req, res, url) {
       instanceId: randomUUID(),
       totpEnabled: false
     };
+    try {
+      const timeSync = await localSetTimezone(store.state.config.timezone);
+      store.state.config.timezone = timeSync.timezone || store.state.config.timezone;
+    } catch (error) {
+      store.addActivity('time', `Time-zone synchronization needs attention: ${error.message}`, 'warning');
+    }
     store.addActivity('setup', `Appliance ${input.deviceName} was configured.`, 'success');
     await store.save();
     try {
@@ -978,7 +984,7 @@ async function api(req, res, url) {
     if (Date.now() - lastSent < 30000) return send(res, 429, { error: 'Wait 30 seconds before requesting another SMS code.' });
     const code = issueSmsChallenge(pendingSmsLogins, username, null);
     try {
-      await sendTwilioSms(account.smsMfa, `Your LightNAS verification code is ${code}. It expires in 5 minutes.`);
+      await localSendSms({ phone: account.smsMfa.phone, modem: account.smsMfa.modem || '', message: `Your LightNAS verification code is ${code}. It expires in 5 minutes.` });
     } catch (error) {
       pendingSmsLogins.delete(username);
       throw error;
@@ -1268,10 +1274,12 @@ async function api(req, res, url) {
 
   if (req.method === 'GET' && url.pathname === '/api/security/sms') {
     if (context.apiToken) return send(res, 403, { error: 'SMS settings require an interactive local account session.' });
+    const gateway = await localSmsInventory().catch(error => ({ available:false, backend:'unavailable', modems:[], reason:error.message }));
     return send(res, 200, {
       enabled: Boolean(account.smsMfa?.enabled),
       phone: account.smsMfa?.enabled ? maskPhone(account.smsMfa.phone) : null,
-      provider: account.smsMfa?.enabled ? 'Twilio' : null
+      provider: 'LightNAS local modem',
+      gateway
     });
   }
 
@@ -1280,14 +1288,16 @@ async function api(req, res, url) {
     const input = await bodyJson(req);
     if (!(await verifyPassword(input.currentPassword, account.passwordHash))) return send(res, 403, { error: 'Current account password is incorrect.' });
     const settings = {
-      accountSid: String(input.accountSid || '').trim(),
-      authToken: String(input.authToken || ''),
-      fromNumber: String(input.fromNumber || '').trim(),
-      phone: String(input.phone || '').trim()
+      phone: String(input.phone || '').trim(),
+      modem: String(input.modem || '').trim()
     };
+    if (!/^\+[1-9]\d{7,14}$/.test(settings.phone)) return send(res, 400, { error: 'Use an E.164 phone number such as +15551234567.' });
+    const gateway = await localSmsInventory();
+    if (!gateway.available) return send(res, 409, { error: gateway.reason || 'No local SMS modem is available.' });
+    if (settings.modem && !gateway.modems?.some(item => String(item.id) === settings.modem)) return send(res, 400, { error: 'Choose an available local cellular modem.' });
     const code = issueSmsChallenge(pendingSmsEnrollments, username, settings);
     try {
-      await sendTwilioSms(settings, `Your LightNAS SMS verification setup code is ${code}. It expires in 5 minutes.`);
+      await localSendSms({ ...settings, message: `Your LightNAS SMS verification setup code is ${code}. It expires in 5 minutes.` });
     } catch (error) {
       pendingSmsEnrollments.delete(username);
       throw error;
@@ -1768,14 +1778,21 @@ async function api(req, res, url) {
       performanceTabsColor: /^#[0-9a-f]{6}$/i.test(String(performanceTabsColor || '')) ? performanceTabsColor : (panelColor || '#ffffff'),
       performanceTabsActiveColor: /^#[0-9a-f]{6}$/i.test(String(performanceTabsActiveColor || '')) ? performanceTabsActiveColor : (accentColor || '#087b70'),
       performanceTabsTextColor: /^#[0-9a-f]{6}$/i.test(String(performanceTabsTextColor || '')) ? performanceTabsTextColor : (contentTextColor || '#12283b'),
-      timezone,
+      timezone: (await localTimeStatus().catch(() => ({ timezone }))).timezone || timezone,
+      timeSync: await localTimeStatus().catch(error => ({ timezone, ntpEnabled:false, synchronized:false, error:error.message })),
       logo: Boolean(logoExt)
     });
   }
   if (req.method === 'PATCH' && url.pathname === '/api/settings') {
     const input = await bodyJson(req);
     if (!/^[a-zA-Z0-9][a-zA-Z0-9-]{1,31}$/.test(input.deviceName || '')) return send(res, 400, { error: 'Device name must contain 2–32 letters, numbers, or hyphens.' });
-    if (!['UTC', 'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles'].includes(input.timezone)) return send(res, 400, { error: 'Choose a supported time zone.' });
+    const requestedTimezone = String(input.timezone || '').trim();
+    let supportedTimezone = requestedTimezone === 'UTC';
+    if (!supportedTimezone) {
+      try { supportedTimezone = Intl.supportedValuesOf('timeZone').includes(requestedTimezone); }
+      catch { supportedTimezone = /^[A-Za-z0-9_+.-]+(?:\/[A-Za-z0-9_+.-]+){1,3}$/.test(requestedTimezone); }
+    }
+    if (!supportedTimezone) return send(res, 400, { error: 'Choose a valid IANA time zone.' });
     const brandName = String(input.brandName || store.state.config.brandName || 'LightNAS').trim();
     if (brandName.length < 2 || brandName.length > 32 || /[<>\r\n]/.test(brandName)) return send(res, 400, { error: 'Brand name must contain 2–32 characters.' });
     const logoMode = input.logoMode === undefined
@@ -1824,7 +1841,8 @@ async function api(req, res, url) {
     store.state.config.performanceTabsColor = performanceTabsColor;
     store.state.config.performanceTabsActiveColor = performanceTabsActiveColor;
     store.state.config.performanceTabsTextColor = performanceTabsTextColor;
-    store.state.config.timezone = input.timezone;
+    const timeSync = await localSetTimezone(requestedTimezone);
+    store.state.config.timezone = timeSync.timezone || requestedTimezone;
     if (changedPassword) store.state.config.passwordHash = await hashPassword(input.newPassword);
     store.addActivity('settings', changedPassword ? 'Administrator password was changed.' : 'Appliance settings were updated.');
     await store.save();
