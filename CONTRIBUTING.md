@@ -43,7 +43,8 @@ Large changes should begin with an issue or design discussion before substantial
 Do not submit:
 
 - secrets, passwords, tokens, certificates, private keys, or production data;
-- copied proprietary code you do not have the right to contribute;
+- proprietary, closed-source, source-available-only, or otherwise non-open-source third-party code, libraries, snippets, SDKs, components, or dependencies unless the LightNAS maintainer has given an explicit written exception;
+- copied code you do not have the right to contribute;
 - code with incompatible licensing;
 - malware, backdoors, credential harvesting, or hidden remote access;
 - changes that falsely report an operation as successful when the requested VM, container, application, storage, or network change did not actually occur;
@@ -164,21 +165,61 @@ Security-sensitive code should favor:
 - explicit network exposure; and
 - auditable actions.
 
+## Open-source code requirement
+
+Any third-party code used in or added to LightNAS must be open source unless the LightNAS maintainer gives an explicit written exception.
+
+This requirement applies to:
+
+- libraries and packages;
+- copied or adapted code snippets;
+- SDKs and frameworks;
+- frontend and backend components;
+- system utilities bundled or redistributed with LightNAS;
+- container/application recipes;
+- build tools that become part of the distributed product;
+- drivers or helper components included with a LightNAS build; and
+- other third-party source code incorporated into the repository or distributed product.
+
+Contributors must verify that the source code is publicly available under a recognized open-source license and that its license is compatible with how LightNAS uses and distributes it.
+
+Code that is merely "source available" but does not provide open-source rights is **not considered open source for this requirement**.
+
+Do not add proprietary, closed-source, evaluation-only, noncommercial-only, or otherwise restricted third-party code to LightNAS unless the maintainer has explicitly reviewed and approved that exception in writing.
+
+The fact that LightNAS itself is currently distributed under the LightNAS Development and Community Evaluation License does not remove this requirement for third-party code used by the project.
+
+When adding third-party code, the pull request should identify:
+
+- the project or component name;
+- the upstream source/repository;
+- the version or commit used;
+- the open-source license;
+- whether the code is bundled, linked, executed externally, or used only during development; and
+- any attribution or notice requirements.
+
+If the license is unclear, do not add the code until it has been reviewed.
+
 ## Dependencies
 
-New dependencies should have a clear need.
+New dependencies should have a clear need and must satisfy the open-source code requirement above.
 
 Before adding one, consider:
 
 - maintenance activity;
 - security history;
+- whether the source repository is publicly available;
+- whether it uses a recognized open-source license;
 - license compatibility;
+- attribution or notice requirements;
 - package size;
 - runtime overhead;
 - platform support; and
 - whether the same result can be achieved safely with existing dependencies or platform tools.
 
-Do not add a dependency with a license that conflicts with LightNAS distribution or intended use.
+Do not add a dependency with a proprietary, closed-source, source-available-only, evaluation-only, noncommercial-only, or otherwise incompatible license unless an explicit written maintainer exception has been granted.
+
+Do not add any dependency with a license that conflicts with LightNAS distribution or intended use.
 
 ## Commit guidance
 
