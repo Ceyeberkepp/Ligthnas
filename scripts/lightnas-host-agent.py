@@ -2414,6 +2414,117 @@ def prefer_uplink(device: str) -> dict:
 
 
 
+
+def sms_modems() -> list[dict]:
+    """Return ModemManager modems that can be used as LightNAS's local SMS gateway."""
+    if not available("mmcli"):
+        return []
+    result = subprocess.run(["mmcli", "-L"], text=True, capture_output=True, timeout=15)
+    if result.returncode != 0:
+        return []
+    modems = []
+    for line in result.stdout.splitlines():
+        match = re.search(r"/Modem/(\d+)\s+\[(.*?)\]\s+(.+)$", line.strip())
+        if not match:
+            continue
+        modems.append({"id": match.group(1), "manufacturer": match.group(2).strip(), "model": match.group(3).strip()})
+    return modems
+
+
+def sms_inventory() -> dict:
+    modems = sms_modems()
+    return {
+        "available": bool(modems),
+        "backend": "ModemManager/mmcli" if available("mmcli") else "not installed",
+        "modems": modems,
+        "reason": None if modems else ("No cellular modem was detected." if available("mmcli") else "ModemManager (mmcli) is not installed.")
+    }
+
+
+def sms_send(data: dict) -> dict:
+    """Send an SMS directly through a locally attached GSM/LTE modem; no cloud provider is used."""
+    phone = str(data.get("phone") or "").strip()
+    message = str(data.get("message") or "")
+    modem = str(data.get("modem") or "").strip()
+    if not re.fullmatch(r"\+[1-9]\d{7,14}", phone):
+        raise ValueError("SMS phone must use E.164 format, for example +15551234567")
+    if not message or len(message) > 480 or any(ch in message for ch in "\x00\r"):
+        raise ValueError("invalid SMS message")
+    modems = sms_modems()
+    if not modems:
+        raise RuntimeError("No local cellular SMS modem is available. Connect a supported GSM/LTE modem and install ModemManager.")
+    if modem:
+        if not re.fullmatch(r"\d{1,4}", modem) or not any(item["id"] == modem for item in modems):
+            raise ValueError("selected SMS modem is not available")
+    else:
+        modem = modems[0]["id"]
+
+    create = subprocess.run(
+        ["mmcli", "-m", modem, f"--messaging-create-sms=text='{message}',number='{phone}'"],
+        text=True, capture_output=True, timeout=20
+    )
+    if create.returncode != 0:
+        raise RuntimeError((create.stderr or create.stdout or "Unable to create SMS").strip()[:500])
+    match = re.search(r"/SMS/(\d+)", create.stdout)
+    if not match:
+        raise RuntimeError("ModemManager created an SMS but did not return its identifier")
+    sms_id = match.group(1)
+    try:
+        sent = subprocess.run(["mmcli", "-s", sms_id, "--send"], text=True, capture_output=True, timeout=30)
+        if sent.returncode != 0:
+            raise RuntimeError((sent.stderr or sent.stdout or "Unable to send SMS").strip()[:500])
+    finally:
+        subprocess.run(["mmcli", "-m", modem, f"--messaging-delete-sms={sms_id}"], text=True, capture_output=True, timeout=15)
+    return {"sent": True, "phone": phone, "modem": modem, "backend": "ModemManager/mmcli"}
+
+
+def time_status() -> dict:
+    timezone = ""
+    synchronized = False
+    ntp = False
+    if available("timedatectl"):
+        result = subprocess.run(["timedatectl", "show", "--property=Timezone", "--property=NTPSynchronized", "--property=NTP", "--value"], text=True, capture_output=True, timeout=10)
+        if result.returncode == 0:
+            values = [line.strip() for line in result.stdout.splitlines()]
+            if values:
+                timezone = values[0]
+            if len(values) > 1:
+                synchronized = values[1].lower() == "yes"
+            if len(values) > 2:
+                ntp = values[2].lower() == "yes"
+    if not timezone:
+        try:
+            timezone = Path("/etc/timezone").read_text(encoding="utf-8").strip()
+        except OSError:
+            timezone = "UTC"
+    return {"timezone": timezone or "UTC", "ntpEnabled": ntp, "synchronized": synchronized}
+
+
+def time_set(data: dict) -> dict:
+    timezone = str(data.get("timezone") or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_+.-]+(?:/[A-Za-z0-9_+.-]+){0,3}", timezone) or ".." in timezone:
+        raise ValueError("invalid time zone")
+    zoneinfo = Path("/usr/share/zoneinfo") / timezone
+    if timezone != "UTC" and not zoneinfo.is_file():
+        raise ValueError("time zone is not installed on this host")
+    if available("timedatectl"):
+        run(["timedatectl", "set-timezone", timezone], timeout=20)
+        # Keep the appliance clock synchronized whenever systemd-timesyncd or another
+        # systemd-compatible NTP service is available. Failure to enable NTP should
+        # not undo an otherwise valid time-zone change.
+        run(["timedatectl", "set-ntp", "true"], timeout=20, check=False)
+    else:
+        target = Path("/usr/share/zoneinfo") / ("Etc/UTC" if timezone == "UTC" else timezone)
+        if not target.is_file():
+            raise RuntimeError("timedatectl is unavailable and the requested zoneinfo file was not found")
+        localtime = Path("/etc/localtime")
+        if localtime.exists() or localtime.is_symlink():
+            localtime.unlink()
+        localtime.symlink_to(target)
+        Path("/etc/timezone").write_text(timezone + "\n", encoding="utf-8")
+    return time_status()
+
+
 def require_nmcli() -> None:
     if not available("nmcli"):
         raise RuntimeError("NetworkManager is not installed on this LightNAS host")
@@ -2480,6 +2591,23 @@ def network_action(data: dict) -> dict:
             raise RuntimeError("UFW is not installed on this LightNAS host")
         run(["ufw", "disable"], timeout=30)
         return {"action": action, "status": "disabled"}
+    if action == "firewall-defaults":
+        if not available("ufw"):
+            raise RuntimeError("UFW is not installed on this LightNAS host")
+        incoming = str(data.get("incoming") or "deny").lower()
+        outgoing = str(data.get("outgoing") or "allow").lower()
+        if incoming not in {"allow", "deny", "reject"} or outgoing not in {"allow", "deny", "reject"}:
+            raise ValueError("invalid firewall default policy")
+        run(["ufw", "default", incoming, "incoming"], timeout=30)
+        run(["ufw", "default", outgoing, "outgoing"], timeout=30)
+        return {"action": action, "incoming": incoming, "outgoing": outgoing}
+    if action == "firewall-reset":
+        if not available("ufw"):
+            raise RuntimeError("UFW is not installed on this LightNAS host")
+        run(["ufw", "--force", "reset"], timeout=30)
+        run(["ufw", "default", "deny", "incoming"], timeout=30)
+        run(["ufw", "default", "allow", "outgoing"], timeout=30)
+        return {"action": action, "status": "reset", "incoming": "deny", "outgoing": "allow"}
     if action == "wifi-connect":
         require_nmcli()
         device = str(data.get("device") or "")
@@ -3744,6 +3872,14 @@ def dispatch(request: dict) -> dict:
         return network_inventory()
     if action == "network-action":
         return network_action(data)
+    if action == "sms-inventory":
+        return sms_inventory()
+    if action == "sms-send":
+        return sms_send(data)
+    if action == "time-status":
+        return time_status()
+    if action == "time-set":
+        return time_set(data)
     if action == "share-provision":
         return share_provision(data)
     if action == "share-admin-sync":
