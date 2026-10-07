@@ -53,3 +53,19 @@ test('WebAuthn passkeys can be registered, removed, and used to sign in', async 
   assert.match(admin, /serializePasskeyRegistration/);
   assert.match(admin, /window\.isSecureContext/);
 });
+
+
+test('LightNAS appliances use centralized SMS service configuration without ModemManager', async () => {
+  const [server, admin, installer, smsService] = await Promise.all([
+    read('src/server.mjs'),
+    read('public/admin-security.js'),
+    read('install.sh'),
+    read('src/sms-service.mjs')
+  ]);
+  assert.match(server, /sendLightNasSms/);
+  assert.match(smsService, /LIGHTNAS_SMS_GATEWAY_URL/);
+  assert.match(smsService, /LIGHTNAS_SMS_GATEWAY_TOKEN/);
+  assert.match(installer, /\/etc\/lightnas\/sms\.env/);
+  assert.doesNotMatch(installer, /\bmodemmanager\b/i);
+  assert.doesNotMatch(admin, /MODEM NEEDED|GSM\/LTE modem|Local cellular modem|ModemManager/);
+});
