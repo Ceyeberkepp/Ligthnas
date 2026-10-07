@@ -12,7 +12,7 @@ LightNAS has two separate appliance installs maintained from this repository. Th
 curl -fsSL https://raw.githubusercontent.com/Ceyeberkepp/Ligthnas/main/install.sh | bash
 ```
 
-**Hypervisor edition:**
+**Hypervisor edition:** (under costruction)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Ceyeberkepp/Ligthnas/main/install-hypervisor.sh | bash
