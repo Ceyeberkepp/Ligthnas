@@ -97,3 +97,33 @@ test('firewall provides policy, reset, and rule controls', async () => {
   assert.match(host, /firewall-defaults/);
   assert.match(host, /firewall-reset/);
 });
+
+
+test('settings and security expose section-level permissions', async () => {
+  const [server, app, adminSecurity] = await Promise.all([
+    read('src/server.mjs'),
+    read('public/app.js'),
+    read('public/admin-security.js')
+  ]);
+
+  for (const permission of [
+    'settings.general.manage',
+    'settings.password.manage',
+    'security.mfa.manage',
+    'settings.software.view',
+    'settings.software.manage'
+  ]) {
+    assert.ok(server.includes(permission), `missing server permission ${permission}`);
+    assert.ok(adminSecurity.includes(permission), `missing permission label ${permission}`);
+  }
+
+  assert.match(server, /\/api\/security\/password/);
+  assert.match(server, /Password settings permission is required/);
+  assert.match(server, /MFA settings permission is required/);
+  assert.match(server, /General settings permission is required/);
+  assert.match(app, /settingsPermission\('settings\.general\.manage'\)/);
+  assert.match(app, /settingsPermission\('settings\.password\.manage'\)/);
+  assert.match(app, /settingsPermission\('security\.mfa\.manage'\)/);
+  assert.match(app, /\/api\/security\/password/);
+  assert.match(adminSecurity, /permissions\.includes\('security\.mfa\.manage'\)/);
+});

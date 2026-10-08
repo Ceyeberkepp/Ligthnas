@@ -88,7 +88,12 @@ const permissionNames = {
   'system.shell':'Use privileged node shell',
   'users.manage':'Manage users & permission groups',
   'smtp.manage':'Manage SMTP',
-  'settings.manage':'Manage appliance settings',
+  'settings.general.manage':'Settings — appliance identity & branding',
+  'settings.password.manage':'Settings — change own password',
+  'security.mfa.manage':'Settings — MFA / 2FA / passkeys',
+  'settings.software.view':'Settings — view software & edition',
+  'settings.software.manage':'Settings — manage updates & license',
+  'settings.manage':'Settings — full settings access (legacy)',
   'admin.view':'View Admin Center'
 };
 
@@ -167,6 +172,10 @@ async function renderTotp() {
   if (location.hash !== '#settings') return;
   const content = q('#content');
   if (!content || q('.totp-admin', content)) return;
+  const appliance = state?.overview?.appliance || {};
+  const permissions = appliance.permissions || [];
+  const allowed = appliance.role === 'administrator' || permissions.includes('security.mfa.manage') || permissions.includes('settings.manage');
+  if (!allowed) return;
 
   let totp, sms, passkeys;
   try {
@@ -220,7 +229,9 @@ async function renderTotp() {
         </div>
       </section>
     </div>`;
-  q('#settings-form', content)?.insertAdjacentElement('afterend', section);
+  const softwareSection = q('.software-card', content);
+  if (softwareSection) softwareSection.insertAdjacentElement('beforebegin', section);
+  else q('.settings-dashboard', content)?.append(section);
 }
 
 async function renderAutomation() {

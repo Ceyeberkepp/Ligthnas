@@ -501,7 +501,10 @@ export const PERMISSIONS = Object.freeze([
   'network.view', 'network.manage', 'firewall.view', 'firewall.manage', 'integrations.view', 'integrations.manage',
   'containers.console', 'vms.console', 'backup.manage', 'audit.view',
   'monitoring.view', 'capabilities.view', 'system.view', 'system.shell',
-  'users.manage', 'smtp.manage', 'settings.manage', 'admin.view'
+  'users.manage', 'smtp.manage',
+  'settings.general.manage', 'settings.password.manage', 'security.mfa.manage',
+  'settings.software.view', 'settings.software.manage',
+  'settings.manage', 'admin.view'
 ]);
 const DEFAULT_USER_PERMISSIONS = Object.freeze(['files.view.own', 'files.own']);
 const DEFAULT_USER_STORAGE_QUOTA_BYTES = 5 * 1024 * 1024 * 1024;
@@ -1231,7 +1234,7 @@ async function api(req, res, url) {
     }
   }
   if (req.method === 'PUT' && url.pathname === '/api/branding/logo') {
-    if (!requireOwner(res, context)) return;
+    if (!isAdmin && !hasPermission(permissions, 'settings.general.manage') && !hasPermission(permissions, 'settings.manage')) return send(res, 403, { error: 'General settings permission is required.' });
     const type = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
     const extension = ({ 'image/jpeg':'jpg', 'image/png':'png', 'image/webp':'webp' })[type];
     if (!extension) return send(res, 415, { error: 'Use a JPEG, PNG, or WebP logo.' });
@@ -1246,12 +1249,19 @@ async function api(req, res, url) {
     return send(res, 200, { ok: true, logo: true });
   }
   if (req.method === 'DELETE' && url.pathname === '/api/branding/logo') {
-    if (!requireOwner(res, context)) return;
+    if (!isAdmin && !hasPermission(permissions, 'settings.general.manage') && !hasPermission(permissions, 'settings.manage')) return send(res, 403, { error: 'General settings permission is required.' });
     for (const old of ['jpg','png','webp']) await rm(join(brandingRoot, `logo.${old}`), { force: true }).catch(() => {});
     delete store.state.config.logoExt;
     store.state.config.logoMode = 'text';
     await store.save();
     return send(res, 200, { ok: true, logo: false });
+  }
+
+  const selfMfaPath = url.pathname.startsWith('/api/security/totp') ||
+    url.pathname.startsWith('/api/security/sms') ||
+    url.pathname.startsWith('/api/security/passkeys');
+  if (selfMfaPath && !isAdmin && !hasPermission(permissions, 'security.mfa.manage') && !hasPermission(permissions, 'settings.manage')) {
+    return send(res, 403, { error: 'MFA settings permission is required.' });
   }
 
   if (req.method === 'GET' && url.pathname === '/api/security/totp') {
@@ -1424,7 +1434,36 @@ async function api(req, res, url) {
     return send(res, 200, { ok: true, remaining: account.passkeys.length });
   }
 
-  const ownerOnly = (url.pathname === '/api/settings' && req.method !== 'GET') || url.pathname === '/api/capabilities/config' ||
+  if (req.method === 'POST' && url.pathname === '/api/security/password') {
+    if (context.apiToken) return send(res, 403, { error: 'Password changes require an interactive local account session.' });
+    if (!isAdmin && !hasPermission(permissions, 'settings.password.manage') && !hasPermission(permissions, 'settings.manage')) {
+      return send(res, 403, { error: 'Password settings permission is required.' });
+    }
+    const input = await bodyJson(req);
+    if (!(await verifyPassword(input.currentPassword, account.passwordHash))) return send(res, 403, { error: 'Current account password is incorrect.' });
+    if (typeof input.newPassword !== 'string' || input.newPassword.length < 4 || input.newPassword.length > 1024) {
+      return send(res, 400, { error: 'New password must contain 4–1024 characters.' });
+    }
+    account.passwordHash = await hashPassword(input.newPassword);
+    store.addActivity('security', `Password changed for ${username}.`, 'success');
+    await store.save();
+    if (isAdmin) {
+      await localSyncShareAdministrator({
+        username: store.state.config.username,
+        password: input.newPassword,
+        shares: store.state.shares.map(share => ({
+          id:String(share.id || ''),
+          name:String(share.name || ''),
+          protocol:String(share.protocol || ''),
+          username:String(share.username || '')
+        }))
+      }).catch(error => store.addActivity('security', `Share password synchronization needs attention: ${error.message}`, 'warning'));
+    }
+    sessions.clearUser(username);
+    return send(res, 200, { ok:true, signInRequired:true }, { 'Set-Cookie': sessionCookie(req, '', 0) });
+  }
+
+  const ownerOnly = url.pathname === '/api/capabilities/config' ||
     (url.pathname === '/api/smtp' && req.method !== 'GET') || url.pathname === '/api/smtp/test' ||
     url.pathname.startsWith('/api/security/api-tokens') || url.pathname.startsWith('/api/security/webhooks') ||
     url.pathname.startsWith('/api/security/identity-providers');
@@ -1784,7 +1823,7 @@ async function api(req, res, url) {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/settings') {
-    if (!isAdmin && !hasPermission(permissions, 'settings.manage') && !permissions.includes('nav.settings')) return send(res, 403, { error: 'Settings sidebar access is required.' });
+    if (!isAdmin && !hasPermission(permissions, 'settings.general.manage') && !hasPermission(permissions, 'settings.manage')) return send(res, 403, { error: 'General settings permission is required.' });
     const { username: owner, deviceName, timezone, logoExt, brandName, logoMode, accentColor, sidebarColor, contentColor, sidebarTextColor, contentTextColor, primaryButtonColor, loginButtonColor, topbarColor, panelColor, inputColor, performanceTabsColor, performanceTabsActiveColor, performanceTabsTextColor } = store.state.config;
     return send(res, 200, {
       username: owner,
@@ -1810,7 +1849,11 @@ async function api(req, res, url) {
     });
   }
   if (req.method === 'PATCH' && url.pathname === '/api/settings') {
+    if (!isAdmin && !hasPermission(permissions, 'settings.general.manage') && !hasPermission(permissions, 'settings.manage')) {
+      return send(res, 403, { error: 'General settings permission is required.' });
+    }
     const input = await bodyJson(req);
+    if (!isAdmin && input.newPassword) return send(res, 403, { error: 'Use the password security control to change your password.' });
     if (!/^[a-zA-Z0-9][a-zA-Z0-9-]{1,31}$/.test(input.deviceName || '')) return send(res, 400, { error: 'Device name must contain 2–32 letters, numbers, or hyphens.' });
     const requestedTimezone = String(input.timezone || '').trim();
     let supportedTimezone = requestedTimezone === 'UTC';
@@ -2108,11 +2151,11 @@ async function api(req, res, url) {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/license') {
-    if (!isAdmin && !permissions.includes('system.view')) return send(res, 403, { error: 'System information access is required.' });
+    if (!isAdmin && !permissions.includes('system.view') && !hasPermission(permissions, 'settings.software.view') && !hasPermission(permissions, 'settings.software.manage') && !hasPermission(permissions, 'settings.manage')) return send(res, 403, { error: 'Software settings permission is required.' });
     return send(res, 200, await licenseStatus({ instanceId: store.state.config.instanceId, version: SOFTWARE_VERSION }));
   }
   if (req.method === 'POST' && url.pathname === '/api/license/verify') {
-    if (!requireOwner(res, context)) return;
+    if (!isAdmin && !hasPermission(permissions, 'settings.software.manage') && !hasPermission(permissions, 'settings.manage')) return send(res, 403, { error: 'Software management permission is required.' });
     const input = await bodyJson(req);
     const result = await verifyLicense({ licenseKey: input.licenseKey, instanceId: store.state.config.instanceId, version: SOFTWARE_VERSION });
     store.addActivity('license', `LightNAS ${result.edition} license was verified.`, 'success');
@@ -2121,11 +2164,11 @@ async function api(req, res, url) {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/software') {
-    if (!isAdmin && !permissions.includes('system.view')) return send(res, 403, { error: 'System information access is required.' });
+    if (!isAdmin && !permissions.includes('system.view') && !hasPermission(permissions, 'settings.software.view') && !hasPermission(permissions, 'settings.software.manage') && !hasPermission(permissions, 'settings.manage')) return send(res, 403, { error: 'Software settings permission is required.' });
     return send(res, 200, await localSoftwareStatus(url.searchParams.get('check') === '1'));
   }
   if (req.method === 'POST' && url.pathname === '/api/software/update') {
-    if (!requireOwner(res, context)) return;
+    if (!isAdmin && !hasPermission(permissions, 'settings.software.manage') && !hasPermission(permissions, 'settings.manage')) return send(res, 403, { error: 'Software management permission is required.' });
     const result = await localSoftwareUpdate();
     store.addActivity('update', 'LightNAS software update was started.', 'info');
     await store.save();
