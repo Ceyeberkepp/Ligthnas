@@ -1823,7 +1823,7 @@ async function api(req, res, url) {
   }
 
   if (req.method === 'GET' && url.pathname === '/api/settings') {
-    if (!isAdmin && !hasPermission(permissions, 'settings.manage') && !permissions.includes('nav.settings')) return send(res, 403, { error: 'Settings sidebar access is required.' });
+    if (!isAdmin && !hasPermission(permissions, 'settings.general.manage') && !hasPermission(permissions, 'settings.manage')) return send(res, 403, { error: 'General settings permission is required.' });
     const { username: owner, deviceName, timezone, logoExt, brandName, logoMode, accentColor, sidebarColor, contentColor, sidebarTextColor, contentTextColor, primaryButtonColor, loginButtonColor, topbarColor, panelColor, inputColor, performanceTabsColor, performanceTabsActiveColor, performanceTabsTextColor } = store.state.config;
     return send(res, 200, {
       username: owner,
