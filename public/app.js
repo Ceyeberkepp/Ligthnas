@@ -1,5 +1,5 @@
 if (window.LIGHTNAS_PRODUCT_MODE === 'hypervisor') document.body.classList.add('product-hypervisor');
-const state = { overview: null, view: 'home', uiMode: window.LIGHTNAS_PRODUCT_MODE === 'hypervisor' ? 'hypervisor' : 'nas', folder: '', files: null, fileError: null, filesSettingsOpen: false, fileLibraryTab: 'all', filesNavExpanded: localStorage.getItem('lightnas-files-nav-expanded') !== '0', mobileFilesPeriod: localStorage.getItem('lightnas-mobile-files-period') || 'all', aiMessages: [], logs: null, fileView: ['list','grid','gallery'].includes(localStorage.getItem('lightnas-file-view')) ? localStorage.getItem('lightnas-file-view') : 'grid', fileTruncated: false, fileQuota: null, fileSectionCache: new Map(), fileSectionCheckedAt: new Map(), filesLoadingKeys: new Set(), communityCatalogCheckedAt: 0, overviewMetric: localStorage.getItem('lightnas-overview-metric') || 'cpu', lastNetworkSample: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, userAccess: null, smtp: undefined, media: null, network: null, software: null, license: null, builtinCatalog: null, communityCatalog: null, communityCatalogLoading: false, communityCatalogError: null, appSearch: '', appCategory: '', appVisibleLimit: 72, backupJobs: null, selectedBackupJobId: null, metricHistory: { cpu: [], load: [], memory: [], storage: [], networkIn: [], networkOut: [] } };
+const state = { overview: null, view: 'home', uiMode: window.LIGHTNAS_PRODUCT_MODE === 'hypervisor' ? 'hypervisor' : 'nas', folder: '', files: null, fileError: null, filesSettingsOpen: false, fileLibraryTab: 'all', filesNavExpanded: localStorage.getItem('lightnas-files-nav-expanded') !== '0', mobileFilesPeriod: localStorage.getItem('lightnas-mobile-files-period') || 'all', aiMessages: [], logs: null, fileView: ['list','grid','gallery'].includes(localStorage.getItem('lightnas-file-view')) ? localStorage.getItem('lightnas-file-view') : 'grid', fileTruncated: false, fileQuota: null, fileSectionCache: new Map(), fileSectionCheckedAt: new Map(), filesLoadingKeys: new Set(), communityCatalogCheckedAt: 0, overviewMetric: localStorage.getItem('lightnas-overview-metric') || 'cpu', lastNetworkSample: null, runtimes: null, runtimeError: null, containerError: null, spaces: null, users: null, groups: null, userAccess: null, smtp: undefined, media: null, network: null, software: null, license: null, builtinCatalog: null, communityCatalog: null, communityCatalogLoading: false, communityCatalogError: null, appSearch: '', appCategory: '', appVisibleLimit: 72, backupJobs: null, selectedBackupJobId: null, adminSection: localStorage.getItem('lightnas-admin-section') || 'general', metricHistory: { cpu: [], load: [], memory: [], storage: [], networkIn: [], networkOut: [] } };
 function filesSectionCacheKey(tab = state.fileLibraryTab, folder = state.folder) {
   if (folder) return 'path:' + folder;
   return tab === 'folders' ? 'folders' : tab || 'all';
@@ -909,7 +909,7 @@ async function loadUsers() {
     const data = await request('/api/users');
     state.users = data.users || [];
     state.userAccess = { permissionOptions: data.permissionOptions || [], groups: data.groups || [] };
-    if (['users', 'permissions'].includes(state.view)) render(state.view);
+    if (['users', 'permissions', 'admin'].includes(state.view)) render(state.view);
   } catch (error) { toast(error.message); }
 }
 
@@ -2274,67 +2274,113 @@ function settingsView() {
       </section>` : ''}
     </section>`;
 }
+function adminCenterSectionButton(id, label) {
+  return `<button class="admin-center-nav-item ${state.adminSection === id ? 'active' : ''}" type="button" data-admin-section="${id}">${escapeHtml(label)}</button>`;
+}
+
+function adminCenterRow(title, description, actions = '') {
+  return `<div class="admin-center-row">
+    <div><b>${escapeHtml(title)}</b><p>${escapeHtml(description)}</p></div>
+    <div class="admin-center-row-actions">${actions}</div>
+  </div>`;
+}
+
 function adminView() {
   const { appliance } = state.overview;
   const userCount = state.users?.length ?? '—';
   const networkName = state.network?.control?.currentUplink?.name || state.network?.routes?.find(item => item.destination === 'default')?.device || '—';
-  return `${pageHead('Admin Center', `Operate ${escapeHtml(appliance.deviceName)} from one focused administration workspace.`)}
-    <section class="admin-overview-grid">
-      <article class="admin-overview-card accent-card">
-        <span class="eyebrow">APPLIANCE</span>
-        <h2>${escapeHtml(appliance.deviceName)}</h2>
-        <p>Owner: ${escapeHtml(appliance.username)} · ${escapeHtml(appliance.timezone || 'UTC')}</p>
-        <div class="head-actions"><button class="secondary" data-view-link="settings">Settings</button></div>
-      </article>
-      <article class="admin-overview-card">
-        <span class="eyebrow">ACCESS</span>
-        <h2>${userCount} local users</h2>
-        <p>Users, groups, inherited scopes, authentication and identity policy.</p>
-        <div class="head-actions"><button class="secondary" data-view-link="permissions">Permissions</button><button class="secondary" data-view-link="users">Users</button></div>
-      </article>
-      <article class="admin-overview-card">
-        <span class="eyebrow">NETWORK</span>
-        <h2>${escapeHtml(networkName)}</h2>
-        <p>Interfaces, bridges, VLANs, bonds, routes, DNS and host firewall.</p>
-        <div class="head-actions"><button class="secondary" data-view-link="network">Networking</button><button class="secondary" data-view-link="firewall">Firewall</button></div>
-      </article>
-      <article class="admin-overview-card">
-        <span class="eyebrow">OPERATIONS</span>
-        <h2>Health & monitoring</h2>
-        <p>Live system pressure, appliance diagnostics and managed-service repair.</p>
-        <div class="head-actions"><button class="secondary" data-view-link="home">Overview health</button><button class="secondary" data-view-link="capabilities">Diagnostics</button></div>
-      </article>
-    </section>
+  const section = ['general','users','permissions','security','integrations'].includes(state.adminSection) ? state.adminSection : 'general';
 
-    <section class="panel" id="appliance-health-panel">
-      <div class="admin-section-head">
-        <div data-appliance-health-result>
-          <span class="eyebrow">APPLIANCE HEALTH</span>
-          <h2>Self-management</h2>
-          <p class="muted">Validate storage, networking, containers, VMs, application runtime and core LightNAS services.</p>
+  const action = (view, label, primary = false) =>
+    `<button class="${primary ? 'primary' : 'secondary'}" type="button" data-view-link="${view}">${escapeHtml(label)}</button>`;
+
+  const panels = {
+    general: `
+      <section class="admin-center-panel">
+        <div class="admin-center-panel-head">
+          <div><h2>General</h2><p>Appliance configuration, network, health, and system services.</p></div>
         </div>
-        <div class="head-actions">
-          <button class="secondary" type="button" data-appliance-health>Check health</button>
-          <button class="primary" type="button" data-appliance-repair>Repair managed services</button>
+        <div class="admin-center-section">
+          <h3>Appliance</h3>
+          ${adminCenterRow(appliance.deviceName, `Owner: ${appliance.username} · ${appliance.timezone || 'UTC'}`, action('settings','Open settings'))}
+          ${adminCenterRow('Network', `Current management interface: ${networkName}`, action('network','Networking') + action('firewall','Firewall'))}
         </div>
-      </div>
-    </section>
+        <div class="admin-center-section">
+          <h3>Health & operations</h3>
+          ${adminCenterRow('Overview health', 'Live system pressure, storage, memory, CPU and service status.', action('home','Open overview'))}
+          ${adminCenterRow('Diagnostics', 'Review LightNAS capabilities and host diagnostics.', action('capabilities','Open diagnostics'))}
+          <div class="admin-health-actions">
+            <div><b>Self-management</b><p>Validate storage, networking, containers, VMs, application runtime and core LightNAS services.</p></div>
+            <div class="admin-center-row-actions">
+              <button class="secondary" type="button" data-appliance-health>Check health</button>
+              <button class="primary" type="button" data-appliance-repair>Repair managed services</button>
+            </div>
+          </div>
+          <div class="admin-health-result" data-appliance-health-result></div>
+        </div>
+        <div class="admin-center-section">
+          <h3>License & responsibility</h3>
+          <div class="admin-center-legal">
+            <b>LightNAS · Development & Community Evaluation License</b>
+            <p>LightNAS is an independent product from Cyverax LLC. Third-party platform names are used only when describing optional deployment, migration, compatibility, or integration features.</p>
+            <p>LightNAS is currently for development and early testing only and is not licensed for production or enterprise use without a separate paid license. The current source is not open source. Community use is free only within the permitted development/evaluation scope. Virtual machines, containers, applications, storage, services, networks, data, backups, security, third-party licenses, and other instances created or managed on your infrastructure remain the operator's responsibility.</p>
+          </div>
+        </div>
+      </section>`,
 
-    <section class="panel admin-service-links">
-      <div><span class="eyebrow">SERVICES</span><h2>Notifications & integrations</h2><p class="muted">Configure SMTP, identity providers, API automation and external integrations without duplicating the full navigation tree.</p></div>
-      <div class="head-actions"><button class="secondary" data-view-link="smtp">SMTP</button><button class="secondary" data-view-link="integrations">Integrations</button></div>
-    </section>
+    users: `
+      <section class="admin-center-panel">
+        <div class="admin-center-panel-head"><div><h2>Users & groups</h2><p>Manage identities, account status, storage quotas, memberships, and group assignments.</p></div></div>
+        <div class="admin-center-section">
+          ${adminCenterRow('Local users', `${userCount} local user account${Number(userCount) === 1 ? '' : 's'} configured.`, action('users','Manage users',true))}
+          ${adminCenterRow('Permission groups', 'Group users together and inherit access policies across multiple accounts.', action('permissions','Manage groups'))}
+          ${adminCenterRow('Private user libraries', 'Administrator access to user libraries remains protected by administrator-password verification.', action('files','Files & media'))}
+        </div>
+      </section>`,
 
-    <section class="panel legal-notice-panel">
-      <div>
-        <span class="eyebrow">LICENSE & RESPONSIBILITY</span>
-        <h2>LightNAS · Development & Community Evaluation License</h2>
-        <p class="muted">LightNAS is an independent product from Cyverax LLC. Third-party platform names are used only when describing optional deployment, migration, compatibility, or integration features.</p>
-        <p class="muted">LightNAS is currently for development and early testing only and is not licensed for production or enterprise use without a separate paid license. The current source is not open source. Community use is free only within the permitted development/evaluation scope. Virtual machines, containers, applications, storage, services, networks, data, backups, security, third-party licenses, and other instances created or managed on your infrastructure remain the operator's responsibility.</p>
-      </div>
-    </section>`;
+    permissions: `
+      <section class="admin-center-panel">
+        <div class="admin-center-panel-head"><div><h2>Permissions</h2><p>Control sidebar visibility, settings sections, resource access, and administrative actions.</p></div></div>
+        <div class="admin-center-section">
+          ${adminCenterRow('Navigation access', 'Choose which LightNAS tabs a user or group can see.', action('permissions','Manage permissions',true))}
+          ${adminCenterRow('Settings section access', 'Grant individual settings areas such as password change, MFA, branding, software viewing, or update management.', action('permissions','Edit settings access'))}
+          ${adminCenterRow('Resource actions', 'Control storage, apps, containers, VMs, networking, firewall, backups, audit, and system access independently.', action('permissions','Edit action access'))}
+        </div>
+      </section>`,
+
+    security: `
+      <section class="admin-center-panel">
+        <div class="admin-center-panel-head"><div><h2>Security</h2><p>Account password, multi-factor authentication, passkeys, and verification methods.</p></div></div>
+        <div class="admin-center-section">
+          ${adminCenterRow('Password', 'Change the signed-in account password with current-password verification.', action('settings','Change password'))}
+          ${adminCenterRow('Multi-factor authentication', 'Configure authenticator apps, SMS verification, passkeys, and hardware security keys.', action('settings','Configure MFA',true))}
+          ${adminCenterRow('Permission policies', 'Limit which security controls each user is allowed to see and change.', action('permissions','Security permissions'))}
+        </div>
+      </section>`,
+
+    integrations: `
+      <section class="admin-center-panel">
+        <div class="admin-center-panel-head"><div><h2>Integrations</h2><p>Notifications, identity, API automation, and external service connections.</p></div></div>
+        <div class="admin-center-section">
+          ${adminCenterRow('Email / SMTP', 'Configure outbound email delivery and test the SMTP relay.', action('smtp','Configure SMTP'))}
+          ${adminCenterRow('External integrations', 'Manage identity providers, API tokens, webhooks, and service connections.', action('integrations','Open integrations',true))}
+          ${adminCenterRow('Networking & firewall', 'External services depend on the appliance network and firewall configuration.', action('network','Networking') + action('firewall','Firewall'))}
+        </div>
+      </section>`
+  };
+
+  return `${pageHead('Admin Center', 'Manage accounts, access, settings, security, and system services from one workspace.')}
+    <div class="admin-center-workspace">
+      <aside class="admin-center-nav panel" aria-label="Admin Center sections">
+        ${adminCenterSectionButton('general','General')}
+        ${adminCenterSectionButton('users','Users & groups')}
+        ${adminCenterSectionButton('permissions','Permissions')}
+        ${adminCenterSectionButton('security','Security')}
+        ${adminCenterSectionButton('integrations','Integrations')}
+      </aside>
+      <div class="admin-center-content">${panels[section]}</div>
+    </div>`;
 }
-
 
 function moduleView(view) {
   if (view === 'apps') {
@@ -2392,7 +2438,7 @@ function moduleView(view) {
 }
 
 async function loadNetwork() {
-  try { state.network = await request('/api/network'); if (['network', 'firewall'].includes(state.view)) render(state.view); }
+  try { state.network = await request('/api/network'); if (['network', 'firewall', 'admin'].includes(state.view)) render(state.view); }
   catch (error) { toast(error.message); }
 }
 
@@ -2729,10 +2775,10 @@ function render(view) {
     }
   }
   if (['pools', 'storage'].includes(state.view) && state.spaces === null) loadSpaces();
-  if (['users', 'permissions'].includes(state.view) && state.users === null) loadUsers();
+  if (['users', 'permissions', 'admin'].includes(state.view) && state.users === null) loadUsers();
   if (['smtp','integrations'].includes(state.view) && state.smtp === undefined) loadSmtp();
   if (['files', 'media'].includes(state.view) && state.media === null) loadMedia();
-  if (['network', 'firewall'].includes(state.view) && !state.network) loadNetwork();
+  if (['network', 'firewall', 'admin'].includes(state.view) && !state.network) loadNetwork();
   if (['logs','backups','analytics'].includes(state.view) && state.logs === null) loadLogs();
   if (state.view === 'backups' && state.backupJobs === null && window.LIGHTNAS_PRODUCT_MODE !== 'hypervisor') loadBackupJobs();
   if (state.view === 'apps') {
@@ -2754,6 +2800,13 @@ function render(view) {
 }
 
 function bindViewActions() {
+  document.querySelectorAll('#content [data-admin-section]').forEach(button => button.addEventListener('click', () => {
+    const next = button.dataset.adminSection;
+    if (!['general','users','permissions','security','integrations'].includes(next)) return;
+    state.adminSection = next;
+    localStorage.setItem('lightnas-admin-section', next);
+    render('admin');
+  }));
   document.querySelectorAll('#content [data-settings-collapse]').forEach(button => button.addEventListener('click', () => {
     const id = button.dataset.settingsCollapse;
     let saved = {};

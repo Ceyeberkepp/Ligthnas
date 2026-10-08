@@ -2087,3 +2087,210 @@ body:not(.product-hypervisor) .backup-status-line {
 .console.sidebar-collapsed .nav-files-parent-row {
   display: block;
 }
+
+
+/* Admin Center workspace redesign */
+.admin-center-workspace {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.admin-center-nav {
+  position: sticky;
+  top: 96px;
+  display: grid;
+  gap: 4px;
+  padding: 14px;
+  border-radius: 12px;
+  box-shadow: none;
+}
+
+.admin-center-nav-item {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  text-align: left;
+  padding: 11px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.admin-center-nav-item:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--panel-2) 78%, transparent);
+}
+
+.admin-center-nav-item.active {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel-2));
+  box-shadow: inset 3px 0 var(--accent);
+}
+
+.admin-center-content {
+  min-width: 0;
+}
+
+.admin-center-panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: none;
+}
+
+.admin-center-panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 18px;
+  padding: 24px 26px 18px;
+}
+
+.admin-center-panel-head h2 {
+  margin: 0 0 6px;
+  font-size: 18px;
+  letter-spacing: -.02em;
+}
+
+.admin-center-panel-head p,
+.admin-center-section > p,
+.admin-center-row p,
+.admin-health-actions p,
+.admin-center-legal p {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.admin-center-panel-head p,
+.admin-center-row p,
+.admin-health-actions p {
+  margin: 0;
+  font-size: 12px;
+}
+
+.admin-center-section {
+  border-top: 1px solid var(--line);
+  padding: 0 26px;
+}
+
+.admin-center-section > h3 {
+  margin: 0;
+  padding: 20px 0 10px;
+  font-size: 14px;
+  letter-spacing: -.01em;
+}
+
+.admin-center-row,
+.admin-health-actions {
+  min-height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 22px;
+  padding: 15px 0;
+  border-top: 1px solid var(--line);
+}
+
+.admin-center-section > h3 + .admin-center-row,
+.admin-center-section > h3 + .admin-health-actions {
+  border-top: 0;
+}
+
+.admin-center-row > div:first-child,
+.admin-health-actions > div:first-child {
+  min-width: 0;
+}
+
+.admin-center-row b,
+.admin-health-actions b,
+.admin-center-legal b {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+
+.admin-center-row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.admin-center-row-actions .primary,
+.admin-center-row-actions .secondary {
+  min-height: 36px;
+  padding: 8px 13px;
+  border-radius: 8px;
+  font-size: 12px;
+  box-shadow: none;
+}
+
+.admin-health-result {
+  padding-bottom: 18px;
+}
+
+.admin-health-result:empty {
+  display: none;
+}
+
+.admin-center-legal {
+  padding: 0 0 22px;
+}
+
+.admin-center-legal p {
+  margin: 8px 0 0;
+  font-size: 12px;
+}
+
+@media (max-width: 900px) {
+  .admin-center-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-center-nav {
+    position: static;
+    grid-template-columns: repeat(5, minmax(max-content, 1fr));
+    overflow-x: auto;
+    padding: 8px;
+  }
+
+  .admin-center-nav-item {
+    white-space: nowrap;
+    text-align: center;
+  }
+
+  .admin-center-nav-item.active {
+    box-shadow: inset 0 -3px var(--accent);
+  }
+}
+
+@media (max-width: 620px) {
+  .admin-center-nav {
+    display: flex;
+    gap: 4px;
+  }
+
+  .admin-center-panel-head,
+  .admin-center-section {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .admin-center-row,
+  .admin-health-actions {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .admin-center-row-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
