@@ -117,8 +117,13 @@ function memberCheckboxes(users, selected = []) {
   return `<div class="security-check-grid">${users.map(user => `<label><input type="checkbox" name="members" value="${escapeText(user.username)}" ${chosen.has(user.username) ? 'checked' : ''}><span>${escapeText(user.username)}</span></label>`).join('') || '<p class="muted">Create users first, then add them to this group.</p>'}</div>`;
 }
 
+function adminSectionActive(section) {
+  return location.hash === '#admin' && Boolean(q(`[data-admin-content="${section}"]`, q('#content')));
+}
+
+
 async function renderGroups() {
-  if (location.hash !== '#permissions') return;
+  if (location.hash !== '#permissions' && !adminSectionActive('permissions')) return;
   const content = q('#content');
   if (!content || q('.groups-admin', content)) return;
   let data;
@@ -169,7 +174,7 @@ async function renderGroups() {
 }
 
 async function renderTotp() {
-  if (location.hash !== '#settings') return;
+  if (location.hash !== '#settings' && !adminSectionActive('settings')) return;
   const content = q('#content');
   if (!content || q('.totp-admin', content)) return;
   const appliance = state?.overview?.appliance || {};
@@ -235,7 +240,7 @@ async function renderTotp() {
 }
 
 async function renderAutomation() {
-  if (location.hash !== '#integrations') return;
+  if (location.hash !== '#integrations' && !adminSectionActive('integrations')) return;
   const content = q('#content');
   if (!content || q('.automation-admin', content)) return;
   let tokenData, hookData;
@@ -300,7 +305,7 @@ function refreshCurrent() {
 }
 
 async function refreshGroupsPanel() {
-  if (location.hash !== '#permissions') return;
+  if (location.hash !== '#permissions' && !adminSectionActive('permissions')) return;
   q('.groups-admin', q('#content'))?.remove();
   await renderGroups();
 }
