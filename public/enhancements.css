@@ -4189,7 +4189,8 @@ small {
 /* Viewer actions: compact anchored desktop menu, not an unstyled browser dialog. */
 dialog.viewer-more-sheet.viewer-desktop-popover {
   position: fixed !important;
-  inset: auto !important;
+  right: auto !important;
+  bottom: auto !important;
   width: 240px !important;
   max-width: calc(100vw - 24px) !important;
   height: auto !important;
@@ -4368,3 +4369,5 @@ dialog.viewer-more-sheet.viewer-desktop-popover [hidden] { display: none !import
   dialog.mobile-photo-editor .mobile-editor-tabs button span,
   dialog.mobile-photo-editor .mobile-editor-tabs button small { display: inline !important; }
 }
+
+dialog.viewer-more-sheet.viewer-desktop-popover::backdrop { background: transparent !important; backdrop-filter: none !important; }
