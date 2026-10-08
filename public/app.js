@@ -909,7 +909,7 @@ async function loadUsers() {
     const data = await request('/api/users');
     state.users = data.users || [];
     state.userAccess = { permissionOptions: data.permissionOptions || [], groups: data.groups || [] };
-    if (['users', 'permissions'].includes(state.view)) render(state.view);
+    if (['users', 'permissions', 'admin'].includes(state.view)) render(state.view);
   } catch (error) { toast(error.message); }
 }
 
@@ -2438,7 +2438,7 @@ function moduleView(view) {
 }
 
 async function loadNetwork() {
-  try { state.network = await request('/api/network'); if (['network', 'firewall'].includes(state.view)) render(state.view); }
+  try { state.network = await request('/api/network'); if (['network', 'firewall', 'admin'].includes(state.view)) render(state.view); }
   catch (error) { toast(error.message); }
 }
 
@@ -2775,10 +2775,10 @@ function render(view) {
     }
   }
   if (['pools', 'storage'].includes(state.view) && state.spaces === null) loadSpaces();
-  if (['users', 'permissions'].includes(state.view) && state.users === null) loadUsers();
+  if (['users', 'permissions', 'admin'].includes(state.view) && state.users === null) loadUsers();
   if (['smtp','integrations'].includes(state.view) && state.smtp === undefined) loadSmtp();
   if (['files', 'media'].includes(state.view) && state.media === null) loadMedia();
-  if (['network', 'firewall'].includes(state.view) && !state.network) loadNetwork();
+  if (['network', 'firewall', 'admin'].includes(state.view) && !state.network) loadNetwork();
   if (['logs','backups','analytics'].includes(state.view) && state.logs === null) loadLogs();
   if (state.view === 'backups' && state.backupJobs === null && window.LIGHTNAS_PRODUCT_MODE !== 'hypervisor') loadBackupJobs();
   if (state.view === 'apps') {
