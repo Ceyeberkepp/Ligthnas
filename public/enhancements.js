@@ -400,7 +400,13 @@ function ensureViewerMoreMenu() {
 }
 
 function openViewerMoreMenu() {
-  ensureViewerMoreMenu().showModal();
+  const sheet = ensureViewerMoreMenu();
+  const viewer = document.querySelector('#lightnas-viewer');
+  const canEdit = Boolean(viewer?.querySelector('[data-viewer-stage] img'));
+  sheet.querySelector('[data-more-action="edit"]').hidden = !canEdit;
+  sheet.querySelector('[data-more-action="copy-edits"]').hidden = !canEdit;
+  sheet.querySelector('[data-more-action="paste-edits"]').hidden = !canEdit || !mobileCopiedEdits;
+  sheet.showModal();
 }
 
 async function saveViewerDuplicate() {
