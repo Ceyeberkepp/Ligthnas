@@ -776,6 +776,36 @@ async function editCurrentImage() {
   await openMobilePhotoEditor();
 }
 
+// Preview URL and image preloading helpers shared by desktop and mobile.
+function viewerUrls({ path }) {
+  const encoded = encodeURIComponent(path);
+  return {
+    preview: `/api/files/thumbnail?path=${encoded}`,
+    original: `/api/files/download?path=${encoded}`
+  };
+}
+
+function warmViewerImage(url) {
+  return new Promise(resolve => {
+    if (!url) { resolve(false); return; }
+    const image = new Image();
+    image.onload = () => resolve(true);
+    image.onerror = () => resolve(false);
+    image.src = url;
+    if (image.complete) resolve(image.naturalWidth > 0);
+  });
+}
+
+function preloadPreviewNeighbors(path) {
+  const items = previewItems();
+  const index = items.findIndex(item => item.path === path);
+  if (index < 0) return;
+  [items[index - 1], items[index + 1]].filter(Boolean).forEach(item => {
+    if (previewKind(item.name) !== 'image') return;
+    warmViewerImage(viewerUrls(item).preview).catch(() => {});
+  });
+}
+
 async function openPreview(name, explicitPath = '') {
   const kind = previewKind(name);
   if (!kind) return false;
