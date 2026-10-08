@@ -414,7 +414,7 @@ function openViewerMoreMenu() {
     sheet.classList.add('viewer-desktop-popover');
     sheet.style.left = Math.max(12, Math.min(window.innerWidth - 254, rect.right - 240)) + 'px';
     sheet.style.top = Math.min(window.innerHeight - 360, rect.bottom + 7) + 'px';
-    sheet.show();
+    sheet.showModal();
     sheet._outsideClick?.();
     const dismiss = event => {
       if (!sheet.contains(event.target) && !trigger.contains(event.target)) sheet.close();
