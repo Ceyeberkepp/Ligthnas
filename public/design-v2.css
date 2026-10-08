@@ -231,3 +231,52 @@ label { font-size:13px;font-weight:550;gap:6px; }
   .user-management-dialog .dialog-body { padding:18px;max-height:92dvh; }
   .files-page .file-toolbar-actions { gap:5px; }
 }
+
+
+/* V2 shared action styling — consistent beyond Files & Media. */
+.content .page-head .head-actions { display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:7px; }
+.content .page-head .head-actions > button,
+.content .page-head .head-actions > .secondary,
+.content .page-head .head-actions > .primary,
+.content .page-head .head-actions .storage-add-toggle {
+  min-height:34px;
+  height:34px;
+  padding:0 11px;
+  font-size:12px;
+  font-weight:600;
+  border-radius:6px;
+  box-shadow:none;
+}
+.content .page-head .head-actions .refresh-icon-button {
+  width:34px;
+  min-width:34px;
+  padding:0;
+  background:var(--panel);
+  color:var(--text);
+  border:1px solid var(--line);
+}
+.content .page-head .head-actions .refresh-icon-button:hover {
+  background:var(--panel-2);
+  border-color:var(--line-strong);
+}
+.content .page-head .head-actions .secondary:not(.refresh-icon-button) {
+  background:var(--panel);
+  border-color:var(--line);
+}
+.content .page-head .head-actions .secondary:not(.refresh-icon-button):hover {
+  background:var(--panel-2);
+}
+.content .storage-add-toggle { white-space:nowrap; }
+.content .storage-add-menu { align-self:center; }
+/* Keep the Admin Center section navigation compact without an empty tall card. */
+.content .admin-nav,
+.content .admin-sidebar,
+.content .admin-section-nav {
+  align-self:start;
+  height:max-content;
+}
+.content .settings-collapse-button { flex-shrink:0; }
+@media(max-width:700px) {
+  .content .page-head .head-actions { justify-content:flex-start; }
+  .content .page-head .head-actions > button { max-width:100%; }
+}

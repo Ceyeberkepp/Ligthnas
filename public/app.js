@@ -862,7 +862,7 @@ function storageAddMenuHeader() {
 
 function storageView() {
   const spaces = Array.isArray(state.spaces) ? state.spaces : [];
-  const actions = `<div class="head-actions"><button class="secondary refresh-icon-button" type="button" data-storage-refresh aria-label="Refresh" title="Refresh">↻</button><button class="secondary refresh-icon-button" data-action="refresh-storage" aria-label="Refresh" title="Refresh">↻</button><button class="primary" data-view-link="pools">Manage storage</button>${storageAddMenuHeader()}</div>`;
+  const actions = `<div class="head-actions"><button class="secondary refresh-icon-button" data-action="refresh-storage" aria-label="Refresh" title="Refresh">↻</button><button class="primary" data-view-link="pools">Manage storage</button>${storageAddMenuHeader()}</div>`;
   return `${pageHead('Storage', 'LightNAS storage pools, capacity and content libraries.', actions)}
     <div id="storage-manager"></div>
     ${spaces.length ? `<section class="storage-spaces-section"><div class="section-heading"><div><span class="eyebrow">FILE STORAGE</span><h2>LightNAS storage spaces</h2></div></div><div class="storage-list">${spaces.map(space => `<article class="storage-row"><div><h3>${escapeHtml(space.label)}</h3><p>Spaces/${escapeHtml(space.name)}</p></div><button class="secondary" data-open-space="${escapeHtml(space.name)}">Open</button></article>`).join('')}</div></section>` : ''}`;
@@ -2820,9 +2820,17 @@ function bindViewActions() {
     const id = button.dataset.settingsCollapse;
     let saved = {};
     try { saved = JSON.parse(localStorage.getItem('lightnas-settings-collapsed') || '{}'); } catch {}
-    saved[id] = !saved[id];
+    const section = button.closest('[data-settings-section]');
+    const body = section?.querySelector('.settings-section-body');
+    if (!section || !body) return;
+    const shouldCollapse = !section.classList.contains('collapsed');
+    section.classList.toggle('collapsed', shouldCollapse);
+    body.hidden = shouldCollapse;
+    button.setAttribute('aria-expanded', String(!shouldCollapse));
+    const name = section.querySelector('.settings-card-head h2, .settings-card-head h3')?.textContent?.trim() || id;
+    button.setAttribute('aria-label', (shouldCollapse ? 'Expand ' : 'Collapse ') + name);
+    saved[id] = shouldCollapse;
     localStorage.setItem('lightnas-settings-collapsed', JSON.stringify(saved));
-    render('settings');
   }));
   $('[data-software-check]', $('#content'))?.addEventListener('click', async event => {
     event.currentTarget.disabled = true;
