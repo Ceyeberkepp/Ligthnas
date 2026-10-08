@@ -127,3 +127,28 @@ test('settings and security expose section-level permissions', async () => {
   assert.match(app, /\/api\/security\/password/);
   assert.match(adminSecurity, /permissions\.includes\('security\.mfa\.manage'\)/);
 });
+
+
+test('Admin Center uses structured workspace navigation without removing current actions', async () => {
+  const [app, styles] = await Promise.all([
+    read('public/app.js'),
+    read('public/styles.css')
+  ]);
+
+  const admin = app.slice(app.indexOf('function adminCenterSectionButton'), app.indexOf('function moduleView(view)'));
+  for (const section of ['General','Users & groups','Permissions','Security','Integrations']) {
+    assert.ok(admin.includes(section), `missing Admin Center section ${section}`);
+  }
+
+  for (const target of ['settings','users','permissions','network','firewall','capabilities','smtp','integrations']) {
+    assert.ok(admin.includes(`data-view-link="${target}"`), `missing existing Admin Center action ${target}`);
+  }
+
+  assert.match(admin, /data-appliance-health/);
+  assert.match(admin, /data-appliance-repair/);
+  assert.match(admin, /Development & Community Evaluation License/);
+  assert.match(app, /lightnas-admin-section/);
+  assert.match(styles, /\.admin-center-workspace/);
+  assert.match(styles, /\.admin-center-nav-item\.active/);
+  assert.match(styles, /\.admin-center-row/);
+});
