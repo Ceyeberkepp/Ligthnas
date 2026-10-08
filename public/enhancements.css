@@ -4371,3 +4371,40 @@ dialog.viewer-more-sheet.viewer-desktop-popover [hidden] { display: none !import
 }
 
 dialog.viewer-more-sheet.viewer-desktop-popover::backdrop { background: transparent !important; backdrop-filter: none !important; }
+
+
+/* NAS overview: keep system facts readable in both one- and two-column layouts. */
+.console[data-workspace-mode="nas"] .node-summary-card .node-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 20px;
+  row-gap: 12px;
+  margin-top: 16px;
+}
+.console[data-workspace-mode="nas"] .node-summary-card .node-facts > div {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  gap: 4px;
+  padding: 0;
+}
+.console[data-workspace-mode="nas"] .node-summary-card .node-facts dt,
+.console[data-workspace-mode="nas"] .node-summary-card .node-facts dd {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  text-align: left;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+.console[data-workspace-mode="nas"] .node-summary-card .node-facts dd {
+  font-weight: 600;
+}
+@media (max-width: 520px) {
+  .console[data-workspace-mode="nas"] .node-summary-card .node-facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
