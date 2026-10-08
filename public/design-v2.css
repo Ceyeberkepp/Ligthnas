@@ -122,3 +122,112 @@ label { font-size:13px;font-weight:550;gap:6px; }
 @media (prefers-reduced-motion:reduce) {
  *,*::before,*::after { scroll-behavior:auto!important;animation-duration:.01ms!important;transition-duration:.01ms!important; }
 }
+
+
+/* V2 refinements — align dock, enlarge account dialog, quiet controls. */
+/* Sidebar width is 232px in V2; collapsed sidebar retains legacy 86px. */
+.console:not(.sidebar-collapsed) > .task-dock {
+  left:232px;
+  right:0;
+  width:auto;
+  margin:0;
+  border-left:0;
+  box-shadow:none;
+}
+.console.sidebar-collapsed > .task-dock { left:86px;right:0;width:auto;box-shadow:none; }
+.task-dock.collapsed { box-shadow:none; }
+.task-dock-bar { border-radius:0; }
+.user-management-dialog {
+  width:min(880px,calc(100vw - 48px));
+  max-width:880px;
+  max-height:min(90dvh,920px);
+  padding:0;
+  overflow:hidden;
+}
+.user-management-dialog .dialog-body {
+  max-height:min(90dvh,920px);
+  overflow-y:auto;
+  overscroll-behavior:contain;
+  padding:28px 32px;
+}
+.user-management-dialog .dialog-head { margin-bottom:20px; }
+.user-management-dialog .dialog-close {
+  flex:0 0 34px;
+  width:34px;height:34px;
+  padding:0;
+  border-radius:6px;
+  box-shadow:none;
+  font-size:20px;
+  font-weight:400;
+}
+.settings-collapse-button {
+  width:30px;height:30px;
+  border:0;
+  background:transparent;
+  color:var(--muted);
+  border-radius:6px;
+  font-size:0;
+  box-shadow:none;
+}
+.settings-collapse-button::before {
+  content:"";
+  width:8px;height:8px;
+  border-right:1.7px solid currentColor;
+  border-bottom:1.7px solid currentColor;
+  transform:translateY(-2px) rotate(45deg);
+  transition:transform .15s ease;
+}
+.settings-collapse-button[aria-expanded="true"]::before {
+  transform:translateY(2px) rotate(225deg);
+}
+.settings-collapse-button:hover { background:var(--panel-2);border-color:transparent;color:var(--text); }
+.files-page .file-toolbar-actions { gap:6px; }
+.files-page .file-toolbar-select {
+  min-height:32px;
+  padding:0 7px;
+  border:1px solid var(--line);
+  border-radius:6px;
+  background:var(--panel);
+  font-size:12px;
+  font-weight:500;
+  box-shadow:none;
+}
+.files-page .file-toolbar-select select {
+  min-height:30px;
+  padding:3px 20px 3px 4px;
+  font-size:12px;
+  font-weight:500;
+  border:0;
+  background:transparent;
+}
+.files-page .library-selector { min-width:0; }
+.files-page .library-selector select { min-width:84px; }
+.files-page .file-toolbar-actions > button,
+.files-page .file-toolbar-actions > .secondary,
+.files-page .files-icon-action {
+  height:32px;
+  min-height:32px;
+  padding:0 9px;
+  border:1px solid var(--line);
+  border-radius:6px;
+  background:var(--panel);
+  color:var(--text);
+  font-size:12px;
+  font-weight:500;
+  box-shadow:none;
+}
+.files-page .file-toolbar-actions > .files-icon-action {
+  width:32px;min-width:32px;padding:0;
+  font-size:17px;
+}
+.files-page .file-toolbar-actions > button:hover,
+.files-page .file-toolbar-select:hover { background:var(--panel-2);border-color:var(--line-strong); }
+@media(max-width:900px) {
+  .console:not(.sidebar-collapsed) > .task-dock,
+  .console.sidebar-collapsed > .task-dock { left:0;right:0; }
+}
+@media(max-width:700px) {
+  .user-management-dialog { width:calc(100vw - 16px);max-width:calc(100vw - 16px);max-height:92dvh; }
+  .user-management-dialog .dialog-body { padding:18px;max-height:92dvh; }
+  .files-page .file-toolbar-actions { gap:5px; }
+}
