@@ -1,0 +1,124 @@
+/* LightNAS V2 — flat, content-led interface.
+   Non-destructive presentation layer over existing functional views.
+   Retains all existing IDs, event handlers, routes and backend calls. */
+:root {
+  color-scheme: dark;
+  --bg:#101316; --panel:#1a1e22; --panel-2:#20252a;
+  --line:#30373d; --line-strong:#46505a;
+  --text:#eef0f2; --muted:#a3abb3;
+  --accent:#80b3e2; --accent-2:#80b3e2;
+  --warning:#e7b86b; --danger:#ec8585; --success:#74c9a5;
+  --radius:8px; --shadow:0 6px 22px rgba(0,0,0,.16);
+  --sidebar:#15191d; --topbar:#171b1f; --input:#20252a; --button:#292f35;
+  --primary-button:#80b3e2; --primary-button-contrast:#111d27;
+  --login-button:var(--primary-button); --login-button-contrast:var(--primary-button-contrast);
+  --performance-tabs:var(--panel); --performance-tabs-active:var(--accent);
+  --performance-tabs-text:var(--muted); --performance-tabs-active-text:#111d27;
+  font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+:root[data-theme="light"] {
+  color-scheme:light;
+  --bg:#fff; --panel:#fff; --panel-2:#f7f8f9;
+  --line:#e4e7ea; --line-strong:#cbd2d8;
+  --text:#242b32; --muted:#646e78; --accent:#245c8f; --accent-2:#245c8f;
+  --warning:#a36a12; --danger:#ba353b; --success:#18764f;
+  --sidebar:#f8f9fa; --topbar:#fff; --input:#fff; --button:#f3f5f6;
+  --primary-button:#245c8f; --primary-button-contrast:#fff;
+  --login-button:var(--primary-button); --login-button-contrast:#fff;
+  --shadow:0 6px 20px rgba(20,30,40,.08);
+}
+html,body { background:var(--bg);color:var(--text); }
+body { font-size:14px;line-height:1.5; }
+.console { grid-template:56px 1fr / 232px minmax(0,1fr); }
+.sidebar { padding:17px 11px 14px;background:var(--sidebar);border-right:1px solid var(--line); }
+.sidebar-brand { margin:0 11px 22px;font-size:18px; }
+.sidebar nav { gap:2px; }
+.sidebar nav a { padding:8px 11px;font-size:13px;font-weight:500;border-radius:6px; }
+.sidebar nav a.active { background:var(--panel-2);color:var(--text);box-shadow:inset 2px 0 var(--accent); }
+.sidebar nav a:hover,.foot-admin:hover,.foot-admin.active { background:var(--panel-2);color:var(--text); }
+.sidebar nav .nav-group { border-color:var(--line); }
+.nav-group summary { font-size:11px;text-transform:uppercase;letter-spacing:.055em; }
+.sidebar-foot { border-color:var(--line); }
+.foot-admin { border-radius:6px;font-weight:600; }
+.topbar { background:var(--topbar);border-bottom:1px solid var(--line);min-height:56px; }
+.content { background:var(--bg); }
+.content > * { min-width:0; }
+.content h1 { font-weight:650;letter-spacing:-.035em; }
+.content h2,.content h3 { letter-spacing:-.02em; }
+.content p,.content small { line-height:1.5; }
+.primary,.secondary,.icon-button,.ghost-button,.top-shell-button,.nav-files-toggle {
+  border-radius:6px;box-shadow:none;font-weight:600;
+}
+.primary { background:var(--primary-button);color:var(--primary-button-contrast);box-shadow:none; }
+.primary:hover { filter:brightness(.96); }
+.secondary { background:var(--button);border:1px solid var(--line);color:var(--text); }
+input,select,textarea { border-radius:6px;background:var(--input);border:1px solid var(--line-strong);padding:10px 12px; }
+input:focus,select:focus,textarea:focus,button:focus-visible,a:focus-visible,summary:focus-visible {
+ outline:2px solid var(--accent);outline-offset:2px;box-shadow:none;
+}
+label { font-size:13px;font-weight:550;gap:6px; }
+.card,.panel,.stat-card,.metric-card,.info-card,.inventory-card,.attached-storage-card,
+.monitor-card,.admin-group,.admin-tool-card,.storage-pool-card,.lightnas-dialog,
+.policy-grid,.wizard-review div,.wizard-steps span,.inventory-heading {
+  border-radius:8px;box-shadow:none;
+}
+.inventory-heading { background:transparent;border:0;padding:5px 0 15px; }
+.admin-tool-groups { gap:22px; }
+.admin-group { background:transparent;border:0;border-radius:0;padding:0 0 18px;border-bottom:1px solid var(--line); }
+.admin-group-grid { grid-template-columns:repeat(auto-fit,minmax(215px,1fr)); }
+.admin-tool-card { background:var(--panel);padding:13px;border-color:var(--line); }
+.admin-tool-card:hover { transform:none;background:var(--panel-2); }
+.admin-tool-card b { font-size:13px; }
+.admin-tool-card span { font-size:12px; }
+.attached-storage-grid,.inventory-grid { grid-template-columns:repeat(auto-fit,minmax(245px,1fr));gap:12px; }
+.host-monitor-grid { grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:10px; }
+.monitor-card { background:var(--panel);min-height:0;padding:14px; }
+.monitor-card strong { font-size:21px;letter-spacing:-.025em; }
+.content-badge,.volume-state,.library-tab { border-radius:5px;letter-spacing:normal; }
+.library-tab { background:transparent;padding:7px 11px; }
+.library-tab.active { background:var(--panel-2);color:var(--text);border-color:var(--line-strong); }
+.template-table { border-radius:6px; }
+.template-table-head { background:var(--panel-2); }
+.template-table-row:hover { background:var(--panel-2); }
+.task-dock { box-shadow:none; }
+.task-dock-bar { background:var(--panel); }
+.auth-shell { grid-template-columns:minmax(320px,.9fr) minmax(390px,1.1fr); }
+.auth-story { background:var(--sidebar);border-right:1px solid var(--line); }
+.auth-story::after { content:none; }
+.auth-panel { background:var(--bg); }
+.story-copy h1 { font-size:clamp(38px,4.5vw,64px);line-height:1.07;letter-spacing:-.04em; }
+.story-copy p { color:var(--muted);font-size:16px; }
+.story-status { color:var(--muted); }
+.story-status i,.device-mini i { box-shadow:none; }
+.auth-form h2 { font-size:29px; }
+.brand-mark { background:var(--panel-2);border:1px solid var(--line);box-shadow:none;border-radius:7px; }
+.brand-mark span { background:var(--accent);animation:none; }
+.eyebrow,.step-count { letter-spacing:.08em; }
+.lightnas-dialog::backdrop { background:rgba(0,0,0,.55);backdrop-filter:none; }
+.wizard-steps span { background:transparent; }
+.wizard-steps span.active { background:var(--panel-2); }
+.file-thumb { border-radius:5px; }
+.viewer-arrow { border-radius:6px;box-shadow:none; }
+:where(.console,.auth-shell) * { backdrop-filter:none; }
+:where(.console,.auth-shell) .active { transition:background-color .12s ease,border-color .12s ease; }
+/* Flat-paint the most common legacy gradient treatments. */
+:where(.console,.auth-shell) :is(.primary,.secondary,.sidebar,.topbar,.card,.panel,.stat-card,.metric-card,.info-card,.monitor-card,.admin-tool-card,.inventory-card,.auth-story,.auth-panel,.brand-mark,.nav-group a.active) { background-image:none; }
+@media (min-width:1100px) {
+ .content { padding:24px 30px; }
+ .inventory-grid > :first-child:nth-last-child(3) { grid-column:span 2; }
+}
+@media (max-width:900px) {
+ .console { grid-template-columns:minmax(0,1fr); }
+ .content { padding:17px; }
+ .admin-group-grid { grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); }
+}
+@media (max-width:700px) {
+ .content { padding:14px 12px 84px; }
+ .host-monitor-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+ .admin-group-grid { grid-template-columns:1fr; }
+ .auth-shell { grid-template-columns:1fr; }
+ .auth-panel { padding:28px 22px; }
+}
+@media (prefers-reduced-motion:reduce) {
+ *,*::before,*::after { scroll-behavior:auto!important;animation-duration:.01ms!important;transition-duration:.01ms!important; }
+}
