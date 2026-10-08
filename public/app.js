@@ -2157,7 +2157,7 @@ function aiView() {
           <button class="primary" type="submit">Send <span aria-hidden="true">↗</span></button>
         </form>
       </section>
-    </section>;
+    </section>`;
 }
 
 
