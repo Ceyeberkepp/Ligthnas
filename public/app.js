@@ -2134,27 +2134,30 @@ function aiView() {
     { role:'agent', text:'I am the LightNAS helper. I can inspect the current NAS state, diagnose container networking, summarize storage and performance, and guide you to the right control.' }
   ];
   return `${pageHead('AI helper', 'A system-aware LightNAS assistant for troubleshooting and administration.', '<button class="secondary" data-ai-prompt="Check system health">Check health</button>')}
-    <section class="ai-agent-shell">
-      <aside class="panel ai-agent-context">
-        <span class="eyebrow">QUICK HELP</span>
-        <h2>Ask LightNAS</h2>
-        <p class="muted">The helper reads the current LightNAS inventory. AI runtimes such as Ollama, Open WebUI, Flowise and LocalAI are installed from App Store.</p>
+    <section class="ai-agent-shell ai-workspace-v2">
+      <aside class="ai-agent-context">
+        <span class="eyebrow">WORKSPACE</span>
+        <h2>Quick actions</h2>
+        <p class="muted">Ask about this appliance or select a common diagnostic.</p>
         <div class="ai-quick-actions">
-          <button class="secondary" type="button" data-ai-prompt="Diagnose container networking">Container networking</button>
-          <button class="secondary" type="button" data-ai-prompt="Show storage summary">Storage summary</button>
-          <button class="secondary" type="button" data-ai-prompt="Show performance status">Performance</button>
-          <button class="secondary" type="button" data-ai-prompt="Tell me about apps">Apps</button>
+          <button class="secondary" type="button" data-ai-prompt="Diagnose container networking">Container network <span aria-hidden="true">↗</span></button>
+          <button class="secondary" type="button" data-ai-prompt="Show storage summary">Storage health <span aria-hidden="true">↗</span></button>
+          <button class="secondary" type="button" data-ai-prompt="Show performance status">Performance <span aria-hidden="true">↗</span></button>
+          <button class="secondary" type="button" data-ai-prompt="Tell me about apps">Applications <span aria-hidden="true">↗</span></button>
         </div>
-        <button class="primary" type="button" data-ai-action="open-apps">Open AI tools in App Store</button>
+        <div class="ai-agent-tools"><span class="eyebrow">TOOLS</span><p class="muted">Local AI runtimes and additional tools are available through the App Store.</p>
+          <button class="secondary" type="button" data-ai-action="open-apps">Browse AI tools <span aria-hidden="true">↗</span></button>
+        </div>
       </aside>
-      <section class="panel ai-agent-chat">
+      <section class="ai-agent-chat" aria-label="LightNAS assistant conversation">
+        <div class="ai-chat-heading"><div><span class="ai-chat-presence" aria-hidden="true"></span><strong>LightNAS Assistant</strong><small>Appliance diagnostics</small></div></div>
         <div class="ai-agent-messages">${messages.map(message => `<article class="ai-message ${message.role === 'user' ? 'user' : 'agent'}"><span>${message.role === 'user' ? 'YOU' : 'LIGHTNAS'}</span><p>${escapeHtml(message.text)}</p>${message.action ? `<button class="secondary" type="button" data-ai-action="${escapeHtml(message.action)}">${escapeHtml(message.actionLabel || 'Run action')}</button>` : ''}</article>`).join('')}</div>
         <form class="ai-agent-form" data-ai-form>
-          <input name="message" autocomplete="off" maxlength="500" placeholder="Ask: Why does my container have no IP?" required>
-          <button class="primary" type="submit">Ask</button>
+          <input name="message" autocomplete="off" maxlength="500" placeholder="Ask about your NAS, storage, network, or applications…" required>
+          <button class="primary" type="submit">Send <span aria-hidden="true">↗</span></button>
         </form>
       </section>
-    </section>`;
+    </section>;
 }
 
 
