@@ -234,7 +234,9 @@ function canView(view, appliance = state.overview?.appliance) {
     home: ['overview.view'], hypervisor: ['overview.view', 'vms.view', 'containers.view'], files: ['files.view.own', 'files.own', 'files.read'], media: ['files.view.own', 'files.own', 'files.read'], storage: ['storage.view'], pools: ['pools.view', 'storage.manage'], shares: ['shares.view', 'shares.manage'], backups: ['backup.manage', 'storage.view'],
     apps: ['apps.view', 'apps.manage'], ai: ['apps.view', 'apps.manage', 'system.view'], containers: ['containers.view', 'containers.manage', 'containers.console'], vms: ['vms.view', 'vms.manage', 'vms.console'],
     network: ['network.view'], firewall: ['firewall.view', 'firewall.manage', 'network.manage'], monitoring: ['monitoring.view', 'system.view'], analytics: ['monitoring.view', 'system.view'], logs: ['audit.view'], capabilities: ['capabilities.view', 'system.view'],
-    integrations: ['integrations.view', 'integrations.manage'], assistant: ['admin.view', 'system.view'], users: ['users.manage'], permissions: ['users.manage'], shell: ['system.shell'], smtp: ['smtp.manage'], settings: ['settings.manage'], admin: ['admin.view']
+    integrations: ['integrations.view', 'integrations.manage'], assistant: ['admin.view', 'system.view'], users: ['users.manage'], permissions: ['users.manage'], shell: ['system.shell'], smtp: ['smtp.manage'],
+    settings: ['settings.manage', 'settings.general.manage', 'settings.password.manage', 'security.mfa.manage', 'settings.software.view', 'settings.software.manage'],
+    admin: ['admin.view', 'nav.users', 'nav.permissions', 'nav.smtp', 'nav.settings', 'nav.analytics', 'nav.capabilities', 'nav.integrations', 'users.manage', 'smtp.manage', 'monitoring.view', 'capabilities.view', 'integrations.view', 'integrations.manage', 'settings.manage', 'settings.general.manage', 'settings.password.manage', 'security.mfa.manage', 'settings.software.view', 'settings.software.manage']
   }[view];
   return Array.isArray(required) && (!required.length || required.some(permission => allowed.has(permission)));
 }
@@ -2285,7 +2287,14 @@ const ADMIN_CENTER_SECTIONS = Object.freeze([
   ['integrations', 'Integrations']
 ]);
 
+function adminCenterSectionAllowed(id) {
+  if (state.overview?.appliance?.role === 'administrator') return true;
+  const view = ({ users:'users', permissions:'permissions', smtp:'smtp', settings:'settings', analytics:'analytics', capabilities:'capabilities', integrations:'integrations' })[id];
+  return id === 'general' || Boolean(view && canView(view));
+}
+
 function adminCenterSectionButton(id, label) {
+  if (!adminCenterSectionAllowed(id)) return '';
   return `<button class="admin-center-nav-item ${state.adminSection === id ? 'active' : ''}" type="button" data-admin-section="${id}">${escapeHtml(label)}</button>`;
 }
 
@@ -2308,7 +2317,7 @@ function adminGeneralPanel() {
   const userCount = state.users?.length ?? '—';
   const networkName = state.network?.control?.currentUplink?.name || state.network?.routes?.find(item => item.destination === 'default')?.device || '—';
   const adminAction = (section, label, primary = false) =>
-    `<button class="${primary ? 'primary' : 'secondary'}" type="button" data-admin-section="${section}">${escapeHtml(label)}</button>`;
+    adminCenterSectionAllowed(section) ? `<button class="${primary ? 'primary' : 'secondary'}" type="button" data-admin-section="${section}">${escapeHtml(label)}</button>` : '';
   const viewAction = (view, label) =>
     `<button class="secondary" type="button" data-view-link="${view}">${escapeHtml(label)}</button>`;
 
@@ -2359,7 +2368,7 @@ function adminGeneralPanel() {
 }
 
 function adminView() {
-  const validSections = new Set(ADMIN_CENTER_SECTIONS.map(([id]) => id));
+  const validSections = new Set(ADMIN_CENTER_SECTIONS.filter(([id]) => adminCenterSectionAllowed(id)).map(([id]) => id));
   const section = validSections.has(state.adminSection) ? state.adminSection : 'general';
   state.adminSection = section;
 
@@ -2802,7 +2811,7 @@ function render(view) {
 function bindViewActions() {
   document.querySelectorAll('#content [data-admin-section]').forEach(button => button.addEventListener('click', () => {
     const next = button.dataset.adminSection;
-    if (!ADMIN_CENTER_SECTIONS.some(([id]) => id === next)) return;
+    if (!ADMIN_CENTER_SECTIONS.some(([id]) => id === next) || !adminCenterSectionAllowed(next)) return;
     state.adminSection = next;
     localStorage.setItem('lightnas-admin-section', next);
     render('admin');
