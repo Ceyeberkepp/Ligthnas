@@ -148,7 +148,14 @@ function ensureViewer() {
       <div class="dialog-head">
         <button class="viewer-mobile-back" type="button" data-close-viewer aria-label="Back">‹</button>
         <div class="viewer-title-block"><span class="eyebrow">FILE VIEWER</span><h2 data-viewer-title>Preview</h2><small data-viewer-date></small></div>
-        <button class="viewer-mobile-more" type="button" data-viewer-more aria-label="More options">•••</button>
+        <div class="viewer-menu-wrap">
+          <button class="viewer-mobile-more viewer-menu-trigger" type="button" data-viewer-more aria-label="File options" aria-expanded="false" aria-haspopup="true">⋯</button>
+          <div class="viewer-desktop-menu" data-viewer-desktop-menu hidden>
+            <button type="button" data-menu-command="edit">Edit image</button>
+            <button type="button" data-menu-command="download">Download</button>
+            <button type="button" data-menu-command="delete" class="danger-button">Delete file</button>
+          </div>
+        </div>
         <button class="dialog-close viewer-desktop-close-button" type="button" data-close-viewer aria-label="Close">×</button>
       </div>
       <div class="viewer-shell">
@@ -179,7 +186,28 @@ function ensureViewer() {
     const item = previewItems()[Number(button.dataset.filmstripIndex)];
     if (item) openPreview(item.name, item.path);
   });
-  dialog.querySelector('[data-viewer-more]').addEventListener('click', () => openViewerMoreMenu());
+  const menuButton = dialog.querySelector('[data-viewer-more]');
+  const desktopMenu = dialog.querySelector('[data-viewer-desktop-menu]');
+  const closeDesktopMenu = () => {
+    desktopMenu.hidden = true;
+    menuButton.setAttribute('aria-expanded', 'false');
+  };
+  menuButton.addEventListener('click', () => {
+    if (matchMedia('(max-width: 760px)').matches) return openViewerMoreMenu();
+    const opening = desktopMenu.hidden;
+    desktopMenu.hidden = !opening;
+    menuButton.setAttribute('aria-expanded', String(opening));
+  });
+  desktopMenu.addEventListener('click', event => {
+    const command = event.target.closest('[data-menu-command]')?.dataset.menuCommand;
+    if (!command) return;
+    closeDesktopMenu();
+    dialog.querySelector('[data-viewer-' + (command === 'download' ? 'download' : command) + ']')?.click();
+  });
+  dialog.addEventListener('click', event => {
+    if (!event.target.closest('.viewer-menu-wrap')) closeDesktopMenu();
+  });
+  dialog.addEventListener('close', closeDesktopMenu);
 
   const stage = dialog.querySelector('[data-viewer-stage]');
   let gesture = null;
@@ -754,10 +782,8 @@ async function saveMobilePhotoEdit() {
 }
 
 async function editCurrentImage() {
-  if (matchMedia('(max-width: 760px)').matches) {
-    await openMobilePhotoEditor();
-    return;
-  }
+  await openMobilePhotoEditor();
+  return;
   const dialog = document.querySelector('#lightnas-viewer');
   const image = dialog?.querySelector('[data-viewer-stage] img');
   const path = dialog?.dataset.sourcePath || '';
@@ -979,6 +1005,8 @@ async function openPreview(name, explicitPath = '') {
   };
   const editButton = dialog.querySelector('[data-viewer-edit]');
   editButton.hidden = kind !== 'image';
+  const menuEdit = dialog.querySelector('[data-menu-command="edit"]');
+  if (menuEdit) menuEdit.hidden = kind !== 'image';
   editButton.onclick = () => editCurrentImage().catch(error => window.alert(error.message));
   dialog.querySelector('[data-viewer-delete]').onclick = async () => {
     if (!window.confirm(`Delete "${name}"? This cannot be undone.`)) return;
