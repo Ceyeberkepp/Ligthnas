@@ -406,7 +406,31 @@ function openViewerMoreMenu() {
   sheet.querySelector('[data-more-action="edit"]').hidden = !canEdit;
   sheet.querySelector('[data-more-action="copy-edits"]').hidden = !canEdit;
   sheet.querySelector('[data-more-action="paste-edits"]').hidden = !canEdit || !mobileCopiedEdits;
-  sheet.showModal();
+  if (sheet.open) { sheet.close(); return; }
+  if (matchMedia('(min-width: 761px)').matches) {
+    const trigger = viewer?.querySelector('[data-viewer-more]');
+    const rect = trigger?.getBoundingClientRect();
+    if (!rect) return;
+    sheet.classList.add('viewer-desktop-popover');
+    sheet.style.left = Math.max(12, Math.min(window.innerWidth - 254, rect.right - 240)) + 'px';
+    sheet.style.top = Math.min(window.innerHeight - 360, rect.bottom + 7) + 'px';
+    sheet.show();
+    sheet._outsideClick?.();
+    const dismiss = event => {
+      if (!sheet.contains(event.target) && !trigger.contains(event.target)) sheet.close();
+    };
+    document.addEventListener('pointerdown', dismiss, true);
+    sheet._outsideClick = () => document.removeEventListener('pointerdown', dismiss, true);
+    sheet.addEventListener('close', () => {
+      sheet._outsideClick?.();
+      sheet._outsideClick = null;
+      sheet.classList.remove('viewer-desktop-popover');
+    }, { once:true });
+  } else {
+    sheet.style.left = '';
+    sheet.style.top = '';
+    sheet.showModal();
+  }
 }
 
 async function saveViewerDuplicate() {
