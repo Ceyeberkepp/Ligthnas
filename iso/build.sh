@@ -634,6 +634,12 @@ case "$virt" in
     ;;
 esac
 
+# Chromium needs an XDG runtime directory even when launched without LightDM.
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+if [[ ! -d "$XDG_RUNTIME_DIR" ]]; then
+  install -d -m 0700 -o "$(id -u)" -g "$(id -g)" "$XDG_RUNTIME_DIR"
+fi
+
 exec chromium "${flags[@]}" file:///usr/share/lightnas/kiosk-start.html
 KIOSK
 chmod 0755 /usr/local/bin/lightnas-kiosk
@@ -683,6 +689,8 @@ printf '%s LightNAS display console starting\n' "$(date -Is)" >>/var/log/lightna
 udevadm settle --timeout=8 >/dev/null 2>&1 || true
 sleep 1
 
+# xinit must own a real VT. Redirecting stdout through a shell is not enough
+# unless systemd also supplies a controlling terminal (see the service below).
 exec /usr/bin/xinit /usr/local/bin/lightnas-xsession -- :0 vt7 -keeptty -nolisten tcp \
   >>/var/log/lightnas-display.log 2>&1
 DISPLAY_CONSOLE
@@ -694,6 +702,8 @@ Description=LightNAS local graphical control center
 After=systemd-user-sessions.service lightnas.service
 Wants=lightnas.service
 Conflicts=display-manager.service lightdm.service getty@tty7.service
+After=systemd-logind.service
+Wants=systemd-logind.service
 StartLimitIntervalSec=0
 
 [Service]
@@ -703,6 +713,9 @@ TTYPath=/dev/tty7
 TTYReset=yes
 TTYVHangup=yes
 TTYVTDisallocate=yes
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
 ExecStart=/usr/local/sbin/lightnas-display-console
 Restart=always
 RestartSec=2
@@ -784,6 +797,43 @@ systemctl disable lightdm.service >/dev/null 2>&1 || true
 systemctl mask lightdm.service >/dev/null 2>&1 || true
 systemctl enable lightnas-display-console.service >/dev/null 2>&1 || true
 systemctl set-default graphical.target >/dev/null 2>&1 || true
+
+# Reserve VT7 for the LightNAS graphical appliance. The console is managed by
+# the dedicated service; no automatic tty1 login is necessary or permitted.
+install -d -m 0755 /etc/systemd/system/getty@tty1.service.d
+cat >/etc/systemd/system/getty@tty1.service.d/lightnas-no-autologin.conf <<'GETTY'
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --noclear %I $TERM
+GETTY
+
+# Collect service failures without blocking access to the control plane.
+cat >/usr/local/sbin/lightnas-boot-diagnostics <<'DIAGNOSTICS'
+#!/bin/bash
+set -u
+install -d -m 0755 /var/log/lightnas
+{
+  date -Is
+  systemctl --no-pager --failed || true
+  for unit in lightnas.service lightnas-display-console.service docker.service; do
+    echo "===== ${unit} ====="
+    systemctl --no-pager status "$unit" || true
+    journalctl -b -u "$unit" --no-pager -n 80 || true
+  done
+} > /var/log/lightnas/boot-diagnostics.log 2>&1
+DIAGNOSTICS
+chmod 0755 /usr/local/sbin/lightnas-boot-diagnostics
+cat >/etc/systemd/system/lightnas-boot-diagnostics.service <<'DIAGNOSTICS_UNIT'
+[Unit]
+Description=Record LightNAS boot service diagnostics
+After=lightnas.service lightnas-display-console.service docker.service
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/lightnas-boot-diagnostics
+[Install]
+WantedBy=multi-user.target
+DIAGNOSTICS_UNIT
+systemctl enable lightnas-boot-diagnostics.service >/dev/null 2>&1 || true
 
 #
 # LightNAS data locations
