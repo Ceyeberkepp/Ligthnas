@@ -2174,6 +2174,13 @@ function settingsCollapseButton(id, label) {
   return `<button class="settings-collapse-button" type="button" data-settings-collapse="${escapeHtml(id)}" aria-expanded="${collapsed ? 'false' : 'true'}" aria-label="${collapsed ? 'Expand' : 'Collapse'} ${escapeHtml(label)}">${collapsed ? '⌄' : '⌃'}</button>`;
 }
 
+function settingsPermission(scope) {
+  const appliance = state.overview?.appliance || {};
+  if (appliance.role === 'administrator') return true;
+  const permissions = appliance.permissions || [];
+  return permissions.includes(scope) || permissions.includes('settings.manage');
+}
+
 function settingsView() {
   const { appliance } = state.overview;
   const zoneValues = (() => {
@@ -2181,9 +2188,14 @@ function settingsView() {
     catch { return ['UTC', 'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles']; }
   })();
   const zones = [...new Set([appliance.timezone || 'UTC', ...zoneValues])].map(value => [value, value.replaceAll('_', ' ')]);
-  return `${pageHead('Settings & security', 'Brand the appliance, manage general settings, and control account security.')}
+  const canGeneral = settingsPermission('settings.general.manage');
+  const canPassword = settingsPermission('settings.password.manage');
+  const canSoftware = settingsPermission('settings.software.view') || settingsPermission('settings.software.manage');
+  const canMfa = settingsPermission('security.mfa.manage');
+  return `${pageHead('Settings & security', 'Only the settings sections assigned to your account are shown.')}
     <section class="settings-dashboard">
-      <form id="settings-form" class="panel settings-general-card settings-collapsible ${settingsSectionCollapsed('general') ? 'collapsed' : ''}" data-settings-section="general">
+      ${!canGeneral && !canPassword && !canSoftware && !canMfa ? '<div class="module-note"><b>No settings sections assigned.</b> Ask an administrator to grant the specific Settings & security sections you need.</div>' : ''}
+      ${canGeneral ? `<form id="settings-form" class="panel settings-general-card settings-collapsible ${settingsSectionCollapsed('general') ? 'collapsed' : ''}" data-settings-section="general">
         <div class="settings-card-head"><div><span class="eyebrow">GENERAL</span><h2>Appliance identity & branding</h2><p class="muted">Use either a text logo or a picture logo, then match the interface color to your brand.</p></div>${settingsCollapseButton('general','Appliance identity & branding')}</div>
         <div class="settings-section-body" ${settingsSectionCollapsed('general') ? 'hidden' : ''}>
         <div class="settings-general-grid branding-settings-grid">
@@ -2219,18 +2231,18 @@ function settingsView() {
         <div class="settings-save-row"><button class="primary" type="submit">Save general settings</button></div>
         <div class="form-error" role="alert"></div>
         </div>
-      </form>
+      </form>` : ''}
 
-      <form id="password-form" class="panel password-card settings-collapsible ${settingsSectionCollapsed('password') ? 'collapsed' : ''}" data-settings-section="password">
-        <div class="settings-card-head"><div><span class="eyebrow">PASSWORD</span><h2>Change administrator password</h2><p class="muted">Password verification is required only when changing the password.</p></div>${settingsCollapseButton('password','Change administrator password')}</div>
+      ${canPassword ? `<form id="password-form" class="panel password-card settings-collapsible ${settingsSectionCollapsed('password') ? 'collapsed' : ''}" data-settings-section="password">
+        <div class="settings-card-head"><div><span class="eyebrow">PASSWORD</span><h2>Change account password</h2><p class="muted">Change your own LightNAS password after confirming your current password.</p></div>${settingsCollapseButton('password','Change administrator password')}</div>
         <div class="settings-section-body" ${settingsSectionCollapsed('password') ? 'hidden' : ''}>
         <label>Current password<input name="currentPassword" type="password" autocomplete="current-password" required></label>
         <label>New password<input name="newPassword" type="password" minlength="4" autocomplete="new-password" required placeholder="At least 4 characters"></label>
         <button class="secondary" type="submit">Change password</button><div class="form-error" role="alert"></div>
         </div>
-      </form>
+      </form>` : ''}
 
-      <section class="panel software-card settings-collapsible ${settingsSectionCollapsed('software') ? 'collapsed' : ''}" data-settings-section="software">
+      ${canSoftware ? `<section class="panel software-card settings-collapsible ${settingsSectionCollapsed('software') ? 'collapsed' : ''}" data-settings-section="software">
         <div class="settings-card-head"><div><span class="eyebrow">SOFTWARE & EDITION</span><h2>LightNAS version and updates</h2><p class="muted">Check the installed build and verify a paid Pro or Enterprise entitlement for permitted production or organizational use.</p></div>${settingsCollapseButton('software','LightNAS version and updates')}</div>
         <div class="settings-section-body" ${settingsSectionCollapsed('software') ? 'hidden' : ''}>
         <div class="manager-summary software-summary">
@@ -2252,7 +2264,7 @@ function settingsView() {
         </form>
         <p class="module-note"><b>Pre-production license:</b> Community use is free only for development, lab, education, evaluation, and early testing. Production, enterprise, commercial, hosting, managed-service, and organizational operational use require a separate paid license. A verified Pro/Enterprise receipt is accepted only from the configured HTTPS license server and must carry a valid signed receipt for this appliance.</p>
         </div>
-      </section>
+      </section>` : ''}
     </section>`;
 }
 function adminView() {
@@ -2722,7 +2734,7 @@ function render(view) {
       queueMicrotask(() => loadCommunityCatalog(false).catch(() => null));
     }
   }
-  if (state.view === 'settings' && (!state.software || !state.license)) loadSoftwareAndLicense();
+  if (state.view === 'settings' && (settingsPermission('settings.software.view') || settingsPermission('settings.software.manage')) && (!state.software || !state.license)) loadSoftwareAndLicense();
 
   if (state.view === 'containers') {
     const needContainers = !state.runtimes?.containers && !state.containerError;
@@ -3332,24 +3344,7 @@ function bindViewActions() {
     button.disabled = true;
     try {
       const input = Object.fromEntries(new FormData(form));
-      const result = await request('/api/settings', { method:'PATCH', body:JSON.stringify({
-        deviceName: state.overview.appliance.deviceName,
-        timezone: state.overview.appliance.timezone,
-        brandName: state.overview.appliance.brandName,
-        logoMode: state.overview.appliance.logoMode,
-        accentColor: state.overview.appliance.accentColor,
-        sidebarColor: state.overview.appliance.sidebarColor,
-        contentColor: state.overview.appliance.contentColor,
-        sidebarTextColor: state.overview.appliance.sidebarTextColor,
-        contentTextColor: state.overview.appliance.contentTextColor,
-        primaryButtonColor: state.overview.appliance.primaryButtonColor,
-        loginButtonColor: state.overview.appliance.loginButtonColor,
-        topbarColor: state.overview.appliance.topbarColor,
-        panelColor: state.overview.appliance.panelColor,
-        inputColor: state.overview.appliance.inputColor,
-        performanceTabsColor: state.overview.appliance.performanceTabsColor,
-        performanceTabsActiveColor: state.overview.appliance.performanceTabsActiveColor,
-        performanceTabsTextColor: state.overview.appliance.performanceTabsTextColor,
+      const result = await request('/api/security/password', { method:'POST', body:JSON.stringify({
         currentPassword: input.currentPassword,
         newPassword: input.newPassword
       }) });
