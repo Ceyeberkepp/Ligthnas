@@ -2196,7 +2196,8 @@ function settingsView() {
   const zones = [...new Set([appliance.timezone || 'UTC', ...zoneValues])].map(value => [value, value.replaceAll('_', ' ')]);
   const canGeneral = settingsPermission('settings.general.manage');
   const canPassword = settingsPermission('settings.password.manage');
-  const canSoftware = settingsPermission('settings.software.view') || settingsPermission('settings.software.manage');
+  const canSoftwareManage = settingsPermission('settings.software.manage');
+  const canSoftware = settingsPermission('settings.software.view') || canSoftwareManage;
   const canMfa = settingsPermission('security.mfa.manage');
   return `${pageHead('Settings & security', 'Only the settings sections assigned to your account are shown.')}
     <section class="settings-dashboard">
@@ -2240,7 +2241,7 @@ function settingsView() {
       </form>` : ''}
 
       ${canPassword ? `<form id="password-form" class="panel password-card settings-collapsible ${settingsSectionCollapsed('password') ? 'collapsed' : ''}" data-settings-section="password">
-        <div class="settings-card-head"><div><span class="eyebrow">PASSWORD</span><h2>Change account password</h2><p class="muted">Change your own LightNAS password after confirming your current password.</p></div>${settingsCollapseButton('password','Change administrator password')}</div>
+        <div class="settings-card-head"><div><span class="eyebrow">PASSWORD</span><h2>Change account password</h2><p class="muted">Change your own LightNAS password after confirming your current password.</p></div>${settingsCollapseButton('password','Change account password')}</div>
         <div class="settings-section-body" ${settingsSectionCollapsed('password') ? 'hidden' : ''}>
         <label>Current password<input name="currentPassword" type="password" autocomplete="current-password" required></label>
         <label>New password<input name="newPassword" type="password" minlength="4" autocomplete="new-password" required placeholder="At least 4 characters"></label>
@@ -2261,13 +2262,13 @@ function settingsView() {
         </div>
         <div class="head-actions software-actions">
           <button class="secondary" type="button" data-software-check>Check for updates</button>
-          <button class="primary" type="button" data-software-update ${state.software?.updateAvailable ? '' : 'disabled'}>Install update</button>
+          ${canSoftwareManage ? `<button class="primary" type="button" data-software-update ${state.software?.updateAvailable ? '' : 'disabled'}>Install update</button>` : ''}
         </div>
-        <form data-license-form class="license-verify-form">
+        ${canSoftwareManage ? `<form data-license-form class="license-verify-form">
           <label>Pro / Enterprise license key<input name="licenseKey" type="password" autocomplete="off" placeholder="Enter license key when your authentication server is ready"></label>
           <button class="secondary" type="submit">Verify edition</button>
           <div class="form-error" role="alert"></div>
-        </form>
+        </form>` : ''}
         <p class="module-note"><b>Pre-production license:</b> Community use is free only for development, lab, education, evaluation, and early testing. Production, enterprise, commercial, hosting, managed-service, and organizational operational use require a separate paid license. A verified Pro/Enterprise receipt is accepted only from the configured HTTPS license server and must carry a valid signed receipt for this appliance.</p>
         </div>
       </section>` : ''}
