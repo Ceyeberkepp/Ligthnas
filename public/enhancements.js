@@ -148,7 +148,7 @@ function ensureViewer() {
       <div class="dialog-head">
         <button class="viewer-mobile-back" type="button" data-close-viewer aria-label="Back">‹</button>
         <div class="viewer-title-block"><span class="eyebrow">FILE VIEWER</span><h2 data-viewer-title>Preview</h2><small data-viewer-date></small></div>
-        <button class="viewer-mobile-more" type="button" data-viewer-more aria-label="More options">•••</button>
+        <button class="viewer-mobile-more" type="button" data-viewer-more aria-label="More options" title="More options">⋯</button>
         <button class="dialog-close viewer-desktop-close-button" type="button" data-close-viewer aria-label="Close">×</button>
       </div>
       <div class="viewer-shell">
@@ -366,11 +366,15 @@ function ensureViewerMoreMenu() {
     <div class="dialog-body">
       <div class="mobile-sheet-handle"></div>
       <div class="viewer-sheet-list">
+        <button type="button" data-more-action="edit">Edit photo</button>
+        <button type="button" data-more-action="share">Share</button>
+        <button type="button" data-more-action="favorite">Favorite</button>
         <button type="button" data-more-action="duplicate">Save as duplicate</button>
         <button type="button" data-more-action="copy-edits">Copy edits</button>
         <button type="button" data-more-action="paste-edits">Paste edits</button>
         <button type="button" data-more-action="info">Info</button>
         <button type="button" data-more-action="download">Download</button>
+        <button type="button" data-more-action="delete">Delete</button>
       </div>
     </div>`;
   document.body.append(sheet);
@@ -379,6 +383,10 @@ function ensureViewerMoreMenu() {
     if (!button) return;
     const action = button.dataset.moreAction;
     sheet.close();
+    if (action === 'edit') editCurrentImage().catch(error => window.alert(error.message));
+    if (action === 'share') document.querySelector('#lightnas-viewer [data-viewer-share]')?.click();
+    if (action === 'favorite') document.querySelector('#lightnas-viewer [data-viewer-favorite]')?.click();
+    if (action === 'delete') document.querySelector('#lightnas-viewer [data-viewer-delete]')?.click();
     if (action === 'info') openViewerInfo();
     if (action === 'download') document.querySelector('#lightnas-viewer [data-viewer-download]')?.click();
     if (action === 'copy-edits') {
@@ -754,107 +762,12 @@ async function saveMobilePhotoEdit() {
 }
 
 async function editCurrentImage() {
-  if (matchMedia('(max-width: 760px)').matches) {
-    await openMobilePhotoEditor();
-    return;
-  }
   const dialog = document.querySelector('#lightnas-viewer');
-  const image = dialog?.querySelector('[data-viewer-stage] img');
-  const path = dialog?.dataset.sourcePath || '';
-  if (!dialog?.open || !image || !path) return;
-
-  const source = new Image();
-  source.crossOrigin = 'same-origin';
-  source.src = image.currentSrc || image.src;
-  await source.decode();
-
-  const choice = window.prompt('Edit photo: enter L for rotate left, R for rotate right, or C for center square crop.', 'R');
-  if (!choice) return;
-  const action = choice.trim().toUpperCase();
-
-  let width = source.naturalWidth;
-  let height = source.naturalHeight;
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d', { alpha:false });
-  if (!ctx) throw new Error('Image editor is unavailable in this browser.');
-
-  if (action === 'L' || action === 'R') {
-    canvas.width = height;
-    canvas.height = width;
-    ctx.translate(canvas.width / 2, canvas.height / 2);
-    ctx.rotate((action === 'R' ? 1 : -1) * Math.PI / 2);
-    ctx.drawImage(source, -width / 2, -height / 2);
-  } else if (action === 'C') {
-    const side = Math.min(width, height);
-    canvas.width = side;
-    canvas.height = side;
-    ctx.drawImage(source, (width - side) / 2, (height - side) / 2, side, side, 0, 0, side, side);
-  } else {
+  if (!dialog?.open || !dialog.querySelector('[data-viewer-stage] img')) {
+    window.alert('Open a photo to edit it.');
     return;
   }
-
-  const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.94));
-  if (!blob) throw new Error('Unable to create the edited photo.');
-  const slash = path.lastIndexOf('/');
-  const folder = slash >= 0 ? path.slice(0, slash + 1) : '';
-  const original = slash >= 0 ? path.slice(slash + 1) : path;
-  const stem = original.replace(/\.[^.]+$/, '');
-  const editedPath = `${folder}${stem}-edited-${Date.now()}.jpg`;
-  const response = await fetch(`/api/files?path=${encodeURIComponent(editedPath)}`, {
-    method:'PUT',
-    headers:{ 'Content-Type':'image/jpeg', 'X-LightNAS-Request':'1' },
-    body:blob
-  });
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    throw new Error(body.error || 'Unable to save the edited photo.');
-  }
-  dialog.close();
-  document.querySelector('#content [data-action="refresh-files"]')?.click();
-}
-
-const viewerPreloadCache = new Map();
-
-function viewerUrls(item) {
-  const extension = item.name.toLowerCase().split('.').pop();
-  const native = ['jpg','jpeg','png','gif','webp','avif','bmp','svg'].includes(extension);
-  return {
-    preview: `/api/files/thumbnail?preview=1&path=${encodeURIComponent(item.path)}`,
-    original: native ? `/api/files/download?path=${encodeURIComponent(item.path)}` : ''
-  };
-}
-
-function warmViewerImage(url) {
-  if (!url || viewerPreloadCache.has(url)) return viewerPreloadCache.get(url);
-  const image = new Image();
-  const promise = new Promise(resolve => {
-    image.onload = () => resolve(image);
-    image.onerror = () => resolve(null);
-  });
-  image.src = url;
-  viewerPreloadCache.set(url, promise);
-  return promise;
-}
-
-function preloadPreviewNeighbors(path) {
-  const items = previewItems();
-  const index = items.findIndex(item => item.path === path);
-  const nearby = [items[index - 2], items[index - 1], items[index + 1], items[index + 2]].filter(Boolean);
-
-  if (nearby.length) {
-    fetch('/api/files/prewarm', {
-      method:'POST',
-      credentials:'same-origin',
-      headers:{ 'Content-Type':'application/json', 'X-LightNAS-Request':'1' },
-      body:JSON.stringify({ paths:nearby.map(item => item.path) })
-    }).catch(() => {});
-  }
-
-  for (const item of nearby) {
-    if (previewKind(item.name) !== 'image') continue;
-    const urls = viewerUrls(item);
-    warmViewerImage(urls.preview);
-  }
+  await openMobilePhotoEditor();
 }
 
 async function openPreview(name, explicitPath = '') {
@@ -980,6 +893,8 @@ async function openPreview(name, explicitPath = '') {
   const editButton = dialog.querySelector('[data-viewer-edit]');
   editButton.hidden = kind !== 'image';
   editButton.onclick = () => editCurrentImage().catch(error => window.alert(error.message));
+  const moreEdit = document.querySelector('#viewer-more-sheet [data-more-action="edit"]');
+  if (moreEdit) moreEdit.hidden = kind !== 'image';
   dialog.querySelector('[data-viewer-delete]').onclick = async () => {
     if (!window.confirm(`Delete "${name}"? This cannot be undone.`)) return;
     const response = await fetch(`/api/files?path=${encodeURIComponent(path)}`, {
