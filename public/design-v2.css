@@ -430,3 +430,48 @@ label { font-size:13px;font-weight:550;gap:6px; }
   .content .ai-workspace-v2 .ai-agent-messages { min-height:250px;max-height:55dvh;padding:20px 16px; }
   .content .ai-workspace-v2 .ai-agent-form { padding:12px; }
 }
+
+
+/* Desktop file viewer: restrained controls and menu in titlebar. */
+@media(min-width:761px) {
+  .lightnas-viewer .dialog-head { position:relative;display:flex;align-items:flex-start;gap:12px; }
+  .lightnas-viewer .viewer-title-block { flex:1;min-width:0; }
+  .lightnas-viewer .viewer-menu-wrap { display:block;position:relative;flex:0 0 auto; }
+  .lightnas-viewer .viewer-mobile-more.viewer-menu-trigger {
+    display:grid!important;place-items:center;
+    width:34px;height:34px;padding:0;
+    border:1px solid var(--line);border-radius:6px;
+    background:var(--panel);color:var(--text);
+    font-size:25px;line-height:1;box-shadow:none;
+  }
+  .lightnas-viewer .viewer-desktop-close-button { width:34px;height:34px;border-radius:6px; }
+  .lightnas-viewer .viewer-desktop-menu:not([hidden]) {
+    position:absolute;right:0;top:calc(100% + 6px);z-index:50;
+    display:grid;gap:2px;width:175px;padding:5px;
+    border:1px solid var(--line);border-radius:8px;background:var(--panel);
+    box-shadow:0 8px 24px rgba(0,0,0,.12);
+  }
+  .lightnas-viewer .viewer-desktop-menu[hidden] { display:none!important; }
+  .lightnas-viewer .viewer-desktop-menu button {
+    display:block;width:100%;text-align:left;min-height:35px;
+    padding:8px 10px;border:0;border-radius:5px;
+    background:transparent;color:var(--text);font-size:13px;
+  }
+  .lightnas-viewer .viewer-desktop-menu button:hover { background:var(--panel-2); }
+  .lightnas-viewer .viewer-desktop-menu button.danger-button { color:var(--danger)!important; }
+  .lightnas-viewer .dialog-actions { display:none!important; }
+  .lightnas-viewer .viewer-arrow {
+    display:grid;place-items:center;translate:0 -50%;
+    width:34px;height:42px;padding:0;
+    border:0;border-radius:7px;
+    background:rgba(20,25,30,.62);color:#fff;
+    font-size:27px;font-weight:300;line-height:1;box-shadow:none;
+  }
+  .lightnas-viewer .viewer-arrow:hover:not(:disabled) {
+    background:rgba(20,25,30,.86);color:#fff;border:0;
+  }
+}
+@media(max-width:760px) {
+  .lightnas-viewer .viewer-desktop-menu { display:none!important; }
+  .lightnas-viewer .viewer-menu-wrap { display:contents; }
+}
