@@ -921,7 +921,13 @@ function permissionLabel(value) {
     'files.write': 'Upload / create files anywhere',
     'files.download': 'Download all files & folders',
     'files.delete': 'Delete files & folders anywhere',
-    'media.convert': 'Convert media'
+    'media.convert': 'Convert media',
+    'settings.general.manage': 'Settings — appliance identity & branding',
+    'settings.password.manage': 'Settings — change own password',
+    'security.mfa.manage': 'Settings — MFA / 2FA / passkeys',
+    'settings.software.view': 'Settings — view software & edition',
+    'settings.software.manage': 'Settings — manage updates & license',
+    'settings.manage': 'Settings — full settings access'
   };
   return labels[value] || String(value || '').replaceAll('.', ' · ').replaceAll('_', ' ').replace(/\b\w/g, letter => letter.toUpperCase());
 }
