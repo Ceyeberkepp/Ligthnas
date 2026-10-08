@@ -8,7 +8,8 @@
     "start": "node src/server.mjs",
     "dev": "NAS_DEV=1 node --watch src/server.mjs",
     "test": "node --test",
-    "check:platform": "node scripts/check-platform-contract.mjs"
+    "check:platform": "node scripts/check-platform-contract.mjs",
+    "start:sms-gateway": "node services/sms-gateway/server.mjs"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",
