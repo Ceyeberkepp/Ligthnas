@@ -141,7 +141,7 @@ test('Admin Center uses structured workspace navigation without removing current
   }
 
   for (const target of ['settings','users','permissions','network','firewall','capabilities','smtp','integrations']) {
-    assert.ok(admin.includes(`data-view-link="${target}"`), `missing existing Admin Center action ${target}`);
+    assert.ok(admin.includes(`action('${target}'`), `missing existing Admin Center action ${target}`);
   }
 
   assert.match(admin, /data-appliance-health/);
