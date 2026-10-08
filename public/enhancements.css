@@ -4139,3 +4139,48 @@ small {
     box-shadow: none !important;
   }
 }
+
+/* Compact desktop/mobile media viewer controls (October 2026). */
+.lightnas-viewer .viewer-mobile-more {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 38px;
+  width: 38px;
+  height: 38px;
+  min-width: 38px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  margin-left: auto;
+}
+.lightnas-viewer .viewer-arrow {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid rgba(255,255,255,.2);
+  border-radius: 50%;
+  background: rgba(20,25,31,.65);
+  color: white;
+  box-shadow: none;
+  font-size: 24px;
+  font-weight: 400;
+  line-height: 1;
+  backdrop-filter: blur(4px);
+}
+.lightnas-viewer .viewer-previous { left: 8px; }
+.lightnas-viewer .viewer-next { right: 8px; }
+.lightnas-viewer .viewer-arrow:disabled { opacity: .16; }
+.lightnas-viewer .dialog-actions { display: none !important; }
+.lightnas-viewer .viewer-desktop-close-button { display: inline-flex !important; }
+.viewer-more-sheet [data-more-action][hidden] { display: none !important; }
+@media (max-width:760px) {
+  .lightnas-viewer .viewer-arrow { display: none !important; }
+  .lightnas-viewer .viewer-desktop-close-button { display: none !important; }
+}
