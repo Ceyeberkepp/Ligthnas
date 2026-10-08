@@ -177,7 +177,7 @@ async function renderTotp() {
   if (location.hash !== '#settings' && !adminSectionActive('settings')) return;
   const content = q('#content');
   if (!content || q('.totp-admin', content)) return;
-  const appliance = state?.overview?.appliance || {};
+  const appliance = window.LightNASOverview?.appliance || {};
   const permissions = appliance.permissions || [];
   const allowed = appliance.role === 'administrator' || permissions.includes('security.mfa.manage') || permissions.includes('settings.manage');
   if (!allowed) return;

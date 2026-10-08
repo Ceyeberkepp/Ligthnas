@@ -129,26 +129,52 @@ test('settings and security expose section-level permissions', async () => {
 });
 
 
-test('Admin Center uses structured workspace navigation without removing current actions', async () => {
-  const [app, styles] = await Promise.all([
+test('Admin Center is the single administration workspace', async () => {
+  const [app, styles, index, adminSecurity] = await Promise.all([
     read('public/app.js'),
-    read('public/styles.css')
+    read('public/styles.css'),
+    read('public/index.html'),
+    read('public/admin-security.js')
   ]);
 
-  const admin = app.slice(app.indexOf('function adminCenterSectionButton'), app.indexOf('function moduleView(view)'));
-  for (const section of ['General','Users & groups','Permissions','Security','Integrations']) {
+  assert.doesNotMatch(index, /<summary>Administration<\/summary>/);
+  assert.match(index, /class="foot-admin"[^>]+href="#admin"/);
+
+  const admin = app.slice(app.indexOf('const ADMIN_CENTER_SECTIONS'), app.indexOf('function moduleView(view)'));
+  for (const section of [
+    'General',
+    'Users & groups',
+    'Permissions',
+    'Email / SMTP',
+    'Settings & security',
+    'Analytics',
+    'Capabilities',
+    'Integrations'
+  ]) {
     assert.ok(admin.includes(section), `missing Admin Center section ${section}`);
   }
 
-  for (const target of ['settings','users','permissions','network','firewall','capabilities','smtp','integrations']) {
-    assert.ok(admin.includes(`action('${target}'`), `missing existing Admin Center action ${target}`);
+  for (const embedded of [
+    'usersView()',
+    'permissionsView()',
+    'smtpView()',
+    'settingsView()',
+    'analyticsView()',
+    'capabilitiesView()',
+    'integrationsView()'
+  ]) {
+    assert.ok(admin.includes(`adminEmbeddedView(${embedded})`), `missing embedded admin view ${embedded}`);
   }
 
   assert.match(admin, /data-appliance-health/);
   assert.match(admin, /data-appliance-repair/);
   assert.match(admin, /Development & Community Evaluation License/);
-  assert.match(app, /lightnas-admin-section/);
+  assert.match(app, /adminCenterSectionAllowed/);
+  assert.match(app, /settings\.general\.manage/);
+  assert.match(adminSecurity, /adminSectionActive\('permissions'\)/);
+  assert.match(adminSecurity, /adminSectionActive\('settings'\)/);
+  assert.match(adminSecurity, /adminSectionActive\('integrations'\)/);
   assert.match(styles, /\.admin-center-workspace/);
-  assert.match(styles, /\.admin-center-nav-item\.active/);
-  assert.match(styles, /\.admin-center-row/);
+  assert.match(styles, /\.admin-center-embedded/);
 });
+
