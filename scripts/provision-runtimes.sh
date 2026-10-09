@@ -475,12 +475,32 @@ EOF
       systemctl try-restart libvirtd.service >/dev/null 2>&1 || true
       systemctl try-restart libvirtd.socket >/dev/null 2>&1 || true
     fi
-    if systemctl list-unit-files libvirtd.socket --no-legend 2>/dev/null | grep -q '^libvirtd.socket'; then
-      systemctl enable --now libvirtd.socket >/dev/null 2>&1 || true
-    elif systemctl list-unit-files virtqemud.socket --no-legend 2>/dev/null | grep -q '^virtqemud.socket'; then
-      systemctl enable --now virtqemud.socket >/dev/null 2>&1 || true
-    fi
+    # Debian installations may use modular virtqemud or legacy libvirtd.
+    # A single socket activation attempt is not enough if a unit is masked,
+    # missing, or failed at first boot. Try the available QEMU daemon first.
+    libvirt_online=0
+    for unit in virtqemud.socket virtqemud.service libvirtd.socket libvirtd.service; do
+      if systemctl list-unit-files "$unit" --no-legend 2>/dev/null | grep -q "^$unit"; then
+        systemctl enable --now "$unit" >/dev/null 2>&1 || true
+        for attempt in {1..4}; do
+          if virsh -c qemu:///system list --all >/dev/null 2>&1; then
+            libvirt_online=1
+            break
+          fi
+          sleep 1
+        done
+        [[ "$libvirt_online" == "1" ]] && break
+      fi
+    done
     if getent group libvirt >/dev/null 2>&1; then usermod -aG libvirt lightnas; fi
+    # Refresh supplementary groups for the running control-plane service.
+    # On Debian the socket commonly grants access to members of libvirt.
+    if [[ "$libvirt_online" == "1" ]]; then
+      systemctl try-restart lightnas.service >/dev/null 2>&1 || true
+    else
+      echo 'LightNAS: libvirt QEMU daemon did not become ready. Diagnostics:' >&2
+      systemctl --no-pager --full status virtqemud.service libvirtd.service 2>&1 | tail -35 >&2 || true
+    fi
 
     install -d -m 0755 /var/lib/libvirt/images
     setfacl -m u:lightnas:rwx /var/lib/libvirt/images >/dev/null 2>&1 || true
