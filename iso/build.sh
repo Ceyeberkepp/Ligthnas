@@ -77,16 +77,18 @@ if [[ -d /usr/share/live/build/bootloaders ]]; then
   rm -rf config/bootloaders
   cp -a /usr/share/live/build/bootloaders config/bootloaders
 
+  # Product-branded BIOS/UEFI splash; keep the lower half clear for menus.
   cat >"${BUILD_DIR}/lightnas-splash.svg" <<'SVG'
 <svg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480">
-  <rect width="640" height="480" fill="#08111f"/>
-  <rect x="214" y="118" width="34" height="104" rx="11" fill="#54df9b"/>
-  <rect x="272" y="88" width="34" height="134" rx="11" fill="#5ce1c3"/>
-  <rect x="330" y="132" width="34" height="90" rx="11" fill="#7ab8ff"/>
-  <text x="320" y="292" text-anchor="middle" font-family="DejaVu Sans, sans-serif" font-size="54" font-weight="700" fill="#f4fbff">LightNAS</text>
-  <text x="320" y="333" text-anchor="middle" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#9db2c3">Storage · Apps · Containers · Virtual Machines</text>
-  <text x="320" y="380" text-anchor="middle" font-family="DejaVu Sans, sans-serif" font-size="15" fill="#5ce1c3">LightNAS Installer</text>
-  <text x="320" y="408" text-anchor="middle" font-family="DejaVu Sans, sans-serif" font-size="13" fill="#9db2c3">Graphical · VGA safe · Terminal · Serial · BIOS + UEFI</text>
+ <rect width="640" height="480" fill="#08111f"/>
+ <rect x="0" y="0" width="640" height="8" fill="#5ce1c3"/>
+ <rect x="38" y="36" width="48" height="48" rx="12" fill="#5ce1c3"/>
+ <path d="M51 67 L62 52 L72 67 M56 61 H68" fill="none" stroke="#08111f" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+ <text x="100" y="70" font-family="DejaVu Sans,sans-serif" font-size="32" font-weight="bold" fill="#f4fbff">LightNAS</text>
+ <text x="41" y="128" font-family="DejaVu Sans,sans-serif" font-size="24" font-weight="bold" fill="#f4fbff">Welcome to LightNAS</text>
+ <text x="41" y="153" font-family="DejaVu Sans,sans-serif" font-size="14" fill="#9db2c3">Storage  •  Apps  •  Containers  •  Virtual Machines</text>
+ <line x1="40" y1="177" x2="600" y2="177" stroke="#31505e" stroke-width="2"/>
+ <text x="42" y="450" font-family="DejaVu Sans,sans-serif" font-size="12" fill="#9db2c3">Debian 13 based   •   BIOS / UEFI   •   Graphics and terminal installation</text>
 </svg>
 SVG
   rsvg-convert -w 640 -h 480 "${BUILD_DIR}/lightnas-splash.svg" >"${BUILD_DIR}/lightnas-splash.png"
@@ -586,7 +588,8 @@ cat >/usr/share/lightnas/kiosk-start.html <<'KIOSK_HTML'
 </head>
 <body>
 <main>
-  <h1>LightNAS</h1>
+  <div style="display:flex;align-items:center;justify-content:center;gap:14px;margin-bottom:20px"><span aria-hidden="true" style="display:grid;place-items:center;border-radius:12px;background:#5ce1c3;color:#08111f;width:52px;height:52px;font-weight:800;font-size:28px">L</span><h1 style="font-size:46px;margin:0">LightNAS</h1></div>
+  <p style="color:#5ce1c3;font-weight:600">Storage · Apps · Containers · Virtual Machines</p>
   <p><span class="dot"></span>Starting the local control center…</p>
   <p id="status">Waiting for LightNAS services.</p>
   <small>Web access will remain available at http://&lt;this-system-IP&gt;:3080</small>
@@ -594,8 +597,8 @@ cat >/usr/share/lightnas/kiosk-start.html <<'KIOSK_HTML'
 <script>
 (async function poll(){
   try{
-    await fetch('http://127.0.0.1:3080/api/status',{cache:'no-store',mode:'no-cors'});
-    location.replace('http://127.0.0.1:3080/'); return;
+    const response = await fetch('http://127.0.0.1:3080/api/status',{cache:'no-store'});
+    if (response.ok) { location.replace('http://127.0.0.1:3080/'); return; }
   }catch{}
   document.getElementById('status').textContent='Services are still starting. This screen will update automatically.';
   setTimeout(poll,1000);
@@ -1003,6 +1006,11 @@ if ! grep -Rqs -- 'Install LightNAS (Serial Console)' binary 2>/dev/null; then
   exit 1
 fi
 echo "Graphical, VGA-safe, terminal, and serial LightNAS installer entries confirmed."
+# Check branding shipped to the actual ISO boot menus, not just build templates.
+if ! grep -Rqs 'LightNAS' binary 2>/dev/null; then
+  echo 'ERROR: LightNAS bootloader branding missing from binary ISO tree.' >&2
+  exit 1
+fi
 
 #
 # Verify the final SquashFS actually contains ZFS.
