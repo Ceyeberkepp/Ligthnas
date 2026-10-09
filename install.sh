@@ -64,8 +64,14 @@ install_missing_packages \
   ca-certificates curl git gnupg python3 ffmpeg imagemagick qrencode acl novnc iproute2 nftables ufw samba openssh-server ovmf \
   tar gzip xz-utils zstd
 
-if ! command -v node >/dev/null 2>&1 || \
-   [[ "$(node --version | sed -E 's/^v([0-9]+).*/\1/')" -lt 22 ]]; then
+# Node.js and npm are both mandatory. Some minimal images have node but no
+# npm; do not skip the dependency installation in that case.
+node_major=0
+if command -v node >/dev/null 2>&1; then
+  node_version="$(node --version 2>/dev/null || true)"
+  [[ "$node_version" =~ ^v([0-9]+)\. ]] && node_major="${BASH_REMATCH[1]}"
+fi
+if (( node_major < 22 )) || ! command -v npm >/dev/null 2>&1; then
   echo "[2/6] Installing Node.js 22..."
   install -d -m 0755 /etc/apt/keyrings
   curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
@@ -77,8 +83,26 @@ EOF
   apt_update_once
   apt-get install -y --no-install-recommends nodejs
 else
-  echo "[2/6] Node.js $(node --version) is already installed."
+  echo "[2/6] Node.js $(node --version) and npm $(npm --version) are already installed."
 fi
+
+# Fail early if an image ships broken executables or an incomplete Node.js
+# installation. Install npm separately where the distribution splits it out.
+for tool in curl git node npm; do
+  if ! command -v "$tool" >/dev/null 2>&1; then
+    echo "ERROR: Required installer tool missing: $tool" >&2
+    exit 1
+  fi
+done
+if ! npm --version >/dev/null 2>&1; then
+  echo "ERROR: npm is installed but cannot execute." >&2
+  exit 1
+fi
+if ! curl --version >/dev/null 2>&1 || ! git --version >/dev/null 2>&1; then
+  echo "ERROR: curl or git is installed but cannot execute." >&2
+  exit 1
+fi
+echo "      Verified: curl $(curl --version | head -n 1), git $(git --version), node $(node --version), npm $(npm --version)"
 
 # System containers are a built-in LightNAS feature on every supported host.
 # Install the LXC and bridge stack unconditionally so a new installation is
@@ -141,6 +165,8 @@ fi
 
 echo "[3/6] Installing LightNAS..."
 if [[ -d "${INSTALL_DIRECTORY}/.git" ]]; then
+  # Never report a successful update if fetching/pulling failed.
+  git -C "${INSTALL_DIRECTORY}" rev-parse --is-inside-work-tree >/dev/null
   git -C "${INSTALL_DIRECTORY}" pull --ff-only
 elif [[ -e "${INSTALL_DIRECTORY}" ]]; then
   echo "Refusing to overwrite existing non-Git path: ${INSTALL_DIRECTORY}" >&2
@@ -158,11 +184,19 @@ lock_hash=""
 installed_hash="$(cat "${npm_stamp}" 2>/dev/null || true)"
 if [[ ! -d "${INSTALL_DIRECTORY}/node_modules/ws" || ! -d "${INSTALL_DIRECTORY}/node_modules/@xterm/xterm" || "${lock_hash}" != "${installed_hash}" ]]; then
   echo "      Installing changed Node.js dependencies..."
-  npm --prefix "${INSTALL_DIRECTORY}" install --omit=dev --no-audit --no-fund --prefer-offline
+  if [[ -f "${INSTALL_DIRECTORY}/package-lock.json" ]]; then
+    npm --prefix "${INSTALL_DIRECTORY}" ci --omit=dev --no-audit --no-fund --prefer-offline
+  else
+    npm --prefix "${INSTALL_DIRECTORY}" install --omit=dev --no-audit --no-fund --prefer-offline
+  fi
   [[ -n "${lock_hash}" ]] && printf '%s\n' "${lock_hash}" >"${npm_stamp}"
 else
   echo "      Node.js dependencies unchanged; skipping npm install."
 fi
+
+# Do not silently skip broken or incomplete dependency trees on updates.
+node -e 'for(const name of ["ws","@xterm/xterm","@xterm/addon-fit"]) require.resolve(name,{paths:[process.argv[1]]})' "${INSTALL_DIRECTORY}"
+echo "      Node.js production dependencies verified."
 
 echo "[4/6] Creating the service account and persistent storage..."
 if ! id lightnas >/dev/null 2>&1; then
